@@ -117,29 +117,39 @@ def _daily_bars_from_chart(res0: dict) -> list[tuple[str, float]]:
 def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool) -> float | None:
     """Prior US session close from daily bars — never trust Yahoo meta alone.
 
-    Rules (SUP_20260727):
-      • Last bar is *today* (date match, or live≈last while RTH open) → prior = previous bar.
-      • Else last bar is the prior session → prior = last bar when quoting a live price;
-        when using last bar as the display price (closed), prior = previous bar.
+    Unambiguous rule (SUP_20260727 / production bug):
+      prior close = close of the most recent daily bar with date *strictly
+      before* today's US session date.
+
+    That is always Friday's close on Monday (whether or not today's partial
+    bar exists). Meta previousClose is ignored by the caller.
     """
     if not bars:
         return None
-    last_date, last_close = bars[-1]
-    prev_close = bars[-2][1] if len(bars) >= 2 else None
     today_iso = _us_now_et().date().isoformat()
-    last_is_today = bool(last_date and last_date >= today_iso)
-    if not last_is_today and rth_open and live_px is not None and last_close is not None:
-        # No/missing timestamps or delayed date: treat last bar as today if it
-        # matches the live print (partial session bar).
-        if abs(float(live_px) - float(last_close)) <= max(0.05, 0.003 * abs(float(last_close))):
-            last_is_today = True
-    if last_is_today:
-        return float(prev_close) if prev_close is not None else None
-    # Last bar is a completed prior session
+    # Bars with real dates: last strictly-before-today
+    dated = [(d, c) for d, c in bars if d]
+    if dated:
+        prior_bars = [(d, c) for d, c in dated if d < today_iso]
+        if prior_bars:
+            return float(prior_bars[-1][1])
+        # All bars are today (rare) → need previous from undated fallback
+        if len(dated) >= 2 and dated[-1][0] >= today_iso:
+            return float(dated[-2][1])
+    # Timestamp-less series: if live≈last bar, treat last as today → prior=[-2]
+    # else last bar is prior session.
+    closes = [c for _, c in bars]
+    if not closes:
+        return None
+    last_close = closes[-1]
+    if len(closes) < 2:
+        return None
     if rth_open and live_px is not None:
+        if abs(float(live_px) - float(last_close)) <= max(0.05, 0.003 * abs(float(last_close))):
+            return float(closes[-2])
         return float(last_close)
-    # Displaying last bar itself as the price → day % is that session's move
-    return float(prev_close) if prev_close is not None else None
+    # Closed: price is last bar → day % vs previous bar
+    return float(closes[-2])
 
 
 def _us_now_et():
