@@ -297,6 +297,10 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 "source": "yahoo-chart",
                 "price_source": price_source,
                 "as_of": as_of,
+                # Temporary debug for SUP_20260727 (safe, non-secret)
+                "debug_bars_tail": bars[-4:] if bars else [],
+                "debug_today": _us_now_et().isoformat(),
+                "debug_rth": rth_open,
             }
         except Exception as e:
             print(f"[market_data] yahoo quote {sym} {host}: {e!s:.100}", flush=True)
