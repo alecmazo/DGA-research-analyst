@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui109-20260727-koyfin-options"
+WEB_BUILD_VERSION = "ui110-20260727-koyfin-desk"
 
 
 @app.get("/api/build")

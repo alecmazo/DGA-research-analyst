@@ -82,10 +82,10 @@
 <!-- Toast root — populated by window.toast() -->
 <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
 
-<!-- ── INDEX RIBBON ── populated by JS from /api/market/indices ── -->
-<div class="ribbon-wrap">
-  <div class="ribbon" id="ribbon">
-    <div class="idx" style="opacity:0.5"><div class="idx-name">Loading…</div></div>
+<!-- ── MARKET BAR ── populated by JS from /api/market/indices ── -->
+<div class="ribbon-wrap market-bar-wrap">
+  <div class="ribbon market-bar" id="ribbon" role="region" aria-label="Market indices">
+    <div class="idx idx-loading"><span class="idx-name">Markets</span><span class="idx-px">…</span></div>
   </div>
 </div>
 
@@ -116,22 +116,42 @@
   <!-- ── RIGHT: Positions Pane ──────────────────────────────────────────── -->
   <div class="fid-pos-pane">
 
-    <!-- Pane header: account name + period picker + stats -->
-    <div class="fid-pos-pane-hdr">
-      <div>
-        <div class="fid-sel-acct-name" id="fid-sel-acct-name">All Accounts</div>
-        <div class="fid-pos-hdr-stats" id="fid-pos-hdr-stats">
-          <span class="fid-stat-chip"><strong id="fid-stat-count">—</strong> positions</span>
-          <span class="fid-stat-chip"><strong id="fid-stat-gainers" style="color:#16a34a">—</strong> up today</span>
-          <span class="fid-stat-chip"><strong id="fid-stat-losers" style="color:#dc2626">—</strong> down</span>
-          <span class="fid-stat-chip">Unrealized: <strong id="fid-stat-unrealized">—</strong></span>
+    <header class="page-hero pos-hero">
+      <div class="page-hero-text">
+        <div class="page-eyebrow">Book · live</div>
+        <h2 class="page-title" id="fid-sel-acct-name">All Accounts</h2>
+        <p class="page-sub">Holdings across funds and managed accounts — day move, unrealized P&amp;L, and weight.</p>
+      </div>
+      <div class="page-hero-actions">
+        <div id="gp-chart-periods" class="seg-control gp-chart-periods" style="flex-shrink:0;">
+          <button type="button" class="seg-btn gp-chart-period-btn" data-period="1m">1M</button>
+          <button type="button" class="seg-btn gp-chart-period-btn active" data-period="ytd">YTD</button>
+          <button type="button" class="seg-btn gp-chart-period-btn" data-period="1y">1Y</button>
+          <button type="button" class="seg-btn gp-chart-period-btn" data-period="3y">3Y</button>
         </div>
       </div>
-      <div id="gp-chart-periods" style="flex-shrink:0;">
-        <button class="gp-chart-period-btn" data-period="1m">1M</button>
-        <button class="gp-chart-period-btn active" data-period="ytd">YTD</button>
-        <button class="gp-chart-period-btn" data-period="1y">1Y</button>
-        <button class="gp-chart-period-btn" data-period="3y">3Y</button>
+    </header>
+
+    <div class="kpi-strip pos-kpi-strip" id="fid-pos-hdr-stats">
+      <div class="kpi-card">
+        <div class="kpi-label">Positions</div>
+        <div class="kpi-value kpi-value-sm" id="fid-stat-count">—</div>
+        <div class="kpi-hint">In selected book</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Up today</div>
+        <div class="kpi-value kpi-value-sm pos" id="fid-stat-gainers">—</div>
+        <div class="kpi-hint">Names green on day</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Down today</div>
+        <div class="kpi-value kpi-value-sm neg" id="fid-stat-losers">—</div>
+        <div class="kpi-hint">Names red on day</div>
+      </div>
+      <div class="kpi-card kpi-card-meta">
+        <div class="kpi-label">Unrealized</div>
+        <div class="kpi-value kpi-value-sm" id="fid-stat-unrealized">—</div>
+        <div class="kpi-hint">Open P&amp;L</div>
       </div>
     </div>
 
@@ -186,16 +206,30 @@
 
   <!-- ─── LEFT COLUMN ───────────────────────────────────────── -->
   <aside class="col-left">
-    <!-- Watchlist -->
-    <section class="panel" data-wid="watchlist">
-      <header class="panel-head">
-        <span class="panel-title">Watchlist</span>
-        <span class="panel-badge" id="wl-count">0</span>
-      </header>
-      <div class="panel-body" style="padding:0">
-        <div id="wl-rows">
-          <div class="wl-row" style="opacity:0.5"><div><div class="wl-tk">Loading…</div></div><div></div></div>
+    <!-- Watchlist — dense data table -->
+    <section class="panel term-panel" data-wid="watchlist">
+      <header class="panel-head term-panel-head">
+        <div class="term-panel-title-wrap">
+          <span class="panel-title">Watchlist</span>
+          <span class="panel-badge" id="wl-count">0</span>
         </div>
+        <span class="panel-action">Day movers first</span>
+      </header>
+      <div class="panel-body wl-table-wrap" style="padding:0">
+        <table class="wl-table term-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th class="num">Last</th>
+              <th class="num">Day %</th>
+              <th class="num">As of</th>
+              <th class="wl-th-act" aria-label="Actions"></th>
+            </tr>
+          </thead>
+          <tbody id="wl-rows">
+            <tr class="wl-row wl-row-loading"><td colspan="5" class="wl-empty-cell">Loading…</td></tr>
+          </tbody>
+        </table>
         <div class="wl-add">
           <input id="wl-input" class="wl-add-input" placeholder="Add ticker…" autocomplete="off">
           <button id="wl-add-btn" class="wl-add-btn" title="Add ticker">+</button>
@@ -223,7 +257,7 @@
           <span class="panel-title">Daily Pulse</span>
           <span class="panel-badge tab-meta" id="brief-meta">—</span>
           <button id="run-brief-btn" class="tab-btn" style="margin-left:auto;font-size:9px;"
-            onclick="event.stopPropagation();triggerBrief();">📰 Run</button>
+            onclick="event.stopPropagation();triggerBrief();">Run</button>
           <span class="ac-chevron" style="margin-left:4px;">›</span>
         </summary>
         <div id="brief-content" style="padding:14px 16px;max-height:420px;overflow-y:auto;font-size:12px;line-height:1.6;">
@@ -234,36 +268,32 @@
 
 
 
-    <!-- ── 🤖 AI Analyst (agentic — Claude calls tools over our data) ─── -->
-    <section class="panel" data-wid="ai-analyst" data-collapsible="1" style="margin-bottom:12px;">
-      <header class="panel-head">
-        <span class="panel-title">DGA Capital Analyst</span>
-        <span class="panel-badge" id="agentic-model-badge" style="background:#f3e8ff;color:#6b21a8;">AGENTIC</span>
-        <span style="margin-left:auto;font-size:10.5px;color:var(--text-tertiary);font-weight:500;">pulls live quotes · saved reports · news</span>
+    <!-- ── Analyst command surface ─── -->
+    <section class="panel cmd-panel" data-wid="ai-analyst" data-collapsible="1" style="margin-bottom:12px;">
+      <header class="panel-head term-panel-head">
+        <div class="term-panel-title-wrap">
+          <span class="panel-title">Analyst</span>
+          <span class="panel-badge cmd-badge" id="agentic-model-badge">Agentic</span>
+        </div>
+        <span class="panel-action">Live quotes · reports · news</span>
       </header>
-      <div style="padding:14px 16px;">
-        <div style="font-size:11.5px;color:var(--text-secondary);line-height:1.55;margin-bottom:10px;">
-          Ask an open-ended research question. Pick an engine below (or leave Settings default),
-          then run — pulls live quotes, saved reports, sector data, and news with cited numbers.
-          <em>Multi-step; ~$0.05–0.30 depending on depth and engine.</em>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <span style="font-size:8px;color:var(--mid);font-weight:800;letter-spacing:0.8px;">ENGINE:</span>
-          <span id="agentic-llm-chips" style="display:inline-flex;gap:4px;flex-wrap:wrap;" role="group" aria-label="Analyst engine">
-            <button type="button" class="hero-llm-chip active" data-llm="claude" title="Claude Opus 4.8 · tool-use default">Claude</button>
-            <button type="button" class="hero-llm-chip" data-llm="grok" title="Grok 4.5 · strong for live/current markets">Grok</button>
-            <button type="button" class="hero-llm-chip" data-llm="deepseek" title="DeepSeek · cheapest agent path">DeepSeek</button>
+      <div class="cmd-body">
+        <div class="cmd-toolbar">
+          <span class="meta-label" style="margin:0;">Engine</span>
+          <span id="agentic-llm-chips" class="seg-control" role="group" aria-label="Analyst engine">
+            <button type="button" class="seg-btn hero-llm-chip active" data-llm="claude" title="Claude Opus 4.8 · tool-use default">Claude</button>
+            <button type="button" class="seg-btn hero-llm-chip" data-llm="grok" title="Grok 4.5 · strong for live/current markets">Grok</button>
+            <button type="button" class="seg-btn hero-llm-chip" data-llm="deepseek" title="DeepSeek · cheapest agent path">DeepSeek</button>
           </span>
-          <span id="agentic-engine-tag" style="font-size:8.5px;font-weight:700;color:var(--mid);background:rgba(0,0,0,0.04);border-radius:4px;padding:1px 6px;">—</span>
+          <span id="agentic-engine-tag" class="cmd-engine-tag">—</span>
+          <span class="cmd-cost-hint">Multi-step · ~$0.05–0.30</span>
         </div>
-        <div style="display:flex;gap:8px;align-items:flex-start;">
-          <textarea id="agentic-q" rows="2" placeholder="e.g. Compare NVDA and AMD on valuation and recent catalysts — which has more upside from here? Use our saved reports."
-            style="flex:1;border:1px solid var(--border-default);border-radius:6px;padding:9px 11px;font-size:13px;font-family:inherit;line-height:1.5;color:var(--text-primary);background:var(--bg-elevated);resize:vertical;"></textarea>
-          <button id="agentic-run-btn" class="btn-primary" style="white-space:nowrap;align-self:stretch;padding:0 18px;">🤖 Analyze</button>
+        <div class="cmd-compose">
+          <textarea id="agentic-q" class="cmd-input" rows="2" placeholder="Ask a research question — e.g. Compare NVDA and AMD on valuation and catalysts using our saved reports."></textarea>
+          <button id="agentic-run-btn" class="btn-primary cmd-run" type="button">Analyze</button>
         </div>
-        <!-- One-tap preset: retiree portfolio build (diagnose → target sleeve → Builder) -->
-        <div style="margin-top:10px;">
-          <button id="agentic-preset-retiree" type="button"
+        <div class="cmd-presets">
+          <button id="agentic-preset-retiree" type="button" class="cmd-preset-primary"
             data-account="ANAT IRA"
             data-preset="Analyze the [ANAT IRA] account for Anatoly, a 69-year-old retiree living off this portfolio. Call list_portfolios then get_portfolio_holdings to pull the actual positions, weights, sectors, and unrealized P&L — don't guess.
 
@@ -271,27 +301,22 @@ Diagnose it for a retiree in the withdrawal phase, with numbers: (1) concentrati
 
 Then propose a target sector sleeve suited to a 69-year-old whose priorities are, in order: capital preservation and limiting max drawdown, durable income to fund ~4%/yr withdrawals, then beating the S&P 500 on a risk-adjusted basis. Favor quality dividend-payers and defensives, cap any single sector, and keep liquidity for withdrawals. This is an IRA, so rebalancing taxes don't matter, but RMDs begin at age 73.
 
-End with the sleeve block at this account's real market value so I can push it to the Builder."
-            style="font-size:11.5px;font-weight:600;background:var(--gold-soft,#fdf6e3);border:1px solid var(--gold,#c9a84c);color:var(--gold-dark,#a88a3a);padding:6px 12px;border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-            📊 Build a retiree portfolio
+End with the sleeve block at this account's real market value so I can push it to the Builder.">
+            Retiree portfolio build
           </button>
-          <span style="font-size:10px;color:var(--text-tertiary);margin-left:8px;">fills the box — edit the account name, then Analyze</span>
+          <div id="agentic-examples" class="cmd-examples">
+            <button class="agentic-ex cmd-chip" type="button">Which of my covered names moved most today and why?</button>
+            <button class="agentic-ex cmd-chip" type="button">Summarize the bull vs bear case on NVDA from our reports.</button>
+            <button class="agentic-ex cmd-chip" type="button">Any fresh catalysts across my coverage this week?</button>
+            <button class="agentic-ex cmd-chip" type="button">Compare the ANAT IRA and taxable accounts and suggest how to optimize the IRA.</button>
+          </div>
         </div>
-        <!-- Example chips -->
-        <div id="agentic-examples" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-          <button class="agentic-ex" type="button" style="font-size:10.5px;background:var(--gray-100);border:1px solid var(--border-subtle);color:var(--text-secondary);padding:3px 9px;border-radius:12px;cursor:pointer;">Which of my covered names moved most today and why?</button>
-          <button class="agentic-ex" type="button" style="font-size:10.5px;background:var(--gray-100);border:1px solid var(--border-subtle);color:var(--text-secondary);padding:3px 9px;border-radius:12px;cursor:pointer;">Summarize the bull vs bear case on NVDA from our reports.</button>
-          <button class="agentic-ex" type="button" style="font-size:10.5px;background:var(--gray-100);border:1px solid var(--border-subtle);color:var(--text-secondary);padding:3px 9px;border-radius:12px;cursor:pointer;">Any fresh catalysts across my coverage this week?</button>
-          <button class="agentic-ex" type="button" style="font-size:10.5px;background:var(--gray-100);border:1px solid var(--border-subtle);color:var(--text-secondary);padding:3px 9px;border-radius:12px;cursor:pointer;">Compare the ANAT IRA and taxable accounts and suggest how to optimize the IRA.</button>
-        </div>
-        <!-- Live progress + result -->
-        <div id="agentic-out" style="display:none;margin-top:14px;"></div>
-        <!-- Saved analyses: persisted answers, re-openable + printable to PDF -->
-        <div id="agentic-reviews" style="margin-top:16px;border-top:1px solid var(--border-subtle);padding-top:12px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <span style="font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:var(--text-secondary);">🗂 Saved analyses</span>
-            <span style="font-size:10px;color:var(--text-tertiary);">re-open or print to PDF</span>
-            <button id="agentic-reviews-refresh" type="button" class="btn-secondary" style="margin-left:auto;font-size:10px;padding:2px 8px;">↻</button>
+        <div id="agentic-out" class="cmd-result" style="display:none;"></div>
+        <div id="agentic-reviews" class="cmd-reviews">
+          <div class="cmd-reviews-head">
+            <span class="meta-label" style="margin:0;">Saved analyses</span>
+            <span class="cmd-reviews-hint">Re-open or print to PDF</span>
+            <button id="agentic-reviews-refresh" type="button" class="btn-secondary cmd-reviews-refresh">↻</button>
           </div>
           <div id="agentic-reviews-list"></div>
         </div>
@@ -301,8 +326,8 @@ End with the sleeve block at this account's real market value so I can push it t
     <!-- ── 🧭 Portfolio Strategist (agentic cross-book review → podcast/memo) ── -->
     <section class="panel" data-wid="strategist" data-collapsible="1" style="margin-bottom:12px;">
       <header class="panel-head">
-        <span class="panel-title">🧭 Portfolio Strategist</span>
-        <span class="panel-badge" style="background:#f3e8ff;color:#6b21a8;">AGENTIC · EV</span>
+        <span class="panel-title">Portfolio Strategist</span>
+        <span class="panel-badge cmd-badge">Agentic · EV</span>
         <span style="margin-left:auto;font-size:10.5px;color:var(--text-tertiary);font-weight:500;">whole-book review → roundup podcast / memo</span>
       </header>
       <div style="padding:14px 16px;">
@@ -1493,21 +1518,40 @@ End with the sleeve block at this account's real market value so I can push it t
 <!-- ══ FUND TAB ════════════════════════════════════════════════ -->
 <div id="tab-fund" class="tab-panel" data-hero="1">
   <div class="wide-shell fund-landing">
-    <header class="fund-landing-header">
-      <div class="fund-landing-title-block">
-        <p class="fund-landing-eyebrow">Capital base</p>
-        <h2>Fund Dashboard</h2>
-        <p class="fund-landing-sub">LP funds and managed accounts — NAV, capital, and performance at a glance. Open a row to drill into holdings, waterfall, and exports.</p>
+    <header class="page-hero fund-landing-header">
+      <div class="page-hero-text fund-landing-title-block">
+        <div class="page-eyebrow fund-landing-eyebrow">Capital base</div>
+        <h2 class="page-title">Fund Dashboard</h2>
+        <p class="page-sub fund-landing-sub">LP funds and managed accounts — NAV, capital, and performance. Open a row for holdings, waterfall, and exports.</p>
       </div>
-      <div id="fund-subtabs" class="fund-subtab-switch" role="tablist" aria-label="Fund type">
-        <button type="button" class="fund-subtab active" data-subtab="funds" role="tab" aria-selected="true">
-          LP Funds <span class="fund-subtab-count" id="fund-funds-count">0</span>
-        </button>
-        <button type="button" class="fund-subtab" data-subtab="accts" role="tab" aria-selected="false">
-          Managed Accounts <span class="fund-subtab-count" id="fund-accts-count">0</span>
-        </button>
+      <div class="page-hero-actions">
+        <div id="fund-subtabs" class="seg-control fund-subtab-switch" role="tablist" aria-label="Fund type">
+          <button type="button" class="seg-btn fund-subtab active" data-subtab="funds" role="tab" aria-selected="true">
+            LP Funds <span class="fund-subtab-count" id="fund-funds-count">0</span>
+          </button>
+          <button type="button" class="seg-btn fund-subtab" data-subtab="accts" role="tab" aria-selected="false">
+            Managed <span class="fund-subtab-count" id="fund-accts-count">0</span>
+          </button>
+        </div>
       </div>
     </header>
+    <div class="kpi-strip fund-kpi-strip">
+      <div class="kpi-card">
+        <div class="kpi-label">LP Funds</div>
+        <div class="kpi-value kpi-value-sm" id="fund-kpi-funds">—</div>
+        <div class="kpi-hint">Active vehicles</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Managed accounts</div>
+        <div class="kpi-value kpi-value-sm" id="fund-kpi-accts">—</div>
+        <div class="kpi-hint">SMA / IRA books</div>
+      </div>
+      <div class="kpi-card kpi-card-meta">
+        <div class="kpi-label">View</div>
+        <div class="kpi-value kpi-value-sm" id="fund-kpi-view">Funds</div>
+        <div class="kpi-hint">Switch with the control above</div>
+      </div>
+    </div>
     <div id="fund-funds-list" class="fund-subtab-content fund-card-list"><div class="tab-loading">Loading…</div></div>
     <div id="fund-accts-list" class="fund-subtab-content fund-card-list" style="display:none;"><div class="tab-loading">Loading…</div></div>
   </div>

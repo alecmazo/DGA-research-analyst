@@ -1376,12 +1376,10 @@
       const data = await r.json();
       const ribbon = document.getElementById('ribbon');
       ribbon.innerHTML = (data.indices || []).map(idx => `
-        <div class="idx" data-symbol="${idx.symbol}">
-          <div class="idx-name">${idx.label}</div>
-          <div class="idx-row">
-            <div class="idx-px">${idx.price != null ? fmtPx(idx.price) : '—'}</div>
-            <div class="idx-chg ${cssClass(idx.pct)}">${fmtPct(idx.pct)}</div>
-          </div>
+        <div class="idx" data-symbol="${_cfEsc(idx.symbol || '')}" title="${_cfEsc(idx.label || idx.symbol || '')}">
+          <span class="idx-name">${_cfEsc(idx.label || idx.symbol || '')}</span>
+          <span class="idx-px">${idx.price != null ? fmtPx(idx.price) : '—'}</span>
+          <span class="idx-chg ${cssClass(idx.pct)}">${fmtPct(idx.pct)}</span>
         </div>
       `).join('');
       _idxLastOk = Date.now();
@@ -1418,7 +1416,7 @@
     } catch (e) {
       console.warn('[watchlist]', e);
       document.getElementById('wl-rows').innerHTML =
-        '<div class="wl-row" style="opacity:0.6"><div><div class="wl-tk">—</div></div></div>';
+        '<tr class="wl-row"><td colspan="5" class="wl-empty-cell">Could not load watchlist</td></tr>';
     }
   }
 
@@ -1764,15 +1762,27 @@
     }
   }
 
+  function _wlAsOfCell(q) {
+    if (!q || !q.as_of) return '<span class="wl-asof wl-asof-live">Live</span>';
+    const d = _parseServerDate(q.as_of);
+    if (!d || isNaN(d)) return '<span class="wl-asof">' + _cfEsc(String(q.as_of).slice(0, 10)) + '</span>';
+    const today = new Date();
+    const sameDay = d.getFullYear() === today.getFullYear()
+      && d.getMonth() === today.getMonth()
+      && d.getDate() === today.getDate();
+    const label = sameDay
+      ? d.toLocaleTimeString('en-US', { ..._PT, hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString('en-US', { ..._PT, month: 'short', day: 'numeric' });
+    return '<span class="wl-asof" title="As of ' + _cfEsc(d.toLocaleString('en-US', { ..._PT })) + ' PT">'
+      + _cfEsc(label) + '</span>';
+  }
   function renderWatchlist(tickers, quotes, earnings, reports) {
     const rows = document.getElementById('wl-rows');
     document.getElementById('wl-count').textContent = String(tickers.length);
     earnings = earnings || {};
     reports = reports || {};
     if (!tickers.length) {
-      rows.innerHTML = `<div style="padding:14px; font-size:12px; color:var(--dim); text-align:center;">
-        No tickers yet. Add one below.
-      </div>`;
+      rows.innerHTML = '<tr class="wl-row"><td colspan="5" class="wl-empty-cell">No tickers yet. Add one below.</td></tr>';
       return;
     }
     // Largest absolute day-move first (up or down); missing quotes last.
@@ -1797,19 +1807,20 @@
       const hasRep = !!(reports[tk] || (earn && earn.has_report));
       const repBtn = hasRep
         ? ('<button type="button" class="wl-report-btn" data-open-report="' + tk + '"'
-          + ' title="Open saved DGA report for ' + tk + '">📄</button>')
+          + ' title="Open saved DGA report for ' + tk + '">Rpt</button>')
         : '';
+      const px = q.price != null ? fmtPx(q.price) : '—';
       return `
-        <div class="wl-row${earn ? ' wl-row-earn' : ''}" data-ticker="${tk}">
-          <div class="wl-left">
-            <div class="wl-tk">${tk}${_quoteStaleChip(q)}${_wlEarnChip(tk, earn)}${repBtn}</div>
-          </div>
-          <div class="wl-right">
-            <div class="wl-px">${q.price != null ? '$' + fmtPx(q.price) : '—'}</div>
-            <div class="wl-chg ${cssClass(q.pct)}">${fmtPct(q.pct)}</div>
-          </div>
-          <button class="wl-remove" data-remove="${tk}" title="Remove">×</button>
-        </div>
+        <tr class="wl-row${earn ? ' wl-row-earn' : ''}" data-ticker="${tk}">
+          <td class="wl-td-tk">
+            <span class="wl-tk">${tk}</span>${_quoteStaleChip(q)}
+            <span class="wl-meta">${_wlEarnChip(tk, earn)}${repBtn}</span>
+          </td>
+          <td class="num wl-td-px">${px === '—' ? '—' : ('$' + px)}</td>
+          <td class="num wl-td-chg"><span class="wl-chg ${cssClass(q.pct)}">${fmtPct(q.pct)}</span></td>
+          <td class="num wl-td-asof">${_wlAsOfCell(q)}</td>
+          <td class="wl-td-act"><button type="button" class="wl-remove" data-remove="${tk}" title="Remove">×</button></td>
+        </tr>
       `;
     }).join('');
 
@@ -11304,6 +11315,10 @@
       const accts = d.managed_accounts || [];
       document.getElementById('fund-funds-count').textContent = funds.length;
       document.getElementById('fund-accts-count').textContent = accts.length;
+      const kpiF = document.getElementById('fund-kpi-funds');
+      const kpiA = document.getElementById('fund-kpi-accts');
+      if (kpiF) kpiF.textContent = String(funds.length);
+      if (kpiA) kpiA.textContent = String(accts.length);
       if (!funds.length && !accts.length) {
         elFunds.innerHTML = '<div class="tab-empty">No LP funds yet.<br><span style="font-size:12px;color:var(--dim);">Create one in Settings → Fund Administration.</span></div>';
         elAccts.innerHTML = '<div class="tab-empty">No managed accounts yet.<br><span style="font-size:12px;color:var(--dim);">Create one in Settings → Fund Administration.</span></div>';
@@ -11462,6 +11477,8 @@
       });
       document.getElementById('fund-funds-list').style.display = which === 'funds' ? '' : 'none';
       document.getElementById('fund-accts-list').style.display = which === 'accts' ? '' : 'none';
+      const view = document.getElementById('fund-kpi-view');
+      if (view) view.textContent = which === 'accts' ? 'Managed' : 'Funds';
     });
   });
 
