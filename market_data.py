@@ -114,42 +114,72 @@ def _daily_bars_from_chart(res0: dict) -> list[tuple[str, float]]:
     return out
 
 
-def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool) -> float | None:
+def _yf_prior_close(symbol: str) -> float | None:
+    """Last completed session close via yfinance history (fills Yahoo chart gaps)."""
+    try:
+        import yfinance as yf  # type: ignore
+        hist = yf.Ticker(symbol).history(period="10d", auto_adjust=True)
+        if hist is None or len(hist) < 1:
+            return None
+        # history is timezone-aware; drop today if present so we get prior session
+        today_iso = _us_now_et().date().isoformat()
+        closes = []
+        for idx, row in hist.iterrows():
+            try:
+                d = idx.date().isoformat() if hasattr(idx, "date") else str(idx)[:10]
+            except Exception:
+                d = str(idx)[:10]
+            c = _f(row.get("Close"))
+            if c is None:
+                continue
+            if d < today_iso:
+                closes.append((d, float(c)))
+        if closes:
+            return float(closes[-1][1])
+        # Fallback: second-to-last row if last row is today
+        if len(hist) >= 2:
+            return float(hist["Close"].iloc[-2])
+    except Exception as e:
+        print(f"[market_data] yf prior close {symbol}: {e!s:.100}", flush=True)
+    return None
+
+
+def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool,
+                         symbol: str = "") -> float | None:
     """Prior US session close from daily bars — never trust Yahoo meta alone.
 
-    Unambiguous rule (SUP_20260727 / production bug):
-      prior close = close of the most recent daily bar with date *strictly
-      before* today's US session date.
+    Rule: most recent daily bar with date *strictly before* today (ET).
 
-    That is always Friday's close on Monday (whether or not today's partial
-    bar exists). Meta previousClose is ignored by the caller.
+    Cloud Yahoo chart responses sometimes skip a session (production saw
+    2026-07-23 then 2026-07-27 — Friday missing). If the latest pre-today bar
+    is older than 3 calendar days, fall back to yfinance history so day-%
+    matches Yahoo's website Friday close.
     """
+    from datetime import date, timedelta
     if not bars:
-        return None
+        return _yf_prior_close(symbol) if symbol else None
     today_iso = _us_now_et().date().isoformat()
-    # Bars with real dates: last strictly-before-today
     dated = [(d, c) for d, c in bars if d]
-    if dated:
-        prior_bars = [(d, c) for d, c in dated if d < today_iso]
-        if prior_bars:
-            return float(prior_bars[-1][1])
-        # All bars are today (rare) → need previous from undated fallback
-        if len(dated) >= 2 and dated[-1][0] >= today_iso:
-            return float(dated[-2][1])
-    # Timestamp-less series: if live≈last bar, treat last as today → prior=[-2]
-    # else last bar is prior session.
+    prior_bars = [(d, c) for d, c in dated if d < today_iso]
+    if prior_bars:
+        last_prior_date, last_prior_close = prior_bars[-1]
+        try:
+            gap = (date.fromisoformat(today_iso) - date.fromisoformat(last_prior_date)).days
+        except Exception:
+            gap = 0
+        # Normal weekend gap is 1–3 days (Fri→Mon). Larger ⇒ missing session in chart.
+        if gap <= 3 or not symbol:
+            return float(last_prior_close)
+        yf_prev = _yf_prior_close(symbol)
+        if yf_prev is not None:
+            return float(yf_prev)
+        return float(last_prior_close)
+    if len(dated) >= 2 and dated[-1][0] >= today_iso:
+        return float(dated[-2][1])
     closes = [c for _, c in bars]
-    if not closes:
-        return None
-    last_close = closes[-1]
-    if len(closes) < 2:
-        return None
-    if rth_open and live_px is not None:
-        if abs(float(live_px) - float(last_close)) <= max(0.05, 0.003 * abs(float(last_close))):
-            return float(closes[-2])
-        return float(last_close)
-    # Closed: price is last bar → day % vs previous bar
-    return float(closes[-2])
+    if len(closes) >= 2:
+        return float(closes[-2])
+    return _yf_prior_close(symbol) if symbol else None
 
 
 def _us_now_et():
@@ -217,9 +247,11 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
         return None
     for host in ("query1", "query2"):
         try:
+            # Prefer 1mo so a missing single session (seen on some cloud IPs:
+            # 10d chart skipped Fri 2026-07-24) still includes the true prior close.
             r = requests.get(
                 f"https://{host}.finance.yahoo.com/v8/finance/chart/{sym}",
-                params={"range": "10d", "interval": "1d", "includePrePost": "false"},
+                params={"range": "1mo", "interval": "1d", "includePrePost": "false"},
                 timeout=8,
                 headers={"User-Agent": "Mozilla/5.0 DGACapital/1.0"},
             )
@@ -280,11 +312,10 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
             # SUP_20260727: Yahoo meta previousClose was Thursday (319.69) while
             # Friday close was 313.03 → day-% used a multi-session base.
             # Never use meta previousClose / regularMarketChangePercent.
-            prev = _session_prior_close(bars, live_px if rth_open else px, rth_open)
+            prev = _session_prior_close(
+                bars, live_px if rth_open else px, rth_open, symbol=sym)
             if prev is None:
-                # Absolute last resort only — still better than nothing
-                prev = _f(meta.get("previousClose")
-                          or meta.get("regularMarketPreviousClose"))
+                prev = _yf_prior_close(sym)
 
             pct = None
             if prev not in (None, 0):
