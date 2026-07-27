@@ -329,27 +329,15 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 continue
             meta = res0.get("meta") or {}
             bars = _daily_bars_from_chart(res0)
-            # If chart skipped a session (gap > 3d before today), merge spark bars
-            # which are more complete on some Railway/cloud IPs.
-            today_iso = _us_now_et().date().isoformat()
-            dated = [(d, c) for d, c in bars if d and d < today_iso]
-            gap_days = 0
-            if dated:
-                try:
-                    from datetime import date as _date
-                    gap_days = (_date.fromisoformat(today_iso)
-                                - _date.fromisoformat(dated[-1][0])).days
-                except Exception:
-                    gap_days = 0
-            if gap_days > 3 or len(bars) < 3:
-                spark = _spark_bars(sym)
-                if spark:
-                    # Merge by date, prefer chart values when both exist
-                    by_d = {d: c for d, c in spark if d}
-                    for d, c in bars:
-                        if d:
-                            by_d[d] = c
-                    bars = sorted(by_d.items(), key=lambda x: x[0])
+            # ALWAYS merge spark bars. Cloud chart responses often skip a
+            # session (prod: no Fri 2026-07-24). Spark is denser on those IPs.
+            spark = _spark_bars(sym)
+            if spark:
+                by_d = {d: c for d, c in spark if d}
+                for d, c in bars:
+                    if d:
+                        by_d[d] = c  # chart wins on conflict
+                bars = sorted(by_d.items(), key=lambda x: x[0])
             closes = [c for _, c in bars]
             rth_open = _us_rth_open(meta)
             last_sess = _last_completed_us_session_date()
@@ -417,9 +405,10 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 "price_source": price_source,
                 "as_of": as_of,
                 # Temporary debug for SUP_20260727 (safe, non-secret)
-                "debug_bars_tail": bars[-4:] if bars else [],
+                "debug_bars_tail": bars[-5:] if bars else [],
                 "debug_today": _us_now_et().isoformat(),
                 "debug_rth": rth_open,
+                "debug_spark_n": len(spark) if spark else 0,
             }
         except Exception as e:
             print(f"[market_data] yahoo quote {sym} {host}: {e!s:.100}", flush=True)
