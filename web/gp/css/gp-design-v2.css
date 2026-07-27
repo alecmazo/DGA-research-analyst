@@ -1971,6 +1971,13 @@ html[data-theme="dark"] .opt-cell-empty { color: var(--gray-400); }
   color: var(--success-700);
   font-weight: 600;
 }
+.wl-td-dayabs, .wl-dayabs {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
 .wl-td-act { text-align: right; width: 28px; }
 .wl-table .wl-remove {
   position: static;

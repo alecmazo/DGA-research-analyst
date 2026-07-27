@@ -1762,25 +1762,43 @@
     }
   }
 
-  function _wlAsOfCell(q) {
-    if (!q || !q.as_of) return '<span class="wl-asof wl-asof-live">Live</span>';
-    const d = _parseServerDate(q.as_of);
-    if (!d || isNaN(d)) return '<span class="wl-asof">' + _cfEsc(String(q.as_of).slice(0, 10)) + '</span>';
-    const today = new Date();
-    const sameDay = d.getFullYear() === today.getFullYear()
-      && d.getMonth() === today.getMonth()
-      && d.getDate() === today.getDate();
-    const label = sameDay
-      ? d.toLocaleTimeString('en-US', { ..._PT, hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleDateString('en-US', { ..._PT, month: 'short', day: 'numeric' });
-    return '<span class="wl-asof" title="As of ' + _cfEsc(d.toLocaleString('en-US', { ..._PT })) + ' PT">'
-      + _cfEsc(label) + '</span>';
+  function _wlDayAbs(q) {
+    if (!q || q.price == null || isNaN(Number(q.price))) return null;
+    const px = Number(q.price);
+    let prev = q.prev != null ? Number(q.prev)
+      : (q.prev_close != null ? Number(q.prev_close)
+        : (q.previous_close != null ? Number(q.previous_close) : null));
+    if ((prev == null || !isFinite(prev) || prev === 0) && q.pct != null && isFinite(Number(q.pct))) {
+      const p = Number(q.pct);
+      if (p !== -100) prev = px / (1 + p / 100);
+    }
+    if (prev == null || !isFinite(prev)) return null;
+    return px - prev;
+  }
+  function _wlDayAbsCell(q) {
+    const d = _wlDayAbs(q);
+    if (d == null || isNaN(d)) return '<span class="wl-dayabs nc">—</span>';
+    const abs = Math.abs(d);
+    const s = (d >= 0 ? '+' : '−') + abs.toLocaleString('en-US', {
+      minimumFractionDigits: abs >= 100 ? 0 : 2,
+      maximumFractionDigits: abs >= 100 ? 0 : 2,
+    });
+    return '<span class="wl-dayabs ' + cssClass(d) + '">' + s + '</span>';
   }
   function renderWatchlist(tickers, quotes, earnings, reports) {
     const rows = document.getElementById('wl-rows');
     document.getElementById('wl-count').textContent = String(tickers.length);
     earnings = earnings || {};
     reports = reports || {};
+    // Cache for Market Pulse — hide ghost tickers not on the watchlist.
+    try {
+      window._DGA_WL_SET = new Set((tickers || []).map(function (t) {
+        return String(t || '').toUpperCase();
+      }));
+      if (typeof _pulseRenderAll === 'function') {
+        try { _pulseRenderAll(); } catch (_) {}
+      }
+    } catch (_) {}
     if (!tickers.length) {
       rows.innerHTML = '<tr class="wl-row"><td colspan="5" class="wl-empty-cell">No tickers yet. Add one below.</td></tr>';
       return;
@@ -1817,8 +1835,8 @@
             <span class="wl-meta">${_wlEarnChip(tk, earn)}${repBtn}</span>
           </td>
           <td class="num wl-td-px">${px === '—' ? '—' : ('$' + px)}</td>
+          <td class="num wl-td-dayabs">${_wlDayAbsCell(q)}</td>
           <td class="num wl-td-chg"><span class="wl-chg ${cssClass(q.pct)}">${fmtPct(q.pct)}</span></td>
-          <td class="num wl-td-asof">${_wlAsOfCell(q)}</td>
           <td class="wl-td-act"><button type="button" class="wl-remove" data-remove="${tk}" title="Remove">×</button></td>
         </tr>
       `;
@@ -10051,6 +10069,30 @@
     if (age < 60 * 48) return '⟳ ' + Math.round(age / 60) + 'h ago';
     return '⟳ ' + Math.round(age / 1440) + 'd ago';
   }
+  /** Entries to show: prefer current watchlist so ghost May scans don't appear. */
+  function _pulseDisplayEntries() {
+    const all = Object.entries(_pulseLatest || {});
+    const wl = (typeof window !== 'undefined' && window._DGA_WL_SET instanceof Set)
+      ? window._DGA_WL_SET : null;
+    if (!wl || !wl.size) return all;
+    const onList = all.filter(function (pair) {
+      return wl.has(String(pair[0] || '').toUpperCase());
+    });
+    // If filter empties (watchlist not loaded yet), fall back to all.
+    return onList.length ? onList : all;
+  }
+  function _pulseNewestIso(entries) {
+    let best = null, bestT = -1;
+    (entries || []).forEach(function (pair) {
+      const res = pair[1] || {};
+      const sa = res._scanned_at || res.scanned_at;
+      if (!sa) return;
+      const d = (typeof _parseServerDate === 'function') ? _parseServerDate(sa) : new Date(sa);
+      const t = d && !isNaN(d) ? d.getTime() : NaN;
+      if (!isNaN(t) && t > bestT) { bestT = t; best = sa; }
+    });
+    return best;
+  }
 
   /** Kick a single-ticker rescan; merges into _pulseLatest when done. */
   function _pulseRescanTicker(tk, opts) {
@@ -10234,10 +10276,20 @@
     const rows = document.getElementById(prefix + '-rows');
     const ts   = document.getElementById(prefix + '-ts');
     if (!rows) return;
+    const entries = _pulseDisplayEntries();
     if (ts) {
-      ts.textContent = _pulseScannedAt ? _pulseHeaderAgeLabel(_pulseScannedAt) : '—';
+      // Header age from *displayed* rows only (not ghost names left in kv).
+      const newest = _pulseNewestIso(entries) || _pulseScannedAt;
+      let label = newest ? _pulseHeaderAgeLabel(newest) : '—';
+      const staleN = entries.filter(function (p) { return _pulseIsStale(p[1]); }).length;
+      if (staleN > 0 && entries.length) {
+        label += ' · ' + staleN + ' stale';
+      }
+      ts.textContent = label;
+      ts.title = staleN
+        ? (staleN + ' ticker' + (staleN === 1 ? '' : 's') + ' older than ~18h — open a row or Run Pulse to refresh')
+        : (newest ? ('Newest watchlist pulse: ' + newest) : '');
     }
-    const entries = Object.entries(_pulseLatest || {});
     if (!entries.length) {
       rows.innerHTML = '<div style="padding:14px;font-size:12px;color:var(--dim);text-align:center;">'
         + 'No pulse yet — click Run Pulse to scan your watchlist.</div>';
@@ -10318,11 +10370,26 @@
 
   async function _pulseLoadLatest() {
     try {
+      // Ensure watchlist set is warm so we can hide ghost pulse rows.
+      if (!(window._DGA_WL_SET instanceof Set) || !window._DGA_WL_SET.size) {
+        try {
+          const wr = await window.dgaFetch('/api/watchlist');
+          if (wr.ok) {
+            const wd = await wr.json();
+            window._DGA_WL_SET = new Set((wd.tickers || []).map(function (t) {
+              return String(t || '').toUpperCase();
+            }));
+            if (_pulseWlCount == null) _pulseWlCount = (wd.tickers || []).length;
+          }
+        } catch (_) {}
+      }
       const r = await window.dgaFetch('/api/scan/latest');
       if (!r.ok) throw new Error(r.status);
       const d = await r.json();
       _pulseLatest    = (d.exists && d.results) ? d.results : {};
-      _pulseScannedAt = d.scanned_at || null;
+      // Prefer newest among watchlist entries for header (not global max over ghosts).
+      const disp = _pulseDisplayEntries();
+      _pulseScannedAt = _pulseNewestIso(disp) || d.scanned_at || null;
     } catch (e) { console.warn('[pulse]', e); }
     _pulseRenderAll();
   }

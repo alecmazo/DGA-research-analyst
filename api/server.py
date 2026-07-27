@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui110-20260727-koyfin-desk"
+WEB_BUILD_VERSION = "ui111-20260727-pulse-stale-wl"
 
 
 @app.get("/api/build")
@@ -11051,23 +11051,54 @@ def _run_scan(job_id: str, tickers: list[str]) -> None:
             _sjobs[job_id]["results"] = final["results"]
             _sjobs[job_id]["scanned_at"] = final["scanned_at"]
             _sjobs[job_id]["tickers_done"] = list(final["results"].keys())
-        # Merge new results into the persistent kv_store blob so Market Pulse
-        # retains results for tickers NOT in this scan (per-ticker persistence).
+        # Merge into scan.pulse. For a multi-ticker / full watchlist run we
+        # prune ghost rows (SUP_20260727_4629a291): old tickers left from prior
+        # lists were showing "STALE · 72d ago" after a fresh Run Pulse.
         try:
             existing = _kv_get("scan.pulse") or {}
-            merged = dict(existing)
+            if not isinstance(existing, dict):
+                existing = {}
             fin_at = final.get("scanned_at") or (datetime.utcnow().isoformat() + "Z")
             if isinstance(fin_at, str) and not (
                 fin_at.endswith("Z") or "+" in fin_at[10:] or fin_at.endswith("00:00")
             ):
                 fin_at = fin_at + "Z"
-            for tk, res in final["results"].items():
+            scanned_set = {str(t).upper() for t in (tickers or []) if t}
+            # Full pulse (2+ names) → keep only this universe after update.
+            # Single-ticker rescan keeps the rest of the map.
+            if len(scanned_set) >= 2:
+                merged = {}
+            else:
+                merged = dict(existing)
+            for tk, res in (final.get("results") or {}).items():
                 r_at = (res or {}).get("scanned_at") or fin_at
                 if isinstance(r_at, str) and not (
                     r_at.endswith("Z") or "+" in r_at[10:]
                 ):
                     r_at = r_at + "Z"
-                merged[tk] = dict(res, _scanned_at=r_at, scanned_at=r_at)
+                merged[str(tk).upper()] = dict(res, _scanned_at=r_at, scanned_at=r_at)
+            # Drop ancient orphans even on single-ticker path (>21d)
+            try:
+                from datetime import timezone as _tz
+                cutoff = datetime.now(_tz.utc).timestamp() - 21 * 86400
+                keep = {}
+                for tk, res in merged.items():
+                    if not isinstance(res, dict):
+                        continue
+                    if str(tk).upper() in scanned_set:
+                        keep[str(tk).upper()] = res
+                        continue
+                    sa = res.get("_scanned_at") or res.get("scanned_at") or ""
+                    try:
+                        s = str(sa).replace("Z", "+00:00")
+                        ts = datetime.fromisoformat(s).timestamp()
+                    except Exception:
+                        ts = 0
+                    if ts >= cutoff:
+                        keep[str(tk).upper()] = res
+                merged = keep
+            except Exception as _pr:
+                print(f"[scan] pulse prune skipped: {_pr!s:.80}", flush=True)
             _kv_put("scan.pulse", merged)
         except Exception as _ke:
             print(f"[scan] kv persist failed (non-fatal): {_ke}")
