@@ -228,30 +228,45 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 continue
 
             # ── Prior session close (never chartPreviousClose) ───────────
-            prev = _f(meta.get("previousClose")
-                      or meta.get("regularMarketPreviousClose"))
-            if prev is None and closes:
-                # If the last bar is *today's* (partial or final) session while
-                # RTH is open, prior close is the previous bar. If the last bar
-                # is still Friday and today is Monday open, prior close is the
-                # last bar itself — NOT closes[-2] (that would be Thursday and
-                # inflate multi-day %).
-                if rth_open and bar_last_date and bar_last_date >= _us_now_et().date().isoformat():
-                    prev = bar_prev
-                elif rth_open and bar_last is not None:
-                    # No today bar yet → last bar is prior session close
-                    prev = bar_last
-                else:
-                    # Closed: price is last bar; day % vs prior bar
-                    prev = bar_prev
+            # SUP_20260727: Yahoo meta previousClose is often STALE/WRONG
+            # (e.g. Thursday while last completed session is Friday). That
+            # made watchlist day-% multi-session (TSLA −3.8% vs true −1.7%).
+            # Always derive prior close from dated daily bars when available;
+            # only fall back to meta if bars are missing.
+            today_iso = _us_now_et().date().isoformat()
+            session_prev = None
+            if closes:
+                # Last bar is *today's* partial/final session → prior = previous bar
+                if bar_last_date and bar_last_date >= today_iso:
+                    session_prev = bar_prev
+                elif bar_last is not None:
+                    # Last bar is still prior session (e.g. Fri while Mon open)
+                    # → that bar *is* the prior close for live day %
+                    if rth_open:
+                        session_prev = bar_last
+                    else:
+                        # Market closed: price is last bar; day % vs bar before it
+                        session_prev = bar_prev
 
-            # Prefer Yahoo's own day % only when RTH is open (live session).
-            # When closed, recompute from last two session closes so weekend
-            # day % stays Friday's move, not a stale meta % or multi-day span.
+            meta_prev = _f(meta.get("previousClose")
+                           or meta.get("regularMarketPreviousClose"))
+            prev = session_prev
+            if prev is None:
+                prev = meta_prev
+            elif meta_prev is not None and session_prev is not None:
+                # If meta is within 0.5% of bar session prev, either is fine;
+                # if they diverge, bars win (meta is the known failure mode).
+                try:
+                    if abs(float(meta_prev) - float(session_prev)) > max(
+                            0.05, 0.005 * abs(float(session_prev))):
+                        prev = session_prev
+                except (TypeError, ValueError):
+                    prev = session_prev
+
+            # Always recompute day % from price vs session prev. Do NOT trust
+            # regularMarketChangePercent when previousClose meta is unreliable.
             pct = None
-            if rth_open:
-                pct = _f(meta.get("regularMarketChangePercent"))
-            if pct is None and prev not in (None, 0):
+            if prev not in (None, 0):
                 pct = (float(px) - float(prev)) / float(prev) * 100.0
 
             return {

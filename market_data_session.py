@@ -170,30 +170,30 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 continue
 
             # ── Prior session close (never chartPreviousClose) ───────────
-            prev = _f(meta.get("previousClose")
-                      or meta.get("regularMarketPreviousClose"))
-            if prev is None and closes:
-                # If the last bar is *today's* (partial or final) session while
-                # RTH is open, prior close is the previous bar. If the last bar
-                # is still Friday and today is Monday open, prior close is the
-                # last bar itself — NOT closes[-2] (that would be Thursday and
-                # inflate multi-day %).
-                if rth_open and bar_last_date and bar_last_date >= _us_now_et().date().isoformat():
-                    prev = bar_prev
-                elif rth_open and bar_last is not None:
-                    # No today bar yet → last bar is prior session close
-                    prev = bar_last
-                else:
-                    # Closed: price is last bar; day % vs prior bar
-                    prev = bar_prev
-
-            # Prefer Yahoo's own day % only when RTH is open (live session).
-            # When closed, recompute from last two session closes so weekend
-            # day % stays Friday's move, not a stale meta % or multi-day span.
+            # SUP_20260727: Yahoo meta previousClose is often STALE/WRONG.
+            # Always derive prior close from dated daily bars when available.
+            today_iso = _us_now_et().date().isoformat()
+            session_prev = None
+            if closes:
+                if bar_last_date and bar_last_date >= today_iso:
+                    session_prev = bar_prev
+                elif bar_last is not None:
+                    if rth_open:
+                        session_prev = bar_last
+                    else:
+                        session_prev = bar_prev
+            meta_prev = _f(meta.get("previousClose")
+                           or meta.get("regularMarketPreviousClose"))
+            prev = session_prev if session_prev is not None else meta_prev
+            if (prev is not None and meta_prev is not None and session_prev is not None):
+                try:
+                    if abs(float(meta_prev) - float(session_prev)) > max(
+                            0.05, 0.005 * abs(float(session_prev))):
+                        prev = session_prev
+                except (TypeError, ValueError):
+                    prev = session_prev
             pct = None
-            if rth_open:
-                pct = _f(meta.get("regularMarketChangePercent"))
-            if pct is None and prev not in (None, 0):
+            if prev not in (None, 0):
                 pct = (float(px) - float(prev)) / float(prev) * 100.0
 
             return {
