@@ -256,10 +256,59 @@ SECTION 7 — VALUATION
 Use at least two primary valuation methods. Show your math explicitly.
 
 **7A. Discounted Cash Flow (DCF):**
-- WACC components: risk-free rate, equity risk premium, beta, cost of debt, capital structure
-- Terminal growth rate assumption and justification
-- DCF-derived intrinsic value per share
-- Sensitivity table: intrinsic value across WACC (rows) × terminal growth rate (columns)
+
+Show the **full build-up**, not only the sensitivity grid. The reader must be able to audit every step of the base-case DCF (the “ladder”). Use FCFF unless you explicitly state FCFE and adjust for net debt consistently.
+
+**7A-1. WACC build (table required):**
+
+| Component | Value | Notes |
+|-----------|-------|-------|
+| Risk-free rate | [X.X%] | [source / tenor] |
+| Equity risk premium | [X.X%] | |
+| Beta (levered) | [X.XX] | |
+| Cost of equity | [X.X%] | rf + β×ERP |
+| Pre-tax cost of debt | [X.X%] | |
+| Tax rate | [X.X%] | |
+| After-tax cost of debt | [X.X%] | |
+| E / (D+E) | [X.X%] | |
+| D / (D+E) | [X.X%] | |
+| **WACC (base)** | **[X.X%]** | |
+
+**7A-2. Explicit assumptions (one short list):** base FCF year-0 ($M), forecast years (usually 5), revenue/FCF growth path, margin or reinvestment notes, terminal growth rate (justify vs long-run GDP/inflation), share count used for per-share value, net debt (or net cash) bridge.
+
+**7A-3. DCF projection ladder (table required — this is the detail the sensitivity table alone does not show):**
+
+Title the table exactly: `DCF Projection Ladder (Base Case)`.
+
+| Year | Fiscal | Revenue ($M) | Rev Growth % | FCF ($M) | FCF Growth % | Discount Factor | PV of FCF ($M) |
+|------|--------|--------------|--------------|----------|--------------|-----------------|----------------|
+| 0 (A) | FY[N] | [A] | — | [A] | — | 1.00 | — |
+| 1 (E) | FY[N+1] | [E] | [X%] | [E] | [X%] | [0.XXX] | [E] |
+| 2 (E) | FY[N+2] | [E] | [X%] | [E] | [X%] | [0.XXX] | [E] |
+| 3 (E) | FY[N+3] | [E] | [X%] | [E] | [X%] | [0.XXX] | [E] |
+| 4 (E) | FY[N+4] | [E] | [X%] | [E] | [X%] | [0.XXX] | [E] |
+| 5 (E) | FY[N+5] | [E] | [X%] | [E] | [X%] | [0.XXX] | [E] |
+| **Sum PV explicit FCF** | — | — | — | — | — | — | **[E]** |
+
+Discount factor = 1 / (1 + WACC)^t. Show intermediate numbers (do not jump straight to the sensitivity matrix).
+
+**7A-4. Terminal value & equity bridge (table required):**
+
+| Step | Amount ($M) | Formula / note |
+|------|-------------|----------------|
+| Year-5 FCF | [E] | from ladder |
+| Terminal growth (g) | [X.X%] | justify |
+| Terminal value (exit) | [E] | FCF₅×(1+g) / (WACC−g) |
+| PV of terminal value | [E] | TV / (1+WACC)^5 |
+| Enterprise value | [E] | Σ PV explicit FCF + PV(TV) |
+| (−) Net debt / (+) Net cash | [E] | as of latest BS |
+| Equity value | [E] | |
+| Diluted shares (M) | [X] | |
+| **DCF value / share** | **$[X.XX]** | Equity value / shares |
+| Current price | $[X.XX] | |
+| Upside / (downside) | [+/-X%] | |
+
+**7A-5. Sensitivity table** (required — base case cell bolded; must match 7A-4 base WACC & g):
 
 | DCF Sensitivity     | TGR: 1.0% | TGR: 2.0% | TGR: 2.5% | TGR: 3.0% | TGR: 3.5% |
 |---------------------|-----------|-----------|-----------|-----------|-----------|
@@ -269,7 +318,7 @@ Use at least two primary valuation methods. Show your math explicitly.
 | WACC: 10.0%         | $[X]      | $[X]      | $[X]      | $[X]      | $[X]      |
 | WACC: 11.0%         | $[X]      | $[X]      | $[X]      | $[X]      | $[X]      |
 
-Bold the base-case cell.
+Bold the base-case cell. One sentence: which inputs move value the most (WACC vs g vs year-1 FCF).
 
 **7B. Comparable Company Analysis** (minimum 5 peers — GS/MS style comps table):
 
@@ -445,10 +494,12 @@ You are Grok 4.20 with extended reasoning. Use your full reasoning capacity on t
 
 8. MANDATORY SECTIONS — ZERO EXCEPTIONS. These sections are non-negotiable and must appear in every report, complete and fully populated. If any section is absent or replaced by a summary sentence, the report is incomplete:
 
-   a. SECTION 7A — DCF SENSITIVITY TABLE: Must produce the full 5-row × 5-column WACC × TGR table. Do not summarize it as text. Do not skip it for companies with negative earnings — use conservative/negative growth assumptions and note them. The table must appear in the output.
+   a. SECTION 7A — FULL DCF BUILD + SENSITIVITY: Must produce (1) WACC build table, (2) **DCF Projection Ladder (Base Case)** year-by-year with FCF, discount factors, and PV of FCF, (3) terminal value & equity bridge to $/share, and (4) the full 5×5 WACC × TGR sensitivity table with base case bolded. A sensitivity grid alone is NOT sufficient — the ladder numbers must be visible. Do not skip for negative earnings; use conservative assumptions and label them.
 
    b. SECTION 7B — COMPARABLE COMPANY ANALYSIS: Must include a minimum of 5 peer companies. Must show ALL columns: Company, Ticker, Mkt Cap, EV, NTM P/E, NTM EV/EBITDA, EV/Revenue, FCF Yield, Revenue Growth, EBITDA Margin. A summary paragraph is not a substitute for this table.
 
-   c. SECTION 11 — TOP 5 INSTITUTIONAL HOLDERS: Must produce the full 5-row holders table with Shares Held, % of Float, Qtr Change, and Signal columns. Use your most current training data or live search. If exact current data is unavailable, use best estimates and append "(est.)" — but the table must exist.
+   c. SECTION 6 — 5-YEAR PROJECTIONS: Must include the multi-year Revenue / Growth / EBITDA / Margin / EPS / FCF table with (A)/(E) labels so growth assumptions are explicit.
+
+   d. SECTION 11 — TOP 5 INSTITUTIONAL HOLDERS: Must produce the full 5-row holders table with Shares Held, % of Float, Qtr Change, and Signal columns. Use your most current training data or live search. If exact current data is unavailable, use best estimates and append "(est.)" — but the table must exist.
 
    If you are uncertain about any section's data, produce the best estimate and label each estimated cell with "(E)". Never omit the section.

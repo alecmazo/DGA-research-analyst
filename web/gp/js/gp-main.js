@@ -129,6 +129,7 @@
 
     // 2) Parse markdown tables BEFORE other transforms (line-based)
     //    Match: header row | --- row | one or more body rows
+    //    Tag tables for chart enrichment (growth / comps / DCF ladder).
     const lines = text.split('\n');
     const out = [];
     let i = 0;
@@ -146,7 +147,9 @@
           rows.push(parseRow(lines[i]));
           i++;
         }
-        let html = '<table class="md-table"><thead><tr>';
+        const kind = _mdTableKind(headers);
+        let html = '<div class="md-table-block"' + (kind ? ' data-kind="' + kind + '"' : '') + '>'
+          + '<table class="md-table"><thead><tr>';
         for (const h of headers) html += `<th>${h}</th>`;
         html += '</tr></thead><tbody>';
         for (const r of rows) {
@@ -154,7 +157,7 @@
           for (const c of r) html += `<td>${c}</td>`;
           html += '</tr>';
         }
-        html += '</tbody></table>';
+        html += '</tbody></table></div>';
         out.push(html);
       } else {
         out.push(line);
@@ -189,6 +192,251 @@
       return '<p>' + t.replace(/\n/g, '<br>') + '</p>';
     });
     el.innerHTML = '<div class="md-body">' + paragraphs.join('\n') + '</div>';
+    try { _enrichReportCharts(el); } catch (e) { console.warn('[report charts]', e); }
+  }
+
+  /** Classify markdown tables so the report viewer can draw charts. */
+  function _mdTableKind(headers) {
+    const h = (headers || []).map(x => String(x || '').toLowerCase().replace(/\s+/g, ' '));
+    const joined = h.join(' | ');
+    if (joined.includes('discount factor') || joined.includes('pv of fcf')
+        || (joined.includes('fcf') && joined.includes('discount'))) return 'dcf-ladder';
+    if (joined.includes('dcf sensitivity') || /tgr\s*:/.test(joined)) return 'dcf-sens';
+    if ((joined.includes('ntm p/e') || joined.includes('ev/ebitda'))
+        && (joined.includes('ticker') || joined.includes('company'))) return 'comps';
+    if ((joined.includes('revenue growth') || joined.includes('rev growth'))
+        && (joined.includes('ebitda') || joined.includes('revenue ($') || joined.includes('fcf')))
+      return 'growth';
+    if (h.some(x => /fy\d{2,4}|fy\[/.test(x)) && joined.includes('revenue')) return 'growth';
+    return '';
+  }
+
+  function _mdParseNum(cell) {
+    if (cell == null) return null;
+    let s = String(cell).replace(/<[^>]+>/g, '').replace(/\*\*/g, '').trim();
+    if (!s || s === '—' || s === '-' || s === '–' || /^n\/?a$/i.test(s)) return null;
+    s = s.replace(/[,$£€]/g, '').replace(/\s/g, '');
+    // (12.3%) accounting negatives
+    let neg = false;
+    if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+    s = s.replace(/%$/, '');
+    // 1.2Bn / 500M (common in comps tables)
+    let mult = 1;
+    if (/bn$/i.test(s)) { mult = 1e9; s = s.replace(/bn$/i, ''); }
+    else if (/mm$/i.test(s)) { mult = 1e6; s = s.replace(/mm$/i, ''); }
+    else if (/m$/i.test(s) && !/[a-z]{2,}m$/i.test(s)) { mult = 1e6; s = s.replace(/m$/i, ''); }
+    const n = parseFloat(s);
+    if (!isFinite(n)) return null;
+    return neg ? -n * mult : n * mult;
+  }
+
+  function _mdStripHtml(s) {
+    return String(s || '').replace(/<[^>]+>/g, '').replace(/\*\*/g, '').trim();
+  }
+
+  /** Compact SVG bar chart for report tables (no external lib). */
+  function _reportBarChart(opts) {
+    const labels = opts.labels || [];
+    const series = opts.series || []; // [{name, color, values: number[]}]
+    const title = opts.title || '';
+    const unit = opts.unit || '';
+    if (!labels.length || !series.length) return '';
+    const W = 520, H = 200;
+    const padL = 42, padR = 12, padT = 28, padB = 36;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    let lo = 0, hi = 0;
+    series.forEach(s => (s.values || []).forEach(v => {
+      if (v == null || !isFinite(v)) return;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }));
+    if (lo === hi) { hi = lo + 1; }
+    if (lo > 0) lo = 0;
+    const n = labels.length;
+    const nS = series.length;
+    const slot = plotW / Math.max(n, 1);
+    const bw = Math.max(4, (slot * 0.72) / nS);
+    function yOf(v) {
+      return padT + plotH * (1 - (v - lo) / (hi - lo));
+    }
+    let svg = '';
+    // grid
+    for (let g = 0; g <= 4; g++) {
+      const v = lo + (hi - lo) * (g / 4);
+      const y = yOf(v);
+      svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR)
+        + '" y2="' + y.toFixed(1) + '" stroke="var(--border-subtle,#e2e8f0)" stroke-width="1"/>';
+      const lbl = unit === '%' ? v.toFixed(0) + '%'
+        : (Math.abs(v) >= 1e9 ? (v / 1e9).toFixed(1) + 'B'
+          : Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(0) + 'M'
+          : Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1));
+      svg += '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1)
+        + '" text-anchor="end" font-size="9" fill="var(--text-secondary,#64748b)">'
+        + lbl + '</text>';
+    }
+    if (lo < 0 && hi > 0) {
+      const y0 = yOf(0);
+      svg += '<line x1="' + padL + '" y1="' + y0.toFixed(1) + '" x2="' + (W - padR)
+        + '" y2="' + y0.toFixed(1) + '" stroke="var(--text-tertiary,#94a3b8)" stroke-width="1"/>';
+    }
+    for (let i = 0; i < n; i++) {
+      for (let s = 0; s < nS; s++) {
+        const v = series[s].values[i];
+        if (v == null || !isFinite(v)) continue;
+        const x = padL + slot * i + slot * 0.14 + s * bw;
+        const y0 = yOf(0);
+        const y1 = yOf(v);
+        const top = Math.min(y0, y1);
+        const h = Math.max(1.5, Math.abs(y1 - y0));
+        svg += '<rect x="' + x.toFixed(1) + '" y="' + top.toFixed(1)
+          + '" width="' + Math.max(3, bw - 1.5).toFixed(1) + '" height="' + h.toFixed(1)
+          + '" fill="' + (series[s].color || '#5BB8D4') + '" rx="1.5"/>';
+      }
+      const lx = padL + slot * i + slot / 2;
+      const lab = String(labels[i] || '').slice(0, 10);
+      svg += '<text x="' + lx.toFixed(1) + '" y="' + (H - 12)
+        + '" text-anchor="middle" font-size="9" fill="var(--text-secondary,#64748b)">'
+        + lab.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</text>';
+    }
+    let legend = '';
+    if (nS > 1) {
+      legend = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;font-size:10.5px;color:var(--text-secondary);">';
+      series.forEach(s => {
+        legend += '<span style="display:inline-flex;align-items:center;gap:4px;">'
+          + '<span style="width:9px;height:9px;border-radius:2px;background:' + s.color + ';display:inline-block;"></span>'
+          + (s.name || '') + '</span>';
+      });
+      legend += '</div>';
+    }
+    return '<div class="md-report-chart" style="margin:6px 0 16px;padding:10px 12px;border:1px solid var(--border-subtle,#e2e8f0);'
+      + 'border-radius:8px;background:var(--bg-elevated,#fff);">'
+      + (title ? '<div style="font-size:11px;font-weight:700;color:var(--text-primary,#0f172a);margin-bottom:4px;">'
+        + title + '</div>' : '')
+      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-height:220px;display:block;">'
+      + svg + '</svg>' + legend + '</div>';
+  }
+
+  function _enrichReportCharts(root) {
+    if (!root) return;
+    const blocks = root.querySelectorAll('.md-table-block[data-kind]');
+    blocks.forEach(block => {
+      if (block.querySelector('.md-report-chart')) return;
+      const kind = block.getAttribute('data-kind');
+      const table = block.querySelector('table');
+      if (!table) return;
+      const ths = Array.from(table.querySelectorAll('thead th')).map(t => _mdStripHtml(t.innerHTML));
+      const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr =>
+        Array.from(tr.querySelectorAll('td')).map(td => _mdStripHtml(td.innerHTML)));
+      if (!rows.length) return;
+
+      if (kind === 'growth') {
+        // Prefer % series: Revenue Growth, EBITDA Margin; fallback Revenue levels
+        const idxRevG = ths.findIndex(h => /rev(enue)?\s*growth/i.test(h));
+        const idxEbitdaM = ths.findIndex(h => /ebitda\s*margin/i.test(h));
+        const idxRev = ths.findIndex(h => /^revenue/i.test(h) && !/growth/i.test(h));
+        // Labels: first col if year-like, else col headers for year columns
+        let labels = rows.map(r => r[0] || '');
+        const series = [];
+        const colors = ['#5BB8D4', '#0A1628', '#16a34a', '#d97706'];
+        if (idxRevG >= 0) {
+          series.push({
+            name: ths[idxRevG], color: colors[0],
+            values: rows.map(r => _mdParseNum(r[idxRevG])),
+          });
+        }
+        if (idxEbitdaM >= 0) {
+          series.push({
+            name: ths[idxEbitdaM], color: colors[1],
+            values: rows.map(r => _mdParseNum(r[idxEbitdaM])),
+          });
+        }
+        if (!series.length && idxRev >= 0) {
+          // Multi-year header layout: Metric | FY1 | FY2 | ...
+          if (ths.length > 2 && /metric/i.test(ths[0] || '')) {
+            const yrLabels = ths.slice(1);
+            const revRow = rows.find(r => /revenue/i.test(r[0] || '') && !/growth/i.test(r[0] || ''));
+            const grRow = rows.find(r => /growth/i.test(r[0] || ''));
+            const mgnRow = rows.find(r => /margin/i.test(r[0] || ''));
+            labels = yrLabels;
+            if (grRow) series.push({ name: 'Revenue Growth %', color: colors[0], values: grRow.slice(1).map(_mdParseNum) });
+            if (mgnRow) series.push({ name: 'Margin %', color: colors[1], values: mgnRow.slice(1).map(_mdParseNum) });
+            if (!series.length && revRow) {
+              series.push({ name: 'Revenue', color: colors[0], values: revRow.slice(1).map(_mdParseNum) });
+            }
+          } else {
+            series.push({
+              name: ths[idxRev], color: colors[0],
+              values: rows.map(r => _mdParseNum(r[idxRev])),
+            });
+          }
+        }
+        if (!series.length) return;
+        const unit = series.every(s => /%|growth|margin/i.test(s.name || '')) ? '%' : '';
+        const chart = _reportBarChart({
+          title: 'Growth expectations (from table)',
+          labels: labels.map(l => String(l).replace(/\s*\(E\)|\s*\(A\)/gi, '').slice(0, 12)),
+          series, unit,
+        });
+        if (chart) block.insertAdjacentHTML('beforeend', chart);
+      }
+
+      if (kind === 'comps') {
+        const idxName = ths.findIndex(h => /company|ticker/i.test(h));
+        const idxPe = ths.findIndex(h => /ntm\s*p\/?e|p\/?e/i.test(h) && !/ev/i.test(h));
+        const idxEv = ths.findIndex(h => /ev\/ebitda/i.test(h));
+        const nameI = idxName >= 0 ? idxName : 0;
+        const metricI = idxPe >= 0 ? idxPe : idxEv;
+        if (metricI < 0) return;
+        const filtered = rows.filter(r => {
+          const name = (r[nameI] || '');
+          if (/median|premium|discount|average|mean/i.test(name)) return false;
+          return _mdParseNum(r[metricI]) != null;
+        }).slice(0, 10);
+        if (filtered.length < 2) return;
+        const chart = _reportBarChart({
+          title: (idxPe >= 0 ? 'NTM P/E' : 'EV/EBITDA') + ' — comps vs subject',
+          labels: filtered.map(r => (r[nameI] || '').slice(0, 12)),
+          series: [{
+            name: ths[metricI],
+            color: '#5BB8D4',
+            values: filtered.map(r => _mdParseNum(r[metricI])),
+          }],
+          unit: 'x',
+        });
+        if (chart) block.insertAdjacentHTML('beforeend', chart);
+      }
+
+      if (kind === 'dcf-ladder') {
+        const idxYear = ths.findIndex(h => /^year|fiscal/i.test(h));
+        const idxFcf = ths.findIndex(h => /^fcf/i.test(h) && !/growth|pv/i.test(h));
+        const idxPv = ths.findIndex(h => /pv of fcf|pv\s*fcf/i.test(h));
+        const labI = idxYear >= 0 ? idxYear : 0;
+        const filtered = rows.filter(r => {
+          if (/sum|total|terminal/i.test(r[labI] || '')) return false;
+          return true;
+        });
+        const labels = filtered.map(r => (r[labI] || '').slice(0, 10));
+        const series = [];
+        if (idxFcf >= 0) {
+          series.push({
+            name: 'FCF', color: '#0A1628',
+            values: filtered.map(r => _mdParseNum(r[idxFcf])),
+          });
+        }
+        if (idxPv >= 0) {
+          series.push({
+            name: 'PV of FCF', color: '#5BB8D4',
+            values: filtered.map(r => _mdParseNum(r[idxPv])),
+          });
+        }
+        if (!series.length) return;
+        const chart = _reportBarChart({
+          title: 'DCF ladder — explicit period cash flows',
+          labels, series, unit: '',
+        });
+        if (chart) block.insertAdjacentHTML('beforeend', chart);
+      }
+    });
   }
 
   // ── Generic job poller ────────────────────────────────────────
