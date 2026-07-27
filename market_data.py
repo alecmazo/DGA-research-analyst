@@ -329,15 +329,27 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 continue
             meta = res0.get("meta") or {}
             bars = _daily_bars_from_chart(res0)
-            # ALWAYS merge spark bars. Cloud chart responses often skip a
-            # session (prod: no Fri 2026-07-24). Spark is denser on those IPs.
+            # Prefer spark when it has a denser pre-today series (cloud chart
+            # often skips a session — prod chart missed Fri 2026-07-24).
             spark = _spark_bars(sym)
+            spark_n = len(spark) if spark else 0
+            today_iso = _us_now_et().date().isoformat()
             if spark:
-                by_d = {d: c for d, c in spark if d}
-                for d, c in bars:
-                    if d:
-                        by_d[d] = c  # chart wins on conflict
-                bars = sorted(by_d.items(), key=lambda x: x[0])
+                chart_prior = [d for d, _ in bars if d and d < today_iso]
+                spark_prior = [d for d, _ in spark if d and d < today_iso]
+                # Use spark as base if it knows more completed sessions
+                if len(spark_prior) > len(chart_prior):
+                    by_d = {d: c for d, c in spark if d}
+                    for d, c in bars:
+                        if d:
+                            by_d[d] = c
+                    bars = sorted(by_d.items(), key=lambda x: x[0])
+                else:
+                    by_d = {d: c for d, c in bars if d}
+                    for d, c in spark:
+                        if d and d not in by_d:
+                            by_d[d] = c
+                    bars = sorted(by_d.items(), key=lambda x: x[0])
             closes = [c for _, c in bars]
             rth_open = _us_rth_open(meta)
             last_sess = _last_completed_us_session_date()
@@ -409,6 +421,7 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 "debug_today": _us_now_et().isoformat(),
                 "debug_rth": rth_open,
                 "debug_spark_n": len(spark) if spark else 0,
+                "debug_spark_tail": (spark[-5:] if spark else []),
             }
         except Exception as e:
             print(f"[market_data] yahoo quote {sym} {host}: {e!s:.100}", flush=True)
