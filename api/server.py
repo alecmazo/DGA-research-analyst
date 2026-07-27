@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui96-20260720-inkind-loan-narrow"
+WEB_BUILD_VERSION = "ui97-20260727-watchlist-daypct"
 
 
 @app.get("/api/build")
@@ -11709,11 +11709,15 @@ def batch_quotes(tickers: str = ""):
                     closes = _closes_for(ysym)
                     if closes is None or len(closes) == 0:
                         continue
+                    # Daily bars only: last close is the last session print.
+                    # Day % = last session move (closes[-1] vs closes[-2]), not
+                    # live vs closes[-2] — that multi-day bug is what broke the
+                    # watchlist (SUP_20260727). Prefer market_data for live %.
                     price = float(closes.iloc[-1])
                     prev = float(closes.iloc[-2]) if len(closes) >= 2 else None
                     for orig in origs:
                         if orig in misses:
-                            _accept(orig, price, None, prev, source="yfinance")
+                            _accept(orig, price, None, prev, source="yfinance-daily")
                 misses = [s for s in misses if _still_need(s)]
         except Exception as _e:
             print(f"[batch_quotes] yf.download failed: {_e}", flush=True)

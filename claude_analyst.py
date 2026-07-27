@@ -1836,53 +1836,22 @@ def fetch_market_snapshot(ticker: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         print(f"   ⚠️  yfinance fast_info failed for {ticker}: {exc}")
 
-    # ── Fallback: raw Yahoo chart API ────────────────────────────────────────
-    # Meta previousClose is often missing (2026+). chartPreviousClose is NOT
-    # the prior session — use second-to-last daily bar for day %.
+    # ── Fallback: session-aware Yahoo chart (shared with watchlist) ───────────
+    # CRITICAL (SUP_20260727): never use closes[-2] blindly when previousClose
+    # is missing. If the last daily bar is still Friday and the market is open
+    # Monday, closes[-2] is *Thursday* and day-% vs live price is multi-day
+    # wrong (e.g. TSLA −3.4% vs true ≈ −1.3%). Delegate to market_data.
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=10d"
-        resp = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15,
-        )
-        data = resp.json()
-        if isinstance(data, dict):
-            chart  = data.get("chart", {}) if isinstance(data.get("chart"), dict) else {}
-            result = chart.get("result", []) if isinstance(chart.get("result"), list) else []
-            if result and isinstance(result[0], dict):
-                res0 = result[0]
-                meta = res0.get("meta", {}) if isinstance(res0.get("meta"), dict) else {}
-                closes_raw = ((res0.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
-                closes = []
-                for c in closes_raw:
-                    try:
-                        if c is not None and float(c) == float(c):
-                            closes.append(float(c))
-                    except (TypeError, ValueError):
-                        pass
-                if out["price"] is None:
-                    px = meta.get("regularMarketPrice") or meta.get("postMarketPrice")
-                    if px is None and closes:
-                        px = closes[-1]
-                    if px is not None:
-                        out["price"] = float(px)
-                if out["previous_close"] is None:
-                    prev = meta.get("previousClose") or meta.get("regularMarketPreviousClose")
-                    if prev is None and len(closes) >= 2:
-                        prev = closes[-2]
-                    if prev is not None:
-                        out["previous_close"] = float(prev)
-                # Yahoo's own day % when meta still sends it
-                if out.get("pct_change") is None:
-                    rmp = meta.get("regularMarketChangePercent")
-                    if rmp is not None:
-                        try:
-                            out["pct_change"] = float(rmp)
-                        except (TypeError, ValueError):
-                            pass
-                if not out["source"]:
-                    out["source"] = "Yahoo Finance"
+        import market_data as _md  # type: ignore
+        mq = (_md.get_quotes([ticker]) or {}).get(ticker.upper()) or {}
+        if mq.get("price") is not None and out["price"] is None:
+            out["price"] = float(mq["price"])
+        if mq.get("prev_close") is not None and out["previous_close"] is None:
+            out["previous_close"] = float(mq["prev_close"])
+        if mq.get("pct_change") is not None and out.get("pct_change") is None:
+            out["pct_change"] = float(mq["pct_change"])
+        if mq and not out["source"]:
+            out["source"] = mq.get("source") or "yahoo-chart"
     except Exception as exc:  # noqa: BLE001
         print(f"   ⚠️  Market snapshot chart fallback failed for {ticker}: {exc}")
 
