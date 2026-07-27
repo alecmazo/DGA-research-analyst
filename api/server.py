@@ -11606,7 +11606,11 @@ def batch_quotes(tickers: str = ""):
                     pct = _pct_from(px, prev)
                 for orig in rev.get(ysym, [ysym]):
                     if orig in misses:
-                        _accept(orig, px, pct, prev, source=q.get("source") or "yahoo-chart")
+                        _accept(
+                            orig, px, pct, prev,
+                            source=q.get("price_source") or q.get("source") or "yahoo-chart",
+                            as_of=q.get("as_of"),
+                        )
             misses = [s for s in misses if _still_need(s)]
         except Exception as e:
             print(f"[batch_quotes] market_data failed: {e!s:.140}", flush=True)
@@ -11642,42 +11646,23 @@ def batch_quotes(tickers: str = ""):
         except Exception as e:
             print(f"[batch_quotes] fast_info batch failed: {e!s:.140}", flush=True)
 
-    # ── 3) Yahoo chart HTTP fallback (bar prev — never chartPreviousClose) ────
+    # ── 3) Yahoo chart HTTP fallback — session-aware via market_data ────────────
     if misses:
         try:
-            import urllib.request as _urlreq
+            import market_data as _md
             still = []
             for orig in misses:
                 ysym = _resolve_ticker_alias(orig)
                 try:
-                    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}"
-                           f"?range=10d&interval=1d")
-                    req = _urlreq.Request(
-                        url, headers={"User-Agent": "Mozilla/5.0 DGACapital/1.0"})
-                    with _urlreq.urlopen(req, timeout=6) as resp:
-                        data = json.loads(resp.read().decode("utf-8", "replace"))
-                    res0 = ((data.get("chart") or {}).get("result") or [None])[0]
-                    if not res0:
+                    q = _md._yahoo_chart_quote(ysym) if hasattr(_md, "_yahoo_chart_quote") else None
+                    if not q or q.get("price") is None:
                         still.append(orig)
                         continue
-                    meta = res0.get("meta") or {}
-                    closes = ((res0.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
-                    closes = [float(c) for c in closes if c is not None]
-                    px = (meta.get("regularMarketPrice")
-                          or meta.get("postMarketPrice")
-                          or meta.get("preMarketPrice"))
-                    if px is None and closes:
-                        px = closes[-1]
-                    # Official meta prev only — never chartPreviousClose
-                    prev = (meta.get("previousClose")
-                            or meta.get("regularMarketPreviousClose"))
-                    if prev is None and len(closes) >= 2:
-                        prev = closes[-2]
-                    pct = meta.get("regularMarketChangePercent")
-                    if px is None:
-                        still.append(orig)
-                        continue
-                    _accept(orig, px, pct, prev, source="yahoo-chart")
+                    _accept(
+                        orig, q.get("price"), q.get("pct_change"), q.get("prev_close"),
+                        source=q.get("price_source") or q.get("source") or "yahoo-chart",
+                        as_of=q.get("as_of"),
+                    )
                     if _still_need(orig):
                         still.append(orig)
                 except Exception:
@@ -11745,7 +11730,10 @@ def batch_quotes(tickers: str = ""):
         except Exception as e:
             print(f"[batch_quotes] tiingo failed: {e!s:.120}", flush=True)
 
-    # ── 6) Fresh store (≤90s) then any-age store ──────────────────────────────
+    # ── 6) Fresh store (≤90s) then last-session store only ────────────────────
+    # SUP_20260726: any-age store used to serve multi-day-stale prices on
+    # weekends (watchlist showed Thursday/older prints instead of Friday close).
+    # Cap fallback age so we never display pre-last-session store rows.
     if misses:
         try:
             db_fn = globals().get("_db_quotes")
@@ -11762,11 +11750,11 @@ def batch_quotes(tickers: str = ""):
     if misses:
         try:
             db_fn = globals().get("_db_quotes")
-            db_any = db_fn(misses) if callable(db_fn) else {}
+            db_sess = db_fn(misses, max_age_s=4 * 86400) if callable(db_fn) else {}
         except Exception as e:
-            print(f"[batch_quotes] db_quotes any-age failed: {e!s:.120}", flush=True)
-            db_any = {}
-        for sym, dq in (db_any or {}).items():
+            print(f"[batch_quotes] db_quotes session-age failed: {e!s:.120}", flush=True)
+            db_sess = {}
+        for sym, dq in (db_sess or {}).items():
             if dq and dq.get("price") is not None:
                 _accept(sym, dq["price"], dq.get("pct_change"),
                         source="store", as_of=dq.get("as_of"))
