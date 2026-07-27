@@ -114,6 +114,14 @@ def _daily_bars_from_chart(res0: dict) -> list[tuple[str, float]]:
     return out
 
 
+# Short-lived caches so batch watchlist quotes do not re-hit Nasdaq/spark
+# for every symbol on every request (watchlist was ~90s for 40 names).
+_NDQ_BARS_CACHE: dict = {}
+_NDQ_BARS_TTL = 300.0  # seconds
+_SPARK_BARS_CACHE: dict = {}
+_SPARK_BARS_TTL = 120.0
+
+
 def _yf_prior_close(symbol: str) -> float | None:
     """Last completed session close via yfinance history (fills Yahoo chart gaps)."""
     try:
@@ -146,6 +154,7 @@ def _yf_prior_close(symbol: str) -> float | None:
 
 def _spark_bars(symbol: str) -> list[tuple[str, float]]:
     """Yahoo spark endpoint — often more complete than chart on cloud IPs."""
+    import time as _time
     import requests
     from datetime import datetime, timezone
     try:
@@ -156,13 +165,17 @@ def _spark_bars(symbol: str) -> list[tuple[str, float]]:
     sym = (symbol or "").strip().upper()
     if not sym:
         return []
+    now = _time.time()
+    hit = _SPARK_BARS_CACHE.get(sym)
+    if hit and (now - hit[0]) < _SPARK_BARS_TTL:
+        return list(hit[1])
     out: list[tuple[str, float]] = []
     for host in ("query1", "query2"):
         try:
             r = requests.get(
                 f"https://{host}.finance.yahoo.com/v8/finance/spark",
                 params={"symbols": sym, "range": "1mo", "interval": "1d"},
-                timeout=8,
+                timeout=4,
                 headers={"User-Agent": "Mozilla/5.0 DGACapital/1.0"},
             )
             if r.status_code != 200:
@@ -195,9 +208,11 @@ def _spark_bars(symbol: str) -> list[tuple[str, float]]:
                 except Exception:
                     continue
             if out:
+                _SPARK_BARS_CACHE[sym] = (now, list(out))
                 return out
         except Exception as e:
             print(f"[market_data] spark {sym} {host}: {e!s:.100}", flush=True)
+    _SPARK_BARS_CACHE[sym] = (now, [])
     return out
 
 
@@ -206,12 +221,19 @@ def _nasdaq_daily_bars(symbol: str) -> list[tuple[str, float]]:
     """Nasdaq.com historical closes — reliable when Yahoo cloud chart skips a session.
 
     Free public JSON (no key). Used to fill missing prior-session bars for day-%.
+    Cached briefly so a 40-ticker watchlist does not issue 40 serial Nasdaq calls
+    on every hard refresh.
     """
+    import time as _time
     import requests
     from datetime import timedelta
     sym = (symbol or "").strip().upper()
     if not sym:
         return []
+    now = _time.time()
+    hit = _NDQ_BARS_CACHE.get(sym)
+    if hit and (now - hit[0]) < _NDQ_BARS_TTL:
+        return list(hit[1])
     try:
         end = _us_now_et().date()
         start = end - timedelta(days=40)
@@ -223,7 +245,7 @@ def _nasdaq_daily_bars(symbol: str) -> list[tuple[str, float]]:
                 "todate": end.isoformat(),
                 "limit": 40,
             },
-            timeout=10,
+            timeout=5,
             headers={
                 "User-Agent": "Mozilla/5.0 DGACapital/1.0",
                 "Accept": "application/json,text/plain,*/*",
@@ -251,9 +273,11 @@ def _nasdaq_daily_bars(symbol: str) -> list[tuple[str, float]]:
             except Exception:
                 continue
         out.sort(key=lambda x: x[0])
+        _NDQ_BARS_CACHE[sym] = (now, list(out))
         return out
     except Exception as e:
         print(f"[market_data] nasdaq bars {sym}: {e!s:.100}", flush=True)
+        _NDQ_BARS_CACHE[sym] = (now, [])
         return []
 
 
@@ -303,16 +327,14 @@ def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool,
         last_prior_date, last_prior_close = prior_bars[-1]
         if last_prior_date >= expected or not symbol:
             return float(last_prior_close)
-        # Missing expected session — try yfinance history merge
-        yf_prev = _yf_prior_close(symbol)
-        # Prefer yfinance only if it looks fresher than last chart prior
-        # (single float — use when present and chart is stale)
-        # Then Nasdaq full series (has the missing Friday on cloud IPs).
+        # Missing expected session — Nasdaq first (fast/reliable on cloud),
+        # then yfinance. Caller usually already merged; this is a safety net.
         ndq = _nasdaq_daily_bars(symbol)
         if ndq:
             ndq_prior = [(d, c) for d, c in ndq if d and d < today_iso]
             if ndq_prior and ndq_prior[-1][0] > last_prior_date:
                 return float(ndq_prior[-1][1])
+        yf_prev = _yf_prior_close(symbol)
         if yf_prev is not None:
             return float(yf_prev)
         return float(last_prior_close)
@@ -411,7 +433,7 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                     "interval": "1d",
                     "includePrePost": "false",
                 },
-                timeout=8,
+                timeout=6,
                 headers={"User-Agent": "Mozilla/5.0 DGACapital/1.0"},
             )
             if r.status_code != 200:
@@ -421,23 +443,20 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 continue
             meta = res0.get("meta") or {}
             bars = _daily_bars_from_chart(res0)
-            # Prefer spark when it has a denser pre-today series (cloud chart
-            # often skips a session — prod chart missed Fri 2026-07-24).
-            spark = _spark_bars(sym)
-            spark_n = len(spark) if spark else 0
+            # Gap-fill only when the expected prior weekday is missing.
+            # Always calling spark+nasdaq made a 40-ticker watchlist take ~90s
+            # and the GP UI looked empty (browser timeout).
+            spark: list = []
+            spark_n = 0
             today_iso = _us_now_et().date().isoformat()
-            if spark:
-                chart_prior = [d for d, _ in bars if d and d < today_iso]
-                spark_prior = [d for d, _ in spark if d and d < today_iso]
-                # Use spark as base if it knows more completed sessions
-                if len(spark_prior) > len(chart_prior):
-                    bars = _merge_bar_series(spark, bars)
-                else:
-                    bars = _merge_bar_series(bars, spark)
-            # If still missing expected prior weekday, pull Nasdaq historical
-            # (Yahoo cloud IPs skip sessions; Nasdaq has the Friday bar).
             expected = _expected_prior_session_iso()
             prior_dates = {d for d, _ in bars if d and d < today_iso}
+            if expected not in prior_dates:
+                spark = _spark_bars(sym)
+                spark_n = len(spark) if spark else 0
+                if spark:
+                    bars = _merge_bar_series(bars, spark)
+                    prior_dates = {d for d, _ in bars if d and d < today_iso}
             if expected not in prior_dates:
                 ndq = _nasdaq_daily_bars(sym)
                 if ndq:
@@ -501,21 +520,24 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
             if prev not in (None, 0):
                 pct = (float(px) - float(prev)) / float(prev) * 100.0
 
-            return {
+            row = {
                 "price": float(px),
                 "prev_close": float(prev) if prev is not None else None,
                 "pct_change": pct,
                 "source": "yahoo-chart",
                 "price_source": price_source,
                 "as_of": as_of,
-                # Temporary debug for SUP_20260727 (safe, non-secret)
-                "debug_bars_tail": bars[-5:] if bars else [],
-                "debug_today": _us_now_et().isoformat(),
-                "debug_rth": rth_open,
-                "debug_spark_n": len(spark) if spark else 0,
-                "debug_spark_tail": (spark[-5:] if spark else []),
-                "debug_expected_prior": _expected_prior_session_iso(),
             }
+            if os.environ.get("MARKET_DATA_DEBUG", "").strip() in ("1", "true", "yes"):
+                row.update({
+                    "debug_bars_tail": bars[-5:] if bars else [],
+                    "debug_today": _us_now_et().isoformat(),
+                    "debug_rth": rth_open,
+                    "debug_spark_n": spark_n,
+                    "debug_spark_tail": (spark[-5:] if spark else []),
+                    "debug_expected_prior": expected,
+                })
+            return row
         except Exception as e:
             print(f"[market_data] yahoo quote {sym} {host}: {e!s:.100}", flush=True)
     return None
@@ -613,16 +635,25 @@ def _yf_expirations(symbol: str) -> list:
 
 # ── Unified public API (Yahoo + optional Tiingo; no Tradier) ─────────────────
 def get_quotes(symbols: list) -> dict:
-    """{SYM: quote}. Yahoo chart first; Tiingo fills gaps when key is set."""
+    """{SYM: quote}. Yahoo chart first (parallel); Tiingo fills gaps when key is set."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     symbols = [s.strip().upper() for s in symbols if s and s.strip()]
     if not symbols:
         return {}
     out = {}
-    # Parallel-friendly sequential Yahoo (reliable, free)
-    for sym in symbols:
-        q = _yahoo_chart_quote(sym)
-        if q:
-            out[sym] = q
+    # Parallel Yahoo chart — sequential was ~2s/ticker and hung the watchlist UI.
+    workers = min(12, max(1, len(symbols)))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(_yahoo_chart_quote, sym): sym for sym in symbols}
+        for fut in as_completed(futs):
+            sym = futs[fut]
+            try:
+                q = fut.result()
+            except Exception as e:
+                print(f"[market_data] get_quotes {sym}: {e!s:.100}", flush=True)
+                q = None
+            if q:
+                out[sym] = q
     missing = [s for s in symbols if s not in out or out[s].get("price") is None]
     if missing:
         tq = _tiingo_quotes(missing)
