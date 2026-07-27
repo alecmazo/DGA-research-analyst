@@ -1116,29 +1116,64 @@
 
   // ── Options Wheel tab ──────────────────────────────────────────────────
   let _optPoll = null;
+  function _optSetStatus(msg, kind) {
+    const status = document.getElementById('opt-status');
+    if (!status) return;
+    status.textContent = msg;
+    status.classList.remove('is-busy', 'is-error', 'is-ok');
+    if (kind) status.classList.add(kind);
+  }
+  function _optSyncDeltaPresets(val) {
+    const v = Number(val);
+    document.querySelectorAll('#opt-delta-presets .seg-btn').forEach(btn => {
+      const d = parseFloat(btn.dataset.delta);
+      btn.classList.toggle('active', Math.abs(d - v) < 0.001);
+    });
+  }
   function loadOptionsTab() {
     const btn = document.getElementById('opt-scan-btn');
     if (btn && !btn._wired) { btn._wired = true; btn.addEventListener('click', _optRunScan); }
     const det = document.getElementById('opt-csp-details');
     if (det && !det._wired) {
       det._wired = true;
-      det.addEventListener('toggle', () => {
-        const c = document.getElementById('opt-csp-caret');
-        if (c) c.textContent = det.open ? '▾' : '▸';
+      // caret rotates via CSS on [open]
+    }
+    const deltaIn = document.getElementById('opt-delta');
+    if (deltaIn && !deltaIn._wired) {
+      deltaIn._wired = true;
+      deltaIn.addEventListener('input', () => _optSyncDeltaPresets(deltaIn.value));
+      deltaIn.addEventListener('change', () => {
+        let v = parseFloat(deltaIn.value);
+        if (!(v > 0)) v = 0.30;
+        v = Math.max(0.05, Math.min(v, 0.95));
+        deltaIn.value = String(v);
+        _optSyncDeltaPresets(v);
+      });
+      _optSyncDeltaPresets(deltaIn.value);
+    }
+    const presets = document.getElementById('opt-delta-presets');
+    if (presets && !presets._wired) {
+      presets._wired = true;
+      presets.addEventListener('click', (e) => {
+        const b = e.target.closest('.seg-btn');
+        if (!b) return;
+        const v = b.dataset.delta;
+        if (deltaIn) deltaIn.value = v;
+        _optSyncDeltaPresets(v);
       });
     }
   }
   async function _optRunScan() {
     const btn = document.getElementById('opt-scan-btn');
-    const status = document.getElementById('opt-status');
     let delta = parseFloat(document.getElementById('opt-delta').value);
     if (!(delta > 0)) delta = 0.30;
     delta = Math.max(0.05, Math.min(delta, 0.95));
     if (_optPoll) { clearInterval(_optPoll); _optPoll = null; }
-    btn.disabled = true;
-    status.textContent = 'Queuing scan…';
-    document.getElementById('opt-cc').innerHTML = '';
-    document.getElementById('opt-csp').innerHTML = '';
+    if (btn) btn.disabled = true;
+    _optSetStatus('Queuing scan…', 'is-busy');
+    const emptyScan = '<div class="term-empty"><div class="term-empty-title">Scanning…</div><div class="term-empty-sub">Pulling chains for holdings, watchlist, and saved reports.</div></div>';
+    document.getElementById('opt-cc').innerHTML = emptyScan;
+    document.getElementById('opt-csp').innerHTML = emptyScan;
     try {
       const r = await window.dgaFetch('/api/options/scan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1146,23 +1181,27 @@
       });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || ('HTTP ' + r.status));
-      status.textContent = `Scanning ${j.universe.length} names (holdings + watchlist + saved reports)${j.truncated ? ' — capped at ' + (j.cap || j.universe.length) : ''}…`;
+      _optSetStatus(
+        `Scanning ${j.universe.length} names (holdings + watchlist + saved reports)${j.truncated ? ' — capped at ' + (j.cap || j.universe.length) : ''}…`,
+        'is-busy'
+      );
       _optPoll = setInterval(async () => {
         try {
           const pr = await window.dgaFetch('/api/options/scan/' + j.job_id);
           const pj = await pr.json();
-          if (pj.label) status.textContent = pj.label;
+          if (pj.label) _optSetStatus(pj.label, 'is-busy');
           if (pj.status === 'done') {
-            clearInterval(_optPoll); _optPoll = null; btn.disabled = false;
+            clearInterval(_optPoll); _optPoll = null; if (btn) btn.disabled = false;
             _optRenderResult(pj.result);
           } else if (pj.status === 'error') {
-            clearInterval(_optPoll); _optPoll = null; btn.disabled = false;
-            status.textContent = '❌ ' + (pj.error || pj.label || 'scan failed');
+            clearInterval(_optPoll); _optPoll = null; if (btn) btn.disabled = false;
+            _optSetStatus(pj.error || pj.label || 'Scan failed', 'is-error');
           }
         } catch (e) { /* transient poll error — keep waiting */ }
       }, 1500);
     } catch (e) {
-      status.textContent = '❌ ' + e.message; btn.disabled = false;
+      _optSetStatus(e.message || 'Scan failed', 'is-error');
+      if (btn) btn.disabled = false;
     }
   }
   function _optExpDate(iso) {
@@ -1175,11 +1214,12 @@
     } catch (e) { return iso; }
   }
   function _optBucketCell(c, kind, sharesHeld) {
-    if (!c) return '<td style="color:#cbd5e1;text-align:center;">—</td>';
+    if (!c) return '<td class="opt-cell-empty">—</td>';
     const yld = kind === 'cc' ? c.static_return_annualized : c.yield_on_cash_annualized;
+    const yldPct = (yld != null && isFinite(yld)) ? (yld * 100).toFixed(0) + '%' : '—';
     const extra = kind === 'cc'
-      ? `cushion ${(c.downside_cushion * 100).toFixed(1)}%`
-      : `buy $${c.effective_buy_price}`;
+      ? `Cushion ${(c.downside_cushion * 100).toFixed(1)}%`
+      : `Eff. buy $${c.effective_buy_price}`;
     const dateLbl = _optExpDate(c.expiration) || (c.dte + 'd');
     // Covered-call premium $ you'd actually collect against the shares you hold:
     // contracts = floor(shares / 100), income = contracts × premium × 100.
@@ -1187,34 +1227,41 @@
     if (kind === 'cc' && sharesHeld && sharesHeld >= 100 && c.premium) {
       const contracts = Math.floor(sharesHeld / 100);
       const income = contracts * c.premium * 100;
-      incomeLine = `<div style="font-size:10.5px;color:#16a34a;font-weight:800;margin-top:3px;" title="${contracts} contracts (${(contracts*100).toLocaleString()} shares) × $${c.premium} premium">💰 ${fmtUSDFull(income, 0)} · ${contracts} contract${contracts !== 1 ? 's' : ''}</div>`;
+      incomeLine = `<div class="opt-cell-income" title="${contracts} contracts (${(contracts*100).toLocaleString()} shares) × $${c.premium} premium">${fmtUSDFull(income, 0)} · ${contracts} ct</div>`;
     }
-    return `<td style="font-variant-numeric:tabular-nums;">
-      <div style="font-weight:700;">$${c.strike} · ${dateLbl}<span style="font-weight:400;color:#94a3b8;font-size:10px;"> (${c.dte}d)</span></div>
-      <div style="font-size:11px;color:#64748b;">$${c.premium} · ${(yld * 100).toFixed(0)}% ann · Δ${c.assignment_prob}</div>
-      <div style="font-size:10px;color:#94a3b8;">${extra}</div>
+    return `<td class="num">
+      <div class="opt-cell-main">$${c.strike} · ${dateLbl} <span class="opt-dte">${c.dte}d</span></div>
+      <div class="opt-cell-sub">$${c.premium} · ${yldPct} ann · Δ${c.assignment_prob}</div>
+      <div class="opt-cell-meta">${extra}</div>
       ${incomeLine}
     </td>`;
   }
   function _optTable(rows, kind) {
     const key = kind === 'cc' ? 'covered_calls' : 'cash_secured_puts';
     const ok = (rows || []).filter(r => r.ok && r[key]);
-    if (!ok.length) return '<div style="padding:16px;color:#94a3b8;font-size:12px;">No candidates found (no liquid strikes within your Δ cap, or no positions in this universe).</div>';
-    let html = `<table class="builder-result-table" style="width:100%;"><thead><tr>
-      <th>Ticker</th><th>Spot</th><th>IV/HV</th><th>Weekly</th><th>Monthly</th><th>Quarterly</th></tr></thead><tbody>`;
+    if (!ok.length) {
+      return '<div class="term-empty"><div class="term-empty-title">No candidates</div><div class="term-empty-sub">No liquid strikes within your Δ cap for this universe, or no eligible positions.</div></div>';
+    }
+    let html = `<div class="term-table-wrap"><table class="term-table"><thead><tr>
+      <th>Ticker</th><th class="num">Spot</th><th class="num">IV/HV</th>
+      <th class="tenor">Weekly</th><th class="tenor">Monthly</th><th class="tenor">Quarterly</th>
+    </tr></thead><tbody>`;
     for (const r of ok) {
       const m = r[key];
-      const rich = (r.iv_hv_ratio != null && r.iv_hv_ratio >= 1) ? '#16a34a' : '#64748b';
+      const rich = (r.iv_hv_ratio != null && r.iv_hv_ratio >= 1);
+      const held = r.held
+        ? ' <span class="term-badge term-badge-held" title="You hold this — covered call is actionable">Held</span>'
+        : '';
       html += `<tr>
-        <td class="tk">${r.ticker}${r.held ? ' <span title="You hold this — covered call is actionable" style="font-size:9px;font-weight:700;letter-spacing:0.5px;color:#16a34a;border:1px solid #16a34a;border-radius:4px;padding:1px 4px;vertical-align:middle;">HELD</span>' : ''}</td>
-        <td style="font-variant-numeric:tabular-nums;">$${r.spot}</td>
-        <td style="color:${rich};font-weight:700;">${r.iv_hv_ratio != null ? r.iv_hv_ratio : '—'}</td>
+        <td><span class="tk">${r.ticker}</span>${held}</td>
+        <td class="num">$${r.spot}</td>
+        <td class="num ${rich ? 'term-iv-rich' : 'term-iv-fair'}">${r.iv_hv_ratio != null ? r.iv_hv_ratio : '—'}</td>
         ${_optBucketCell(m.weekly, kind, r.shares_held)}
         ${_optBucketCell(m.monthly, kind, r.shares_held)}
         ${_optBucketCell(m.quarterly, kind, r.shares_held)}
       </tr>`;
     }
-    return html + '</tbody></table>';
+    return html + '</tbody></table></div>';
   }
   // Sum the covered-call premium $ across every HELD name (max contracts =
   // shares//100) per tenor — the portfolio-wide income if you wrote them all.
@@ -1230,20 +1277,41 @@
     });
     return tot;
   }
+  function _optCountOk(rows, kind) {
+    const key = kind === 'cc' ? 'covered_calls' : 'cash_secured_puts';
+    return (rows || []).filter(r => r.ok && r[key]).length;
+  }
   function _optRenderResult(res) {
     if (!res) return;
     const tot = _optHeldPremiumTotals(res.covered_calls);
-    const totBanner = (tot.weekly || tot.monthly || tot.quarterly)
-      ? '<div style="padding:9px 13px;margin-bottom:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;color:#166534;">'
-        + '💰 <strong>Premium on your full holdings</strong> if you write every covered call below — '
-        + 'weekly <strong>' + fmtUSDFull(tot.weekly, 0) + '</strong> · monthly <strong>' + fmtUSDFull(tot.monthly, 0) + '</strong> · quarterly <strong>' + fmtUSDFull(tot.quarterly, 0) + '</strong>'
-        + '<span style="color:#15803d;opacity:0.7;"> (max contracts = shares ÷ 100, across all accounts)</span>'
-        + '</div>'
-      : '';
-    document.getElementById('opt-cc').innerHTML = totBanner + _optTable(res.covered_calls, 'cc');
+    const strip = document.getElementById('opt-kpi-strip');
+    if (strip) strip.hidden = false;
+    const setK = (id, v, cls) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = v;
+      el.classList.remove('pos', 'neg');
+      if (cls) el.classList.add(cls);
+    };
+    setK('opt-kpi-w', (tot.weekly || tot.monthly || tot.quarterly) ? fmtUSDFull(tot.weekly, 0) : '—', tot.weekly > 0 ? 'pos' : '');
+    setK('opt-kpi-m', (tot.weekly || tot.monthly || tot.quarterly) ? fmtUSDFull(tot.monthly, 0) : '—', tot.monthly > 0 ? 'pos' : '');
+    setK('opt-kpi-q', (tot.weekly || tot.monthly || tot.quarterly) ? fmtUSDFull(tot.quarterly, 0) : '—', tot.quarterly > 0 ? 'pos' : '');
+    setK('opt-kpi-n', String(res.universe_size != null ? res.universe_size : '—'));
+    const meta = document.getElementById('opt-kpi-meta');
+    if (meta) meta.textContent = `Δ ≤ ${res.delta_max} · ranked weekly yield`;
+    const ccN = _optCountOk(res.covered_calls, 'cc');
+    const cspN = _optCountOk(res.cash_secured_puts, 'csp');
+    const ccBadge = document.getElementById('opt-cc-count');
+    const cspBadge = document.getElementById('opt-csp-count');
+    if (ccBadge) ccBadge.textContent = ccN + ' name' + (ccN === 1 ? '' : 's');
+    if (cspBadge) cspBadge.textContent = cspN + ' name' + (cspN === 1 ? '' : 's');
+
+    document.getElementById('opt-cc').innerHTML = _optTable(res.covered_calls, 'cc');
     document.getElementById('opt-csp').innerHTML = _optTable(res.cash_secured_puts, 'csp');
-    document.getElementById('opt-status').textContent =
-      `Δ ≤ ${res.delta_max} · ${res.universe_size} names scanned · ${fmtDate(res.scanned_at)} · ranked by weekly annualized yield`;
+    _optSetStatus(
+      `Δ ≤ ${res.delta_max} · ${res.universe_size} names scanned · ${fmtDate(res.scanned_at)} · ranked by weekly annualized yield`,
+      'is-ok'
+    );
   }
 
   // ── Quick Actions (panel removed — kept for any remaining data-action buttons) ──

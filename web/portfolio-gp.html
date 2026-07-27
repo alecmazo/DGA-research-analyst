@@ -210,7 +210,7 @@
     <!-- 🩺 Data Health — freshness of SnapTrade / quotes / schedulers -->
     <section class="panel" data-wid="data-health" style="margin-bottom:12px;">
       <header class="panel-head">
-        <span class="panel-title">🩺 Data Health</span>
+        <span class="panel-title">Data Health</span>
         <span class="panel-badge" id="dh-badge">…</span>
       </header>
       <div id="dh-body" style="padding:8px 14px;font-size:11.5px;color:var(--text-secondary);">Checking…</div>
@@ -220,7 +220,7 @@
     <section class="panel" data-wid="daily-brief" style="overflow:visible;">
       <details open>
         <summary class="panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;">
-          <span class="panel-title">🌐 Daily Pulse</span>
+          <span class="panel-title">Daily Pulse</span>
           <span class="panel-badge tab-meta" id="brief-meta">—</span>
           <button id="run-brief-btn" class="tab-btn" style="margin-left:auto;font-size:9px;"
             onclick="event.stopPropagation();triggerBrief();">📰 Run</button>
@@ -237,7 +237,7 @@
     <!-- ── 🤖 AI Analyst (agentic — Claude calls tools over our data) ─── -->
     <section class="panel" data-wid="ai-analyst" data-collapsible="1" style="margin-bottom:12px;">
       <header class="panel-head">
-        <span class="panel-title">🤖 DGA Capital Analyst</span>
+        <span class="panel-title">DGA Capital Analyst</span>
         <span class="panel-badge" id="agentic-model-badge" style="background:#f3e8ff;color:#6b21a8;">AGENTIC</span>
         <span style="margin-left:auto;font-size:10.5px;color:var(--text-tertiary);font-weight:500;">pulls live quotes · saved reports · news</span>
       </header>
@@ -1844,37 +1844,106 @@ End with the sleeve block at this account's real market value so I can push it t
 </div><!-- #tab-reports -->
 
 
-<!-- ══ MEMOS TAB ═══════════════════════════════════════════════ -->
+<!-- ══ OPTIONS WHEEL ═══════════════════════════════════════════ -->
 <div id="tab-options" class="tab-panel">
-  <div class="wide-shell">
-    <div class="tab-toolbar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <h2>🎯 Options Wheel <span style="font-size:11px;font-weight:500;color:var(--mid);">— covered calls on holdings · cash-secured puts across watchlist + saved reports</span></h2>
-      <span style="flex:1;"></span>
-      <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;">
-        Max assignment Δ
-        <input id="opt-delta" type="number" min="0.05" max="0.95" step="0.05" value="0.30"
-               title="Cap on assignment probability (option delta). Lower = safer / more likely to keep the stock; higher = richer premium but likelier to be assigned."
-               style="width:72px;height:32px;border:1px solid var(--panel-edge);border-radius:6px;padding:0 8px;font-size:12px;background:#fff;color:#1e293b;">
-      </label>
-      <button class="tab-btn" id="opt-scan-btn" type="button">⚡ Scan portfolio</button>
+  <div class="wide-shell opt-shell">
+
+    <header class="page-hero opt-hero">
+      <div class="page-hero-text">
+        <div class="page-eyebrow">Income · Wheel strategy</div>
+        <h2 class="page-title">Options Wheel</h2>
+        <p class="page-sub">Covered calls on holdings · cash-secured puts across watchlist and saved reports. Ranked by weekly annualized yield within your Δ cap.</p>
+      </div>
+      <div class="page-hero-actions">
+        <div class="opt-delta-control" title="Cap on assignment probability (option delta). Lower = safer; higher = richer premium.">
+          <span class="meta-label">Max assignment Δ</span>
+          <div class="opt-delta-row">
+            <div class="seg-control" id="opt-delta-presets" role="group" aria-label="Delta presets">
+              <button type="button" class="seg-btn" data-delta="0.15">0.15</button>
+              <button type="button" class="seg-btn active" data-delta="0.30">0.30</button>
+              <button type="button" class="seg-btn" data-delta="0.45">0.45</button>
+            </div>
+            <input id="opt-delta" class="opt-delta-input" type="number" min="0.05" max="0.95" step="0.05" value="0.30"
+                   aria-label="Max assignment delta">
+          </div>
+        </div>
+        <button class="btn-primary opt-scan-btn" id="opt-scan-btn" type="button">
+          <span class="opt-scan-ico" aria-hidden="true"></span>
+          Scan portfolio
+        </button>
+      </div>
+    </header>
+
+    <div class="kpi-strip" id="opt-kpi-strip" hidden>
+      <div class="kpi-card">
+        <div class="kpi-label">Held CC · Weekly</div>
+        <div class="kpi-value" id="opt-kpi-w">—</div>
+        <div class="kpi-hint">Premium if written</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Held CC · Monthly</div>
+        <div class="kpi-value" id="opt-kpi-m">—</div>
+        <div class="kpi-hint">Premium if written</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Held CC · Quarterly</div>
+        <div class="kpi-value" id="opt-kpi-q">—</div>
+        <div class="kpi-hint">Premium if written</div>
+      </div>
+      <div class="kpi-card kpi-card-meta">
+        <div class="kpi-label">Universe</div>
+        <div class="kpi-value kpi-value-sm" id="opt-kpi-n">—</div>
+        <div class="kpi-hint" id="opt-kpi-meta">Run a scan to populate</div>
+      </div>
     </div>
-    <div id="opt-status" style="margin-top:10px;font-size:12px;color:var(--dim);">Set your max assignment Δ and run a scan. Holdings are scanned for covered calls; your watchlist for cash-secured puts.</div>
-    <section class="panel" style="margin-top:14px;">
-      <h3 style="margin:0 0 8px;font-size:13px;color:var(--text-primary);">📈 Covered calls <span style="font-weight:500;color:var(--mid);">— holdings first, then your universe</span></h3>
-      <div id="opt-cc" style="overflow:auto;max-height:60vh;"></div>
+
+    <div class="status-bar" id="opt-status" role="status">
+      Set max assignment Δ, then scan. Holdings → covered calls · watchlist + reports → cash-secured puts.
+    </div>
+
+    <section class="panel term-panel" id="opt-cc-panel">
+      <header class="panel-head term-panel-head">
+        <div class="term-panel-title-wrap">
+          <span class="panel-title">Covered calls</span>
+          <span class="panel-badge" id="opt-cc-count">—</span>
+        </div>
+        <span class="panel-action">Holdings · sell calls against shares you own</span>
+      </header>
+      <div class="term-panel-body" id="opt-cc">
+        <div class="term-empty">
+          <div class="term-empty-title">No scan yet</div>
+          <div class="term-empty-sub">Run Scan portfolio to surface the best weekly / monthly / quarterly calls on names you hold.</div>
+        </div>
+      </div>
     </section>
-    <details class="panel" id="opt-csp-details" style="margin-top:14px;padding:0;">
-      <summary style="cursor:pointer;list-style:none;padding:14px 16px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
-        <span id="opt-csp-caret" style="font-size:11px;color:var(--mid);">▸</span>
-        📉 Cash-secured puts <span style="font-weight:500;color:var(--mid);">— across watchlist + saved reports (click to expand)</span>
-      </summary>
-      <div id="opt-csp" style="overflow:auto;max-height:60vh;padding:0 16px 14px;"></div>
-    </details>
-    <div style="margin-top:10px;font-size:11px;color:var(--dim);line-height:1.5;">
-      Each tenor (weekly / monthly / quarterly) shows the best strike to <b>sell</b>: highest annualized premium yield with assignment probability ≤ your Δ cap.
-      Rows are <b>ranked by the weekly annualized yield</b> (names with only a monthly/quarterly setup trail below). Covered calls are limited to names you <b>HOLD</b> (you must own the shares); cash-secured puts span your whole universe — watchlist + saved reports.
-      <b>IV/HV</b> &gt; 1 (green) = implied vol above the stock's own realized vol → premium is relatively rich. <b>Cushion</b> = how far the stock can fall before the call trade is underwater. Δ ≈ chance of assignment. Informational only — not investment advice.
-    </div>
+
+    <section class="panel term-panel" id="opt-csp-panel">
+      <details id="opt-csp-details" open>
+        <summary class="panel-head term-panel-head term-summary">
+          <div class="term-panel-title-wrap">
+            <span class="ac-chevron term-caret" id="opt-csp-caret">›</span>
+            <span class="panel-title">Cash-secured puts</span>
+            <span class="panel-badge" id="opt-csp-count">—</span>
+          </div>
+          <span class="panel-action">Watchlist + saved reports · sell puts for entry</span>
+        </summary>
+        <div class="term-panel-body" id="opt-csp">
+          <div class="term-empty">
+            <div class="term-empty-title">No scan yet</div>
+            <div class="term-empty-sub">CSPs appear here after a scan — ranked by weekly annualized yield on cash secured.</div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <footer class="term-footnote">
+      <span class="meta-label">Notes</span>
+      Each tenor shows the best strike to sell: highest annualized premium with assignment probability ≤ your Δ cap.
+      Rows ranked by weekly annualized yield. <b>IV/HV &gt; 1</b> = rich implied vol vs realized.
+      <b>Cushion</b> = room before a call trade is underwater. Δ ≈ assignment chance.
+      Informational only — not investment advice.
+    </footer>
+
   </div>
 </div><!-- #tab-options -->
 

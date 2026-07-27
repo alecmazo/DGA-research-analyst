@@ -125,6 +125,7 @@
     positions: { title: 'Positions',          sub: 'Live view of every fund and managed-account book. Aggregated and per-LP cuts.' },
     fund:      { title: 'Funds & Accounts',   sub: 'Per-fund overview: NAV, performance, capital flows, and LP roster.' },
     reports:   { title: 'Quarterly Reports',  sub: 'Compose, preview, and send investor letters per fund and per quarter.' },
+    options:   { title: 'Options Wheel',      sub: 'Covered calls on holdings and cash-secured puts across your universe — ranked by weekly annualized yield.' },
     memos:     { title: 'DGA Capital Memos',  sub: 'PDF memos generated from your podcast scripts — assign to an account, attach a GP note, email it out.' },
     settings:  { title: 'Settings',           sub: 'Account, automation, distribution, and compliance configuration.' },
   };
