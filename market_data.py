@@ -201,42 +201,134 @@ def _spark_bars(symbol: str) -> list[tuple[str, float]]:
     return out
 
 
+
+def _nasdaq_daily_bars(symbol: str) -> list[tuple[str, float]]:
+    """Nasdaq.com historical closes — reliable when Yahoo cloud chart skips a session.
+
+    Free public JSON (no key). Used to fill missing prior-session bars for day-%.
+    """
+    import requests
+    from datetime import timedelta
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return []
+    try:
+        end = _us_now_et().date()
+        start = end - timedelta(days=40)
+        r = requests.get(
+            f"https://api.nasdaq.com/api/quote/{sym}/historical",
+            params={
+                "assetclass": "stocks",
+                "fromdate": start.isoformat(),
+                "todate": end.isoformat(),
+                "limit": 40,
+            },
+            timeout=10,
+            headers={
+                "User-Agent": "Mozilla/5.0 DGACapital/1.0",
+                "Accept": "application/json,text/plain,*/*",
+                "Origin": "https://www.nasdaq.com",
+                "Referer": f"https://www.nasdaq.com/market-activity/stocks/{sym.lower()}/historical",
+            },
+        )
+        if r.status_code != 200:
+            return []
+        rows = (((r.json() or {}).get("data") or {}).get("tradesTable") or {}).get("rows") or []
+        out: list[tuple[str, float]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            ds = str(row.get("date") or "").strip()
+            cs = str(row.get("close") or "").replace("$", "").replace(",", "").strip()
+            if not ds or not cs:
+                continue
+            try:
+                # MM/DD/YYYY → ISO
+                mm, dd, yy = ds.split("/")
+                iso = f"{int(yy):04d}-{int(mm):02d}-{int(dd):02d}"
+                px = float(cs)
+                out.append((iso, px))
+            except Exception:
+                continue
+        out.sort(key=lambda x: x[0])
+        return out
+    except Exception as e:
+        print(f"[market_data] nasdaq bars {sym}: {e!s:.100}", flush=True)
+        return []
+
+
+def _expected_prior_session_iso() -> str:
+    """Most recent weekday before today (ET). Holidays may still miss; bars fill truth."""
+    from datetime import timedelta
+    d = _us_now_et().date() - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d.isoformat()
+
+
+def _merge_bar_series(*series: list) -> list[tuple[str, float]]:
+    by_d: dict[str, float] = {}
+    for ser in series:
+        if not ser:
+            continue
+        for d, c in ser:
+            if d and c is not None:
+                by_d[str(d)] = float(c)
+    return sorted(by_d.items(), key=lambda x: x[0])
+
+
 def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool,
                          symbol: str = "") -> float | None:
     """Prior US session close from daily bars — never trust Yahoo meta alone.
 
     Rule: most recent daily bar with date *strictly before* today (ET).
 
-    Cloud Yahoo chart responses sometimes skip a session (production saw
-    2026-07-23 then 2026-07-27 — Friday missing). If the latest pre-today bar
-    is older than 3 calendar days, fall back to yfinance history so day-%
-    matches Yahoo's website Friday close.
+    Cloud Yahoo chart/spark often skip a session (prod: 2026-07-23 then
+    2026-07-27 — Friday missing). If the latest pre-today bar is older than
+    the expected prior weekday, fill from yfinance then Nasdaq historical so
+    day-% matches the real last session close (e.g. Fri 313.03 not Thu 319.69).
     """
-    from datetime import date, timedelta
-    if not bars:
-        return _yf_prior_close(symbol) if symbol else None
+    from datetime import date
     today_iso = _us_now_et().date().isoformat()
-    dated = [(d, c) for d, c in bars if d]
+    expected = _expected_prior_session_iso()
+    dated = [(d, c) for d, c in (bars or []) if d]
     prior_bars = [(d, c) for d, c in dated if d < today_iso]
+
+    def _from_prior(prior):
+        if not prior:
+            return None
+        return float(prior[-1][1])
+
     if prior_bars:
         last_prior_date, last_prior_close = prior_bars[-1]
-        try:
-            gap = (date.fromisoformat(today_iso) - date.fromisoformat(last_prior_date)).days
-        except Exception:
-            gap = 0
-        # Normal weekend gap is 1–3 days (Fri→Mon). Larger ⇒ missing session in chart.
-        if gap <= 3 or not symbol:
+        if last_prior_date >= expected or not symbol:
             return float(last_prior_close)
+        # Missing expected session — try yfinance history merge
         yf_prev = _yf_prior_close(symbol)
+        # Prefer yfinance only if it looks fresher than last chart prior
+        # (single float — use when present and chart is stale)
+        # Then Nasdaq full series (has the missing Friday on cloud IPs).
+        ndq = _nasdaq_daily_bars(symbol)
+        if ndq:
+            ndq_prior = [(d, c) for d, c in ndq if d and d < today_iso]
+            if ndq_prior and ndq_prior[-1][0] > last_prior_date:
+                return float(ndq_prior[-1][1])
         if yf_prev is not None:
             return float(yf_prev)
         return float(last_prior_close)
+
     if len(dated) >= 2 and dated[-1][0] >= today_iso:
         return float(dated[-2][1])
-    closes = [c for _, c in bars]
+    closes = [c for _, c in (bars or [])]
     if len(closes) >= 2:
         return float(closes[-2])
-    return _yf_prior_close(symbol) if symbol else None
+    if symbol:
+        ndq = _nasdaq_daily_bars(symbol)
+        p = _from_prior([(d, c) for d, c in ndq if d and d < today_iso])
+        if p is not None:
+            return p
+        return _yf_prior_close(symbol)
+    return None
 
 
 def _us_now_et():
@@ -339,17 +431,17 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 spark_prior = [d for d, _ in spark if d and d < today_iso]
                 # Use spark as base if it knows more completed sessions
                 if len(spark_prior) > len(chart_prior):
-                    by_d = {d: c for d, c in spark if d}
-                    for d, c in bars:
-                        if d:
-                            by_d[d] = c
-                    bars = sorted(by_d.items(), key=lambda x: x[0])
+                    bars = _merge_bar_series(spark, bars)
                 else:
-                    by_d = {d: c for d, c in bars if d}
-                    for d, c in spark:
-                        if d and d not in by_d:
-                            by_d[d] = c
-                    bars = sorted(by_d.items(), key=lambda x: x[0])
+                    bars = _merge_bar_series(bars, spark)
+            # If still missing expected prior weekday, pull Nasdaq historical
+            # (Yahoo cloud IPs skip sessions; Nasdaq has the Friday bar).
+            expected = _expected_prior_session_iso()
+            prior_dates = {d for d, _ in bars if d and d < today_iso}
+            if expected not in prior_dates:
+                ndq = _nasdaq_daily_bars(sym)
+                if ndq:
+                    bars = _merge_bar_series(bars, ndq)
             closes = [c for _, c in bars]
             rth_open = _us_rth_open(meta)
             last_sess = _last_completed_us_session_date()
@@ -422,6 +514,7 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 "debug_rth": rth_open,
                 "debug_spark_n": len(spark) if spark else 0,
                 "debug_spark_tail": (spark[-5:] if spark else []),
+                "debug_expected_prior": _expected_prior_session_iso(),
             }
         except Exception as e:
             print(f"[market_data] yahoo quote {sym} {host}: {e!s:.100}", flush=True)
