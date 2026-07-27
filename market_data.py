@@ -144,6 +144,63 @@ def _yf_prior_close(symbol: str) -> float | None:
     return None
 
 
+def _spark_bars(symbol: str) -> list[tuple[str, float]]:
+    """Yahoo spark endpoint — often more complete than chart on cloud IPs."""
+    import requests
+    from datetime import datetime, timezone
+    try:
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+    except Exception:
+        et = timezone.utc
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return []
+    out: list[tuple[str, float]] = []
+    for host in ("query1", "query2"):
+        try:
+            r = requests.get(
+                f"https://{host}.finance.yahoo.com/v8/finance/spark",
+                params={"symbols": sym, "range": "1mo", "interval": "1d"},
+                timeout=8,
+                headers={"User-Agent": "Mozilla/5.0 DGACapital/1.0"},
+            )
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            # Formats: {spark:{result:[{response:[chartResult]}]}} or {SYM:{timestamp,close}}
+            spark_res = ((data.get("spark") or {}).get("result")) or []
+            ts, cl = [], []
+            if spark_res:
+                resp0 = (spark_res[0].get("response") or [None])[0] or {}
+                if isinstance(resp0, dict) and resp0.get("timestamp"):
+                    ts = resp0.get("timestamp") or []
+                    cl = ((resp0.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+                else:
+                    # flat map under symbol
+                    flat = data.get(sym) or spark_res[0]
+                    ts = (flat or {}).get("timestamp") or []
+                    cl = (flat or {}).get("close") or []
+            else:
+                flat = data.get(sym) or {}
+                ts = flat.get("timestamp") or []
+                cl = flat.get("close") or []
+            for t, c in zip(ts, cl):
+                px = _f(c)
+                if px is None or t is None:
+                    continue
+                try:
+                    d = datetime.fromtimestamp(int(t), tz=timezone.utc).astimezone(et).date()
+                    out.append((d.isoformat(), float(px)))
+                except Exception:
+                    continue
+            if out:
+                return out
+        except Exception as e:
+            print(f"[market_data] spark {sym} {host}: {e!s:.100}", flush=True)
+    return out
+
+
 def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool,
                          symbol: str = "") -> float | None:
     """Prior US session close from daily bars — never trust Yahoo meta alone.
@@ -272,6 +329,27 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                 continue
             meta = res0.get("meta") or {}
             bars = _daily_bars_from_chart(res0)
+            # If chart skipped a session (gap > 3d before today), merge spark bars
+            # which are more complete on some Railway/cloud IPs.
+            today_iso = _us_now_et().date().isoformat()
+            dated = [(d, c) for d, c in bars if d and d < today_iso]
+            gap_days = 0
+            if dated:
+                try:
+                    from datetime import date as _date
+                    gap_days = (_date.fromisoformat(today_iso)
+                                - _date.fromisoformat(dated[-1][0])).days
+                except Exception:
+                    gap_days = 0
+            if gap_days > 3 or len(bars) < 3:
+                spark = _spark_bars(sym)
+                if spark:
+                    # Merge by date, prefer chart values when both exist
+                    by_d = {d: c for d, c in spark if d}
+                    for d, c in bars:
+                        if d:
+                            by_d[d] = c
+                    bars = sorted(by_d.items(), key=lambda x: x[0])
             closes = [c for _, c in bars]
             rth_open = _us_rth_open(meta)
             last_sess = _last_completed_us_session_date()
