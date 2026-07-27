@@ -81,7 +81,11 @@ def _daily_closes_from_chart(res0: dict) -> list[float]:
 
 
 def _daily_bars_from_chart(res0: dict) -> list[tuple[str, float]]:
-    """[(YYYY-MM-DD ET session date, close), ...] oldest → newest, nulls dropped."""
+    """[(YYYY-MM-DD ET session date, close), ...] oldest → newest, nulls dropped.
+
+    If Yahoo omits timestamps, still return bars with synthetic dates so
+    prior-close logic can use the close series (date string may be empty).
+    """
     from datetime import datetime, timezone
     try:
         from zoneinfo import ZoneInfo
@@ -91,16 +95,51 @@ def _daily_bars_from_chart(res0: dict) -> list[tuple[str, float]]:
     ts = res0.get("timestamp") or []
     closes = ((res0.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
     out: list[tuple[str, float]] = []
-    for t, c in zip(ts, closes):
-        px = _f(c)
-        if px is None or t is None:
-            continue
-        try:
-            d = datetime.fromtimestamp(int(t), tz=timezone.utc).astimezone(et).date()
-            out.append((d.isoformat(), float(px)))
-        except Exception:
-            continue
+    if ts:
+        for t, c in zip(ts, closes):
+            px = _f(c)
+            if px is None or t is None:
+                continue
+            try:
+                d = datetime.fromtimestamp(int(t), tz=timezone.utc).astimezone(et).date()
+                out.append((d.isoformat(), float(px)))
+            except Exception:
+                continue
+    if not out:
+        # Timestamp-less fallback — preserve non-null close order
+        for c in closes:
+            px = _f(c)
+            if px is not None:
+                out.append(("", float(px)))
     return out
+
+
+def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool) -> float | None:
+    """Prior US session close from daily bars — never trust Yahoo meta alone.
+
+    Rules (SUP_20260727):
+      • Last bar is *today* (date match, or live≈last while RTH open) → prior = previous bar.
+      • Else last bar is the prior session → prior = last bar when quoting a live price;
+        when using last bar as the display price (closed), prior = previous bar.
+    """
+    if not bars:
+        return None
+    last_date, last_close = bars[-1]
+    prev_close = bars[-2][1] if len(bars) >= 2 else None
+    today_iso = _us_now_et().date().isoformat()
+    last_is_today = bool(last_date and last_date >= today_iso)
+    if not last_is_today and rth_open and live_px is not None and last_close is not None:
+        # No/missing timestamps or delayed date: treat last bar as today if it
+        # matches the live print (partial session bar).
+        if abs(float(live_px) - float(last_close)) <= max(0.05, 0.003 * abs(float(last_close))):
+            last_is_today = True
+    if last_is_today:
+        return float(prev_close) if prev_close is not None else None
+    # Last bar is a completed prior session
+    if rth_open and live_px is not None:
+        return float(last_close)
+    # Displaying last bar itself as the price → day % is that session's move
+    return float(prev_close) if prev_close is not None else None
 
 
 def _us_now_et():
@@ -227,44 +266,16 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
             if px is None:
                 continue
 
-            # ── Prior session close (never chartPreviousClose) ───────────
-            # SUP_20260727: Yahoo meta previousClose is often STALE/WRONG
-            # (e.g. Thursday while last completed session is Friday). That
-            # made watchlist day-% multi-session (TSLA −3.8% vs true −1.7%).
-            # Always derive prior close from dated daily bars when available;
-            # only fall back to meta if bars are missing.
-            today_iso = _us_now_et().date().isoformat()
-            session_prev = None
-            if closes:
-                # Last bar is *today's* partial/final session → prior = previous bar
-                if bar_last_date and bar_last_date >= today_iso:
-                    session_prev = bar_prev
-                elif bar_last is not None:
-                    # Last bar is still prior session (e.g. Fri while Mon open)
-                    # → that bar *is* the prior close for live day %
-                    if rth_open:
-                        session_prev = bar_last
-                    else:
-                        # Market closed: price is last bar; day % vs bar before it
-                        session_prev = bar_prev
-
-            meta_prev = _f(meta.get("previousClose")
-                           or meta.get("regularMarketPreviousClose"))
-            prev = session_prev
+            # ── Prior session close — BARS ONLY (meta previousClose is toxic) ─
+            # SUP_20260727: Yahoo meta previousClose was Thursday (319.69) while
+            # Friday close was 313.03 → day-% used a multi-session base.
+            # Never use meta previousClose / regularMarketChangePercent.
+            prev = _session_prior_close(bars, live_px if rth_open else px, rth_open)
             if prev is None:
-                prev = meta_prev
-            elif meta_prev is not None and session_prev is not None:
-                # If meta is within 0.5% of bar session prev, either is fine;
-                # if they diverge, bars win (meta is the known failure mode).
-                try:
-                    if abs(float(meta_prev) - float(session_prev)) > max(
-                            0.05, 0.005 * abs(float(session_prev))):
-                        prev = session_prev
-                except (TypeError, ValueError):
-                    prev = session_prev
+                # Absolute last resort only — still better than nothing
+                prev = _f(meta.get("previousClose")
+                          or meta.get("regularMarketPreviousClose"))
 
-            # Always recompute day % from price vs session prev. Do NOT trust
-            # regularMarketChangePercent when previousClose meta is unreliable.
             pct = None
             if prev not in (None, 0):
                 pct = (float(px) - float(prev)) / float(prev) * 100.0

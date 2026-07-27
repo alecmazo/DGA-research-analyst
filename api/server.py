@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui98-20260727-daypct-bars-win"
+WEB_BUILD_VERSION = "ui99-20260727-daypct-bars-only"
 
 
 @app.get("/api/build")
@@ -7138,6 +7138,8 @@ def get_quote(ticker: str):
                 "prev_close": mq.get("prev_close"),
                 "pct_change": mq.get("pct_change"),
                 "source": mq.get("source") or "yahoo-chart",
+                "price_source": mq.get("price_source"),
+                "as_of": mq.get("as_of"),
             }
     except Exception as e:
         print(f"[quote] {original}: market_data failed: {e!s:.100}", flush=True)
