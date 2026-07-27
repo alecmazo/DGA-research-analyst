@@ -247,11 +247,21 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
         return None
     for host in ("query1", "query2"):
         try:
-            # Prefer 1mo so a missing single session (seen on some cloud IPs:
-            # 10d chart skipped Fri 2026-07-24) still includes the true prior close.
+            # Use explicit period1/period2 (not range=10d). Some cloud IPs get a
+            # sparse range response that skips a session (prod skipped Fri
+            # 2026-07-24 → prior close became Thu 319.69). period1/2 returns
+            # the full daily series including the missing Friday.
+            import time as _time
+            p2 = int(_time.time()) + 3600
+            p1 = p2 - 25 * 86400
             r = requests.get(
                 f"https://{host}.finance.yahoo.com/v8/finance/chart/{sym}",
-                params={"range": "1mo", "interval": "1d", "includePrePost": "false"},
+                params={
+                    "period1": p1,
+                    "period2": p2,
+                    "interval": "1d",
+                    "includePrePost": "false",
+                },
                 timeout=8,
                 headers={"User-Agent": "Mozilla/5.0 DGACapital/1.0"},
             )
