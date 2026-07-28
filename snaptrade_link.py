@@ -23,27 +23,63 @@ CLIENT_NAME = "DGA Capital"
 DEFAULT_REDIRECT = "https://portfolio.dgacapital.com/gp"
 
 
+def _env_cred(name: str) -> str:
+    """Read a SnapTrade env var; strip whitespace and accidental shell quotes."""
+    v = (os.environ.get(name) or "").strip()
+    if len(v) >= 2 and ((v[0] == v[-1] == '"') or (v[0] == v[-1] == "'")):
+        v = v[1:-1].strip()
+    return v
+
+
 def available() -> bool:
     """True if the SDK is importable and credentials are configured."""
     try:
         import snaptrade_client  # noqa: F401
     except Exception:
         return False
-    return bool(os.environ.get("SNAPTRADE_CLIENT_ID", "").strip()
-                and os.environ.get("SNAPTRADE_CONSUMER_KEY", "").strip())
+    return bool(_env_cred("SNAPTRADE_CLIENT_ID") and _env_cred("SNAPTRADE_CONSUMER_KEY"))
 
 
 def _client():
+    """Build a SnapTrade SDK client with commercial (partner) credentials.
+
+    SnapTrade Python SDK ≥12 prefers::
+
+        SnapTrade(auth=SnapTradeAuth.commercial_api_key(client_id=…, consumer_key=…))
+
+    Older SDKs take ``client_id`` / ``consumer_key`` kwargs. Using only the old
+    kwargs on a v12 install can send *no* partner signature → API 401
+    ``Authentication credentials were not provided.``
+    """
     from snaptrade_client import SnapTrade
-    cid = os.environ.get("SNAPTRADE_CLIENT_ID", "").strip()
-    sec = os.environ.get("SNAPTRADE_CONSUMER_KEY", "").strip()
+    cid = _env_cred("SNAPTRADE_CLIENT_ID")
+    sec = _env_cred("SNAPTRADE_CONSUMER_KEY")
     if not cid or not sec:
         raise RuntimeError("SNAPTRADE_CLIENT_ID / SNAPTRADE_CONSUMER_KEY are not set.")
-    return SnapTrade(consumer_key=sec, client_id=cid)
+
+    # Prefer explicit commercial auth (SDK 12+ / canary).
+    try:
+        from snaptrade_client import SnapTradeAuth  # type: ignore
+        factory = getattr(SnapTradeAuth, "commercial_api_key", None) or getattr(
+            SnapTradeAuth, "commercialApiKey", None)
+        if callable(factory):
+            try:
+                return SnapTrade(auth=factory(client_id=cid, consumer_key=sec))
+            except TypeError:
+                # Some builds use camelCase kwargs
+                return SnapTrade(auth=factory(clientId=cid, consumerKey=sec))
+    except Exception:
+        pass
+
+    # Legacy constructors (SDK ≤11)
+    try:
+        return SnapTrade(client_id=cid, consumer_key=sec)
+    except TypeError:
+        return SnapTrade(consumer_key=sec, client_id=cid)
 
 
 def check_status() -> dict:
-    """API reachability check."""
+    """API reachability check (partner credentials only — no userSecret)."""
     return _to_dict(_client().api_status.check().body)
 
 

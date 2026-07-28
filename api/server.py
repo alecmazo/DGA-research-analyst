@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui113-20260728-wl-noscroll"
+WEB_BUILD_VERSION = "ui114-20260728-snaptrade-auth"
 
 
 @app.get("/api/build")
@@ -30004,12 +30004,25 @@ def _snaptrade_ensure_user():
         cur.execute("SELECT user_id, user_secret_enc FROM snaptrade_user ORDER BY created_at LIMIT 1")
         row = cur.fetchone()
     if row:
-        return row[0], _sec.decrypt(row[1])
+        uid = row[0]
+        try:
+            secret = _sec.decrypt(row[1])
+        except Exception as e:
+            raise RuntimeError(
+                f"Could not decrypt stored SnapTrade userSecret (DATA_ENCRYPTION_KEY "
+                f"mismatch?): {e}") from e
+        secret = (secret or "").strip()
+        if not secret:
+            raise RuntimeError(
+                "Stored SnapTrade userSecret is empty after decrypt — click "
+                "+ Connect Fidelity to re-register the SnapTrade user.")
+        return uid, secret
     uid = "dga-gp-" + _uuid.uuid4().hex[:12]
     reg = _st.register_user(uid)
     secret = reg.get("userSecret") if isinstance(reg, dict) else None
     if not secret:
         raise RuntimeError("SnapTrade registration returned no userSecret")
+    secret = str(secret).strip()
     enc = _sec.encrypt(secret)
     with _fund_conn() as conn, conn.cursor() as cur:
         cur.execute("INSERT INTO snaptrade_user (user_id, user_secret_enc, updated_at) VALUES (%s,%s,now())", (uid, enc))
@@ -30023,7 +30036,21 @@ def _snaptrade_user_invalid(err: str) -> bool:
     so a user registered under the old (free) client is invalid under the new
     production client."""
     low = (err or "").lower()
-    return "1083" in low or "invalid userid" in low or "invalid usersecret" in low
+    return ("1083" in low or "invalid userid" in low or "invalid usersecret" in low
+            or "user not found" in low)
+
+
+def _snaptrade_partner_auth_missing(err: str) -> bool:
+    """True when SnapTrade got no partner signature (clientId/consumerKey).
+
+    Classic DRF 401: 'Authentication credentials were not provided.' — usually
+    means the SDK did not attach commercial API credentials (wrong constructor
+    for the installed SDK version), not a bad userSecret.
+    """
+    low = (err or "").lower()
+    return ("credentials were not provided" in low
+            or "authentication credentials" in low
+            and "not provided" in low)
 
 
 def _snaptrade_reset_stale_user() -> None:
@@ -32235,6 +32262,12 @@ def _snaptrade_sync_job_runner(job_id: str) -> None:
                       "client id. Click “+ Connect Fidelity” to re-link — it resets "
                       "automatically and your account assignments are restored on the "
                       "next sync.")
+        elif _snaptrade_partner_auth_missing(detail):
+            detail = ("SnapTrade rejected the request: Authentication credentials were "
+                      "not provided. Usually SNAPTRADE_CLIENT_ID / SNAPTRADE_CONSUMER_KEY "
+                      "are missing, quoted wrong in Railway, or the SDK is not attaching "
+                      "partner auth. Check Railway env vars (no extra quotes), redeploy, "
+                      "then ↻ Sync again. Settings → SnapTrade → 🐞 Diag shows lengths.")
         _SNAPTRADE_SYNC_JOB.update({"status": "error", "error": detail,
                                     "finished_at": time.time()})
         _automation_record_run("snaptrade_sync", False, f"manual · {detail[:300]}")
@@ -32578,15 +32611,44 @@ def snaptrade_debug(request: Request):
     test-key gating) vs a parsing issue. Truncated; no secrets returned."""
     _plaid_require_gp(request)
     import snaptrade_link as _st
+    diag = {
+        "partner_env_set": bool(
+            (os.environ.get("SNAPTRADE_CLIENT_ID") or "").strip()
+            and (os.environ.get("SNAPTRADE_CONSUMER_KEY") or "").strip()),
+        "client_id_len": len((os.environ.get("SNAPTRADE_CLIENT_ID") or "").strip()),
+        "consumer_key_len": len((os.environ.get("SNAPTRADE_CONSUMER_KEY") or "").strip()),
+        "partner_api_status": None,
+        "partner_api_error": None,
+        "user_id_present": False,
+        "user_secret_len": 0,
+        "user_error": None,
+    }
+    try:
+        diag["partner_api_status"] = _st.check_status()
+    except Exception as e:
+        diag["partner_api_error"] = _snaptrade_error_detail(e)
     try:
         uid, secret = _snaptrade_ensure_user()
+        diag["user_id_present"] = bool(uid)
+        diag["user_secret_len"] = len(secret or "")
         accts = _st.list_accounts(uid, secret)
     except Exception as e:
-        raise HTTPException(502, f"SnapTrade accounts failed: {_snaptrade_error_detail(e)}")
+        detail = _snaptrade_error_detail(e)
+        diag["user_error"] = detail
+        hint = ""
+        if _snaptrade_partner_auth_missing(detail) or diag.get("partner_api_error"):
+            hint = (" Partner API keys may be missing/invalid on Railway "
+                    "(SNAPTRADE_CLIENT_ID / SNAPTRADE_CONSUMER_KEY), or the "
+                    "SnapTrade SDK auth constructor needs updating.")
+        elif _snaptrade_user_invalid(detail):
+            hint = " Click + Connect Fidelity to re-link under the current client id."
+        raise HTTPException(
+            502,
+            f"SnapTrade accounts failed: {detail}.{hint} diag={ {k: diag[k] for k in diag if k != 'partner_api_status'} }")
     if isinstance(accts, dict):
         accts = accts.get("accounts") or accts.get("data") or []
     if not accts:
-        return {"ok": True, "accounts": 0, "note": "SnapTrade returned no accounts."}
+        return {"ok": True, "accounts": 0, "note": "SnapTrade returned no accounts.", "diag": diag}
     # Probe EVERY account so a single failing one (e.g. ANAT-IRA) is visible.
     per_account = []
     for acct in accts:
