@@ -3157,12 +3157,44 @@
     return `<div style="border:1px solid var(--border-subtle);border-radius:8px;padding:12px 14px;` +
       `background:var(--bg-elevated);">${head}${colhead}${rows}</div>`;
   }
-  function _finRankCards(rc) {
+  function _finMetricSpark(series, title) {
+    // series: [{as_of, value}, ...] oldest→newest
+    if (!series || series.length < 2) return '';
+    const vals = series.map(function (p) { return p.value; }).filter(function (v) { return v != null && !isNaN(v); });
+    if (vals.length < 2) return '';
+    const lo = Math.min.apply(null, vals);
+    const hi = Math.max.apply(null, vals);
+    const span = (hi - lo) || 1;
+    const bars = series.map(function (p) {
+      if (p.value == null || isNaN(p.value)) return '<span style="height:2px;background:var(--gray-200);"></span>';
+      const h = Math.max(3, Math.round(((p.value - lo) / span) * 20));
+      return '<span style="height:' + h + 'px" title="' + _gfEsc((p.as_of || '') + ': ' + p.value) + '"></span>';
+    }).join('');
+    return '<div class="rank-hist-spark" title="' + _gfEsc(title || 'History') + '">' + bars + '</div>'
+      + '<div style="font-size:9.5px;color:var(--text-tertiary);margin-top:2px;">vs itself over time · ' + series.length + ' snapshots</div>';
+  }
+  function _finRankCards(rc, metricHistory) {
     if (!rc) return '';
     const meta = { peer_scope: rc.peer_scope, peer_count: rc.peer_count };
     const fs = _finRankCard(rc.financial_strength, meta);
     const pr = _finRankCard(rc.profitability, meta);
-    const va = _finRankCard(rc.value, meta);
+    let va = _finRankCard(rc.value, meta);
+    // Append DGA Value Rank evolution sparkline (self history of composite /10)
+    const mh = metricHistory || {};
+    const vrHist = mh.dga_value_rank || [];
+    const scoreHist = mh.dga_score || [];
+    const useVr = vrHist.length >= 2;
+    const spark = _finMetricSpark(useVr ? vrHist : scoreHist,
+      useVr ? 'DGA Value Rank /10 over time' : 'DGA Score over time');
+    if (va && spark && va.indexOf('rank-hist-spark') < 0) {
+      const histBlock = '<div class="rank-hist-wrap" style="margin-top:10px;padding-top:8px;'
+        + 'border-top:1px solid var(--border-subtle);">'
+        + '<div style="font-size:9px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;'
+        + 'color:var(--text-tertiary);margin-bottom:4px;">'
+        + (useVr ? 'Value Rank history' : 'DGA Score history')
+        + '</div>' + spark + '</div>';
+      va = va.replace(/<\/div>\s*$/, histBlock + '</div>');
+    }
     if (!fs && !pr && !va) return '';
     return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;">` +
       `<div>${fs}</div>` +
@@ -3392,7 +3424,7 @@
     // ── Ranking cards (Financial Strength / Profitability / DGA Value) ──
     const ranks = document.getElementById('fin-dash-ranks');
     if (ranks) {
-      const html = _finRankCards(d.rank_cards);
+      const html = _finRankCards(d.rank_cards, d.metric_history);
       ranks.innerHTML = html;
       ranks.style.display = html ? 'block' : 'none';
     }
@@ -3403,7 +3435,7 @@
       const n = d.notes;
       notesEl.innerHTML =
         `<strong style="color:var(--text-secondary);">Methodology</strong> · ` +
-        [n.pe, n.roic, n.wacc, n.share_delta, n.peers, n.tokens]
+        [n.pe, n.roic, n.wacc, n.share_delta, n.peers, n.tokens, n.history]
           .filter(Boolean).map(_gfEsc).join(' · ');
       notesEl.style.display = 'block';
     }
@@ -5612,6 +5644,40 @@
             // "Run" time = when analysis finished (generated_at / claude_generated_at)
             '<span class="rep-date" title="Last run: ' + _esc(runMs ? new Date(runMs).toLocaleString() : (attemptAt || '')) + '">'
               + _esc(runDateStr) + '</span>' +
+            // Version history / delta vs prior Analyze (thesis tracking)
+            (function () {
+              const vc = Number(rep.version_count || 1);
+              const dlt = rep.delta_from_prior || null;
+              let html = '';
+              if (vc > 1) {
+                html += '<span class="rep-pill rep-pill-ver" title="'
+                  + vc + ' saved Analyze snapshots — priors retained, open report for timeline">'
+                  + 'v' + vc + '</span>';
+              }
+              if (dlt && (dlt.rating_changed || dlt.pt_changed
+                  || (dlt.upside_pct && dlt.upside_pct.chg_pp != null)
+                  || (vc > 1 && dlt.days_since_prior != null))) {
+                const bits = [];
+                if (dlt.rating_changed) {
+                  bits.push((dlt.rating && dlt.rating.from ? dlt.rating.from : '—')
+                    + '→' + (dlt.rating && dlt.rating.to ? dlt.rating.to : '—'));
+                }
+                if (dlt.pt_changed && dlt.price_target) {
+                  const ch = dlt.price_target.chg_pct;
+                  bits.push('PT ' + (ch != null ? ((ch >= 0 ? '+' : '') + Number(ch).toFixed(0) + '%') : 'Δ'));
+                }
+                if (!bits.length && dlt.upside_pct && dlt.upside_pct.chg_pp != null) {
+                  const up = Number(dlt.upside_pct.chg_pp);
+                  bits.push('upside ' + (up >= 0 ? '+' : '') + up.toFixed(0) + 'pp');
+                }
+                if (dlt.days_since_prior != null) bits.push(dlt.days_since_prior + 'd');
+                if (bits.length) {
+                  html += '<span class="rep-pill rep-pill-delta" title="Change since prior Analyze">'
+                    + _esc(bits.join(' · ') || 'Δ') + '</span>';
+                }
+              }
+              return html;
+            })() +
           '</td>' +
           '<td class="rep-num">' +
             '<div class="rep-num-stack">' +
@@ -5749,6 +5815,7 @@
               + '• Use this when the saved report has empty financial tables\n'
               + '• Forces a fresh SEC EDGAR download + XBRL extract\n'
               + '• Then re-runs Grok analysis (~2-3 min)\n'
+              + '• Prior report is archived (not lost) — open the report for thesis timeline\n'
               + '• After it finishes, re-Compare with Claude will use the new data')) return;
           btn.disabled = true; btn.textContent = '⏳';
           try {
@@ -16945,6 +17012,8 @@
             <div class="rm-hero-metric"><div class="rm-hero-lbl">Upside</div><div class="rm-hero-val" id="rm-upside">—</div></div>
           </div>
           <div class="rm-fresh-row" id="rm-fresh-row"></div>
+          <div class="rm-delta-banner" id="rm-delta-banner" style="display:none;"></div>
+          <div class="rm-history-strip" id="rm-history-strip" style="display:none;"></div>
           <div class="rm-body-wrap">
             <div id="rm-toc-slot"></div>
             <div id="rm-body" class="md-body dga-dialog-body rm-md-scroll" style="padding:14px 20px 28px;">
@@ -16986,6 +17055,128 @@
       ]);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
+
+      // Thesis history: prior Analyze versions + delta vs last run
+      (async function _paintReportHistory() {
+        const deltaEl = overlay.querySelector('#rm-delta-banner');
+        const histEl = overlay.querySelector('#rm-history-strip');
+        const ratingEl = overlay.querySelector('#rm-rating');
+        const targetEl = overlay.querySelector('#rm-target');
+        const upsideEl = overlay.querySelector('#rm-upside');
+        const _paintHeroFromSnap = function (snap, isPrior) {
+          if (!snap) return;
+          if (ratingEl && snap.rating) ratingEl.textContent = snap.rating;
+          if (targetEl && snap.price_target != null) {
+            const t = Number(snap.price_target);
+            targetEl.textContent = '$' + (t >= 100 ? t.toFixed(0) : t.toFixed(2));
+          }
+          if (upsideEl && snap.upside_pct != null) {
+            const u = Number(snap.upside_pct);
+            upsideEl.textContent = (u >= 0 ? '+' : '') + u.toFixed(1) + '%';
+            upsideEl.className = 'rm-hero-val ' + (typeof cssClass === 'function' ? cssClass(u) : '');
+          }
+          if (dateEl && snap.generated_at) {
+            dateEl.textContent = (isPrior ? '· prior · ' : '· ') + fmtDate(snap.generated_at);
+          }
+        };
+        try {
+          const hr = await window.dgaFetch(
+            '/api/report/' + encodeURIComponent(ticker) + '/history?provider=' + encodeURIComponent(provider));
+          if (!hr.ok) return;
+          const h = await hr.json();
+          const cur = h.current || {};
+          const dlt = d.delta_from_prior || cur.delta_from_prior || null;
+          const vc = d.version_count || cur.version_count || 1;
+          const showDelta = deltaEl && dlt && (
+            dlt.rating_changed || dlt.pt_changed
+            || (dlt.upside_pct && dlt.upside_pct.chg_pp != null)
+            || (vc > 1 && dlt.days_since_prior != null)
+            || dlt.has_change
+          );
+          if (showDelta) {
+            const bits = [];
+            if (dlt.rating_changed) {
+              bits.push('<strong>Rating</strong> '
+                + _esc((dlt.rating && dlt.rating.from) || '—') + ' → '
+                + _esc((dlt.rating && dlt.rating.to) || '—'));
+            }
+            if (dlt.price_target && (dlt.pt_changed || dlt.price_target.from != null)) {
+              const ch = dlt.price_target.chg_pct;
+              bits.push('<strong>Target</strong> '
+                + (dlt.price_target.from != null ? ('$' + Number(dlt.price_target.from).toFixed(0)) : '—')
+                + ' → '
+                + (dlt.price_target.to != null ? ('$' + Number(dlt.price_target.to).toFixed(0)) : '—')
+                + (ch != null ? (' <span class="' + cssClass(ch) + '">(' + (ch >= 0 ? '+' : '') + Number(ch).toFixed(1) + '%)</span>') : ''));
+            }
+            if (dlt.upside_pct && dlt.upside_pct.chg_pp != null) {
+              bits.push('<strong>Upside</strong> '
+                + (dlt.upside_pct.chg_pp >= 0 ? '+' : '') + Number(dlt.upside_pct.chg_pp).toFixed(1) + ' pp');
+            }
+            if (dlt.days_since_prior != null) {
+              bits.push(dlt.days_since_prior + 'd since prior');
+            }
+            if (!bits.length) bits.push('Thesis re-run archived (same headline numbers)');
+            deltaEl.style.display = 'block';
+            deltaEl.innerHTML = '<div class="rm-delta-title">Δ since prior Analyze (v' + vc + ')</div>'
+              + '<div class="rm-delta-bits">' + bits.join(' · ') + '</div>'
+              + '<div class="rm-delta-note">Each Analyze is a timestamped snapshot. Priors are kept — pick a version below to re-read the old thesis.</div>';
+          }
+          const vers = h.versions || [];
+          if (histEl && (vers.length || cur)) {
+            const chips = [];
+            if (cur) {
+              chips.push('<button type="button" class="rm-hist-chip active" data-ver="current">'
+                + 'Current'
+                + (cur.generated_at ? (' · ' + _repFmtRelDate(cur.generated_at)) : '')
+                + (cur.rating ? (' · ' + _esc(cur.rating)) : '')
+                + (cur.price_target != null ? (' · $' + Number(cur.price_target).toFixed(0)) : '')
+                + '</button>');
+            }
+            vers.slice(0, 12).forEach(function (v) {
+              chips.push('<button type="button" class="rm-hist-chip" data-ver="' + v.id + '">'
+                + (v.generated_at ? _repFmtRelDate(v.generated_at) : ('#' + v.id))
+                + (v.rating ? (' · ' + _esc(v.rating)) : '')
+                + (v.price_target != null ? (' · $' + Number(v.price_target).toFixed(0)) : '')
+                + '</button>');
+            });
+            if (chips.length > 1) {
+              histEl.style.display = 'block';
+              histEl.innerHTML = '<div class="rm-hist-label">Thesis timeline · ' + chips.length
+                + ' snapshots</div><div class="rm-hist-chips">' + chips.join('') + '</div>';
+              histEl.querySelectorAll('[data-ver]').forEach(function (btn) {
+                btn.addEventListener('click', async function () {
+                  const vid = btn.getAttribute('data-ver');
+                  histEl.querySelectorAll('.rm-hist-chip').forEach(function (c) { c.classList.remove('active'); });
+                  btn.classList.add('active');
+                  body.innerHTML = '<div class="tab-loading"><span class="spin">↻</span> Loading version…</div>';
+                  try {
+                    if (vid === 'current') {
+                      renderMd(body, d.report_md || '');
+                      _paintHeroFromSnap({
+                        rating: d.rating || cur.rating,
+                        price_target: d.price_target != null ? d.price_target : cur.price_target,
+                        upside_pct: d.upside_pct != null ? d.upside_pct : cur.upside_pct,
+                        generated_at: d.generated_at || cur.generated_at,
+                      }, false);
+                      if (deltaEl && showDelta) deltaEl.style.display = 'block';
+                      return;
+                    }
+                    const vr = await window.dgaFetch(
+                      '/api/report/' + encodeURIComponent(ticker) + '/version/' + encodeURIComponent(vid));
+                    if (!vr.ok) throw new Error('version ' + vr.status);
+                    const vd = await vr.json();
+                    renderMd(body, vd.report_md || '_Empty version._');
+                    _paintHeroFromSnap(vd, true);
+                    if (deltaEl) deltaEl.style.display = 'none';
+                  } catch (err) {
+                    body.innerHTML = '<div class="tab-error">Could not load version: ' + _esc(err.message || err) + '</div>';
+                  }
+                });
+              });
+            }
+          }
+        } catch (_) { /* history optional */ }
+      })();
 
       let quote = null;
       if (qRes && qRes.ok) {

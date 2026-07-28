@@ -24,7 +24,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | Nav + continuity files | **`ui378-20260728-nav-continuity`** | Nav reorg + CONTINUITY.md |
 | **Settings handoff button** | **`ui379-20260728-continuity-button`** | Settings → Continuity handoff (copy/download) |
 | **Builder sector boards** | **`ui380-20260728-builder-boards`** | Multi-list sector boards + breadth history |
-| **Next deploy after this handoff** | **`ui381-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
+| **Report history / thesis deltas** | **`ui381-20260728-report-history`** | Re-Analyze archives prior; Saved Reports vN + Δ; timeline; Value Rank self-history |
+| **Next deploy after this handoff** | **`ui382-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -130,4 +131,11 @@ When switching machine or agent (Claude ↔ Grok):
 
 ---
 
-*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui380 · Next: ui381*
+### Report history (ui381)
+
+- Re-Analyze **archives** the prior markdown into `analyst_report_versions` before overwrite.
+- Current row keeps `delta_from_prior` (per-provider map) + `version_count`.
+- UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
+- APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
+
+*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui380 → ship ui381 · Next: ui382*

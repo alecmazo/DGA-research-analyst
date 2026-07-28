@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui380-20260728-builder-boards"
+WEB_BUILD_VERSION = "ui381-20260728-report-history"
 
 
 @app.get("/api/build")
@@ -7055,16 +7055,22 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                            rating, price_target, upside_pct,
                            claude_rating, claude_price_target, claude_upside_pct,
                            kimi_rating, kimi_price_target, kimi_upside_pct,
-                           deepseek_rating, deepseek_price_target, deepseek_upside_pct
+                           deepseek_rating, deepseek_price_target, deepseek_upside_pct,
+                           COALESCE(version_count, 1) AS version_count,
+                           delta_from_prior
                     FROM analyst_reports
                     WHERE ticker = %s
                 """, (ticker,))
                 row = cur.fetchone()
             if row:
+                _vc = int(row.get("version_count") or 1)
+                _delta_raw = row.get("delta_from_prior")
                 if provider == "claude" and (row.get("report_md_claude") or "").strip():
                     return {
                         "ticker": ticker,
                         "provider": "claude",
+                        "version_count": _vc,
+                        "delta_from_prior": _parse_delta_blob(_delta_raw, "claude"),
                         "report_md": row["report_md_claude"],
                         "generated_at": _iso(row.get("claude_generated_at")),
                         "has_docx": False,
@@ -7083,6 +7089,8 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                     return {
                         "ticker": ticker,
                         "provider": "kimi",
+                        "version_count": _vc,
+                        "delta_from_prior": _parse_delta_blob(_delta_raw, "kimi"),
                         "report_md": row["report_md_kimi"],
                         "generated_at": _iso(row.get("kimi_generated_at")),
                         "has_docx": False,
@@ -7101,6 +7109,8 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                     return {
                         "ticker": ticker,
                         "provider": "deepseek",
+                        "version_count": _vc,
+                        "delta_from_prior": _parse_delta_blob(_delta_raw, "deepseek"),
                         "report_md": row["report_md_deepseek"],
                         "generated_at": _iso(row.get("deepseek_generated_at")),
                         "has_docx": False,
@@ -7119,6 +7129,8 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                     return {
                         "ticker": ticker,
                         "provider": "grok",
+                        "version_count": _vc,
+                        "delta_from_prior": _parse_delta_blob(_delta_raw, "grok"),
                         "report_md": row["report_md"],
                         "generated_at": _iso(row.get("generated_at")),
                         "has_docx": row["has_docx"],
@@ -7141,6 +7153,8 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                         return {
                             "ticker": ticker,
                             "provider": alt,
+                            "version_count": _vc,
+                            "delta_from_prior": _parse_delta_blob(_delta_raw, alt),
                             "report_md": row[md_key],
                             "generated_at": _iso(row.get(ts_key)),
                             "has_docx": bool(row.get("has_docx")) if alt == "grok" else False,
@@ -7185,6 +7199,162 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
         "gamma_url": gamma_url,
         "gamma_generated_at": gamma_generated_at,
     }
+
+
+
+@app.get("/api/report/{ticker}/history")
+def report_history(ticker: str, provider: str = "grok", request: Request = None):
+    """List prior report versions (newest first) + current snapshot meta.
+
+    Does not include full markdown (use /version/{id} for body). Enables
+    thesis-over-time tracking without losing prior Analyze runs.
+    """
+    if request is not None:
+        try:
+            _claims_or_401(request)
+        except Exception:
+            pass
+    ticker = ticker.strip().upper()
+    provider = (provider or "grok").lower().strip()
+    if provider == "volume":
+        provider = "kimi"
+    if provider not in ("grok", "claude", "kimi", "deepseek"):
+        provider = "grok"
+    try:
+        _ensure_report_history_tables()
+    except Exception:
+        pass
+    versions = []
+    current = None
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, provider, generated_at, report_date, rating,
+                           price_target, upside_pct, delta_to_next,
+                           (COALESCE(length(report_md),0) > 200) AS has_md
+                      FROM analyst_report_versions
+                     WHERE ticker = %s AND provider = %s
+                     ORDER BY generated_at DESC NULLS LAST, id DESC
+                     LIMIT 50
+                """, (ticker, provider))
+                for r in (cur.fetchall() or []):
+                    dtn = r[7]
+                    if isinstance(dtn, str):
+                        try:
+                            import json as _json
+                            dtn = _json.loads(dtn)
+                        except Exception:
+                            dtn = None
+                    versions.append({
+                        "id": r[0],
+                        "provider": r[1],
+                        "generated_at": r[2].isoformat() if r[2] and hasattr(r[2], "isoformat") else (str(r[2]) if r[2] else None),
+                        "report_date": r[3],
+                        "rating": r[4],
+                        "price_target": float(r[5]) if r[5] is not None else None,
+                        "upside_pct": float(r[6]) if r[6] is not None else None,
+                        "delta_to_next": dtn,
+                        "has_md": bool(r[8]),
+                    })
+                # current row meta
+                col_map = {
+                    "grok": ("report_md", "generated_at", "rating", "price_target", "upside_pct", "report_date"),
+                    "claude": ("report_md_claude", "claude_generated_at", "claude_rating", "claude_price_target", "claude_upside_pct", "claude_report_date"),
+                    "kimi": ("report_md_kimi", "kimi_generated_at", "kimi_rating", "kimi_price_target", "kimi_upside_pct", "kimi_report_date"),
+                    "deepseek": ("report_md_deepseek", "deepseek_generated_at", "deepseek_rating", "deepseek_price_target", "deepseek_upside_pct", "deepseek_report_date"),
+                }
+                cols = col_map[provider]
+                cur.execute(f"""
+                    SELECT {cols[0]}, {cols[1]}, {cols[2]}, {cols[3]}, {cols[4]}, {cols[5]},
+                           COALESCE(version_count,1), delta_from_prior
+                      FROM analyst_reports WHERE ticker=%s
+                """, (ticker,))
+                row = cur.fetchone()
+                if row and row[0] and len(str(row[0]).strip()) > 200:
+                    dlt = _parse_delta_blob(row[7], provider)
+                    # Prefer provider-scoped version count (1 + archived for this engine)
+                    prov_vc = 1 + len(versions)
+                    shared_vc = int(row[6] or 1)
+                    current = {
+                        "id": "current",
+                        "provider": provider,
+                        "generated_at": row[1].isoformat() if row[1] and hasattr(row[1], "isoformat") else (str(row[1]) if row[1] else None),
+                        "rating": row[2],
+                        "price_target": float(row[3]) if row[3] is not None else None,
+                        "upside_pct": float(row[4]) if row[4] is not None else None,
+                        "report_date": row[5],
+                        "version_count": max(prov_vc, shared_vc if provider == "grok" else prov_vc),
+                        "delta_from_prior": dlt,
+                        "is_current": True,
+                    }
+        except Exception as e:
+            print(f"[report-history] list {ticker}: {e!s:.160}", flush=True)
+    # Metric history for PT / score
+    metrics = _metric_history(ticker, [
+        "report_price_target", "report_upside_pct",
+        "dga_score", "dga_value_rank", "dga_value", "price",
+    ])
+    return {
+        "ok": True,
+        "ticker": ticker,
+        "provider": provider,
+        "current": current,
+        "versions": versions,
+        "version_count": (current or {}).get("version_count") or (len(versions) + (1 if current else 0)),
+        "metric_history": metrics,
+    }
+
+
+@app.get("/api/report/{ticker}/version/{version_id}")
+def report_version_get(ticker: str, version_id: str, request: Request = None):
+    """Full markdown for a historical report version."""
+    if request is not None:
+        try:
+            _claims_or_401(request)
+        except Exception:
+            pass
+    ticker = ticker.strip().upper()
+    if version_id == "current":
+        return get_report(ticker, provider="grok", request=request)
+    try:
+        vid = int(version_id)
+    except Exception:
+        raise HTTPException(400, "invalid version id")
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        raise HTTPException(503, "DB unavailable")
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT id, provider, generated_at, report_md, report_date,
+                   rating, price_target, upside_pct, delta_to_next
+              FROM analyst_report_versions
+             WHERE id=%s AND ticker=%s
+        """, (vid, ticker))
+        r = cur.fetchone()
+    if not r:
+        raise HTTPException(404, "Version not found")
+    dtn = r[8]
+    if isinstance(dtn, str):
+        try:
+            import json as _json
+            dtn = _json.loads(dtn)
+        except Exception:
+            pass
+    return {
+        "ok": True,
+        "id": r[0],
+        "ticker": ticker,
+        "provider": r[1],
+        "generated_at": r[2].isoformat() if r[2] and hasattr(r[2], "isoformat") else str(r[2] or ""),
+        "report_md": r[3],
+        "report_date": r[4],
+        "rating": r[5],
+        "price_target": float(r[6]) if r[6] is not None else None,
+        "upside_pct": float(r[7]) if r[7] is not None else None,
+        "delta_to_next": dtn,
+        "is_current": False,
+    }
+
 
 
 @app.get("/api/download/{ticker}/docx")
@@ -10348,6 +10518,345 @@ def _clean_report_date(raw: str) -> str:
     return d
 
 
+
+def _ensure_report_history_tables() -> None:
+    """Version history for analyst reports + daily metric snapshots (Value Rank, etc.)."""
+    if not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS analyst_report_versions (
+                    id              BIGSERIAL PRIMARY KEY,
+                    ticker          VARCHAR(20) NOT NULL,
+                    provider        VARCHAR(20) NOT NULL DEFAULT 'grok',
+                    generated_at    TIMESTAMP,
+                    report_md       TEXT,
+                    report_date     TEXT,
+                    rating          VARCHAR(30),
+                    price_target    NUMERIC,
+                    upside_pct      NUMERIC,
+                    delta_to_next   JSONB,
+                    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS arv_ticker_prov_gen_idx
+                    ON analyst_report_versions (ticker, provider, generated_at DESC)
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ticker_metric_snapshots (
+                    ticker      VARCHAR(20) NOT NULL,
+                    as_of       DATE NOT NULL DEFAULT CURRENT_DATE,
+                    metric_key  TEXT NOT NULL,
+                    value       DOUBLE PRECISION,
+                    meta_json   JSONB,
+                    PRIMARY KEY (ticker, as_of, metric_key)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS tms_ticker_metric_idx
+                    ON ticker_metric_snapshots (ticker, metric_key, as_of DESC)
+            """)
+            # Current-row delta vs immediate prior (shown on open report)
+            cur.execute("""
+                ALTER TABLE analyst_reports
+                  ADD COLUMN IF NOT EXISTS delta_from_prior JSONB
+            """)
+            cur.execute("""
+                ALTER TABLE analyst_reports
+                  ADD COLUMN IF NOT EXISTS version_count INT NOT NULL DEFAULT 1
+            """)
+            conn.commit()
+    except Exception as e:
+        print(f"[report-history] ensure tables: {e!s:.160}", flush=True)
+
+
+def _report_delta_dict(prior: dict, new: dict) -> dict:
+    """Compact numeric/thesis delta between two report snapshots."""
+    def _f(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+    out = {
+        "prior_generated_at": (
+            prior.get("generated_at").isoformat()
+            if hasattr(prior.get("generated_at"), "isoformat")
+            else prior.get("generated_at")
+        ),
+        "prior_report_date": prior.get("report_date"),
+        "rating": {"from": prior.get("rating"), "to": new.get("rating")},
+        "price_target": {"from": _f(prior.get("price_target")), "to": _f(new.get("price_target"))},
+        "upside_pct": {"from": _f(prior.get("upside_pct")), "to": _f(new.get("upside_pct"))},
+    }
+    p_pt, n_pt = out["price_target"]["from"], out["price_target"]["to"]
+    if p_pt not in (None, 0) and n_pt is not None:
+        out["price_target"]["chg_pct"] = round((n_pt - p_pt) / abs(p_pt) * 100.0, 2)
+    p_up, n_up = out["upside_pct"]["from"], out["upside_pct"]["to"]
+    if p_up is not None and n_up is not None:
+        out["upside_pct"]["chg_pp"] = round(n_up - p_up, 2)
+    # days between prior gen and now
+    try:
+        from datetime import datetime as _dt
+        pg = prior.get("generated_at")
+        if hasattr(pg, "timestamp"):
+            out["days_since_prior"] = max(0, int((_dt.utcnow() - pg.replace(tzinfo=None)).total_seconds() // 86400))
+        elif isinstance(pg, str) and pg:
+            try:
+                pgt = _dt.fromisoformat(pg.replace("Z", "+00:00")).replace(tzinfo=None)
+                out["days_since_prior"] = max(0, int((_dt.utcnow() - pgt).total_seconds() // 86400))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Changed flags for UI chips
+    out["rating_changed"] = (prior.get("rating") or "") != (new.get("rating") or "") and bool(prior.get("rating") or new.get("rating"))
+    out["pt_changed"] = p_pt is not None and n_pt is not None and abs(n_pt - p_pt) > 0.005 * max(abs(p_pt), 1)
+    out["has_change"] = bool(
+        out["rating_changed"] or out["pt_changed"]
+        or (out.get("upside_pct") or {}).get("chg_pp") not in (None, 0)
+        or out.get("days_since_prior") is not None
+    )
+    return out
+
+
+def _parse_delta_blob(raw, provider: str | None = None):
+    """Normalize delta_from_prior JSONB (legacy flat or per-provider map).
+
+    Storage shape (ui381+):
+      {"grok": {...}, "claude": {...}, ...}
+    Legacy (single flat delta with rating_changed / price_target keys) is
+    treated as grok-only when no provider map is present.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            import json as _json
+            raw = _json.loads(raw)
+        except Exception:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    # Flat legacy delta
+    if "rating_changed" in raw or "price_target" in raw or "rating" in raw:
+        if provider and provider != "grok":
+            # Legacy row only captured one provider's delta — unknown for others
+            return None if provider != "grok" else raw
+        return raw
+    # Per-provider map
+    if provider:
+        d = raw.get(provider) or raw.get((provider or "").lower())
+        return d if isinstance(d, dict) else None
+    # No provider: prefer grok, else first non-empty engine entry
+    for k in ("grok", "claude", "kimi", "deepseek"):
+        if isinstance(raw.get(k), dict):
+            return raw[k]
+    for v in raw.values():
+        if isinstance(v, dict) and ("rating" in v or "price_target" in v or "rating_changed" in v):
+            return v
+    return None
+
+
+def _merge_delta_blob(existing, provider: str, delta: dict) -> dict:
+    """Merge a provider's latest delta into the per-provider map."""
+    base: dict = {}
+    if isinstance(existing, str):
+        try:
+            import json as _json
+            existing = _json.loads(existing)
+        except Exception:
+            existing = None
+    if isinstance(existing, dict):
+        if "rating_changed" in existing or "price_target" in existing or "rating" in existing:
+            base = {"grok": existing}
+        else:
+            base = dict(existing)
+    provider = (provider or "grok").lower()
+    base[provider] = delta
+    return base
+
+
+def _stamp_report_delta(cur, ticker: str, provider: str, delta: dict) -> None:
+    """Write per-provider delta + bump shared version_count (same txn as upsert)."""
+    import json as _json
+    cur.execute(
+        "SELECT delta_from_prior FROM analyst_reports WHERE ticker=%s",
+        (ticker,))
+    row = cur.fetchone()
+    existing = None
+    if row is not None:
+        existing = row[0] if not isinstance(row, dict) else row.get("delta_from_prior")
+    merged = _merge_delta_blob(existing, provider, delta)
+    cur.execute(
+        "UPDATE analyst_reports SET delta_from_prior=%s::jsonb, "
+        "version_count = COALESCE(version_count, 1) + 1 WHERE ticker=%s",
+        (_json.dumps(merged), ticker))
+
+
+def _archive_prior_report_version(cur, ticker: str, provider: str, new_summary: dict, new_md: str) -> dict | None:
+    """If a prior report exists for provider, snapshot it and return delta (new vs prior).
+
+    Call inside an open transaction *before* overwriting current columns.
+    Never raises to callers of upsert (caller wraps).
+    """
+    provider = (provider or "grok").lower()
+    col_md = {
+        "grok": "report_md",
+        "claude": "report_md_claude",
+        "kimi": "report_md_kimi",
+        "deepseek": "report_md_deepseek",
+    }.get(provider, "report_md")
+    col_gen = {
+        "grok": "generated_at",
+        "claude": "claude_generated_at",
+        "kimi": "kimi_generated_at",
+        "deepseek": "deepseek_generated_at",
+    }.get(provider, "generated_at")
+    col_rating = {
+        "grok": "rating",
+        "claude": "claude_rating",
+        "kimi": "kimi_rating",
+        "deepseek": "deepseek_rating",
+    }.get(provider, "rating")
+    col_pt = {
+        "grok": "price_target",
+        "claude": "claude_price_target",
+        "kimi": "kimi_price_target",
+        "deepseek": "deepseek_price_target",
+    }.get(provider, "price_target")
+    col_up = {
+        "grok": "upside_pct",
+        "claude": "claude_upside_pct",
+        "kimi": "kimi_upside_pct",
+        "deepseek": "deepseek_upside_pct",
+    }.get(provider, "upside_pct")
+    col_rd = {
+        "grok": "report_date",
+        "claude": "claude_report_date",
+        "kimi": "kimi_report_date",
+        "deepseek": "deepseek_report_date",
+    }.get(provider, "report_date")
+
+    cur.execute(f"""
+        SELECT {col_md} AS report_md, {col_gen} AS generated_at,
+               {col_rating} AS rating, {col_pt} AS price_target,
+               {col_up} AS upside_pct, {col_rd} AS report_date,
+               COALESCE(version_count, 1) AS version_count
+          FROM analyst_reports WHERE ticker = %s
+    """, (ticker,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    # row may be tuple or mapping
+    if isinstance(row, dict):
+        old_md = row.get("report_md") or ""
+        prior = {
+            "generated_at": row.get("generated_at"),
+            "rating": row.get("rating"),
+            "price_target": row.get("price_target"),
+            "upside_pct": row.get("upside_pct"),
+            "report_date": row.get("report_date"),
+        }
+        vcount = int(row.get("version_count") or 1)
+    else:
+        old_md = row[0] or ""
+        prior = {
+            "generated_at": row[1],
+            "rating": row[2],
+            "price_target": row[3],
+            "upside_pct": row[4],
+            "report_date": row[5],
+        }
+        vcount = int(row[6] or 1) if len(row) > 6 else 1
+
+    if not (old_md and len(old_md.strip()) > 200):
+        return None
+    # Skip if identical content (hydrate / re-import)
+    if old_md.strip() == (new_md or "").strip():
+        return None
+
+    new_snap = {
+        "rating": new_summary.get("rating"),
+        "price_target": new_summary.get("price_target"),
+        "upside_pct": new_summary.get("upside_pct"),
+    }
+    delta = _report_delta_dict(prior, new_snap)
+    delta["version_index"] = vcount + 1  # the new report's index after this write
+
+    import json as _json
+    cur.execute("""
+        INSERT INTO analyst_report_versions
+            (ticker, provider, generated_at, report_md, report_date,
+             rating, price_target, upside_pct, delta_to_next)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+    """, (
+        ticker, provider, prior.get("generated_at"), old_md, prior.get("report_date"),
+        prior.get("rating"), prior.get("price_target"), prior.get("upside_pct"),
+        _json.dumps(delta),
+    ))
+    return delta
+
+
+def _snapshot_ticker_metrics(ticker: str, metrics: dict, meta: dict | None = None) -> None:
+    """Persist today's metric values for history charts (Value Rank, DGA score, etc.)."""
+    if not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+        return
+    if not ticker or not metrics:
+        return
+    try:
+        _ensure_report_history_tables()
+        import json as _json
+        from datetime import date as _date
+        as_of = _date.today().isoformat()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            for k, v in (metrics or {}).items():
+                if v is None:
+                    continue
+                try:
+                    fv = float(v)
+                except (TypeError, ValueError):
+                    continue
+                cur.execute("""
+                    INSERT INTO ticker_metric_snapshots (ticker, as_of, metric_key, value, meta_json)
+                    VALUES (%s, %s, %s, %s, %s::jsonb)
+                    ON CONFLICT (ticker, as_of, metric_key) DO UPDATE SET
+                        value = EXCLUDED.value,
+                        meta_json = COALESCE(EXCLUDED.meta_json, ticker_metric_snapshots.meta_json)
+                """, (ticker.upper(), as_of, str(k)[:80], fv,
+                      _json.dumps(meta or {}) if meta else None))
+            conn.commit()
+    except Exception as e:
+        print(f"[metric-snap] {ticker}: {e!s:.120}", flush=True)
+
+
+def _metric_history(ticker: str, keys: list[str], limit: int = 36) -> dict:
+    """{metric_key: [{as_of, value}, ...]} oldest→newest."""
+    out: dict = {k: [] for k in keys}
+    if not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+        return out
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT metric_key, as_of, value
+                  FROM ticker_metric_snapshots
+                 WHERE ticker = %s AND metric_key = ANY(%s)
+                 ORDER BY as_of ASC
+            """, (ticker.upper(), list(keys)))
+            for mk, as_of, val in (cur.fetchall() or []):
+                if mk not in out:
+                    out[mk] = []
+                out[mk].append({"as_of": str(as_of), "value": float(val) if val is not None else None})
+            # cap to last `limit` points per series
+            for mk in list(out.keys()):
+                if len(out[mk]) > limit:
+                    out[mk] = out[mk][-limit:]
+    except Exception as e:
+        print(f"[metric-hist] {ticker}: {e!s:.120}", flush=True)
+    return out
+
+
 def _db_upsert_report(
     ticker: str,
     md_text: str,
@@ -10395,11 +10904,23 @@ def _db_upsert_report(
         _ensure_analyst_reports_table_schema()
     except Exception:
         pass
+    try:
+        _ensure_report_history_tables()
+    except Exception:
+        pass
     # When touch_run_at is False (hydrate), keep prior analysis stamps so
     # Saved Reports order reflects real Analyze runs, not deploy re-imports.
     _touch = bool(touch_run_at)
+    delta_from_prior = None
     try:
         with _fund_conn() as conn, conn.cursor() as cur:
+            # Snapshot prior version before overwrite (real Analyze only)
+            if _touch and (md_text or "").strip():
+                try:
+                    delta_from_prior = _archive_prior_report_version(
+                        cur, ticker, provider, summary or {}, md_text)
+                except Exception as _ae:
+                    print(f"[report-history] archive {ticker}/{provider}: {_ae!s:.120}", flush=True)
             # ── Claude path: only touches the *_claude columns ──────────
             if provider == "claude":
                 cur.execute("""
@@ -10432,6 +10953,20 @@ def _db_upsert_report(
                     summary.get("upside_pct"),
                     _touch, _touch, _touch, _touch,
                 ))
+                if delta_from_prior is not None:
+                    _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+                else:
+                    cur.execute(
+                        "UPDATE analyst_reports SET version_count = COALESCE(version_count,1) "
+                        "WHERE ticker=%s AND COALESCE(version_count,0) < 1",
+                        (ticker,))
+                try:
+                    _snapshot_ticker_metrics(ticker, {
+                        "report_price_target": summary.get("price_target"),
+                        "report_upside_pct": summary.get("upside_pct"),
+                    }, {"provider": "claude", "rating": summary.get("rating")})
+                except Exception:
+                    pass
                 return
 
             # ── Kimi path: parallel columns (does not overwrite Grok/Claude) ─
@@ -10466,6 +11001,15 @@ def _db_upsert_report(
                     summary.get("upside_pct"),
                     _touch, _touch, _touch, _touch,
                 ))
+                if delta_from_prior is not None:
+                    _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+                try:
+                    _snapshot_ticker_metrics(ticker, {
+                        "report_price_target": summary.get("price_target"),
+                        "report_upside_pct": summary.get("upside_pct"),
+                    }, {"provider": "kimi", "rating": summary.get("rating")})
+                except Exception:
+                    pass
                 return
 
             # ── DeepSeek path: parallel columns ─────────────────────────
@@ -10500,6 +11044,15 @@ def _db_upsert_report(
                     summary.get("upside_pct"),
                     _touch, _touch, _touch, _touch,
                 ))
+                if delta_from_prior is not None:
+                    _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+                try:
+                    _snapshot_ticker_metrics(ticker, {
+                        "report_price_target": summary.get("price_target"),
+                        "report_upside_pct": summary.get("upside_pct"),
+                    }, {"provider": "deepseek", "rating": summary.get("rating")})
+                except Exception:
+                    pass
                 return
 
             # ── Grok path (existing behavior) ──────────────────────────
@@ -10570,6 +11123,17 @@ def _db_upsert_report(
                     summary.get("upside_pct"), gamma_url, bool(pptx_stale), report_date,
                     _touch, _touch, _touch, _touch,
                 ))
+
+            # Stamp delta vs prior + version count (Grok path)
+            if delta_from_prior is not None:
+                _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+            try:
+                _snapshot_ticker_metrics(ticker, {
+                    "report_price_target": summary.get("price_target"),
+                    "report_upside_pct": summary.get("upside_pct"),
+                }, {"provider": provider, "rating": summary.get("rating")})
+            except Exception:
+                pass
     except Exception as _e:
         # LOUD log — easy to grep in Railway logs. Previous version used
         # a vague 'non-fatal' message that buried real schema errors.
@@ -11129,6 +11693,8 @@ def list_reports(request: Request = None):
                            kimi_generated_at, deepseek_generated_at,
                            kimi_rating, kimi_price_target, kimi_upside_pct,
                            deepseek_rating, deepseek_price_target, deepseek_upside_pct,
+                           COALESCE(version_count, 1) AS version_count,
+                           delta_from_prior,
                            -- Content presence (avoid loading full report_md into list)
                            (COALESCE(length(report_md), 0) > 200)            AS has_grok_md,
                            (COALESCE(length(report_md_claude), 0) > 200)     AS has_claude_md,
@@ -11175,6 +11741,10 @@ def list_reports(request: Request = None):
                     else:
                         provider_badge = "—"
 
+                    _vc = int(r.get("version_count") or 1)
+                    # List card shows the most relevant engine delta (prefer grok)
+                    _delta = _parse_delta_blob(r.get("delta_from_prior"), None)
+
                     # Effective (less aggressive) price target / upside for
                     # downstream EV math (Builder, rebalance, etc.). When both
                     # providers have a target, take the LOWER of the two —
@@ -11195,6 +11765,8 @@ def list_reports(request: Request = None):
 
                     out.append({
                         "ticker":              r["ticker"],
+                        "version_count":       _vc,
+                        "delta_from_prior":    _delta,
                         "generated_at":        r["generated_at"].isoformat() if r["generated_at"] else None,
                         "has_docx":            r["has_docx"],
                         "has_pptx":            r["has_pptx"],
@@ -14221,6 +14793,7 @@ def _apply_self_migrations() -> None:
         _step("fund_display_settings",      lambda: _ensure_fund_display_settings_table(conn))
         _step("kv_store_table",             lambda: _ensure_kv_store_table(conn))
         _step("analyst_reports_v1",         lambda: _ensure_analyst_reports_table(conn))
+        _step("report_history_tables",      lambda: _ensure_report_history_tables())
         _step("watchlists_table",           lambda: _ensure_watchlists_table(conn))
         _step("benchmark_annual_returns",   lambda: _ensure_benchmark_annual_returns_table(conn))
         _step("seed_benchmark_historical",  lambda: _seed_benchmark_historical(conn))

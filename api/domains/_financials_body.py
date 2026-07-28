@@ -3736,6 +3736,31 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
 
     meta = (_db_meta([tk]).get(tk) or {})
 
+    # Persist daily metric snapshots so Value Rank / DGA score evolve over time
+    # (Rating vs itself uses annual financial history; this tracks the composite
+    # ranks and DGA value as the store + reports change day to day).
+    try:
+        _vr = None
+        if isinstance(rank_cards, dict) and isinstance(rank_cards.get("value"), dict):
+            _vr = rank_cards["value"].get("rank")
+        _snapshot_ticker_metrics(tk, {
+            "dga_score": dga_score,
+            "dga_value": dga_value,
+            "dga_value_rank": _vr,
+            "price": price,
+            "value_score": value_score,
+            "report_price_target": dga_value,  # mean of saved targets
+        }, {"source": "financials_dashboard"})
+    except Exception as _se:
+        print(f"[fin-dash] metric snapshot {tk}: {_se!s:.100}", flush=True)
+    try:
+        metric_history = _metric_history(tk, [
+            "dga_score", "dga_value_rank", "dga_value", "price", "value_score",
+            "report_price_target", "report_upside_pct",
+        ])
+    except Exception:
+        metric_history = {}
+
     return {"ok": True, "ticker": tk,
             "entity_name": rows[-1].get("entity_name") or tk,
             "sector": meta.get("sector") or peers.get("sector"),
@@ -3751,6 +3776,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "dga_score": {"total": dga_score, "components": comps,
                           "weights": weights},
             "valuation": valuation,
+            "metric_history": metric_history,
             "notes": {
                 "wacc": "WACC est.: 9% CoE / 4.3% after-tax CoD, book-equity weighted (no beta).",
                 "roic": "NOPAT (21% tax) / (debt + equity − cash). Quarterly NOPAT ×4.",
@@ -3759,6 +3785,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
                                 else "Sequential (QoQ) share change — not annualized."),
                 "peers": "Sell-side style: industry group + market-cap band (not whole-sector dump).",
                 "tokens": "Dashboard is pure DB arithmetic — zero LLM tokens.",
+                "history": "metric_history tracks DGA score / Value Rank / DGA value over days you open this dashboard or re-run Analyze.",
             }}
 
 
