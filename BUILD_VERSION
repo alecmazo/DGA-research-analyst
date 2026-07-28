@@ -1,0 +1,3 @@
+ui378-20260728-nav-continuity
+# Canonical UI build — keep in sync with api/server.py WEB_BUILD_VERSION
+# and CONTINUITY.md. Never decrease N. Next = max(this, /api/build) + 1.

@@ -118,16 +118,18 @@
   // Tab panels already have h2 in .tab-toolbar; we enrich them with a
   // subtitle on first display. Configured here per tab.
   const HERO_COPY = {
-    research:  { title: 'Research',           sub: 'Generate, review, and refresh ticker reports. Pull new ideas from your watchlist, positions, and the morning brief.' },
+    research:  { title: 'Desk',               sub: 'Watchlist, Daily Pulse, Analyst, and research — the home work surface.' },
+    financials:{ title: 'Financials',         sub: 'SEC filings, company dashboard, comps, and the financials store.' },
+    options:   { title: 'Options Wheel',      sub: 'Covered calls on holdings and cash-secured puts — ranked by weekly annualized yield.' },
     builder:   { title: 'Portfolio Builder',  sub: 'Compose a target sleeve from sector weights and conviction filters. Save scenarios to revisit.' },
-    lab:       { title: 'LLM Lab',            sub: 'A/B test Grok vs Claude on any saved report and generate podcast episodes from your research.' },
-    ideas:     { title: 'Ideas',              sub: 'Daily morning brief, scan results, and market intelligence — the discovery surface.' },
+    lab:       { title: 'Podcasts',           sub: 'Script and synthesize research podcasts from saved reports — debate, memo, catalysts, roundup.' },
+    transcripts:{ title: 'Transcripts',       sub: 'Earnings calls and YouTube transcripts for covered names.' },
     positions: { title: 'Positions',          sub: 'Live view of every fund and managed-account book. Aggregated and per-LP cuts.' },
     fund:      { title: 'Funds & Accounts',   sub: 'Per-fund overview: NAV, performance, capital flows, and LP roster.' },
-    reports:   { title: 'Quarterly Reports',  sub: 'Compose, preview, and send investor letters per fund and per quarter.' },
-    options:   { title: 'Options Wheel',      sub: 'Covered calls on holdings and cash-secured puts across your universe — ranked by weekly annualized yield.' },
     memos:     { title: 'DGA Capital Memos',  sub: 'PDF memos generated from your podcast scripts — assign to an account, attach a GP note, email it out.' },
-    settings:  { title: 'Settings',           sub: 'Account, automation, distribution, and compliance configuration.' },
+    settings:  { title: 'Settings',           sub: 'Account, automation, SnapTrade, distribution, and compliance.' },
+    ideas:     { title: 'Ideas',              sub: 'Daily morning brief, scan results, and market intelligence (reachable from Desk links).' },
+    reports:   { title: 'Quarterly Reports',  sub: 'Compose, preview, and send investor letters per fund and per quarter.' },
   };
   function _injectHero() {
     document.querySelectorAll('.tab-panel').forEach(panel => {
@@ -170,7 +172,7 @@
       title:   'Generate ticker reports',
       body:    'Pull research from Grok and Claude side-by-side. Today\'s movers feed into the Idea Generator on the right.' },
     { selector: '.topbar-link[data-tab="lab"]',
-      eyebrow: '② LLM Lab',
+      eyebrow: '② Podcasts',
       title:   'Turn reports into podcasts',
       body:    'Pick any ticker with both reports, generate a script in your chosen format (Debate, Memo, Catalysts...), then synthesize audio.' },
     { selector: '.topbar-link[data-tab="memos"]',

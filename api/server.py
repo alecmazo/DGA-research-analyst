@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui114-20260728-snaptrade-auth"
+WEB_BUILD_VERSION = "ui378-20260728-nav-continuity"
 
 
 @app.get("/api/build")
