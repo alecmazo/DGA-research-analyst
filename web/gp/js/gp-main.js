@@ -1416,7 +1416,7 @@
     } catch (e) {
       console.warn('[watchlist]', e);
       document.getElementById('wl-rows').innerHTML =
-        '<tr class="wl-row"><td colspan="5" class="wl-empty-cell">Could not load watchlist</td></tr>';
+        '<div class="wl-row wl-row-empty"><div class="wl-empty-cell">Could not load watchlist</div></div>';
     }
   }
 
@@ -1762,29 +1762,6 @@
     }
   }
 
-  function _wlDayAbs(q) {
-    if (!q || q.price == null || isNaN(Number(q.price))) return null;
-    const px = Number(q.price);
-    let prev = q.prev != null ? Number(q.prev)
-      : (q.prev_close != null ? Number(q.prev_close)
-        : (q.previous_close != null ? Number(q.previous_close) : null));
-    if ((prev == null || !isFinite(prev) || prev === 0) && q.pct != null && isFinite(Number(q.pct))) {
-      const p = Number(q.pct);
-      if (p !== -100) prev = px / (1 + p / 100);
-    }
-    if (prev == null || !isFinite(prev)) return null;
-    return px - prev;
-  }
-  function _wlDayAbsCell(q) {
-    const d = _wlDayAbs(q);
-    if (d == null || isNaN(d)) return '<span class="wl-dayabs nc">—</span>';
-    const abs = Math.abs(d);
-    const s = (d >= 0 ? '+' : '−') + abs.toLocaleString('en-US', {
-      minimumFractionDigits: abs >= 100 ? 0 : 2,
-      maximumFractionDigits: abs >= 100 ? 0 : 2,
-    });
-    return '<span class="wl-dayabs ' + cssClass(d) + '">' + s + '</span>';
-  }
   function renderWatchlist(tickers, quotes, earnings, reports) {
     const rows = document.getElementById('wl-rows');
     document.getElementById('wl-count').textContent = String(tickers.length);
@@ -1800,7 +1777,7 @@
       }
     } catch (_) {}
     if (!tickers.length) {
-      rows.innerHTML = '<tr class="wl-row"><td colspan="5" class="wl-empty-cell">No tickers yet. Add one below.</td></tr>';
+      rows.innerHTML = '<div class="wl-row wl-row-empty"><div class="wl-empty-cell">No tickers yet. Add one below.</div></div>';
       return;
     }
     // Largest absolute day-move first (up or down); missing quotes last.
@@ -1819,6 +1796,8 @@
       }
       return String(a).localeCompare(String(b));
     });
+    // Two-line row: [TICKER  EARN Rpt] ........ [$price]
+    //                                        [ day%  ]
     rows.innerHTML = ordered.map(tk => {
       const q = quotes[tk] || {};
       const earn = earnings[tk] || null;
@@ -1828,17 +1807,19 @@
           + ' title="Open saved DGA report for ' + tk + '">Rpt</button>')
         : '';
       const px = q.price != null ? fmtPx(q.price) : '—';
+      const pxHtml = px === '—' ? '—' : ('$' + px);
       return `
-        <tr class="wl-row${earn ? ' wl-row-earn' : ''}" data-ticker="${tk}">
-          <td class="wl-td-tk">
-            <span class="wl-tk">${tk}</span>${_quoteStaleChip(q)}
+        <div class="wl-row${earn ? ' wl-row-earn' : ''}" data-ticker="${tk}">
+          <div class="wl-left">
+            <span class="wl-tk">${tk}</span>
             <span class="wl-meta">${_wlEarnChip(tk, earn)}${repBtn}</span>
-          </td>
-          <td class="num wl-td-px">${px === '—' ? '—' : ('$' + px)}</td>
-          <td class="num wl-td-dayabs">${_wlDayAbsCell(q)}</td>
-          <td class="num wl-td-chg"><span class="wl-chg ${cssClass(q.pct)}">${fmtPct(q.pct)}</span></td>
-          <td class="wl-td-act"><button type="button" class="wl-remove" data-remove="${tk}" title="Remove">×</button></td>
-        </tr>
+          </div>
+          <div class="wl-right">
+            <div class="wl-px">${pxHtml}</div>
+            <div class="wl-chg ${cssClass(q.pct)}">${fmtPct(q.pct)}</div>
+          </div>
+          <button type="button" class="wl-remove" data-remove="${tk}" title="Remove">×</button>
+        </div>
       `;
     }).join('');
 

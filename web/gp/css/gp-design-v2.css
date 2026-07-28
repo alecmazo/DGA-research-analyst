@@ -1865,122 +1865,102 @@ html[data-theme="dark"] .opt-cell-empty { color: var(--gray-400); }
 }
 .market-bar .idx-loading { opacity: 0.55; }
 
-/* ── Watchlist as true data table ─────────────────────────────── */
-.wl-table-wrap {
+/* ── Watchlist compact two-line rows ──────────────────────────── */
+.wl-list-wrap {
   max-height: min(70vh, 820px);
   overflow: auto;
 }
-.wl-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 12px;
-}
-.wl-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border-default);
-  color: var(--text-tertiary);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  text-align: left;
-  padding: 7px 8px;
-  white-space: nowrap;
-}
-.wl-table thead th.num { text-align: right; }
-.wl-table thead th.wl-th-act { width: 28px; }
-.wl-table tbody td {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  vertical-align: middle;
-  background: var(--bg-elevated);
-}
-.wl-table tbody tr.wl-row {
+.wl-rows { display: flex; flex-direction: column; }
+.wl-list-wrap .wl-row,
+#tab-research .wl-list-wrap .wl-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
   cursor: pointer;
+  position: relative;
   transition: background var(--t-fast) var(--ease-out);
-  /* reset legacy grid layout on tr */
-  display: table-row;
-  grid-template-columns: unset;
-  column-gap: unset;
-  padding: 0;
-  border-top: none;
+  min-height: 44px;
 }
-.wl-table tbody tr.wl-row:hover td {
-  background: rgba(91, 184, 212, 0.07);
-}
-.wl-table tbody tr.wl-row-earn td {
-  background: rgba(245, 158, 11, 0.06);
-}
-.wl-table tbody tr.wl-row-earn:hover td {
-  background: rgba(245, 158, 11, 0.10);
-}
-.wl-td-tk {
+.wl-list-wrap .wl-row:first-child { border-top: none; }
+.wl-list-wrap .wl-row:hover { background: rgba(91, 184, 212, 0.07); }
+.wl-list-wrap .wl-row-earn { background: rgba(245, 158, 11, 0.05); }
+.wl-list-wrap .wl-row-earn:hover { background: rgba(245, 158, 11, 0.09); }
+.wl-list-wrap .wl-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
+  flex-wrap: wrap;
 }
-.wl-table .wl-tk {
+.wl-list-wrap .wl-tk {
   font-family: var(--font-display);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--text-primary);
+  line-height: 1.2;
+  flex-shrink: 0;
 }
-.wl-meta {
+.wl-list-wrap .wl-meta {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: 4px;
   flex-wrap: wrap;
-  vertical-align: middle;
+  min-width: 0;
 }
-.wl-table .wl-earn {
+.wl-list-wrap .wl-earn {
   font-size: 8px;
   padding: 0 4px;
+  line-height: 1.55;
 }
-.wl-table .wl-report-btn {
+.wl-list-wrap .wl-report-btn {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--brand-700);
   background: var(--brand-50);
   border: 1px solid var(--brand-200);
   border-radius: 3px;
   padding: 0 5px;
-  line-height: 1.6;
+  line-height: 1.55;
+  cursor: pointer;
   opacity: 1;
 }
-.wl-table .wl-report-btn:hover { background: var(--brand-100); transform: none; }
-.wl-td-px, .wl-td-chg, .wl-td-asof {
+.wl-list-wrap .wl-report-btn:hover {
+  background: var(--brand-100);
+  transform: none;
+}
+.wl-list-wrap .wl-right {
+  text-align: right;
+  justify-self: end;
+  padding-right: 2px;
+}
+.wl-list-wrap .wl-px {
   font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  font-size: 11.5px;
-  font-weight: 600;
-  white-space: nowrap;
+  color: var(--text-primary);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
-.wl-table .wl-chg { margin-top: 0; font-size: 11.5px; }
-.wl-asof {
-  color: var(--text-tertiary);
-  font-weight: 500;
-  font-size: 10.5px;
-}
-.wl-asof-live {
-  color: var(--success-700);
-  font-weight: 600;
-}
-.wl-td-dayabs, .wl-dayabs {
+.wl-list-wrap .wl-chg {
   font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 600;
-  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  margin-top: 2px;
 }
-.wl-td-act { text-align: right; width: 28px; }
-.wl-table .wl-remove {
-  position: static;
+.wl-list-wrap .wl-remove {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
   display: inline-flex;
   width: 22px;
   height: 22px;
@@ -1996,31 +1976,36 @@ html[data-theme="dark"] .opt-cell-empty { color: var(--gray-400); }
   opacity: 0;
   transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
 }
-.wl-table tr.wl-row:hover .wl-remove { opacity: 1; }
-.wl-table .wl-remove:hover {
+.wl-list-wrap .wl-row:hover .wl-remove { opacity: 1; }
+.wl-list-wrap .wl-remove:hover {
   background: rgba(220, 38, 38, 0.12);
   color: var(--danger-700);
 }
-.wl-empty-cell {
-  text-align: center !important;
-  padding: 20px 12px !important;
-  color: var(--text-tertiary) !important;
-  font-size: 12px !important;
-  font-family: var(--font-sans) !important;
-  font-weight: 500 !important;
+.wl-list-wrap .wl-empty-cell,
+.wl-list-wrap .wl-row-empty,
+.wl-list-wrap .wl-row-loading {
+  display: block;
+  text-align: center;
+  padding: 18px 12px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: default;
+  border: none;
 }
-.wl-add {
+.wl-list-wrap .wl-add {
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   position: sticky;
   bottom: 0;
 }
+/* No stale chip on watchlist */
+.wl-list-wrap .q-stale { display: none !important; }
 
-/* Wider left column for table watchlist */
-@media (min-width: 1201px) {
-  #tab-research .shell {
-    grid-template-columns: 300px 1fr 320px;
-  }
+html[data-theme="dark"] .wl-list-wrap .wl-report-btn {
+  background: rgba(91, 184, 212, 0.12);
+  border-color: rgba(91, 184, 212, 0.28);
+  color: var(--brand-300);
 }
 
 /* ── Analyst command surface ──────────────────────────────────── */
