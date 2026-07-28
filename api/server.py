@@ -1224,6 +1224,8 @@ _PUBLIC_PATHS = {
     # Free macro RSS wire — no PII, no LLM. Public so mobile never blanks
     # the Research card on a missing/expired JWT (common with v2-only sessions).
     "/api/v2/news/market-wire",
+    # Free FinTwit public syndication — no PII, no API key, no LLM.
+    "/api/v2/news/x-fin-feed",
 }
 
 def _portfolio_password() -> str:
