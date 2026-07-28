@@ -23,7 +23,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | This Grok session (work laptop) | ui100–ui114 | **Fork counter — must not overwrite higher N** |
 | Nav + continuity files | **`ui378-20260728-nav-continuity`** | Nav reorg + CONTINUITY.md |
 | **Settings handoff button** | **`ui379-20260728-continuity-button`** | Settings → Continuity handoff (copy/download) |
-| **Next deploy after this handoff** | **`ui380-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
+| **Builder sector boards** | **`ui380-20260728-builder-boards`** | Multi-list sector boards + breadth history |
+| **Next deploy after this handoff** | **`ui381-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -129,4 +130,4 @@ When switching machine or agent (Claude ↔ Grok):
 
 ---
 
-*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui379 · Next: ui380*
+*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui380 · Next: ui381*

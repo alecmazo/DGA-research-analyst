@@ -121,7 +121,7 @@
     research:  { title: 'Desk',               sub: 'Watchlist, Daily Pulse, Analyst, and research — the home work surface.' },
     financials:{ title: 'Financials',         sub: 'SEC filings, company dashboard, comps, and the financials store.' },
     options:   { title: 'Options Wheel',      sub: 'Covered calls on holdings and cash-secured puts — ranked by weekly annualized yield.' },
-    builder:   { title: 'Portfolio Builder',  sub: 'Compose a target sleeve from sector weights and conviction filters. Save scenarios to revisit.' },
+    builder:   { title: 'Builder',            sub: 'Sector watchlist boards — track groups of names over time (GuruFocus-style). Basket construction is under Advanced.' },
     lab:       { title: 'Podcasts',           sub: 'Script and synthesize research podcasts from saved reports — debate, memo, catalysts, roundup.' },
     transcripts:{ title: 'Transcripts',       sub: 'Earnings calls and YouTube transcripts for covered names.' },
     positions: { title: 'Positions',          sub: 'Live view of every fund and managed-account book. Aggregated and per-LP cuts.' },

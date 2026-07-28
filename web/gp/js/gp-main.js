@@ -6999,6 +6999,337 @@
     });
   }
 
+  // ── Sector watchlist boards (GuruFocus-style) ─────────────────
+  let _blLists = [];
+  let _blActiveId = null;
+  let _blBoard = null;
+
+  function _blEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function _blDayAbs(price, pct) {
+    if (price == null || pct == null || isNaN(Number(price)) || isNaN(Number(pct))) return null;
+    const px = Number(price), p = Number(pct);
+    if (p === -100) return null;
+    const prev = px / (1 + p / 100);
+    return px - prev;
+  }
+  function _blFmtDayAbs(d) {
+    if (d == null || isNaN(d)) return '—';
+    const abs = Math.abs(d);
+    return (d >= 0 ? '+' : '−') + abs.toLocaleString('en-US', {
+      minimumFractionDigits: abs >= 100 ? 0 : 2,
+      maximumFractionDigits: abs >= 100 ? 0 : 2,
+    });
+  }
+  function _blSetStatus(msg, kind) {
+    const el = document.getElementById('bl-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove('is-busy', 'is-error', 'is-ok');
+    if (kind) el.classList.add(kind);
+  }
+  function _blRenderNav() {
+    const nav = document.getElementById('bl-list-nav');
+    const cnt = document.getElementById('bl-list-count');
+    if (cnt) cnt.textContent = String(_blLists.length);
+    if (!nav) return;
+    if (!_blLists.length) {
+      nav.innerHTML = '<div class="term-empty"><div class="term-empty-title">No boards yet</div>'
+        + '<div class="term-empty-sub">Click <b>Seed sector boards</b> for Tech, Semis, Healthcare… or create your own.</div></div>';
+      return;
+    }
+    nav.innerHTML = _blLists.map(function (L) {
+      const active = L.id === _blActiveId ? ' active' : '';
+      return '<div class="bl-nav-item' + active + '" data-bl-id="' + _blEsc(L.id) + '">'
+        + '<span class="bl-nav-name" title="' + _blEsc(L.sector || L.name) + '">' + _blEsc(L.name) + '</span>'
+        + '<span class="bl-nav-count">' + (L.n_tickers || 0) + '</span>'
+        + '</div>';
+    }).join('');
+    nav.querySelectorAll('[data-bl-id]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        _blActiveId = el.getAttribute('data-bl-id');
+        _blRenderNav();
+        loadBuilderBoard(_blActiveId);
+      });
+    });
+  }
+  function _blRenderHistory(hist) {
+    const wrap = document.getElementById('bl-history');
+    const bars = document.getElementById('bl-history-bars');
+    if (!wrap || !bars) return;
+    if (!hist || !hist.length) {
+      wrap.hidden = true;
+      bars.innerHTML = '';
+      return;
+    }
+    wrap.hidden = false;
+    const avgs = hist.map(function (h) { return h.avg_pct != null ? Math.abs(Number(h.avg_pct)) : 0; });
+    const maxA = Math.max.apply(null, avgs.concat([0.5]));
+    bars.innerHTML = hist.map(function (h) {
+      const avg = h.avg_pct != null ? Number(h.avg_pct) : 0;
+      const hgt = Math.max(4, Math.round((Math.abs(avg) / maxA) * 32));
+      const cls = avg > 0.05 ? 'up' : (avg < -0.05 ? 'dn' : '');
+      const tip = (h.as_of || '') + ' · avg ' + (h.avg_pct != null ? Number(h.avg_pct).toFixed(2) + '%' : '—')
+        + ' · ↑' + (h.n_up || 0) + ' ↓' + (h.n_down || 0);
+      return '<div class="bl-hist-bar ' + cls + '" style="height:' + hgt + 'px" title="' + _blEsc(tip) + '"></div>';
+    }).join('');
+  }
+  function _blRenderBoard(board) {
+    _blBoard = board;
+    const title = document.getElementById('bl-board-title');
+    const sec = document.getElementById('bl-board-sector');
+    const tbody = document.getElementById('bl-tbody');
+    const kpi = document.getElementById('bl-kpi');
+    if (!board || !board.list) {
+      if (title) title.textContent = 'Select a board';
+      if (sec) sec.textContent = '—';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="wl-empty-cell">Select or seed a board to begin.</td></tr>';
+      if (kpi) kpi.hidden = true;
+      _blRenderHistory([]);
+      return;
+    }
+    if (title) title.textContent = board.list.name || 'Board';
+    if (sec) sec.textContent = board.list.sector || board.list.source || '—';
+    const br = board.breadth || {};
+    if (kpi) {
+      kpi.hidden = false;
+      const set = function (id, v, cls) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = v;
+        el.classList.remove('pos', 'neg');
+        if (cls) el.classList.add(cls);
+      };
+      set('bl-kpi-n', String(br.n != null ? br.n : '—'));
+      set('bl-kpi-up', String(br.n_up != null ? br.n_up : '—'), 'pos');
+      set('bl-kpi-dn', String(br.n_down != null ? br.n_down : '—'), 'neg');
+      const avg = br.avg_pct;
+      set('bl-kpi-avg', avg != null ? ((avg >= 0 ? '+' : '') + Number(avg).toFixed(2) + '%') : '—',
+        avg != null ? (avg >= 0 ? 'pos' : 'neg') : '');
+    }
+    _blRenderHistory(board.history || []);
+    const tickers = board.tickers || [];
+    const quotes = board.quotes || {};
+    if (!tickers.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="wl-empty-cell">No tickers — paste symbols above (comma-separated).</td></tr>';
+      return;
+    }
+    const ordered = tickers.slice().sort(function (a, b) {
+      const pa = (quotes[a] || {}).pct, pb = (quotes[b] || {}).pct;
+      const aOk = pa != null && !isNaN(Number(pa));
+      const bOk = pb != null && !isNaN(Number(pb));
+      if (aOk && !bOk) return -1;
+      if (!aOk && bOk) return 1;
+      if (aOk && bOk) return Math.abs(Number(pb)) - Math.abs(Number(pa));
+      return String(a).localeCompare(String(b));
+    });
+    tbody.innerHTML = ordered.map(function (tk) {
+      const q = quotes[tk] || {};
+      const px = q.price != null ? fmtPx(q.price) : '—';
+      const pct = q.pct;
+      const dayAbs = _blDayAbs(q.price, pct);
+      return '<tr data-bl-tk="' + _blEsc(tk) + '">'
+        + '<td><span class="tk">' + _blEsc(tk) + '</span></td>'
+        + '<td class="num">' + (px === '—' ? '—' : ('$' + px)) + '</td>'
+        + '<td class="num"><span class="' + cssClass(pct) + '">' + fmtPct(pct) + '</span></td>'
+        + '<td class="num"><span class="' + cssClass(dayAbs) + '">' + _blFmtDayAbs(dayAbs) + '</span></td>'
+        + '<td><button type="button" class="bl-remove" data-bl-rm="' + _blEsc(tk) + '" title="Remove">×</button></td>'
+        + '</tr>';
+    }).join('');
+    tbody.querySelectorAll('[data-bl-rm]').forEach(function (btn) {
+      btn.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        const tk = btn.getAttribute('data-bl-rm');
+        if (!_blActiveId || !tk) return;
+        _blSetStatus('Removing ' + tk + '…', 'is-busy');
+        try {
+          const r = await window.dgaFetch('/api/v2/builder/lists/' + encodeURIComponent(_blActiveId)
+            + '/tickers/' + encodeURIComponent(tk), { method: 'DELETE' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.detail || r.status);
+          if (d.board) _blRenderBoard(d.board);
+          await loadBuilderLists({ keepActive: true });
+          _blSetStatus('Removed ' + tk, 'is-ok');
+        } catch (err) {
+          _blSetStatus(String(err.message || err), 'is-error');
+        }
+      });
+    });
+    tbody.querySelectorAll('tr[data-bl-tk]').forEach(function (row) {
+      row.addEventListener('click', function (e) {
+        if (e.target.closest('[data-bl-rm]')) return;
+        const tk = row.getAttribute('data-bl-tk');
+        if (tk && typeof openStockPeek === 'function') openStockPeek(tk);
+        else if (tk && typeof openGuruFocus === 'function') openGuruFocus(tk);
+      });
+    });
+  }
+  async function loadBuilderLists(opts) {
+    opts = opts || {};
+    try {
+      const r = await window.dgaFetch('/api/v2/builder/lists');
+      if (!r.ok) throw new Error('lists ' + r.status);
+      const d = await r.json();
+      _blLists = d.lists || [];
+      if (!_blActiveId && _blLists.length) _blActiveId = _blLists[0].id;
+      if (opts.keepActive && _blActiveId && !_blLists.some(function (L) { return L.id === _blActiveId; })) {
+        _blActiveId = _blLists.length ? _blLists[0].id : null;
+      }
+      _blRenderNav();
+      if (_blActiveId) await loadBuilderBoard(_blActiveId);
+      else _blRenderBoard(null);
+    } catch (e) {
+      _blSetStatus('Could not load boards: ' + (e.message || e), 'is-error');
+    }
+  }
+  async function loadBuilderBoard(listId) {
+    if (!listId) return;
+    _blSetStatus('Loading board…', 'is-busy');
+    try {
+      const r = await window.dgaFetch('/api/v2/builder/lists/' + encodeURIComponent(listId));
+      if (!r.ok) throw new Error('board ' + r.status);
+      const d = await r.json();
+      _blRenderBoard(d);
+      _blSetStatus(
+        (d.list && d.list.name ? d.list.name + ' · ' : '')
+        + (d.tickers || []).length + ' names · sorted by |day %| · history updates daily when you open a board',
+        'is-ok'
+      );
+    } catch (e) {
+      _blSetStatus(String(e.message || e), 'is-error');
+    }
+  }
+  async function blSeedLists() {
+    const btn = document.getElementById('bl-seed-btn');
+    if (btn) btn.disabled = true;
+    _blSetStatus('Seeding standard sector boards…', 'is-busy');
+    try {
+      const r = await window.dgaFetch('/api/v2/builder/lists/seed', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || r.status);
+      _blLists = d.lists || [];
+      if (!_blActiveId && _blLists.length) _blActiveId = _blLists[0].id;
+      _blRenderNav();
+      if (_blActiveId) await loadBuilderBoard(_blActiveId);
+      _blSetStatus('Seeded ' + (d.created || 0) + ' new board(s). Edit freely — seeds skip names you already have.', 'is-ok');
+    } catch (e) {
+      _blSetStatus(String(e.message || e), 'is-error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+  async function blCreateList() {
+    const name = prompt('Board name (e.g. Semiconductors, My Banks, Fintech):');
+    if (!name || !name.trim()) return;
+    _blSetStatus('Creating…', 'is-busy');
+    try {
+      const r = await window.dgaFetch('/api/v2/builder/lists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), sector: name.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || r.status);
+      _blActiveId = d.id;
+      _blLists = d.lists || [];
+      _blRenderNav();
+      await loadBuilderBoard(_blActiveId);
+      _blSetStatus('Created “' + name.trim() + '”. Add tickers above.', 'is-ok');
+    } catch (e) {
+      _blSetStatus(String(e.message || e), 'is-error');
+    }
+  }
+  async function blAddTickers() {
+    const inp = document.getElementById('bl-add-tickers');
+    const raw = (inp && inp.value) || '';
+    if (!_blActiveId) {
+      _blSetStatus('Select or create a board first.', 'is-error');
+      return;
+    }
+    if (!raw.trim()) return;
+    _blSetStatus('Adding…', 'is-busy');
+    try {
+      const r = await window.dgaFetch('/api/v2/builder/lists/' + encodeURIComponent(_blActiveId) + '/tickers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: raw }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || r.status);
+      if (inp) inp.value = '';
+      if (d.board) _blRenderBoard(d.board);
+      await loadBuilderLists({ keepActive: true });
+      _blSetStatus('Added ' + (d.added || 0) + ' ticker(s).', 'is-ok');
+    } catch (e) {
+      _blSetStatus(String(e.message || e), 'is-error');
+    }
+  }
+  async function blRenameList() {
+    if (!_blActiveId || !_blBoard || !_blBoard.list) return;
+    const name = prompt('Rename board:', _blBoard.list.name || '');
+    if (!name || !name.trim()) return;
+    try {
+      const r = await window.dgaFetch('/api/v2/builder/lists/' + encodeURIComponent(_blActiveId) + '/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), sector: name.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || r.status);
+      _blLists = d.lists || [];
+      _blRenderNav();
+      await loadBuilderBoard(_blActiveId);
+    } catch (e) {
+      _blSetStatus(String(e.message || e), 'is-error');
+    }
+  }
+  async function blDeleteList() {
+    if (!_blActiveId) return;
+    const nm = (_blBoard && _blBoard.list && _blBoard.list.name) || 'this board';
+    if (!confirm('Delete board “' + nm + '”? Tickers are removed from the board only (not Desk watchlist).')) return;
+    try {
+      const r = await window.dgaFetch('/api/v2/builder/lists/' + encodeURIComponent(_blActiveId), { method: 'DELETE' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || r.status);
+      _blActiveId = null;
+      _blLists = d.lists || [];
+      if (_blLists.length) _blActiveId = _blLists[0].id;
+      _blRenderNav();
+      if (_blActiveId) await loadBuilderBoard(_blActiveId);
+      else _blRenderBoard(null);
+      _blSetStatus('Board deleted.', 'is-ok');
+    } catch (e) {
+      _blSetStatus(String(e.message || e), 'is-error');
+    }
+  }
+  function wireBuilderBoards() {
+    const seed = document.getElementById('bl-seed-btn');
+    const neu = document.getElementById('bl-new-btn');
+    const add = document.getElementById('bl-add-btn');
+    const inp = document.getElementById('bl-add-tickers');
+    const ref = document.getElementById('bl-refresh-btn');
+    const ren = document.getElementById('bl-rename-btn');
+    const del = document.getElementById('bl-delete-btn');
+    if (seed && !seed._wired) { seed._wired = true; seed.addEventListener('click', blSeedLists); }
+    if (neu && !neu._wired) { neu._wired = true; neu.addEventListener('click', blCreateList); }
+    if (add && !add._wired) { add._wired = true; add.addEventListener('click', blAddTickers); }
+    if (inp && !inp._wired) {
+      inp._wired = true;
+      inp.addEventListener('keypress', function (e) { if (e.key === 'Enter') blAddTickers(); });
+    }
+    if (ref && !ref._wired) {
+      ref._wired = true;
+      ref.addEventListener('click', function () {
+        if (_blActiveId) loadBuilderBoard(_blActiveId);
+      });
+    }
+    if (ren && !ren._wired) { ren._wired = true; ren.addEventListener('click', blRenameList); }
+    if (del && !del._wired) { del._wired = true; del.addEventListener('click', blDeleteList); }
+  }
+
   // Refresh the Candidate Pool in place — re-pulls saved-report tickers/targets
   // and re-resolves sectors via the cache-busting endpoint. No market sync, no
   // leaving the Builder tab.
@@ -7758,9 +8089,20 @@
       poolRefreshBtn._wired = true;
       poolRefreshBtn.addEventListener('click', _builderRefreshPool);
     }
-    // Load candidates pool + previously saved scenarios
-    loadBuilderCandidates();
-    loadBuilderScenarios();
+    // Sector boards (primary surface)
+    wireBuilderBoards();
+    loadBuilderLists();
+    // Legacy basket tools — only load pool when Advanced is opened
+    const leg = document.getElementById('builder-legacy-wrap');
+    if (leg && !leg._wired) {
+      leg._wired = true;
+      leg.addEventListener('toggle', function () {
+        if (leg.open) {
+          loadBuilderCandidates();
+          loadBuilderScenarios();
+        }
+      });
+    }
   }
 
   // ── LLM Lab ────────────────────────────────────────────────────────────────

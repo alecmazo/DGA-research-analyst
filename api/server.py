@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui379-20260728-continuity-button"
+WEB_BUILD_VERSION = "ui380-20260728-builder-boards"
 
 
 @app.get("/api/build")
@@ -9058,6 +9058,403 @@ def _builder_fetch_candidates() -> list[dict]:
     print(f"[builder] returning {len(out)} candidates "
           f"({_BUILDER_CANDIDATES_DIAG.get('unknown_sector')} Unknown sector)", flush=True)
     return out
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Builder — multi-list sector watchlists (GuruFocus-style boards)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_BUILDER_SEED_LISTS: list[dict] = [
+    {"name": "Technology", "sector": "Technology", "tickers": [
+        "AAPL", "MSFT", "GOOGL", "META", "ORCL", "CRM", "ADBE", "NOW", "INTU", "IBM"]},
+    {"name": "Semiconductors", "sector": "Technology", "tickers": [
+        "NVDA", "AVGO", "TSM", "AMD", "ASML", "QCOM", "AMAT", "MU", "LRCX", "KLAC", "ARM", "MRVL"]},
+    {"name": "Software / SaaS", "sector": "Technology", "tickers": [
+        "MSFT", "CRM", "NOW", "SNOW", "DDOG", "CRWD", "PANW", "TEAM", "WDAY", "PLTR", "NET"]},
+    {"name": "Healthcare", "sector": "Healthcare", "tickers": [
+        "UNH", "JNJ", "LLY", "ABBV", "MRK", "TMO", "ABT", "ISRG", "SYK", "BSX", "DHR"]},
+    {"name": "Biotech", "sector": "Healthcare", "tickers": [
+        "AMGN", "GILD", "VRTX", "REGN", "BIIB", "MRNA", "BNTX", "ALNY", "INCY"]},
+    {"name": "Financials", "sector": "Financials", "tickers": [
+        "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW", "AXP", "V", "MA", "BRK-B"]},
+    {"name": "Energy", "sector": "Energy", "tickers": [
+        "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "OXY", "VLO", "WMB"]},
+    {"name": "Industrials", "sector": "Industrials", "tickers": [
+        "CAT", "DE", "GE", "HON", "UPS", "RTX", "LMT", "BA", "UNP", "ETN", "EMR"]},
+    {"name": "Consumer Cyclical", "sector": "Consumer Cyclical", "tickers": [
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "LOW", "BKNG", "CMG", "TJX"]},
+    {"name": "Consumer Defensive", "sector": "Consumer Defensive", "tickers": [
+        "WMT", "COST", "PG", "KO", "PEP", "PM", "MO", "CL", "MDLZ", "KHC"]},
+    {"name": "Communication", "sector": "Communication Services", "tickers": [
+        "GOOGL", "META", "NFLX", "DIS", "CMCSA", "T", "VZ", "TMUS", "SPOT", "TTD"]},
+    {"name": "Autos / EV", "sector": "Consumer Cyclical", "tickers": [
+        "TSLA", "F", "GM", "RIVN", "LCID", "TM", "HMC", "STLA", "RACE"]},
+    {"name": "Utilities", "sector": "Utilities", "tickers": [
+        "NEE", "SO", "DUK", "CEG", "SRE", "AEP", "D", "EXC", "XEL", "PCG"]},
+    {"name": "Real Estate", "sector": "Real Estate", "tickers": [
+        "PLD", "AMT", "EQIX", "CCI", "SPG", "O", "WELL", "DLR", "PSA", "VICI"]},
+    {"name": "Materials", "sector": "Materials", "tickers": [
+        "LIN", "APD", "SHW", "ECL", "NEM", "FCX", "NUE", "DOW", "DD", "VMC"]},
+]
+
+
+def _ensure_builder_lists_tables(conn=None) -> None:
+    own = conn is None
+    if own:
+        if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+            return
+        conn = _fund_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS builder_lists (
+                    id          TEXT PRIMARY KEY,
+                    lp_id       TEXT NOT NULL,
+                    name        TEXT NOT NULL,
+                    sector      TEXT NOT NULL DEFAULT '',
+                    source      TEXT NOT NULL DEFAULT 'manual',
+                    sort_order  INT  NOT NULL DEFAULT 0,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS builder_list_tickers (
+                    list_id     TEXT NOT NULL REFERENCES builder_lists(id) ON DELETE CASCADE,
+                    ticker      TEXT NOT NULL,
+                    note        TEXT NOT NULL DEFAULT '',
+                    added_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (list_id, ticker)
+                )""")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS builder_list_snapshots (
+                    list_id     TEXT NOT NULL,
+                    as_of       DATE NOT NULL,
+                    n_tickers   INT NOT NULL DEFAULT 0,
+                    n_up        INT NOT NULL DEFAULT 0,
+                    n_down      INT NOT NULL DEFAULT 0,
+                    avg_pct     DOUBLE PRECISION,
+                    median_pct  DOUBLE PRECISION,
+                    PRIMARY KEY (list_id, as_of)
+                )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS builder_lists_lp_idx ON builder_lists(lp_id, sort_order)")
+            if own:
+                conn.commit()
+    except Exception as e:
+        print(f"[builder-lists] ensure tables: {e!s:.160}", flush=True)
+        if own:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _builder_list_id() -> str:
+    import uuid as _uuid
+    return "BL_" + _uuid.uuid4().hex[:12]
+
+
+def _builder_lists_for_user(lp_id: str) -> list[dict]:
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return []
+    _ensure_builder_lists_tables()
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT l.id, l.name, l.sector, l.source, l.sort_order, l.updated_at,
+                   COUNT(t.ticker)::int AS n_tickers
+              FROM builder_lists l
+              LEFT JOIN builder_list_tickers t ON t.list_id = l.id
+             WHERE l.lp_id = %s
+             GROUP BY l.id
+             ORDER BY l.sort_order, l.name
+        """, (lp_id,))
+        rows = cur.fetchall() or []
+    out = []
+    for r in rows:
+        out.append({
+            "id": r[0],
+            "name": r[1],
+            "sector": r[2] or "",
+            "source": r[3] or "manual",
+            "sort_order": r[4] or 0,
+            "n_tickers": r[6] or 0,
+            "updated_at": r[5].isoformat() if r[5] else None,
+        })
+    return out
+
+
+def _builder_list_tickers(list_id: str, lp_id: str) -> list[str]:
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT t.ticker FROM builder_list_tickers t
+              JOIN builder_lists l ON l.id = t.list_id
+             WHERE t.list_id = %s AND l.lp_id = %s
+             ORDER BY t.added_at, t.ticker
+        """, (list_id, lp_id))
+        return [(r[0] or "").upper() for r in (cur.fetchall() or []) if r and r[0]]
+
+
+def _builder_list_board(list_id: str, lp_id: str) -> dict:
+    """Live board for one list: quotes + simple breadth snapshot."""
+    tickers = _builder_list_tickers(list_id, lp_id)
+    quotes: dict = {}
+    if tickers:
+        try:
+            raw = batch_quotes(",".join(tickers)) or {}
+        except Exception as e:
+            print(f"[builder-lists] quotes: {e!s:.120}", flush=True)
+            raw = {}
+        for tk in tickers:
+            q = raw.get(tk) or {}
+            quotes[tk] = {
+                "price": q.get("price"),
+                "pct": q.get("pct_change"),
+                "as_of": q.get("as_of"),
+            }
+    pcts = []
+    n_up = n_down = 0
+    for tk in tickers:
+        p = (quotes.get(tk) or {}).get("pct")
+        if p is None:
+            continue
+        try:
+            pf = float(p)
+        except (TypeError, ValueError):
+            continue
+        pcts.append(pf)
+        if pf > 0:
+            n_up += 1
+        elif pf < 0:
+            n_down += 1
+    avg_pct = (sum(pcts) / len(pcts)) if pcts else None
+    med_pct = None
+    if pcts:
+        sp = sorted(pcts)
+        mid = len(sp) // 2
+        med_pct = sp[mid] if len(sp) % 2 else (sp[mid - 1] + sp[mid]) / 2
+    # Persist daily snapshot for tracking over time
+    try:
+        from datetime import date as _date
+        as_of = _date.today().isoformat()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO builder_list_snapshots
+                    (list_id, as_of, n_tickers, n_up, n_down, avg_pct, median_pct)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (list_id, as_of) DO UPDATE SET
+                    n_tickers = EXCLUDED.n_tickers,
+                    n_up = EXCLUDED.n_up,
+                    n_down = EXCLUDED.n_down,
+                    avg_pct = EXCLUDED.avg_pct,
+                    median_pct = EXCLUDED.median_pct
+            """, (list_id, as_of, len(tickers), n_up, n_down, avg_pct, med_pct))
+            conn.commit()
+            cur.execute("""
+                SELECT as_of, n_tickers, n_up, n_down, avg_pct, median_pct
+                  FROM builder_list_snapshots
+                 WHERE list_id = %s
+                 ORDER BY as_of DESC
+                 LIMIT 30
+            """, (list_id,))
+            hist_rows = cur.fetchall() or []
+        history = [{
+            "as_of": str(r[0]),
+            "n_tickers": r[1],
+            "n_up": r[2],
+            "n_down": r[3],
+            "avg_pct": r[4],
+            "median_pct": r[5],
+        } for r in reversed(hist_rows)]
+    except Exception as e:
+        print(f"[builder-lists] snapshot: {e!s:.120}", flush=True)
+        history = []
+
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, name, sector, source FROM builder_lists WHERE id=%s AND lp_id=%s",
+                    (list_id, lp_id))
+        meta = cur.fetchone()
+    if not meta:
+        raise HTTPException(404, "List not found")
+    return {
+        "ok": True,
+        "list": {
+            "id": meta[0],
+            "name": meta[1],
+            "sector": meta[2] or "",
+            "source": meta[3] or "manual",
+        },
+        "tickers": tickers,
+        "quotes": quotes,
+        "breadth": {
+            "n": len(tickers),
+            "n_up": n_up,
+            "n_down": n_down,
+            "n_flat": max(0, len(tickers) - n_up - n_down - sum(1 for t in tickers if (quotes.get(t) or {}).get("pct") is None)),
+            "avg_pct": avg_pct,
+            "median_pct": med_pct,
+        },
+        "history": history,
+    }
+
+
+@app.get("/api/v2/builder/lists")
+def builder_lists_get(request: Request):
+    """All sector/named watchlists for the GP."""
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    _ensure_builder_lists_tables()
+    lists = _builder_lists_for_user(lp_id)
+    return {"ok": True, "lists": lists, "seeded": len(lists) > 0}
+
+
+@app.post("/api/v2/builder/lists/seed")
+def builder_lists_seed(request: Request):
+    """Idempotent seed of standard sector boards (GuruFocus-style starting set)."""
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    _ensure_builder_lists_tables()
+    created = 0
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT name FROM builder_lists WHERE lp_id=%s", (lp_id,))
+        have = {(r[0] or "").lower() for r in (cur.fetchall() or [])}
+        for i, spec in enumerate(_BUILDER_SEED_LISTS):
+            nm = spec["name"]
+            if nm.lower() in have:
+                continue
+            lid = _builder_list_id()
+            cur.execute("""
+                INSERT INTO builder_lists (id, lp_id, name, sector, source, sort_order)
+                VALUES (%s, %s, %s, %s, 'seed', %s)
+            """, (lid, lp_id, nm, spec.get("sector") or nm, i * 10))
+            for tk in (spec.get("tickers") or []):
+                tku = (tk or "").strip().upper().replace(".", "-")
+                if not tku:
+                    continue
+                cur.execute("""
+                    INSERT INTO builder_list_tickers (list_id, ticker)
+                    VALUES (%s, %s) ON CONFLICT DO NOTHING
+                """, (lid, tku))
+            created += 1
+            have.add(nm.lower())
+        conn.commit()
+    return {"ok": True, "created": created, "lists": _builder_lists_for_user(lp_id)}
+
+
+@app.post("/api/v2/builder/lists")
+def builder_lists_create(request: Request):
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    body = _request_json_sync(request) or {}
+    name = (body.get("name") or "").strip()[:80]
+    sector = (body.get("sector") or name or "").strip()[:80]
+    tickers = body.get("tickers") or []
+    if not name:
+        raise HTTPException(400, "name required")
+    _ensure_builder_lists_tables()
+    lid = _builder_list_id()
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COALESCE(MAX(sort_order),0)+10 FROM builder_lists WHERE lp_id=%s", (lp_id,))
+        so = int((cur.fetchone() or [10])[0] or 10)
+        cur.execute("""
+            INSERT INTO builder_lists (id, lp_id, name, sector, source, sort_order)
+            VALUES (%s, %s, %s, %s, 'manual', %s)
+        """, (lid, lp_id, name, sector, so))
+        for tk in tickers:
+            tku = str(tk or "").strip().upper().replace(".", "-")
+            if tku:
+                cur.execute(
+                    "INSERT INTO builder_list_tickers (list_id, ticker) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                    (lid, tku))
+        conn.commit()
+    return {"ok": True, "id": lid, "lists": _builder_lists_for_user(lp_id)}
+
+
+@app.get("/api/v2/builder/lists/{list_id}")
+def builder_list_board_get(list_id: str, request: Request):
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    _ensure_builder_lists_tables()
+    return _builder_list_board(list_id, lp_id)
+
+
+@app.patch("/api/v2/builder/lists/{list_id}")
+@app.post("/api/v2/builder/lists/{list_id}/update")
+def builder_list_update(list_id: str, request: Request):
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    body = _request_json_sync(request) or {}
+    name = body.get("name")
+    sector = body.get("sector")
+    with _fund_conn() as conn, conn.cursor() as cur:
+        if name is not None:
+            cur.execute("UPDATE builder_lists SET name=%s, updated_at=now() WHERE id=%s AND lp_id=%s",
+                        (str(name).strip()[:80], list_id, lp_id))
+        if sector is not None:
+            cur.execute("UPDATE builder_lists SET sector=%s, updated_at=now() WHERE id=%s AND lp_id=%s",
+                        (str(sector).strip()[:80], list_id, lp_id))
+        if cur.rowcount == 0 and name is None and sector is None:
+            pass
+        conn.commit()
+    return {"ok": True, "lists": _builder_lists_for_user(lp_id)}
+
+
+@app.delete("/api/v2/builder/lists/{list_id}")
+def builder_list_delete(list_id: str, request: Request):
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM builder_lists WHERE id=%s AND lp_id=%s", (list_id, lp_id))
+        conn.commit()
+    return {"ok": True, "lists": _builder_lists_for_user(lp_id)}
+
+
+@app.post("/api/v2/builder/lists/{list_id}/tickers")
+def builder_list_add_tickers(list_id: str, request: Request):
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    body = _request_json_sync(request) or {}
+    raw = body.get("tickers") or body.get("ticker") or ""
+    if isinstance(raw, str):
+        parts = [p.strip().upper().replace(".", "-") for p in raw.replace("\n", ",").replace(" ", ",").split(",") if p.strip()]
+    else:
+        parts = [str(p).strip().upper().replace(".", "-") for p in (raw or []) if str(p).strip()]
+    if not parts:
+        raise HTTPException(400, "tickers required")
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM builder_lists WHERE id=%s AND lp_id=%s", (list_id, lp_id))
+        if not cur.fetchone():
+            raise HTTPException(404, "List not found")
+        added = 0
+        for tk in parts:
+            cur.execute(
+                "INSERT INTO builder_list_tickers (list_id, ticker) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                (list_id, tk))
+            added += cur.rowcount or 0
+        cur.execute("UPDATE builder_lists SET updated_at=now() WHERE id=%s", (list_id,))
+        conn.commit()
+    return {"ok": True, "added": added, "board": _builder_list_board(list_id, lp_id)}
+
+
+@app.delete("/api/v2/builder/lists/{list_id}/tickers/{ticker}")
+def builder_list_remove_ticker(list_id: str, ticker: str, request: Request):
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    tk = (ticker or "").strip().upper()
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            DELETE FROM builder_list_tickers t
+             USING builder_lists l
+             WHERE t.list_id = l.id AND l.id = %s AND l.lp_id = %s AND t.ticker = %s
+        """, (list_id, lp_id, tk))
+        conn.commit()
+    return {"ok": True, "board": _builder_list_board(list_id, lp_id)}
+
 
 
 @app.get("/api/v2/builder/candidates")

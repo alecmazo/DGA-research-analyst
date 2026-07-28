@@ -647,179 +647,200 @@ End with the sleeve block at this account's real market value so I can push it t
 </div><!-- #tab-research -->
 
 
-<!-- ══ BUILDER TAB (pool-first redesign, ui377) ════════════════ -->
+<!-- ══ BUILDER TAB — sector watchlist boards (ui380) ═══════════ -->
 <div id="tab-builder" class="tab-panel">
-  <div class="wide-shell" style="max-width:1300px;margin:18px auto;padding:0 20px;">
-    <div class="tab-toolbar" style="display:flex;align-items:baseline;gap:16px;margin-bottom:16px;">
-      <h2 style="margin:0;font-size:22px;font-weight:800;letter-spacing:-0.3px;color:var(--text-primary);">🧮 Builder</h2>
-      <div style="font-size:11.5px;color:#64748b;flex:1;">
-        Pick stocks from your saved research, choose a weighting method, and build a basket.
-        Every saved report is eligible — names without a stored price target show "—" and stay in the pool.
-      </div>
-      <div id="builder-pool-meta" style="font-size:11px;color:#64748b;font-weight:600;">—</div>
-    </div>
+  <div class="wide-shell builder-shell">
 
-    <div class="builder-grid2">
-      <!-- ── LEFT: stock pool picker ──────────────────────────────── -->
-      <section class="builder-card">
-        <header class="builder-card-head" style="gap:8px;">
-          <span>Stock Pool</span>
-          <span id="builder-pool-count" style="font-weight:700;color:var(--blue-dark,#3E9AB8);text-transform:none;letter-spacing:0;">—</span>
-          <button id="builder-pool-refresh-btn" class="builder-btn-sec"
-                  title="Re-pull tickers + targets from your saved reports and resolve sectors. Stays on this tab."
-                  style="margin-left:auto;padding:3px 10px;font-size:11px;white-space:nowrap;">↻ Refresh</button>
+    <header class="page-hero builder-hero">
+      <div class="page-hero-text">
+        <div class="page-eyebrow">Sectors · track over time</div>
+        <h2 class="page-title">Builder</h2>
+        <p class="page-sub">Named sector boards (GuruFocus-style): populate lists, watch day moves, and keep a breadth history. Seed defaults, then edit freely.</p>
+      </div>
+      <div class="page-hero-actions">
+        <button type="button" id="bl-seed-btn" class="tab-btn">Seed sector boards</button>
+        <button type="button" id="bl-new-btn" class="btn-primary">+ New list</button>
+      </div>
+    </header>
+
+    <div class="bl-layout">
+      <!-- Left: lists -->
+      <aside class="panel bl-rail" id="bl-rail">
+        <header class="panel-head term-panel-head">
+          <span class="panel-title">Boards</span>
+          <span class="panel-badge" id="bl-list-count">0</span>
         </header>
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--panel-edge);flex-wrap:wrap;">
-          <input id="builder-pool-search" type="text" placeholder="Filter ticker / name / sector…"
-            style="flex:1;min-width:140px;padding:5px 9px;border:1px solid var(--panel-edge);border-radius:4px;font-size:11.5px;background:var(--bg-elevated,#fff);color:var(--text-primary);">
-          <label style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;"
-                 title="Comp-table tickers extracted from your reports (upside from Yahoo analyst targets). Off by default.">
-            <input type="checkbox" id="builder-include-comps" style="accent-color:var(--blue);width:12px;height:12px;">
-            include comps
-          </label>
-          <span style="display:inline-flex;gap:4px;">
-            <button type="button" id="builder-pool-all"  class="builder-btn-sec" style="padding:2px 8px;font-size:10px;">All</button>
-            <button type="button" id="builder-pool-none" class="builder-btn-sec" style="padding:2px 8px;font-size:10px;">None</button>
-          </span>
+        <div id="bl-list-nav" class="bl-list-nav">
+          <div class="term-empty"><div class="term-empty-title">No boards yet</div>
+            <div class="term-empty-sub">Click <b>Seed sector boards</b> to import a standard set (Tech, Semis, Healthcare…), or create your own.</div></div>
         </div>
-        <div id="builder-pool-list" class="builder-pool-list">
-          <div style="padding:12px 14px;font-size:11px;color:#94a3b8;font-style:italic;">Loading saved reports…</div>
+      </aside>
+
+      <!-- Main: active board -->
+      <section class="panel bl-board" id="bl-board">
+        <header class="panel-head term-panel-head" style="flex-wrap:wrap;gap:10px;">
+          <div class="term-panel-title-wrap">
+            <span class="panel-title" id="bl-board-title">Select a board</span>
+            <span class="panel-badge" id="bl-board-sector">—</span>
+          </div>
+          <div class="bl-board-actions">
+            <input id="bl-add-tickers" class="bl-add-input" type="text"
+                   placeholder="Add tickers: NVDA, AMD, AVGO" autocomplete="off">
+            <button type="button" id="bl-add-btn" class="tab-btn sm">Add</button>
+            <button type="button" id="bl-refresh-btn" class="tab-btn sm" title="Refresh quotes">↻</button>
+            <button type="button" id="bl-rename-btn" class="tab-btn sm">Rename</button>
+            <button type="button" id="bl-delete-btn" class="tab-btn sm" style="color:var(--danger-700);">Delete</button>
+          </div>
+        </header>
+
+        <div class="kpi-strip bl-kpi" id="bl-kpi" hidden>
+          <div class="kpi-card">
+            <div class="kpi-label">Names</div>
+            <div class="kpi-value kpi-value-sm" id="bl-kpi-n">—</div>
+            <div class="kpi-hint">On this board</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Up today</div>
+            <div class="kpi-value kpi-value-sm pos" id="bl-kpi-up">—</div>
+            <div class="kpi-hint">Breadth green</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Down today</div>
+            <div class="kpi-value kpi-value-sm neg" id="bl-kpi-dn">—</div>
+            <div class="kpi-hint">Breadth red</div>
+          </div>
+          <div class="kpi-card kpi-card-meta">
+            <div class="kpi-label">Avg day %</div>
+            <div class="kpi-value kpi-value-sm" id="bl-kpi-avg">—</div>
+            <div class="kpi-hint" id="bl-kpi-hint">Equal-weight board move</div>
+          </div>
+        </div>
+
+        <div class="bl-history" id="bl-history" hidden>
+          <span class="meta-label">Breadth history (daily)</span>
+          <div id="bl-history-bars" class="bl-history-bars"></div>
+        </div>
+
+        <div class="bl-table-wrap">
+          <table class="term-table bl-table" id="bl-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th class="num">Last</th>
+                <th class="num">Day %</th>
+                <th class="num">Day $</th>
+                <th class="bl-th-act"></th>
+              </tr>
+            </thead>
+            <tbody id="bl-tbody">
+              <tr><td colspan="5" class="wl-empty-cell">Select or seed a board to begin.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="bl-status" class="status-bar" style="margin:12px;margin-top:0;">
+          Sector boards replace the old single-pool builder as the primary surface. Basket construction is under Advanced.
         </div>
       </section>
+    </div>
 
-      <!-- ── RIGHT: construction controls ─────────────────────────── -->
-      <section class="builder-card">
-        <header class="builder-card-head">Construction</header>
-        <div class="builder-card-body">
-          <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
-            <label class="builder-field" style="margin-bottom:0;width:150px;">
-              <span>Basket size ($)</span>
-              <input id="builder-basket-size" type="number" value="1000000" step="10000" min="0">
-            </label>
-            <div class="builder-field" style="margin-bottom:0;flex:1;min-width:280px;">
-              <span>Weighting method</span>
-              <div class="builder-seg" id="builder-method-seg">
-                <button type="button" data-method="equal" class="active">Equal</button>
-                <button type="button" data-method="ev_weighted">Conviction (EV)</button>
-                <button type="button" data-method="rating_weighted">Rating-tiered</button>
-              </div>
-              <span id="builder-method-explain" style="font-size:10px;color:var(--text-tertiary,#64748b);text-transform:none;letter-spacing:0;font-weight:500;">
-                1/N across every selected stock — no price targets needed.
+    <!-- Legacy basket construction preserved -->
+    <details id="builder-legacy-wrap" class="panel" style="margin-top:16px;padding:0;">
+      <summary class="panel-head" style="cursor:pointer;list-style:none;">
+        <span class="panel-title">Advanced · basket constructor</span>
+        <span class="panel-action">Equal / EV / rating weight · save scenarios</span>
+      </summary>
+      <div style="padding:12px 16px 16px;">
+        <div class="builder-grid2">
+          <section class="builder-card">
+            <header class="builder-card-head" style="gap:8px;">
+              <span>Stock Pool</span>
+              <span id="builder-pool-count" style="font-weight:700;color:var(--blue-dark,#3E9AB8);text-transform:none;letter-spacing:0;">—</span>
+              <button id="builder-pool-refresh-btn" class="builder-btn-sec"
+                      title="Re-pull tickers + targets from your saved reports"
+                      style="margin-left:auto;padding:3px 10px;font-size:11px;white-space:nowrap;">↻ Refresh</button>
+            </header>
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--panel-edge);flex-wrap:wrap;">
+              <input id="builder-pool-search" type="text" placeholder="Filter ticker / name / sector…"
+                style="flex:1;min-width:140px;padding:5px 9px;border:1px solid var(--panel-edge);border-radius:4px;font-size:11.5px;background:var(--bg-elevated,#fff);color:var(--text-primary);">
+              <label style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;">
+                <input type="checkbox" id="builder-include-comps" style="accent-color:var(--blue);width:12px;height:12px;">
+                include comps
+              </label>
+              <span style="display:inline-flex;gap:4px;">
+                <button type="button" id="builder-pool-all"  class="builder-btn-sec" style="padding:2px 8px;font-size:10px;">All</button>
+                <button type="button" id="builder-pool-none" class="builder-btn-sec" style="padding:2px 8px;font-size:10px;">None</button>
               </span>
             </div>
-            <label class="builder-field" style="margin-bottom:0;width:120px;">
-              <span>Max per stock (%)</span>
-              <input id="builder-max-per-stock" type="number" value="10" step="1" min="1" max="100">
-            </label>
-            <label class="builder-field" style="margin-bottom:0;width:150px;" title="Optional — 0 disables the sector cap">
-              <span>Max per sector (%) <em style="text-transform:none;font-style:normal;font-weight:500;">(opt.)</em></span>
-              <input id="builder-max-sector-pct" type="number" value="0" step="5" min="0" max="100" placeholder="0 = none">
-            </label>
-            <button id="builder-construct-btn" class="builder-btn-primary" style="width:auto;padding:10px 24px;">⚡ Build</button>
-          </div>
-          <div id="builder-status" style="margin-top:8px;font-size:11px;color:#94a3b8;min-height:16px;"></div>
+            <div id="builder-pool-list" class="builder-pool-list">
+              <div style="padding:12px 14px;font-size:11px;color:#94a3b8;font-style:italic;">Open Advanced to load the research pool…</div>
+            </div>
+          </section>
+          <section class="builder-card">
+            <header class="builder-card-head">Construction</header>
+            <div class="builder-card-body">
+              <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
+                <label class="builder-field" style="margin-bottom:0;width:150px;">
+                  <span>Basket size ($)</span>
+                  <input id="builder-basket-size" type="number" value="1000000" step="10000" min="0">
+                </label>
+                <div class="builder-field" style="margin-bottom:0;flex:1;min-width:280px;">
+                  <span>Weighting method</span>
+                  <div class="builder-seg" id="builder-method-seg">
+                    <button type="button" data-method="equal" class="active">Equal</button>
+                    <button type="button" data-method="ev_weighted">Conviction (EV)</button>
+                    <button type="button" data-method="rating_weighted">Rating-tiered</button>
+                  </div>
+                  <span id="builder-method-explain" style="font-size:10px;color:var(--text-tertiary,#64748b);">1/N across selected names.</span>
+                </div>
+                <label class="builder-field" style="margin-bottom:0;width:120px;">
+                  <span>Max per stock (%)</span>
+                  <input id="builder-max-per-stock" type="number" value="10" step="1" min="1" max="100">
+                </label>
+                <label class="builder-field" style="margin-bottom:0;width:150px;">
+                  <span>Max per sector (%)</span>
+                  <input id="builder-max-sector-pct" type="number" value="0" step="5" min="0" max="100">
+                </label>
+                <button id="builder-construct-btn" class="builder-btn-primary" style="width:auto;padding:10px 24px;">Build basket</button>
+              </div>
+              <div id="builder-status" style="margin-top:8px;font-size:11px;color:#94a3b8;min-height:16px;"></div>
+            </div>
+          </section>
         </div>
-      </section>
-    </div>
-
-    <!-- ── RESULT PANEL ──────────────────────────────────────────── -->
-    <section id="builder-result" class="builder-card" style="margin-top:18px;display:none;">
-      <header class="builder-card-head">
-        <span>Allocation Result</span>
-        <span id="builder-result-summary" style="margin-left:auto;font-size:11px;color:#64748b;font-weight:600;">—</span>
-      </header>
-      <!-- Action bar: save scenario / push tickers to watchlist -->
-      <div id="builder-actions" style="display:flex;gap:10px;padding:10px 16px;background:#fafbfc;border-bottom:1px solid #e2e8f0;align-items:center;">
-        <input id="builder-scenario-name" type="text" placeholder="Name this basket (optional)"
-          style="flex:1;padding:7px 10px;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;background:#fff;">
-        <button id="builder-save-btn" class="builder-btn-sec" style="white-space:nowrap;">💾 Save Scenario</button>
-        <button id="builder-watchlist-btn" class="builder-btn-primary" style="width:auto;padding:8px 14px;white-space:nowrap;">📌 Add Basket to Watchlist</button>
-      </div>
-      <div id="builder-action-status" style="display:none;padding:8px 16px;font-size:11px;background:#ecfdf5;color:#065f46;border-bottom:1px solid #d1fae5;"></div>
-      <div class="builder-card-body" style="padding:0;">
-        <div id="builder-warnings" style="display:none;padding:10px 16px;background:#fef3c7;border-bottom:1px solid #fde68a;font-size:11px;color:#78350f;"></div>
-        <div id="builder-result-body"></div>
-      </div>
-    </section>
-
-    <!-- ── SAVED SCENARIOS ───────────────────────────────────────── -->
-    <section id="builder-scenarios-panel" class="builder-card" style="margin-top:18px;display:none;">
-      <header class="builder-card-head">
-        <span>Saved Scenarios</span>
-        <span id="builder-scenarios-count" style="margin-left:auto;font-size:11px;color:#64748b;font-weight:600;">—</span>
-      </header>
-      <div class="builder-card-body" style="padding:0;">
-        <div id="builder-scenarios-list"></div>
-      </div>
-    </section>
-
-    <!-- ── ADVANCED: legacy sector-target allocator (moved inside a
-         collapsed <details>; all original IDs + logic preserved) ──── -->
-    <details id="builder-advanced" style="margin-top:18px;">
-      <summary style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--text-secondary);padding:8px 2px;user-select:none;">
-        ⚙️ Advanced: sector-target mode
-        <span style="font-weight:500;color:var(--text-tertiary,#64748b);">— set explicit sector weights; highest-EV names per sector get the largest weights (legacy allocator)</span>
-      </summary>
-      <div class="builder-grid" style="margin-top:12px;">
-        <!-- LEFT: weight controls -->
-        <section class="builder-card">
-          <header class="builder-card-head">Sector Weights</header>
-          <div class="builder-card-body">
-            <div id="builder-sectors-list"></div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-              <select id="builder-add-sector" style="flex:1;font-size:12px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;">
-                <option value="">+ Add sector…</option>
-              </select>
-              <button id="builder-add-sector-btn" class="builder-btn-sec">Add</button>
-            </div>
-            <div id="builder-weight-total" style="margin-top:12px;padding:8px 10px;background:#f8fafc;border-radius:4px;font-size:11px;color:#475569;display:flex;justify-content:space-between;">
-              <span>Total weight:</span>
-              <strong id="builder-weight-total-val" style="color:var(--text-primary);">0%</strong>
-            </div>
-          </div>
-        </section>
-
-        <!-- CENTER: options + build -->
-        <section class="builder-card">
-          <header class="builder-card-head">Options</header>
-          <div class="builder-card-body">
-            <div style="font-size:10px;color:var(--text-tertiary,#64748b);margin-bottom:10px;line-height:1.5;">
-              Uses the <strong>basket size</strong> and <strong>max per stock %</strong> from the Construction bar above.
-            </div>
-            <label class="builder-field">
-              <span>Allocation method</span>
-              <select id="builder-method">
-                <option value="ev_weighted" selected>EV-weighted (softmax by upside)</option>
-                <option value="equal">Equal-weight top N</option>
-              </select>
-            </label>
-            <label class="builder-field">
-              <span>Max stocks per sector</span>
-              <input id="builder-max-per-sector" type="number" value="6" step="1" min="1" max="20">
-            </label>
-            <label class="builder-field-inline">
-              <input id="builder-redistribute" type="checkbox" checked>
-              <span>Redistribute empty sectors</span>
-            </label>
-            <button id="builder-run-btn" class="builder-btn-primary" style="margin-top:14px;">⚡ Build Basket (sector-target)</button>
-          </div>
-        </section>
-
-        <!-- RIGHT: candidate pool summary -->
-        <section class="builder-card">
+        <section id="builder-result" class="builder-card" style="margin-top:14px;display:none;">
           <header class="builder-card-head">
-            <span>Sector Summary</span>
+            <span>Allocation Result</span>
+            <span id="builder-result-summary" style="margin-left:auto;font-size:11px;color:#64748b;font-weight:600;">—</span>
           </header>
-          <div class="builder-card-body">
-            <div id="builder-sectors-summary" style="font-size:11.5px;color:#475569;">
-              <div style="opacity:0.6;font-style:italic;">Loading saved reports…</div>
-            </div>
+          <div id="builder-actions" style="display:flex;gap:10px;padding:10px 16px;background:#fafbfc;border-bottom:1px solid #e2e8f0;align-items:center;">
+            <input id="builder-scenario-name" type="text" placeholder="Name this basket"
+              style="flex:1;padding:7px 10px;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;">
+            <button id="builder-save-btn" class="builder-btn-sec">Save Scenario</button>
+            <button id="builder-watchlist-btn" class="builder-btn-primary" style="width:auto;padding:8px 14px;">Add to Desk watchlist</button>
+          </div>
+          <div id="builder-action-status" style="display:none;padding:8px 16px;font-size:11px;background:#ecfdf5;color:#065f46;"></div>
+          <div class="builder-card-body" style="padding:0;">
+            <div id="builder-warnings" style="display:none;padding:10px 16px;background:#fef3c7;font-size:11px;"></div>
+            <div id="builder-result-body"></div>
           </div>
         </section>
+        <section id="builder-scenarios-panel" class="builder-card" style="margin-top:14px;display:none;">
+          <header class="builder-card-head">
+            <span>Saved Scenarios</span>
+            <span id="builder-scenarios-count" style="margin-left:auto;font-size:11px;color:#64748b;">—</span>
+          </header>
+          <div class="builder-card-body" style="padding:0;"><div id="builder-scenarios-list"></div></div>
+        </section>
+        <!-- keep advanced sector-target ids for legacy JS if present -->
+        <div id="builder-pool-meta" style="display:none;">—</div>
+        <details id="builder-advanced" style="display:none;"><summary></summary>
+          <div class="builder-grid"></div>
+        </details>
       </div>
     </details>
+
   </div>
 </div><!-- #tab-builder -->
+
 
 
 <!-- ══ PODCASTS TAB (internal id remains tab-lab) ═══════════════ -->

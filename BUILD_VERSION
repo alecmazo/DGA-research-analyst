@@ -1,3 +1,2 @@
-ui379-20260728-continuity-button
-# Canonical UI build — keep in sync with api/server.py WEB_BUILD_VERSION
-# and CONTINUITY.md. Never decrease N. Next = max(this, /api/build) + 1.
+ui380-20260728-builder-boards
+# Next = max(this, /api/build) + 1
