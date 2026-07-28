@@ -25,7 +25,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Settings handoff button** | **`ui379-20260728-continuity-button`** | Settings → Continuity handoff (copy/download) |
 | **Builder sector boards** | **`ui380-20260728-builder-boards`** | Multi-list sector boards + breadth history |
 | **Report history / thesis deltas** | **`ui381-20260728-report-history`** | Re-Analyze archives prior; Saved Reports vN + Δ; timeline; Value Rank self-history |
-| **Next deploy after this handoff** | **`ui382-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
+| **Desk X FinTwit card** | **`ui382-20260728-x-fintwit-feed`** | Free FinTwit feed via X public syndication · $0 API |
+| **Next deploy after this handoff** | **`ui383-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -131,6 +132,12 @@ When switching machine or agent (Claude ↔ Grok):
 
 ---
 
+### X FinTwit desk card (ui382)
+
+- Right-rail **X · FinTwit** card on Desk (next to Market Wire).
+- `GET /api/v2/news/x-fin-feed` — free public syndication (`syndication.twitter.com`), **no X API key**, no LLM tokens.
+- Curated finance accounts (wires, macro, Fed, charts, flow); filter chips by tag.
+
 ### Report history (ui381)
 
 - Re-Analyze **archives** the prior markdown into `analyst_report_versions` before overwrite.
@@ -138,4 +145,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui380 → ship ui381 · Next: ui382*
+*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui380 · ship ui381+ui382 · Next: ui383*

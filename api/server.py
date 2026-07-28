@@ -2843,6 +2843,270 @@ def news_market_wire(request: Request, limit: int = 14):
     return _build_market_wire(limit=limit)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# DESK · X FinTwit feed — FREE public syndication (no X API key, no LLM)
+# Fetches curated finance accounts via syndication.twitter.com (same path
+# official timeline embeds use). Cached firm-wide; zero token cost.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_X_FIN_CACHE: dict = {"ts": 0.0, "data": None}
+_X_FIN_TTL = 600  # 10 min — free scrape, be polite
+_X_FIN_ACCT_TTL = 900  # per-handle soft cache
+_X_FIN_HANDLE_CACHE: dict = {}  # handle → {ts, tweets}
+
+# High-signal FinTwit / macro / markets accounts for the Desk card.
+# Edit freely — no paid API; each handle is a free public syndication pull.
+_X_FIN_ACCOUNTS: list[dict] = [
+    {"handle": "DeItaone",       "label": "Walter Bloomberg", "tag": "wire"},
+    {"handle": "FirstSquawk",    "label": "FirstSquawk",      "tag": "wire"},
+    {"handle": "LiveSquawk",     "label": "LiveSquawk",       "tag": "wire"},
+    {"handle": "charliebilello", "label": "Charlie Bilello",  "tag": "charts"},
+    {"handle": "LizAnnSonders",  "label": "Liz Ann Sonders",  "tag": "macro"},
+    {"handle": "RyanDetrick",    "label": "Ryan Detrick",     "tag": "macro"},
+    {"handle": "NickTimiraos",   "label": "Nick Timiraos",    "tag": "fed"},
+    {"handle": "WSJmarkets",     "label": "WSJ Markets",      "tag": "news"},
+    {"handle": "TheStalwart",    "label": "Joe Weisenthal",   "tag": "macro"},
+    {"handle": "unusual_whales", "label": "Unusual Whales",   "tag": "flow"},
+    {"handle": "Barchart",       "label": "Barchart",         "tag": "data"},
+    {"handle": "zerohedge",      "label": "ZeroHedge",        "tag": "macro"},
+]
+
+
+def _x_fin_parse_created(s: str):
+    """Twitter date → unix ts. Returns None on failure."""
+    if not s:
+        return None
+    try:
+        from email.utils import parsedate_to_datetime
+        return int(parsedate_to_datetime(s).timestamp())
+    except Exception:
+        try:
+            from datetime import datetime as _dt
+            return int(_dt.fromisoformat(str(s).replace("Z", "+00:00")).timestamp())
+        except Exception:
+            return None
+
+
+def _x_fin_fetch_handle(handle: str, per: int = 5) -> list[dict]:
+    """Pull recent posts for one public handle via X syndication (free, no key)."""
+    handle = re.sub(r"[^A-Za-z0-9_]", "", (handle or "").lstrip("@"))
+    if not handle:
+        return []
+    now = time.time()
+    cached = _X_FIN_HANDLE_CACHE.get(handle)
+    if cached and (now - cached.get("ts", 0)) < _X_FIN_ACCT_TTL:
+        return list(cached.get("tweets") or [])[:per]
+
+    import json as _json
+    import urllib.request as _req
+    url = (
+        "https://syndication.twitter.com/srv/timeline-profile/screen-name/"
+        + handle
+    )
+    req = _req.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; DGA-Capital-Desk/1.0; +https://portfolio.dgacapital.com)",
+        "Accept": "text/html,application/xhtml+xml",
+    })
+    try:
+        try:
+            with _req.urlopen(req, timeout=9.0) as resp:
+                html = resp.read().decode("utf-8", "replace")
+        except Exception:
+            import ssl
+            ctx = ssl._create_unverified_context()
+            with _req.urlopen(req, timeout=9.0, context=ctx) as resp:
+                html = resp.read().decode("utf-8", "replace")
+    except Exception as e:
+        print(f"[x-fin] {handle}: fetch {e!s:.100}", flush=True)
+        return list((cached or {}).get("tweets") or [])[:per]
+
+    m = re.search(
+        r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+        html, re.S,
+    )
+    if not m:
+        return list((cached or {}).get("tweets") or [])[:per]
+    try:
+        data = _json.loads(m.group(1))
+    except Exception:
+        return []
+
+    tweets: list[dict] = []
+    entries = (
+        ((data.get("props") or {}).get("pageProps") or {})
+        .get("timeline", {})
+        .get("entries")
+        or []
+    )
+    for ent in entries:
+        try:
+            tw = ((ent or {}).get("content") or {}).get("tweet") or {}
+            if not isinstance(tw, dict):
+                continue
+            text = (tw.get("full_text") or tw.get("text") or "").strip()
+            if not text or text.startswith("RT @"):
+                continue
+            uid = str(tw.get("id_str") or tw.get("id") or "")
+            if not uid:
+                continue
+            user = tw.get("user") if isinstance(tw.get("user"), dict) else {}
+            screen = (user.get("screen_name") or handle).lstrip("@")
+            created = tw.get("created_at") or ""
+            pub_ts = _x_fin_parse_created(created)
+            permalink = tw.get("permalink") or f"https://x.com/{screen}/status/{uid}"
+            if permalink.startswith("/"):
+                permalink = "https://x.com" + permalink
+            fav = tw.get("favorite_count")
+            rt = tw.get("retweet_count")
+            try:
+                likes = int(fav) if fav is not None else 0
+            except (TypeError, ValueError):
+                likes = 0
+            try:
+                reposts = int(rt) if rt is not None else 0
+            except (TypeError, ValueError):
+                reposts = 0
+            tweets.append({
+                "id": uid,
+                "handle": screen,
+                "name": user.get("name") or screen,
+                "avatar": user.get("profile_image_url_https")
+                          or user.get("profile_image_url") or "",
+                "text": text,
+                "created_at": created,
+                "pub_ts": pub_ts,
+                "url": permalink,
+                "likes": likes,
+                "reposts": reposts,
+                "source": "x_syndication",
+            })
+        except Exception:
+            continue
+
+    tweets.sort(key=lambda t: -(t.get("pub_ts") or 0))
+    cutoff = now - 21 * 86400
+    recent = [t for t in tweets if (t.get("pub_ts") or 0) >= cutoff]
+    picked = (recent or tweets)[: max(1, min(int(per or 5), 8))]
+    _X_FIN_HANDLE_CACHE[handle] = {"ts": now, "tweets": tweets[:12]}
+    return picked
+
+
+def _build_x_fin_feed(limit: int = 36, handles: list[str] | None = None) -> dict:
+    """Merge curated FinTwit accounts into one chronological free feed."""
+    now = time.time()
+    c = _X_FIN_CACHE
+    use_cache = not handles
+    if use_cache and c["data"] is not None and (now - c["ts"]) < _X_FIN_TTL:
+        data = dict(c["data"])
+        data["items"] = (data.get("items") or [])[:limit]
+        data["cached"] = True
+        return data
+
+    accts = list(_X_FIN_ACCOUNTS)
+    if handles:
+        want = {h.lstrip("@").lower() for h in handles if h}
+        filtered = [a for a in accts if a["handle"].lower() in want]
+        accts = filtered or accts
+
+    tag_by = {a["handle"].lower(): a.get("tag") or "fin" for a in accts}
+    label_by = {a["handle"].lower(): a.get("label") or a["handle"] for a in accts}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    merged: list[dict] = []
+    errors: list[str] = []
+    with ThreadPoolExecutor(max_workers=min(8, max(2, len(accts)))) as pool:
+        futs = {
+            pool.submit(_x_fin_fetch_handle, a["handle"], 5): a
+            for a in accts
+        }
+        try:
+            iterator = as_completed(futs, timeout=18)
+            for fut in iterator:
+                a = futs[fut]
+                try:
+                    rows = fut.result()
+                    for r in rows:
+                        r2 = dict(r)
+                        h = (r2.get("handle") or a["handle"]).lower()
+                        r2["tag"] = tag_by.get(h) or a.get("tag") or "fin"
+                        r2["label"] = label_by.get(h) or a.get("label") or r2.get("name")
+                        merged.append(r2)
+                except Exception as e:
+                    errors.append(f"{a.get('handle')}: {e!s:.60}")
+        except TimeoutError:
+            errors.append("partial: some accounts timed out")
+            for fut, a in futs.items():
+                if not fut.done():
+                    continue
+                try:
+                    rows = fut.result(timeout=0)
+                    for r in rows:
+                        r2 = dict(r)
+                        h = (r2.get("handle") or a["handle"]).lower()
+                        r2["tag"] = tag_by.get(h) or a.get("tag") or "fin"
+                        r2["label"] = label_by.get(h) or a.get("label") or r2.get("name")
+                        if r2.get("id") not in {x.get("id") for x in merged}:
+                            merged.append(r2)
+                except Exception:
+                    pass
+
+    seen: set[str] = set()
+    uniq: list[dict] = []
+    for it in merged:
+        iid = str(it.get("id") or "")
+        if not iid or iid in seen:
+            continue
+        seen.add(iid)
+        uniq.append(it)
+    uniq.sort(key=lambda x: -(x.get("pub_ts") or 0))
+    items = uniq[: max(8, min(int(limit or 36), 60))]
+
+    data = {
+        "ok": True,
+        "kind": "x_fin_feed",
+        "as_of": _pacific_time_str(),
+        "ttl_seconds": _X_FIN_TTL,
+        "token_cost": 0,
+        "api_cost": 0,
+        "note": "Free X public syndication · no API key · no LLM tokens. Curated FinTwit desk accounts.",
+        "accounts": [
+            {"handle": a["handle"], "label": a.get("label"), "tag": a.get("tag")}
+            for a in accts
+        ],
+        "items": items,
+        "errors": errors[:8] if errors else [],
+        "cached": False,
+    }
+    if use_cache:
+        _X_FIN_CACHE["ts"] = now
+        _X_FIN_CACHE["data"] = data
+    return data
+
+
+@app.get("/api/v2/news/x-fin-feed")
+def news_x_fin_feed(request: Request, limit: int = 36, handles: str = ""):
+    """Live-ish FinTwit feed for Desk. Free public syndication — $0 API / $0 LLM.
+
+    Optional ``handles`` = comma-separated subset of curated accounts.
+    """
+    hlist = None
+    if handles and handles.strip():
+        hlist = [x.strip() for x in handles.split(",") if x.strip()][:16]
+    try:
+        return _build_x_fin_feed(limit=limit, handles=hlist)
+    except Exception as e:
+        print(f"[x-fin] build failed: {e!s:.160}", flush=True)
+        return {
+            "ok": False,
+            "kind": "x_fin_feed",
+            "items": [],
+            "error": f"{e!s:.160}",
+            "as_of": _pacific_time_str(),
+            "token_cost": 0,
+            "api_cost": 0,
+        }
+
+
 @app.get("/api/v2/news/fund-filings")
 def news_fund_filings(request: Request, limit: int = 50, days: int = 30):
     """Free SEC EDGAR feed for saved-report universe. Newest first. No LLM.
@@ -6342,7 +6606,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui381-20260728-report-history"
+WEB_BUILD_VERSION = "ui382-20260728-x-fintwit-feed"
 
 
 @app.get("/api/build")

@@ -621,6 +621,21 @@ End with the sleeve block at this account's real market value so I can push it t
       </div>
     </section>
 
+    <!-- X · FinTwit — free public syndication (no X API key, no LLM tokens). -->
+    <section class="panel" data-wid="x-fin-feed" data-collapsible="1" data-expanded="1">
+      <header class="panel-head">
+        <span class="panel-title">X · FinTwit</span>
+        <span class="panel-badge" id="xf-badge" title="Free public syndication · $0 API · $0 tokens">FREE</span>
+        <span class="panel-action" id="xf-asof" style="cursor:default;">—</span>
+        <button type="button" id="xf-refresh" class="panel-action" title="Refresh FinTwit feed"
+                style="background:none;border:none;cursor:pointer;font-size:11px;font-weight:700;color:var(--blue);">↻</button>
+      </header>
+      <div class="xf-filter-bar" id="xf-filters" aria-label="Filter by account tag"></div>
+      <div class="panel-body feed-panel-body xf-feed-body" id="xf-body">
+        <div class="feed-empty">Loading finance-focused X feed…</div>
+      </div>
+    </section>
+
     <!-- Fund Filings — high-signal SEC EDGAR for saved-report universe (newest first). -->
     <section class="panel" data-wid="fund-filings">
       <header class="panel-head">

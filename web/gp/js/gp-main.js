@@ -980,6 +980,143 @@
     // Ensure scroll starts at top (newest)
     body.scrollTop = 0;
   }
+  // ── X · FinTwit (free public syndication — no X API, no LLM) ──
+  window._xfFilterTag = window._xfFilterTag || 'all';
+  window._xfLastPayload = window._xfLastPayload || null;
+
+  function _xfLinkify(text) {
+    const esc = _feedEsc(text || '');
+    return esc
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a class="xf-link" href="$1" target="_blank" rel="noopener">$1</a>')
+      .replace(/(^|[\s])@([A-Za-z0-9_]{1,15})/g, '$1<a class="xf-link" href="https://x.com/$2" target="_blank" rel="noopener">@$2</a>')
+      .replace(/(^|[\s])#([A-Za-z0-9_]{2,40})/g, '$1<span class="xf-hash">#$2</span>');
+  }
+  function _renderXFinFilters(filterEl, accounts, activeTag) {
+    if (!filterEl) return;
+    const tags = ['all'];
+    (accounts || []).forEach(function (a) {
+      const t = (a.tag || 'fin').toLowerCase();
+      if (tags.indexOf(t) < 0) tags.push(t);
+    });
+    filterEl.innerHTML = tags.map(function (t) {
+      const on = (t === activeTag) ? ' active' : '';
+      const label = t === 'all' ? 'All' : t;
+      return '<button type="button" class="xf-chip' + on + '" data-xf-tag="'
+        + _feedEsc(t) + '">' + _feedEsc(label) + '</button>';
+    }).join('');
+    filterEl.querySelectorAll('[data-xf-tag]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        window._xfFilterTag = btn.getAttribute('data-xf-tag') || 'all';
+        if (window._xfLastPayload) _renderXFinFeed(
+          document.getElementById('xf-body'),
+          window._xfLastPayload,
+          window._xfFilterTag
+        );
+        _renderXFinFilters(filterEl, accounts, window._xfFilterTag);
+      });
+    });
+  }
+  function _renderXFinFeed(body, data, filterTag) {
+    if (!body) return;
+    filterTag = (filterTag || 'all').toLowerCase();
+    if (data && data.ok === false && !(data.items || []).length) {
+      body.innerHTML = '<div class="feed-empty">'
+        + _feedEsc(data.error || 'FinTwit feed unavailable') + '</div>';
+      return;
+    }
+    let items = (data && data.items) || [];
+    if (filterTag && filterTag !== 'all') {
+      items = items.filter(function (it) {
+        return String(it.tag || '').toLowerCase() === filterTag;
+      });
+    }
+    if (!items.length) {
+      body.innerHTML = '<div class="feed-empty">No posts'
+        + (filterTag !== 'all' ? ' for tag “' + _feedEsc(filterTag) + '”' : '')
+        + '. Tap refresh — free X syndication can be quiet.</div>';
+      return;
+    }
+    const rows = items.map(function (it) {
+      const href = it.url || ('https://x.com/' + (it.handle || ''));
+      const age = _feedRel(it.pub_ts);
+      const av = it.avatar
+        ? '<img class="xf-av" src="' + _feedEsc(it.avatar) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
+        : '<span class="xf-av xf-av-ph">𝕏</span>';
+      const eng = [];
+      if (it.likes) eng.push(it.likes + '♥');
+      if (it.reposts) eng.push(it.reposts + '↻');
+      return '<div class="feed-row xf-row" data-xf-href="' + _feedEsc(href) + '" role="link" tabindex="0">'
+        + av
+        + '<div class="feed-row-main">'
+        + '<div class="xf-head">'
+        +   '<span class="xf-name">' + _feedEsc(it.name || it.handle || '') + '</span>'
+        +   '<span class="xf-handle">@' + _feedEsc(it.handle || '') + '</span>'
+        +   (it.tag ? '<span class="feed-chip xf-tag">' + _feedEsc(it.tag) + '</span>' : '')
+        +   (age ? '<span class="xf-age">' + age + '</span>' : '')
+        + '</div>'
+        + '<div class="feed-row-title xf-text">' + _xfLinkify(it.text || '') + '</div>'
+        + (eng.length ? '<div class="feed-row-meta">' + _feedEsc(eng.join(' · ')) + '</div>' : '')
+        + '</div></div>';
+    }).join('');
+    const nAcct = ((data && data.accounts) || []).length;
+    const foot = '<div class="feed-foot">X public syndication · '
+      + nAcct + ' FinTwit accounts · $0 API · $0 tokens'
+      + (data && data.cached ? ' · cached' : '')
+      + '</div>';
+    body.innerHTML = rows + foot;
+    body.querySelectorAll('.xf-row[data-xf-href]').forEach(function (row) {
+      const open = function () {
+        const u = row.getAttribute('data-xf-href');
+        if (u) window.open(u, '_blank', 'noopener');
+      };
+      row.addEventListener('click', function (e) {
+        if (e.target && e.target.closest && e.target.closest('a')) return;
+        open();
+      });
+      row.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      });
+    });
+    body.scrollTop = 0;
+  }
+  async function loadXFinFeed(force) {
+    const body = document.getElementById('xf-body');
+    const asOf = document.getElementById('xf-asof');
+    const badge = document.getElementById('xf-badge');
+    const filters = document.getElementById('xf-filters');
+    if (!body) return;
+    if (!window._xfFeedWired) {
+      window._xfFeedWired = true;
+      const btn = document.getElementById('xf-refresh');
+      if (btn) btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        loadXFinFeed(true);
+      });
+    }
+    if (force || !window._xfLastPayload) {
+      body.innerHTML = '<div class="feed-empty">Loading finance-focused X feed…</div>';
+    }
+    try {
+      const url = '/api/v2/news/x-fin-feed?limit=40' + (force ? '&_=' + Date.now() : '');
+      const r = await window.dgaFetch(url, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      window._xfLastPayload = data;
+      _renderXFinFilters(filters, data.accounts || [], window._xfFilterTag || 'all');
+      _renderXFinFeed(body, data, window._xfFilterTag || 'all');
+      if (asOf) asOf.textContent = data.as_of || '—';
+      if (badge) {
+        const n = ((data.items || []).length) || 0;
+        badge.textContent = n ? (n + ' posts') : 'FREE';
+        badge.title = data.note || 'Free FinTwit · no API';
+      }
+    } catch (e) {
+      body.innerHTML = '<div class="feed-empty">FinTwit feed unavailable: '
+        + _feedEsc(e.message || e) + '</div>';
+    }
+  }
+
   async function loadDeskFeeds(force) {
     const mwBody = document.getElementById('mw-body');
     const ffBody = document.getElementById('ff-body');
@@ -987,7 +1124,7 @@
     const ffAsOf = document.getElementById('ff-asof');
     const mwBadge = document.getElementById('mw-badge');
     const ffBadge = document.getElementById('ff-badge');
-    if (!mwBody && !ffBody) return;
+    if (!mwBody && !ffBody && !document.getElementById('xf-body')) return;
 
     if (!window._deskFeedsWired) {
       window._deskFeedsWired = true;
@@ -1056,8 +1193,8 @@
         if (ffBody) ffBody.innerHTML = '<div class="feed-empty">' + _feedEsc(msg) + '</div>';
       }
     }
-    // Wire first, filings second — don't let SEC block the wire paint
-    await loadWire();
+    // Wire + FinTwit first (free, fast-ish); filings last — SEC can be slow
+    await Promise.all([loadWire(), loadXFinFeed(force)]);
     await loadFilings();
   }
 
