@@ -1866,9 +1866,10 @@ html[data-theme="dark"] .opt-cell-empty { color: var(--gray-400); }
 .market-bar .idx-loading { opacity: 0.55; }
 
 /* ── Watchlist compact two-line rows ──────────────────────────── */
+/* Full list — no internal scroll; page scrolls instead */
 .wl-list-wrap {
-  max-height: min(70vh, 820px);
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
 }
 .wl-rows { display: flex; flex-direction: column; }
 .wl-list-wrap .wl-row,
@@ -1996,8 +1997,7 @@ html[data-theme="dark"] .opt-cell-empty { color: var(--gray-400); }
 .wl-list-wrap .wl-add {
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-surface);
-  position: sticky;
-  bottom: 0;
+  position: static;
 }
 /* No stale chip on watchlist */
 .wl-list-wrap .q-stale { display: none !important; }
@@ -2165,9 +2165,18 @@ html[data-theme="dark"] .wl-list-wrap .wl-report-btn {
 #tab-research .panel {
   box-shadow: var(--shadow-xs);
 }
-#tab-research .col-left .panel {
-  position: sticky;
-  top: 108px;
+/* Watchlist should grow to full length (no sticky clip / inner scroll) */
+#tab-research .col-left .panel[data-wid="watchlist"] {
+  position: static;
+  max-height: none;
+  overflow: visible;
+}
+#tab-research .col-left .panel[data-wid="watchlist"] details,
+#tab-research .col-left .panel[data-wid="watchlist"] .panel-body,
+#tab-research .col-left .panel[data-wid="watchlist"] .wl-list-wrap,
+#tab-research .col-left .panel[data-wid="watchlist"] .wl-rows {
+  max-height: none !important;
+  overflow: visible !important;
 }
 
 /* ── Positions hero + KPI ─────────────────────────────────────── */
