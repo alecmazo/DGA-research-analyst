@@ -18751,6 +18751,123 @@
   }
   document.getElementById('rw-refresh')?.addEventListener('click', loadRailwayUsage);
 
+  // ── Continuity handoff (Settings) — paste into Claude / Grok / Cursor ────
+  let _continuityPack = null;
+  async function loadContinuityHandoff() {
+    const meta = document.getElementById('continuity-meta');
+    const prev = document.getElementById('continuity-preview');
+    const badge = document.getElementById('continuity-build-badge');
+    const status = document.getElementById('continuity-status');
+    try {
+      const r = await window.dgaFetch('/api/continuity/handoff');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      _continuityPack = d;
+      if (badge) {
+        badge.textContent = d.build || '—';
+        badge.style.background = '#dcfce7';
+        badge.style.color = '#166534';
+      }
+      if (meta) {
+        meta.innerHTML =
+          '<strong>Live build:</strong> ' + _cfEsc(d.build || '—')
+          + ' · <strong>Next hint:</strong> ' + _cfEsc(d.next_build_hint || '—')
+          + (d.git_sha ? (' · <strong>Git:</strong> ' + _cfEsc((d.git_branch || '') + '@' + d.git_sha)) : '')
+          + (d.git_subject ? (' — ' + _cfEsc(d.git_subject)) : '')
+          + '<br><span style="color:var(--text-tertiary);">Generated ' + _cfEsc(d.generated_at || '') + ' · no secrets included</span>';
+      }
+      if (prev) prev.textContent = d.paste_markdown || '';
+      if (status) status.textContent = '';
+    } catch (e) {
+      _continuityPack = null;
+      if (badge) {
+        badge.textContent = 'ERR';
+        badge.style.background = '#fee2e2';
+        badge.style.color = '#b91c1c';
+      }
+      if (meta) meta.textContent = 'Could not load handoff: ' + (e.message || e);
+      if (prev) prev.textContent = '';
+    }
+  }
+  async function continuityCopyHandoff() {
+    const status = document.getElementById('continuity-status');
+    const btn = document.getElementById('continuity-copy-btn');
+    if (!_continuityPack) await loadContinuityHandoff();
+    const text = (_continuityPack && _continuityPack.paste_markdown) || '';
+    if (!text) {
+      if (status) { status.style.color = '#b91c1c'; status.textContent = 'Nothing to copy.'; }
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      if (status) {
+        status.style.color = '#166534';
+        status.textContent = '✓ Copied — paste into Claude / Grok / Cursor on the other machine.';
+      }
+      if (btn) {
+        const o = btn.textContent;
+        btn.textContent = '✓ Copied';
+        setTimeout(function () { btn.textContent = o; }, 2200);
+      }
+      try {
+        window.toast && window.toast('Handoff copied to clipboard', { type: 'success', ttl: 3500 });
+      } catch (_) {}
+    } catch (e) {
+      if (status) {
+        status.style.color = '#b91c1c';
+        status.textContent = 'Copy failed — use Download .md or expand Preview.';
+      }
+    }
+  }
+  function continuityDownloadHandoff() {
+    const status = document.getElementById('continuity-status');
+    const run = async function () {
+      if (!_continuityPack) await loadContinuityHandoff();
+      const text = (_continuityPack && _continuityPack.paste_markdown) || '';
+      if (!text) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = 'Nothing to download.'; }
+        return;
+      }
+      const name = (_continuityPack && _continuityPack.filename) || 'dga-continuity-handoff.md';
+      const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      if (status) {
+        status.style.color = '#166534';
+        status.textContent = '✓ Downloaded ' + name;
+      }
+    };
+    run();
+  }
+  document.getElementById('continuity-copy-btn')?.addEventListener('click', continuityCopyHandoff);
+  document.getElementById('continuity-download-btn')?.addEventListener('click', continuityDownloadHandoff);
+  document.getElementById('continuity-refresh')?.addEventListener('click', loadContinuityHandoff);
+  // Load when Settings is first opened (and once at boot if already on settings)
+  (function wireContinuityOnSettings() {
+    const loadOnce = function () {
+      if (!_continuityPack) loadContinuityHandoff();
+    };
+    document.querySelectorAll('.topbar-link[data-tab="settings"]').forEach(function (el) {
+      el.addEventListener('click', function () { setTimeout(loadOnce, 50); });
+    });
+    if (document.getElementById('tab-settings')?.classList.contains('active')) {
+      loadContinuityHandoff();
+    }
+  })();
+
   // ── Linked Accounts · Plaid (Fidelity auto-import) ────────────────────────
   const _PLAID_LT_KEY = 'dga_plaid_link_token';
   function _loadPlaidScript(){

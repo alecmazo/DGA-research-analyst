@@ -6342,7 +6342,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui378-20260728-nav-continuity"
+WEB_BUILD_VERSION = "ui379-20260728-continuity-button"
 
 
 @app.get("/api/build")
@@ -6354,6 +6354,109 @@ def build_version():
     home-screen PWAs see the latest UI without manual cache clearing.
     """
     return {"build": WEB_BUILD_VERSION}
+
+
+def _continuity_pack() -> dict:
+    """Assemble a cross-machine / cross-agent handoff package.
+
+    Used by Settings → Continuity handoff so work can move between Grok Build,
+    Claude Code, Cursor, and different computers without UI counter collisions.
+    """
+    from pathlib import Path as _Path
+    root = _Path(__file__).resolve().parent.parent  # repo root (…/api/server.py → …)
+    cont_path = root / "CONTINUITY.md"
+    build_path = root / "BUILD_VERSION"
+    cont_md = ""
+    build_file = ""
+    try:
+        if cont_path.is_file():
+            cont_md = cont_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        cont_md = f"(Could not read CONTINUITY.md: {e!s:.120})"
+    try:
+        if build_path.is_file():
+            build_file = build_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()[0]
+    except Exception:
+        build_file = ""
+
+    git_sha = ""
+    git_branch = ""
+    git_msg = ""
+    try:
+        import subprocess as _sp
+        git_sha = _sp.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=str(root),
+            stderr=_sp.DEVNULL, timeout=3).decode().strip()
+        git_branch = _sp.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(root),
+            stderr=_sp.DEVNULL, timeout=3).decode().strip()
+        git_msg = _sp.check_output(
+            ["git", "log", "-1", "--pretty=%s"], cwd=str(root),
+            stderr=_sp.DEVNULL, timeout=3).decode().strip()
+    except Exception:
+        pass
+
+    # Next suggested N = current + 1 (parse uiNNN-…)
+    next_build = WEB_BUILD_VERSION
+    try:
+        import re as _re
+        m = _re.match(r"ui(\d+)-(.*)", WEB_BUILD_VERSION)
+        if m:
+            next_build = f"ui{int(m.group(1)) + 1}-YYYYMMDD-slug"
+    except Exception:
+        pass
+
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    paste = (
+        f"# DGA Capital — agent handoff\n\n"
+        f"Paste this entire block into **Claude Code**, **Grok Build**, or **Cursor** "
+        f"on any computer. Do not skip the rules.\n\n"
+        f"## Live production (authoritative)\n"
+        f"- **Build:** `{WEB_BUILD_VERSION}`\n"
+        f"- **Probe:** `GET https://portfolio.dgacapital.com/api/build`\n"
+        f"- **Repo:** `https://github.com/alecmazo/claude-research-analyst` (branch `main`)\n"
+        f"- **Git:** `{git_branch or '—'}@{git_sha or '—'}` — {git_msg or '—'}\n"
+        f"- **Handoff generated:** {now}\n"
+        f"- **BUILD_VERSION file:** `{build_file or WEB_BUILD_VERSION}`\n\n"
+        f"## Hard rules\n"
+        f"1. `git pull origin main` before editing.\n"
+        f"2. Read `CONTINUITY.md` (embedded below) and `BUILD_VERSION`.\n"
+        f"3. **Never decrease** `WEB_BUILD_VERSION` N in `api/server.py`.\n"
+        f"4. Next deploy ≈ `{next_build}` (replace date/slug) — or "
+        f"`max(live /api/build, CONTINUITY.md, BUILD_VERSION) + 1`.\n"
+        f"5. After push, confirm Railway shows the new build via `/api/build`.\n"
+        f"6. Prefer a push worktree synced to `origin/main` "
+        f"(historically `/tmp/cra-push` on some agents).\n\n"
+        f"## Nav (do not reshuffle casually)\n"
+        f"Work: Desk · Financials · Options · Builder · Podcasts · Transcripts · Positions\n"
+        f"| Firm ops: Fund · Memos · Settings · Sliw\n\n"
+        f"## CONTINUITY.md (repo copy at handoff time)\n\n"
+        f"{cont_md or '_(file missing on this deploy — use rules above)_'}\n"
+    )
+
+    return {
+        "ok": True,
+        "build": WEB_BUILD_VERSION,
+        "build_file": build_file or WEB_BUILD_VERSION,
+        "next_build_hint": next_build,
+        "generated_at": now,
+        "git_sha": git_sha,
+        "git_branch": git_branch,
+        "git_subject": git_msg,
+        "continuity_md": cont_md,
+        "paste_markdown": paste,
+        "filename": f"dga-continuity-handoff-{now[:10]}.md",
+    }
+
+
+@app.get("/api/continuity/handoff")
+def continuity_handoff(request: Request):
+    """GP Settings handoff pack — markdown paste for Claude / Grok / Cursor.
+
+    No secrets (keys, tokens, or passwords). Safe to copy between machines.
+    """
+    _plaid_require_gp(request)
+    return _continuity_pack()
 
 
 @app.get("/health")

@@ -21,9 +21,19 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 |------|--------|--------|
 | Product line (Mac mini / main history) | **ui377** (comments) … through mid-2026 | Real product counter used in HTML/JS comments (`ui340`, `ui353`, `ui361`, `ui377`) |
 | This Grok session (work laptop) | ui100–ui114 | **Fork counter — must not overwrite higher N** |
-| **Next deploy after this handoff** | **`ui378-20260728-nav-continuity`** | Nav reorg + continuity file; jumps past both streams |
+| Nav + continuity files | **`ui378-20260728-nav-continuity`** | Nav reorg + CONTINUITY.md |
+| **Settings handoff button** | **`ui379-20260728-continuity-button`** | Settings → Continuity handoff (copy/download) |
+| **Next deploy after this handoff** | **`ui380-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
 
-If Mac mini later ships `ui379+` while offline, **pull main first**, then set
+### One-click handoff (preferred)
+
+In the live GP app: **Settings → Continuity handoff → Copy handoff for agent**.
+
+That calls `GET /api/continuity/handoff` and copies a full markdown pack (live
+build, git tip, next-N rule, nav layout, embedded `CONTINUITY.md`) to the
+clipboard. Paste it into Claude Code / Grok Build / Cursor on any computer.
+
+If Mac mini later ships a higher N while offline, **pull main first**, then set
 `WEB_BUILD_VERSION` to `max(local, remote /api/build, CONTINUITY.md) + 1`.
 
 ---
@@ -119,4 +129,4 @@ When switching machine or agent (Claude ↔ Grok):
 
 ---
 
-*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Next: ui378*
+*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui379 · Next: ui380*

@@ -2122,6 +2122,7 @@ End with the sleeve block at this account's real market value so I can push it t
   <div class="wide-shell settings-shell">
 
     <div class="settings-jump" role="navigation" aria-label="Settings sections">
+      <a href="#set-handoff">Handoff</a>
       <a href="#set-support">Support</a>
       <a href="#set-models">Models</a>
       <a href="#set-connections">Connections</a>
@@ -2129,6 +2130,41 @@ End with the sleeve block at this account's real market value so I can push it t
       <a href="#set-security">Security</a>
       <a href="#set-users">Users &amp; Funds</a>
       <a href="#set-system">System</a>
+    </div>
+
+    <!-- ── Continuity handoff (cross-machine / Claude / Grok) ── -->
+    <h3 class="settings-group-head" id="set-handoff">Agent continuity · handoff</h3>
+    <div class="settings-grid">
+      <section class="panel settings-span-2" data-collapsible="1" data-expanded="1" id="continuity-handoff-panel">
+        <header class="panel-head">
+          <span class="panel-title">Continuity handoff</span>
+          <span class="panel-badge" id="continuity-build-badge" style="background:#e0f2fe;color:#075985;">…</span>
+          <span style="flex:1"></span>
+          <button type="button" id="continuity-refresh" class="tab-btn sm" title="Reload pack from live server">↻</button>
+        </header>
+        <div class="settings-card-body">
+          <p style="margin:0 0 10px;font-size:12px;color:var(--text-secondary);line-height:1.5;max-width:720px;">
+            Switching computers or AI tools (Grok Build ↔ Claude Code ↔ Cursor)?
+            Click <strong>Copy handoff</strong>, then paste into the new agent.
+            It includes the live UI build number, next-version rules, nav layout, and
+            <code>CONTINUITY.md</code> so nothing is lost and UI numbers never go backwards.
+          </p>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;">
+            <button type="button" id="continuity-copy-btn" class="btn-primary">Copy handoff for agent</button>
+            <button type="button" id="continuity-download-btn" class="tab-btn">Download .md</button>
+            <span id="continuity-status" style="font-size:11.5px;color:var(--text-tertiary);"></span>
+          </div>
+          <div id="continuity-meta" style="font-size:11.5px;color:var(--text-secondary);font-variant-numeric:tabular-nums;margin-bottom:8px;line-height:1.55;">
+            Loading live build…
+          </div>
+          <details id="continuity-preview-wrap" style="border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-surface);">
+            <summary style="cursor:pointer;padding:8px 12px;font-size:11.5px;font-weight:600;color:var(--text-secondary);list-style:none;">
+              Preview paste text
+            </summary>
+            <pre id="continuity-preview" style="margin:0;padding:12px;max-height:280px;overflow:auto;font-size:10.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;border-top:1px solid var(--border-subtle);color:var(--text-primary);"></pre>
+          </details>
+        </div>
+      </section>
     </div>
 
     <!-- ── Support ── -->
