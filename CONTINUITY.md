@@ -26,7 +26,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Builder sector boards** | **`ui380-20260728-builder-boards`** | Multi-list sector boards + breadth history |
 | **Report history / thesis deltas** | **`ui381-20260728-report-history`** | Re-Analyze archives prior; Saved Reports vN + Δ; timeline; Value Rank self-history |
 | **Desk X FinTwit card** | **`ui382-20260728-x-fintwit-feed`** | Free FinTwit feed via X public syndication · $0 API |
-| **Next deploy after this handoff** | **`ui383-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
+| **Builder tracking table** | **`ui383-20260728-builder-tracking`** | Names, cost basis, since-add %, date first added, notes/FV, sort/filter |
+| **Next deploy after this handoff** | **`ui384-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -145,4 +146,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui380 · ship ui381+ui382 · Next: ui383*
+*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui380 · ship through ui383 · Next: ui384*

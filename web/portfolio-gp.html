@@ -670,7 +670,7 @@ End with the sleeve block at this account's real market value so I can push it t
       <div class="page-hero-text">
         <div class="page-eyebrow">Sectors · track over time</div>
         <h2 class="page-title">Builder</h2>
-        <p class="page-sub">Named sector boards (GuruFocus-style): populate lists, watch day moves, and keep a breadth history. Seed defaults, then edit freely.</p>
+        <p class="page-sub">Named sector boards: company names, cost basis from first add, change since initiation, notes &amp; fair value. Sort/filter any column. Seed defaults, then track over time.</p>
       </div>
       <div class="page-hero-actions">
         <button type="button" id="bl-seed-btn" class="tab-btn">Seed sector boards</button>
@@ -736,24 +736,36 @@ End with the sleeve block at this account's real market value so I can push it t
           <div id="bl-history-bars" class="bl-history-bars"></div>
         </div>
 
+        <div class="bl-toolbar" id="bl-toolbar" hidden>
+          <input type="search" id="bl-filter" class="bl-filter-input"
+                 placeholder="Filter ticker, name, notes…" autocomplete="off">
+          <span class="bl-toolbar-hint" id="bl-sort-hint">Sort: since add %</span>
+          <span class="bl-toolbar-count" id="bl-filter-count"></span>
+        </div>
+
         <div class="bl-table-wrap">
           <table class="term-table bl-table" id="bl-table">
             <thead>
               <tr>
-                <th>Ticker</th>
-                <th class="num">Last</th>
-                <th class="num">Day %</th>
-                <th class="num">Day $</th>
+                <th class="bl-th-sort" data-bl-sort="ticker" title="Sort by ticker">Ticker</th>
+                <th class="num bl-th-sort" data-bl-sort="price" title="Sort by last">Last</th>
+                <th class="num bl-th-sort" data-bl-sort="pct" title="Sort by day %">Day %</th>
+                <th class="num bl-th-sort" data-bl-sort="day_abs" title="Sort by day $">Day $</th>
+                <th class="num bl-th-sort" data-bl-sort="entry_price" title="Cost basis at first add">Cost basis</th>
+                <th class="num bl-th-sort" data-bl-sort="since_entry_pct" title="Change since initiation">Since add %</th>
+                <th class="bl-th-sort" data-bl-sort="entry_date" title="Date first added (YYYY-MM-DD)">Date first added</th>
+                <th class="num bl-th-sort" data-bl-sort="fair_value" title="Your fair value">Fair value</th>
+                <th class="bl-th-sort" data-bl-sort="note" title="Notes">Notes</th>
                 <th class="bl-th-act"></th>
               </tr>
             </thead>
             <tbody id="bl-tbody">
-              <tr><td colspan="5" class="wl-empty-cell">Select or seed a board to begin.</td></tr>
+              <tr><td colspan="10" class="wl-empty-cell">Select or seed a board to begin.</td></tr>
             </tbody>
           </table>
         </div>
         <div id="bl-status" class="status-bar" style="margin:12px;margin-top:0;">
-          Sector boards replace the old single-pool builder as the primary surface. Basket construction is under Advanced.
+          Cost basis and first-added date stamp when a name is added (or on first open after seed). Edit fair value &amp; notes inline. Click column headers to sort.
         </div>
       </section>
     </div>

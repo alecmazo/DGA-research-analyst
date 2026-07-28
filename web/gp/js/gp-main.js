@@ -7207,6 +7207,9 @@
   let _blLists = [];
   let _blActiveId = null;
   let _blBoard = null;
+  let _blSortKey = 'since_entry_pct';
+  let _blSortDir = -1; // -1 desc, +1 asc
+  let _blFilterQ = '';
 
   function _blEsc(s) {
     return String(s == null ? '' : s)
@@ -7228,12 +7231,98 @@
       maximumFractionDigits: abs >= 100 ? 0 : 2,
     });
   }
+  function _blFmtPx(v) {
+    if (v == null || isNaN(Number(v))) return '—';
+    const n = Number(v);
+    return '$' + (typeof fmtPx === 'function' ? fmtPx(n) : n.toFixed(n >= 100 ? 0 : 2));
+  }
+  function _blFmtDate(d) {
+    if (!d) return '—';
+    const s = String(d).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '—';
+  }
   function _blSetStatus(msg, kind) {
     const el = document.getElementById('bl-status');
     if (!el) return;
     el.textContent = msg;
     el.classList.remove('is-busy', 'is-error', 'is-ok');
     if (kind) el.classList.add(kind);
+  }
+  function _blBoardRows(board) {
+    // Prefer enriched rows; fall back to tickers+quotes for older payloads
+    if (board && Array.isArray(board.rows) && board.rows.length) {
+      return board.rows.map(function (r) {
+        const dayAbs = _blDayAbs(r.price, r.pct);
+        return Object.assign({}, r, { day_abs: dayAbs });
+      });
+    }
+    const tickers = (board && board.tickers) || [];
+    const quotes = (board && board.quotes) || {};
+    return tickers.map(function (tk) {
+      const q = quotes[tk] || {};
+      return {
+        ticker: tk, name: '', note: '',
+        price: q.price, pct: q.pct,
+        entry_price: null, entry_date: null, fair_value: null,
+        since_entry_pct: null, since_entry_abs: null,
+        day_abs: _blDayAbs(q.price, q.pct),
+      };
+    });
+  }
+  function _blSortVal(row, key) {
+    if (key === 'ticker') return String(row.ticker || '').toUpperCase();
+    if (key === 'name') return String(row.name || '').toLowerCase();
+    if (key === 'note') return String(row.note || '').toLowerCase();
+    if (key === 'entry_date') return String(row.entry_date || '');
+    const n = Number(row[key]);
+    return isNaN(n) ? null : n;
+  }
+  function _blApplySortFilter(rows) {
+    let out = rows.slice();
+    const q = (_blFilterQ || '').trim().toLowerCase();
+    if (q) {
+      out = out.filter(function (r) {
+        return (r.ticker || '').toLowerCase().indexOf(q) >= 0
+          || (r.name || '').toLowerCase().indexOf(q) >= 0
+          || (r.note || '').toLowerCase().indexOf(q) >= 0
+          || (r.entry_date || '').indexOf(q) >= 0;
+      });
+    }
+    const key = _blSortKey || 'ticker';
+    const dir = _blSortDir || 1;
+    out.sort(function (a, b) {
+      const va = _blSortVal(a, key);
+      const vb = _blSortVal(b, key);
+      const aNull = va == null || va === '';
+      const bNull = vb == null || vb === '';
+      if (aNull && bNull) return String(a.ticker || '').localeCompare(String(b.ticker || ''));
+      if (aNull) return 1;
+      if (bNull) return -1;
+      if (typeof va === 'string' || typeof vb === 'string') {
+        return dir * String(va).localeCompare(String(vb), undefined, { numeric: true });
+      }
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return String(a.ticker || '').localeCompare(String(b.ticker || ''));
+    });
+    return out;
+  }
+  function _blUpdateSortHint() {
+    const el = document.getElementById('bl-sort-hint');
+    if (!el) return;
+    const labels = {
+      ticker: 'ticker', price: 'last', pct: 'day %', day_abs: 'day $',
+      entry_price: 'cost basis', since_entry_pct: 'since add %',
+      entry_date: 'date first added', fair_value: 'fair value', note: 'notes',
+    };
+    const arrow = _blSortDir < 0 ? '↓' : '↑';
+    el.textContent = 'Sort: ' + (labels[_blSortKey] || _blSortKey) + ' ' + arrow;
+    document.querySelectorAll('#bl-table th.bl-th-sort').forEach(function (th) {
+      th.classList.remove('bl-sort-asc', 'bl-sort-desc');
+      if (th.getAttribute('data-bl-sort') === _blSortKey) {
+        th.classList.add(_blSortDir < 0 ? 'bl-sort-desc' : 'bl-sort-asc');
+      }
+    });
   }
   function _blRenderNav() {
     const nav = document.getElementById('bl-list-nav');
@@ -7281,17 +7370,35 @@
       return '<div class="bl-hist-bar ' + cls + '" style="height:' + hgt + 'px" title="' + _blEsc(tip) + '"></div>';
     }).join('');
   }
+  async function _blPatchTicker(tk, fields) {
+    if (!_blActiveId || !tk) return;
+    const r = await window.dgaFetch(
+      '/api/v2/builder/lists/' + encodeURIComponent(_blActiveId)
+      + '/tickers/' + encodeURIComponent(tk) + '/update',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+      }
+    );
+    const d = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error(d.detail || r.status);
+    if (d.board) _blRenderBoard(d.board);
+    return d;
+  }
   function _blRenderBoard(board) {
     _blBoard = board;
     const title = document.getElementById('bl-board-title');
     const sec = document.getElementById('bl-board-sector');
     const tbody = document.getElementById('bl-tbody');
     const kpi = document.getElementById('bl-kpi');
+    const toolbar = document.getElementById('bl-toolbar');
     if (!board || !board.list) {
       if (title) title.textContent = 'Select a board';
       if (sec) sec.textContent = '—';
-      if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="wl-empty-cell">Select or seed a board to begin.</td></tr>';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="10" class="wl-empty-cell">Select or seed a board to begin.</td></tr>';
       if (kpi) kpi.hidden = true;
+      if (toolbar) toolbar.hidden = true;
       _blRenderHistory([]);
       return;
     }
@@ -7315,34 +7422,65 @@
         avg != null ? (avg >= 0 ? 'pos' : 'neg') : '');
     }
     _blRenderHistory(board.history || []);
-    const tickers = board.tickers || [];
-    const quotes = board.quotes || {};
-    if (!tickers.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="wl-empty-cell">No tickers — paste symbols above (comma-separated).</td></tr>';
+    if (toolbar) toolbar.hidden = false;
+    _blUpdateSortHint();
+
+    const allRows = _blBoardRows(board);
+    if (!allRows.length) {
+      tbody.innerHTML = '<tr><td colspan="10" class="wl-empty-cell">No tickers — paste symbols above (comma-separated). First add stamps cost basis + date.</td></tr>';
+      const fc0 = document.getElementById('bl-filter-count');
+      if (fc0) fc0.textContent = '';
       return;
     }
-    const ordered = tickers.slice().sort(function (a, b) {
-      const pa = (quotes[a] || {}).pct, pb = (quotes[b] || {}).pct;
-      const aOk = pa != null && !isNaN(Number(pa));
-      const bOk = pb != null && !isNaN(Number(pb));
-      if (aOk && !bOk) return -1;
-      if (!aOk && bOk) return 1;
-      if (aOk && bOk) return Math.abs(Number(pb)) - Math.abs(Number(pa));
-      return String(a).localeCompare(String(b));
-    });
-    tbody.innerHTML = ordered.map(function (tk) {
-      const q = quotes[tk] || {};
-      const px = q.price != null ? fmtPx(q.price) : '—';
-      const pct = q.pct;
-      const dayAbs = _blDayAbs(q.price, pct);
+    const ordered = _blApplySortFilter(allRows);
+    const fc = document.getElementById('bl-filter-count');
+    if (fc) {
+      fc.textContent = ordered.length === allRows.length
+        ? (allRows.length + ' names')
+        : (ordered.length + ' / ' + allRows.length);
+    }
+    if (!ordered.length) {
+      tbody.innerHTML = '<tr><td colspan="10" class="wl-empty-cell">No rows match filter.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = ordered.map(function (row) {
+      const tk = row.ticker;
+      const pct = row.pct;
+      const dayAbs = row.day_abs != null ? row.day_abs : _blDayAbs(row.price, pct);
+      const since = row.since_entry_pct;
+      const name = row.name || '';
+      const ed = _blFmtDate(row.entry_date);
+      const noteVal = row.note || '';
+      const fvVal = row.fair_value != null && !isNaN(Number(row.fair_value))
+        ? String(row.fair_value) : '';
       return '<tr data-bl-tk="' + _blEsc(tk) + '">'
-        + '<td><span class="tk">' + _blEsc(tk) + '</span></td>'
-        + '<td class="num">' + (px === '—' ? '—' : ('$' + px)) + '</td>'
+        + '<td class="bl-tk-cell">'
+        +   '<span class="tk bl-tk-sym" data-bl-peek="' + _blEsc(tk) + '">' + _blEsc(tk) + '</span>'
+        +   (name ? '<div class="bl-co-name" title="' + _blEsc(name) + '">' + _blEsc(name) + '</div>' : '')
+        + '</td>'
+        + '<td class="num">' + _blFmtPx(row.price) + '</td>'
         + '<td class="num"><span class="' + cssClass(pct) + '">' + fmtPct(pct) + '</span></td>'
         + '<td class="num"><span class="' + cssClass(dayAbs) + '">' + _blFmtDayAbs(dayAbs) + '</span></td>'
+        + '<td class="num" title="Price when tracking started">' + _blFmtPx(row.entry_price) + '</td>'
+        + '<td class="num"><span class="' + cssClass(since) + '">'
+        +   (since == null ? '—' : fmtPct(since)) + '</span></td>'
+        + '<td class="bl-date-cell" title="Date first added">' + _blEsc(ed) + '</td>'
+        + '<td class="num bl-edit-cell">'
+        +   '<input type="text" class="bl-inline-input bl-fv-input" data-bl-fv="' + _blEsc(tk) + '"'
+        +   ' value="' + _blEsc(fvVal) + '" placeholder="—" inputmode="decimal" title="Fair value — blur to save">'
+        +   (row.fv_upside_pct != null
+          ? '<div class="bl-fv-up ' + cssClass(row.fv_upside_pct) + '">'
+            + (row.fv_upside_pct >= 0 ? '+' : '') + Number(row.fv_upside_pct).toFixed(1) + '%</div>'
+          : '')
+        + '</td>'
+        + '<td class="bl-edit-cell">'
+        +   '<input type="text" class="bl-inline-input bl-note-input" data-bl-note="' + _blEsc(tk) + '"'
+        +   ' value="' + _blEsc(noteVal) + '" placeholder="Add note…" title="Notes — blur to save">'
+        + '</td>'
         + '<td><button type="button" class="bl-remove" data-bl-rm="' + _blEsc(tk) + '" title="Remove">×</button></td>'
         + '</tr>';
     }).join('');
+
     tbody.querySelectorAll('[data-bl-rm]').forEach(function (btn) {
       btn.addEventListener('click', async function (e) {
         e.stopPropagation();
@@ -7362,13 +7500,62 @@
         }
       });
     });
-    tbody.querySelectorAll('tr[data-bl-tk]').forEach(function (row) {
-      row.addEventListener('click', function (e) {
-        if (e.target.closest('[data-bl-rm]')) return;
-        const tk = row.getAttribute('data-bl-tk');
+    tbody.querySelectorAll('[data-bl-peek]').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const tk = el.getAttribute('data-bl-peek');
         if (tk && typeof openStockPeek === 'function') openStockPeek(tk);
         else if (tk && typeof openGuruFocus === 'function') openGuruFocus(tk);
       });
+    });
+    // Inline fair value
+    tbody.querySelectorAll('[data-bl-fv]').forEach(function (inp) {
+      const save = async function () {
+        const tk = inp.getAttribute('data-bl-fv');
+        const raw = (inp.value || '').trim();
+        const prev = (_blBoardRows(_blBoard).find(function (r) { return r.ticker === tk; }) || {}).fair_value;
+        const prevS = prev != null ? String(prev) : '';
+        if (raw === prevS || (raw === '' && (prev == null || prev === ''))) return;
+        try {
+          inp.classList.add('bl-saving');
+          await _blPatchTicker(tk, { fair_value: raw === '' ? null : raw });
+          _blSetStatus('Saved fair value for ' + tk, 'is-ok');
+        } catch (err) {
+          _blSetStatus(String(err.message || err), 'is-error');
+        } finally {
+          inp.classList.remove('bl-saving');
+        }
+      };
+      inp.addEventListener('click', function (e) { e.stopPropagation(); });
+      inp.addEventListener('keydown', function (e) {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+      });
+      inp.addEventListener('blur', save);
+    });
+    // Inline notes
+    tbody.querySelectorAll('[data-bl-note]').forEach(function (inp) {
+      const save = async function () {
+        const tk = inp.getAttribute('data-bl-note');
+        const raw = inp.value || '';
+        const prev = (_blBoardRows(_blBoard).find(function (r) { return r.ticker === tk; }) || {}).note || '';
+        if (raw === prev) return;
+        try {
+          inp.classList.add('bl-saving');
+          await _blPatchTicker(tk, { note: raw });
+          _blSetStatus('Saved note for ' + tk, 'is-ok');
+        } catch (err) {
+          _blSetStatus(String(err.message || err), 'is-error');
+        } finally {
+          inp.classList.remove('bl-saving');
+        }
+      };
+      inp.addEventListener('click', function (e) { e.stopPropagation(); });
+      inp.addEventListener('keydown', function (e) {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+      });
+      inp.addEventListener('blur', save);
     });
   }
   async function loadBuilderLists(opts) {
@@ -7397,9 +7584,10 @@
       if (!r.ok) throw new Error('board ' + r.status);
       const d = await r.json();
       _blRenderBoard(d);
+      const n = (d.rows || d.tickers || []).length;
       _blSetStatus(
         (d.list && d.list.name ? d.list.name + ' · ' : '')
-        + (d.tickers || []).length + ' names · sorted by |day %| · history updates daily when you open a board',
+        + n + ' names · cost basis from first add · click headers to sort · edit fair value & notes inline',
         'is-ok'
       );
     } catch (e) {
@@ -7517,6 +7705,7 @@
     const ref = document.getElementById('bl-refresh-btn');
     const ren = document.getElementById('bl-rename-btn');
     const del = document.getElementById('bl-delete-btn');
+    const filt = document.getElementById('bl-filter');
     if (seed && !seed._wired) { seed._wired = true; seed.addEventListener('click', blSeedLists); }
     if (neu && !neu._wired) { neu._wired = true; neu.addEventListener('click', blCreateList); }
     if (add && !add._wired) { add._wired = true; add.addEventListener('click', blAddTickers); }
@@ -7532,6 +7721,34 @@
     }
     if (ren && !ren._wired) { ren._wired = true; ren.addEventListener('click', blRenameList); }
     if (del && !del._wired) { del._wired = true; del.addEventListener('click', blDeleteList); }
+    if (filt && !filt._wired) {
+      filt._wired = true;
+      let t = null;
+      filt.addEventListener('input', function () {
+        _blFilterQ = filt.value || '';
+        if (t) clearTimeout(t);
+        t = setTimeout(function () {
+          if (_blBoard) _blRenderBoard(_blBoard);
+        }, 120);
+      });
+    }
+    // Sortable column headers
+    document.querySelectorAll('#bl-table th.bl-th-sort').forEach(function (th) {
+      if (th._wired) return;
+      th._wired = true;
+      th.style.cursor = 'pointer';
+      th.addEventListener('click', function () {
+        const key = th.getAttribute('data-bl-sort');
+        if (!key) return;
+        if (_blSortKey === key) _blSortDir = -_blSortDir;
+        else {
+          _blSortKey = key;
+          // Default: text asc, numbers desc (movers / since-add)
+          _blSortDir = (key === 'ticker' || key === 'name' || key === 'note' || key === 'entry_date') ? 1 : -1;
+        }
+        if (_blBoard) _blRenderBoard(_blBoard);
+      });
+    });
   }
 
   // Refresh the Candidate Pool in place — re-pulls saved-report tickers/targets

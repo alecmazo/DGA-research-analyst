@@ -6608,7 +6608,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui382-20260728-x-fintwit-feed"
+WEB_BUILD_VERSION = "ui383-20260728-builder-tracking"
 
 
 @app.get("/api/build")
@@ -9562,6 +9562,16 @@ def _ensure_builder_lists_tables(conn=None) -> None:
                     added_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
                     PRIMARY KEY (list_id, ticker)
                 )""")
+            # Tracking anchors + analyst fields (ui383)
+            for col_sql in (
+                "ALTER TABLE builder_list_tickers ADD COLUMN IF NOT EXISTS entry_price DOUBLE PRECISION",
+                "ALTER TABLE builder_list_tickers ADD COLUMN IF NOT EXISTS entry_date DATE",
+                "ALTER TABLE builder_list_tickers ADD COLUMN IF NOT EXISTS fair_value DOUBLE PRECISION",
+            ):
+                try:
+                    cur.execute(col_sql)
+                except Exception:
+                    pass
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS builder_list_snapshots (
                     list_id     TEXT NOT NULL,
@@ -9625,20 +9635,109 @@ def _builder_lists_for_user(lp_id: str) -> list[dict]:
     return out
 
 
-def _builder_list_tickers(list_id: str, lp_id: str) -> list[str]:
+def _builder_list_ticker_rows(list_id: str, lp_id: str) -> list[dict]:
+    """Full per-ticker tracking rows for a board (ownership-checked)."""
     with _fund_conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            SELECT t.ticker FROM builder_list_tickers t
+            SELECT t.ticker, t.note, t.added_at, t.entry_price, t.entry_date, t.fair_value
+              FROM builder_list_tickers t
               JOIN builder_lists l ON l.id = t.list_id
              WHERE t.list_id = %s AND l.lp_id = %s
              ORDER BY t.added_at, t.ticker
         """, (list_id, lp_id))
-        return [(r[0] or "").upper() for r in (cur.fetchall() or []) if r and r[0]]
+        raw = cur.fetchall() or []
+    out = []
+    for r in raw:
+        if not r or not r[0]:
+            continue
+        ed = r[4]
+        if ed is not None and hasattr(ed, "isoformat"):
+            ed = ed.isoformat()
+        elif ed is not None:
+            ed = str(ed)[:10]
+        aa = r[2]
+        out.append({
+            "ticker": (r[0] or "").upper(),
+            "note": r[1] or "",
+            "added_at": aa.isoformat() if aa and hasattr(aa, "isoformat") else (str(aa) if aa else None),
+            "entry_price": float(r[3]) if r[3] is not None else None,
+            "entry_date": ed,
+            "fair_value": float(r[5]) if r[5] is not None else None,
+        })
+    return out
+
+
+def _builder_list_tickers(list_id: str, lp_id: str) -> list[str]:
+    return [r["ticker"] for r in _builder_list_ticker_rows(list_id, lp_id)]
+
+
+def _builder_anchor_missing(list_id: str, quotes: dict) -> None:
+    """Stamp entry_date / entry_price for rows still missing an anchor.
+
+    Used when opening a board or after seed/add so tracking starts from
+    today's initiation price (or the first quote we can get).
+    """
+    if not list_id:
+        return
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT ticker, entry_price, entry_date, added_at
+                  FROM builder_list_tickers WHERE list_id = %s
+            """, (list_id,))
+            for tk, ep, ed, aa in (cur.fetchall() or []):
+                tku = (tk or "").upper()
+                if not tku:
+                    continue
+                price = (quotes.get(tku) or {}).get("price")
+                need_price = ep is None and price is not None
+                need_date = ed is None
+                if not need_price and not need_date:
+                    continue
+                # Prefer added_at date if present; else today
+                date_val = today
+                if aa is not None:
+                    try:
+                        date_val = aa.date().isoformat() if hasattr(aa, "date") else str(aa)[:10]
+                    except Exception:
+                        date_val = today
+                if need_price and need_date:
+                    cur.execute("""
+                        UPDATE builder_list_tickers
+                           SET entry_price = %s, entry_date = %s::date
+                         WHERE list_id = %s AND ticker = %s
+                           AND entry_price IS NULL
+                    """, (float(price), date_val, list_id, tku))
+                    # If price write failed race, still set date
+                    cur.execute("""
+                        UPDATE builder_list_tickers
+                           SET entry_date = COALESCE(entry_date, %s::date)
+                         WHERE list_id = %s AND ticker = %s
+                    """, (date_val, list_id, tku))
+                elif need_price:
+                    cur.execute("""
+                        UPDATE builder_list_tickers
+                           SET entry_price = %s
+                         WHERE list_id = %s AND ticker = %s AND entry_price IS NULL
+                    """, (float(price), list_id, tku))
+                elif need_date:
+                    cur.execute("""
+                        UPDATE builder_list_tickers
+                           SET entry_date = %s::date
+                         WHERE list_id = %s AND ticker = %s AND entry_date IS NULL
+                    """, (date_val, list_id, tku))
+            conn.commit()
+    except Exception as e:
+        print(f"[builder-lists] anchor: {e!s:.120}", flush=True)
 
 
 def _builder_list_board(list_id: str, lp_id: str) -> dict:
-    """Live board for one list: quotes + simple breadth snapshot."""
-    tickers = _builder_list_tickers(list_id, lp_id)
+    """Live board for one list: quotes, names, entry anchors, notes, fair value."""
+    _ensure_builder_lists_tables()
+    rows_meta = _builder_list_ticker_rows(list_id, lp_id)
+    tickers = [r["ticker"] for r in rows_meta]
     quotes: dict = {}
     if tickers:
         try:
@@ -9653,6 +9752,24 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
                 "pct": q.get("pct_change"),
                 "as_of": q.get("as_of"),
             }
+        # Anchor any pre-ui383 rows (or just-seeded) with today's price/date
+        _builder_anchor_missing(list_id, quotes)
+        # Re-read after anchor so response has stamped values
+        rows_meta = _builder_list_ticker_rows(list_id, lp_id)
+        tickers = [r["ticker"] for r in rows_meta]
+
+    # Company names (free DB — security_meta)
+    names: dict = {}
+    try:
+        meta_map = _db_meta(tickers) if tickers else {}
+        for tk in tickers:
+            m = meta_map.get(tk) or {}
+            nm = m.get("name") or m.get("entity_name") or ""
+            if nm:
+                names[tk] = nm
+    except Exception as e:
+        print(f"[builder-lists] names: {e!s:.100}", flush=True)
+
     pcts = []
     n_up = n_down = 0
     for tk in tickers:
@@ -9674,6 +9791,47 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
         sp = sorted(pcts)
         mid = len(sp) // 2
         med_pct = sp[mid] if len(sp) % 2 else (sp[mid - 1] + sp[mid]) / 2
+
+    # Build enriched rows for the interactive table
+    board_rows = []
+    for rm in rows_meta:
+        tk = rm["ticker"]
+        q = quotes.get(tk) or {}
+        price = q.get("price")
+        entry = rm.get("entry_price")
+        since_pct = None
+        since_abs = None
+        try:
+            if price is not None and entry is not None and float(entry) != 0:
+                pf, ef = float(price), float(entry)
+                since_abs = round(pf - ef, 4)
+                since_pct = round((pf - ef) / abs(ef) * 100.0, 4)
+        except (TypeError, ValueError):
+            pass
+        # Upside to fair value if set
+        fv = rm.get("fair_value")
+        fv_upside = None
+        try:
+            if price is not None and fv is not None and float(price) != 0:
+                fv_upside = round((float(fv) - float(price)) / abs(float(price)) * 100.0, 2)
+        except (TypeError, ValueError):
+            pass
+        board_rows.append({
+            "ticker": tk,
+            "name": names.get(tk) or "",
+            "note": rm.get("note") or "",
+            "entry_price": entry,
+            "entry_date": rm.get("entry_date"),  # YYYY-MM-DD
+            "fair_value": fv,
+            "added_at": rm.get("added_at"),
+            "price": price,
+            "pct": q.get("pct"),
+            "as_of": q.get("as_of"),
+            "since_entry_pct": since_pct,
+            "since_entry_abs": since_abs,
+            "fv_upside_pct": fv_upside,
+        })
+
     # Persist daily snapshot for tracking over time
     try:
         from datetime import date as _date
@@ -9726,6 +9884,7 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
             "source": meta[3] or "manual",
         },
         "tickers": tickers,
+        "rows": board_rows,
         "quotes": quotes,
         "breadth": {
             "n": len(tickers),
@@ -9756,6 +9915,9 @@ def builder_lists_seed(request: Request):
     lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
     _ensure_builder_lists_tables()
     created = 0
+    new_ids: list[str] = []
+    from datetime import date as _date
+    today = _date.today().isoformat()
     with _fund_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT name FROM builder_lists WHERE lp_id=%s", (lp_id,))
         have = {(r[0] or "").lower() for r in (cur.fetchall() or [])}
@@ -9773,12 +9935,20 @@ def builder_lists_seed(request: Request):
                 if not tku:
                     continue
                 cur.execute("""
-                    INSERT INTO builder_list_tickers (list_id, ticker)
-                    VALUES (%s, %s) ON CONFLICT DO NOTHING
-                """, (lid, tku))
+                    INSERT INTO builder_list_tickers (list_id, ticker, entry_date, note)
+                    VALUES (%s, %s, %s::date, '')
+                    ON CONFLICT DO NOTHING
+                """, (lid, tku, today))
             created += 1
+            new_ids.append(lid)
             have.add(nm.lower())
         conn.commit()
+    # Stamp entry_price from live quotes for boards we just created
+    for lid in new_ids[:12]:
+        try:
+            _builder_list_board(lid, lp_id)
+        except Exception as e:
+            print(f"[builder-lists] seed anchor {lid}: {e!s:.80}", flush=True)
     return {"ok": True, "created": created, "lists": _builder_lists_for_user(lp_id)}
 
 
@@ -9801,12 +9971,15 @@ def builder_lists_create(request: Request):
             INSERT INTO builder_lists (id, lp_id, name, sector, source, sort_order)
             VALUES (%s, %s, %s, %s, 'manual', %s)
         """, (lid, lp_id, name, sector, so))
+        from datetime import date as _date
+        today = _date.today().isoformat()
         for tk in tickers:
             tku = str(tk or "").strip().upper().replace(".", "-")
             if tku:
                 cur.execute(
-                    "INSERT INTO builder_list_tickers (list_id, ticker) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-                    (lid, tku))
+                    "INSERT INTO builder_list_tickers (list_id, ticker, entry_date, note) "
+                    "VALUES (%s,%s,%s::date,'') ON CONFLICT DO NOTHING",
+                    (lid, tku, today))
         conn.commit()
     return {"ok": True, "id": lid, "lists": _builder_lists_for_user(lp_id)}
 
@@ -9862,19 +10035,107 @@ def builder_list_add_tickers(list_id: str, request: Request):
         parts = [str(p).strip().upper().replace(".", "-") for p in (raw or []) if str(p).strip()]
     if not parts:
         raise HTTPException(400, "tickers required")
+    # Quote once so new rows get today's cost basis at initiation
+    qmap: dict = {}
+    try:
+        raw_q = batch_quotes(",".join(parts)) or {}
+        for tk in parts:
+            qmap[tk] = (raw_q.get(tk) or {}).get("price")
+    except Exception:
+        pass
+    from datetime import date as _date
+    today = _date.today().isoformat()
     with _fund_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM builder_lists WHERE id=%s AND lp_id=%s", (list_id, lp_id))
         if not cur.fetchone():
             raise HTTPException(404, "List not found")
         added = 0
         for tk in parts:
-            cur.execute(
-                "INSERT INTO builder_list_tickers (list_id, ticker) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-                (list_id, tk))
+            px = qmap.get(tk)
+            if px is not None:
+                cur.execute("""
+                    INSERT INTO builder_list_tickers
+                        (list_id, ticker, entry_price, entry_date, note)
+                    VALUES (%s, %s, %s, %s::date, '')
+                    ON CONFLICT (list_id, ticker) DO NOTHING
+                """, (list_id, tk, float(px), today))
+            else:
+                cur.execute("""
+                    INSERT INTO builder_list_tickers
+                        (list_id, ticker, entry_date, note)
+                    VALUES (%s, %s, %s::date, '')
+                    ON CONFLICT (list_id, ticker) DO NOTHING
+                """, (list_id, tk, today))
             added += cur.rowcount or 0
         cur.execute("UPDATE builder_lists SET updated_at=now() WHERE id=%s", (list_id,))
         conn.commit()
     return {"ok": True, "added": added, "board": _builder_list_board(list_id, lp_id)}
+
+
+@app.patch("/api/v2/builder/lists/{list_id}/tickers/{ticker}")
+@app.post("/api/v2/builder/lists/{list_id}/tickers/{ticker}/update")
+def builder_list_update_ticker(list_id: str, ticker: str, request: Request):
+    """Update interactive fields: note, fair_value, entry_price, entry_date."""
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    tk = (ticker or "").strip().upper().replace(".", "-")
+    body = _request_json_sync(request) or {}
+    sets = []
+    args = []
+    if "note" in body:
+        sets.append("note = %s")
+        args.append(str(body.get("note") or "")[:2000])
+    if "fair_value" in body:
+        fv = body.get("fair_value")
+        if fv is None or fv == "":
+            sets.append("fair_value = NULL")
+        else:
+            try:
+                sets.append("fair_value = %s")
+                args.append(float(fv))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "fair_value must be a number")
+    if "entry_price" in body:
+        ep = body.get("entry_price")
+        if ep is None or ep == "":
+            sets.append("entry_price = NULL")
+        else:
+            try:
+                sets.append("entry_price = %s")
+                args.append(float(ep))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "entry_price must be a number")
+    if "entry_date" in body:
+        ed = body.get("entry_date")
+        if ed is None or ed == "":
+            sets.append("entry_date = NULL")
+        else:
+            # Expect YYYY-MM-DD
+            ed_s = str(ed).strip()[:10]
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", ed_s):
+                raise HTTPException(400, "entry_date must be YYYY-MM-DD")
+            sets.append("entry_date = %s::date")
+            args.append(ed_s)
+    if not sets:
+        raise HTTPException(400, "no fields to update")
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM builder_lists WHERE id=%s AND lp_id=%s", (list_id, lp_id))
+        if not cur.fetchone():
+            raise HTTPException(404, "List not found")
+        sql = (
+            "UPDATE builder_list_tickers SET " + ", ".join(sets)
+            + " WHERE list_id = %s AND ticker = %s"
+        )
+        args.extend([list_id, tk])
+        cur.execute(sql, tuple(args))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Ticker not on this board")
+        cur.execute("UPDATE builder_lists SET updated_at=now() WHERE id=%s", (list_id,))
+        conn.commit()
+    # Return light row + full board for UI
+    board = _builder_list_board(list_id, lp_id)
+    row = next((r for r in (board.get("rows") or []) if r.get("ticker") == tk), None)
+    return {"ok": True, "ticker": tk, "row": row, "board": board}
 
 
 @app.delete("/api/v2/builder/lists/{list_id}/tickers/{ticker}")
