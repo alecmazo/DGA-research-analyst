@@ -1219,7 +1219,7 @@ app.add_middleware(
 # Auth — stateless HMAC token (survives restarts, no DB needed)
 # ---------------------------------------------------------------------------
 _PUBLIC_PATHS = {
-    "/health", "/info", "/api/auth", "/api/build", "/api/diagnostics", "/",
+    "/health", "/healthz", "/info", "/api/auth", "/api/build", "/api/diagnostics", "/",
     "/api/auth/v2/login",   # email+password login is unauthenticated by design
     # Free macro RSS wire — no PII, no LLM. Public so mobile never blanks
     # the Research card on a missing/expired JWT (common with v2-only sessions).
@@ -6608,7 +6608,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui383-20260728-builder-tracking"
+WEB_BUILD_VERSION = "ui388-20260729-boot-pool-health"
 
 
 @app.get("/api/build")
@@ -6726,9 +6726,17 @@ def continuity_handoff(request: Request):
 
 
 @app.get("/health")
+@app.get("/healthz")
 def health():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat(),
-            "py": f"{sys.version_info.major}.{sys.version_info.minor}"}
+    """Liveness only — never touch DB/Dropbox/migrations. Railway healthcheck
+    must get 200 as soon as uvicorn is listening."""
+    return {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "py": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "build": WEB_BUILD_VERSION,
+        "uptime_s": round(time.time() - _APP_BOOT_TS, 1) if "_APP_BOOT_TS" in globals() else None,
+    }
 
 
 @app.get("/api/config/models")
@@ -14099,10 +14107,23 @@ def _hydrate_all() -> None:
     _hydrate_from_dropbox()
     _hydrate_analyst_reports_to_db()
 
-threading.Thread(target=_hydrate_all, daemon=True, name="hydrate-all").start()
 
-# Start the daily snapshot worker (runs once per day after market close)
-analyst._start_tracker_snapshot_worker()
+def _start_post_listen_workers() -> None:
+    """Start hydrate / tracker AFTER uvicorn is listening.
+
+    Starting these at module import raced the import lock, opened DB
+    connections before the pool was ready, and delayed / blocked bind
+    long enough for Railway healthchecks to fail (ui384–ui387).
+    """
+    try:
+        threading.Thread(target=_hydrate_all, daemon=True, name="hydrate-all").start()
+    except Exception as _e:
+        print(f"[boot] hydrate-all start failed: {_e!s:.120}", flush=True)
+    try:
+        analyst._start_tracker_snapshot_worker()
+    except Exception as _e:
+        print(f"[boot] tracker snapshot worker failed: {_e!s:.120}", flush=True)
+
 
 # ── Automation settings (stored in kv_store) ─────────────────────────────────
 _DEFAULT_AUTOMATION: dict = {
@@ -14441,16 +14462,31 @@ _FUND_POOL = None
 _FUND_POOL_LOCK = threading.Lock()
 
 
+def _pg_connect_kwargs() -> dict:
+    """Always set a short connect_timeout so a bad/slow DATABASE_URL cannot
+    hang process boot or pin every worker thread forever."""
+    return {
+        "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "10")),
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+    }
+
+
 def _get_fund_pool():
     global _FUND_POOL
     if _FUND_POOL is None:
         with _FUND_POOL_LOCK:
             if _FUND_POOL is None:
                 from psycopg2 import pool as _pgpool
+                # minconn=0: do not open TCP at pool construction (import/boot).
+                # maxconn raised — live ui383 logged continuous "pool exhausted"
+                # and fell back to unbounded direct connects (watchlist breakage).
+                maxconn = int(os.environ.get("PG_POOL_MAX", "25"))
                 _FUND_POOL = _pgpool.ThreadedConnectionPool(
-                    1, 10, os.environ["DATABASE_URL"],
-                    keepalives=1, keepalives_idle=30,
-                    keepalives_interval=10, keepalives_count=3)
+                    0, max(10, maxconn), os.environ["DATABASE_URL"],
+                    **_pg_connect_kwargs())
     return _FUND_POOL
 
 
@@ -14505,9 +14541,14 @@ class _PooledConn:
         return self
 
     def __exit__(self, *exc):
-        # psycopg2 semantics: commit/rollback but do NOT close — several call
-        # sites keep using the conn after a `with conn:` block.
-        return self._conn.__exit__(*exc)
+        # Always return the connection to the pool when the `with _fund_conn()`
+        # block ends. Old behavior only ran psycopg2 commit/rollback and never
+        # putconn'd — under desk load the pool (max 10) stayed exhausted and
+        # watchlists / fund queries fell over (live ui383 log spam).
+        try:
+            return self._conn.__exit__(*exc)
+        finally:
+            self.close()
 
     def __getattr__(self, name):
         return getattr(self._conn, name)
@@ -14534,29 +14575,45 @@ def _fund_conn():
         _apply_self_migrations()
     except Exception:
         pass
-    # Pooled path with a liveness probe (a server-closed idle conn is retried
-    # once); any pool failure falls back to a direct connect — never worse
-    # than the old behavior.
+    # Pooled path. Do NOT fall back to unbounded direct connects on
+    # "pool exhausted" — that was exhausting Postgres and killing watchlists.
+    last_err = None
     try:
         pool = _get_fund_pool()
-        for _attempt in (1, 2):
-            raw = pool.getconn()
+        for _attempt in (1, 2, 3):
             try:
+                raw = pool.getconn()
+            except Exception as e:
+                last_err = e
+                # Brief backoff if pool is temporarily empty
+                time.sleep(0.05 * _attempt)
+                continue
+            try:
+                # Cheap liveness — skip full SELECT when connection is fresh
+                if getattr(raw, "closed", 1):
+                    pool.putconn(raw, close=True)
+                    continue
                 with raw.cursor() as _c:
                     _c.execute("SELECT 1")
                 raw.rollback()
                 return _PooledConn(raw)
-            except Exception:
+            except Exception as e:
+                last_err = e
                 try:
                     pool.putconn(raw, close=True)
                 except Exception:
                     pass
     except Exception as e:
-        print(f"[db-pool] falling back to direct connect: {e!s:.120}", flush=True)
+        last_err = e
+        print(f"[db-pool] getconn failed: {e!s:.120}", flush=True)
+    # One last direct connect with timeout (not a permanent bypass)
     try:
-        return psycopg2.connect(url)
+        return psycopg2.connect(url, **_pg_connect_kwargs())
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Fund DB unavailable: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Fund DB unavailable: {e or last_err}",
+        )
 
 
 
@@ -14820,7 +14877,7 @@ def _ensure_analyst_reports_table_schema(force: bool = False) -> None:
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return
     try:
-        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        conn = psycopg2.connect(os.environ["DATABASE_URL"], **_pg_connect_kwargs())
         try:
             _ensure_analyst_reports_table(conn)
         finally:
@@ -14991,7 +15048,9 @@ def _start_automation_schedulers() -> None:
     print("[automation] schedulers started (after kv helpers ready)", flush=True)
 
 
-_start_automation_schedulers()
+# Do NOT start schedulers at import — that raced import, opened DB traffic
+# before listen, and contributed to healthcheck timeouts. Started from
+# the post-listen startup hook instead.
 
 
 def _ensure_benchmark_annual_returns_table(conn) -> None:
@@ -15283,7 +15342,7 @@ def _apply_self_migrations() -> None:
             except Exception: pass
 
     try:
-        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        conn = psycopg2.connect(os.environ["DATABASE_URL"], **_pg_connect_kwargs())
     except Exception as e:
         print(f"[migration] could not connect: {e}")
         return
@@ -15422,37 +15481,73 @@ def _hydrate_analyst_reports_to_db() -> None:
         print(f"[analyst_reports] hydration thread error (non-fatal): {_e!s:.200}")
 
 
+_APP_BOOT_TS = time.time()
+
+
 @app.on_event("startup")
 async def _on_startup_run_migrations() -> None:
-    _apply_self_migrations()
-    try:
-        _ensure_transcripts_tables()
-    except Exception as _e:
-        print(f"[startup] transcripts table init skipped: {_e}")
-    try:
-        _ensure_strategist_reviews_table()
-    except Exception as _e:
-        print(f"[startup] strategist_reviews table init skipped: {_e}")
-    try:
-        _ensure_analyst_reviews_table()
-    except Exception as _e:
-        print(f"[startup] analyst_reviews table init skipped: {_e}")
-    # Wire DB-backed overlay into auth_v2 so LP assignments persist
-    # in PostgreSQL rather than relying on the overlay file alone.
-    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+    """Bind-ready immediately; heavy work runs off the event loop.
+
+    Railway only promotes when /health returns 200. Running full Postgres
+    migrations + table ensures *synchronously* here blocked uvicorn from
+    serving until every step finished — past the healthcheck timeout once
+    the import path also did DB work (podcast table, automation catch-up).
+    """
+    print(
+        f"[startup] listen-ready (build={WEB_BUILD_VERSION}); "
+        f"deferring migrations/workers to background",
+        flush=True,
+    )
+
+    def _bg_startup() -> None:
+        t0 = time.time()
         try:
-            import auth_v2 as _av2
-            _av2.register_db_backend(_db_load_lp_overlay, _db_save_lp_overlay)
-            print("[auth_v2] DB backend registered")
+            try:
+                _start_post_listen_workers()
+            except Exception as _e:
+                print(f"[startup] post-listen workers: {_e!s:.120}", flush=True)
+            try:
+                _start_automation_schedulers()
+            except Exception as _e:
+                print(f"[startup] automation schedulers: {_e!s:.120}", flush=True)
+            try:
+                _ensure_podcast_table()
+            except Exception as _e:
+                print(f"[startup] podcast table: {_e!s:.120}", flush=True)
+            _apply_self_migrations()
+            try:
+                _ensure_transcripts_tables()
+            except Exception as _e:
+                print(f"[startup] transcripts table init skipped: {_e}", flush=True)
+            try:
+                _ensure_strategist_reviews_table()
+            except Exception as _e:
+                print(f"[startup] strategist_reviews table init skipped: {_e}", flush=True)
+            try:
+                _ensure_analyst_reviews_table()
+            except Exception as _e:
+                print(f"[startup] analyst_reviews table init skipped: {_e}", flush=True)
+            try:
+                if hasattr(globals().get("_ensure_builder_lists_tables", None), "__call__"):
+                    _ensure_builder_lists_tables()  # type: ignore[name-defined]
+            except Exception as _e:
+                print(f"[startup] builder lists skipped: {_e}", flush=True)
+            if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+                try:
+                    import auth_v2 as _av2
+                    _av2.register_db_backend(_db_load_lp_overlay, _db_save_lp_overlay)
+                    print("[auth_v2] DB backend registered", flush=True)
+                except Exception as _e:
+                    print(f"[auth_v2] DB backend registration failed: {_e}", flush=True)
+            try:
+                _load_volume_llm_override_from_db()
+            except Exception as _e:
+                print(f"[startup] volume-llm override load skipped: {_e}", flush=True)
+            print(f"[startup] background init done in {time.time() - t0:.1f}s", flush=True)
         except Exception as _e:
-            print(f"[auth_v2] DB backend registration failed: {_e}")
-    # Option 4: restore Settings volume-LLM toggle after redeploy
-    try:
-        _load_volume_llm_override_from_db()
-    except Exception as _e:
-        print(f"[startup] volume-llm override load skipped: {_e}")
-    # Note: Dropbox hydration + DB backfill run sequentially in _hydrate_all()
-    # (started at module load time). No separate thread needed here.
+            print(f"[startup] background init FAILED: {_e!s:.300}", flush=True)
+
+    threading.Thread(target=_bg_startup, daemon=True, name="startup-init").start()
 
 def _fund_id(cur) -> str:
     fid = os.environ.get("FUND_ID")
@@ -22566,11 +22661,9 @@ def _ensure_podcast_table() -> None:
         print(f"❌ [podcast] table ensure failed: {e!s:.200}", flush=True)
 
 
-# Build-time hook (best-effort)
-try:
-    _ensure_podcast_table()
-except Exception:
-    pass
+# Podcast table ensure is deferred to post-listen startup — doing it at
+# import opened a DB connection (no connect_timeout) and could hang bind
+# long enough for Railway healthcheck to kill the deploy.
 
 
 # Track in-progress podcast generation jobs for UI progress polling.

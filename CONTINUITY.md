@@ -27,7 +27,9 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Report history / thesis deltas** | **`ui381-20260728-report-history`** | Re-Analyze archives prior; Saved Reports vN + Δ; timeline; Value Rank self-history |
 | **Desk X FinTwit card** | **`ui382-20260728-x-fintwit-feed`** | Free FinTwit feed via X public syndication · $0 API |
 | **Builder tracking table** | **`ui383-20260728-builder-tracking`** | Names, cost basis, since-add %, date first added, notes/FV, sort/filter |
-| **Next deploy after this handoff** | **`ui384-YYYYMMDD-slug`** | Always `max(live, this file) + 1` |
+| ui384–ui387 | FAILED healthchecks | Thin-ASGI / rollbacks — do not re-ship as-is |
+| **Boot + pool health** | **`ui388-20260729-boot-pool-health`** | ui383 product + defer import DB work; fix pool leak; larger pool; post-listen workers |
+| **Next deploy after this** | **`ui389-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
