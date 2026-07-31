@@ -5687,14 +5687,18 @@ def _persist_analysis_text(
 
     if provider in ("claude", "kimi", "deepseek"):
         try:
-            _db_upsert_report(
+            ok = _db_upsert_report(
                 ticker, text, summary,
                 has_docx=False, has_pptx=False, gamma_url=None,
                 pptx_stale=None, provider=provider,
             )
-            print(f"✅ [persist] {provider.upper()} report for {ticker} "
-                  f"({len(text):,} chars · price_target={summary.get('price_target')})")
-            return True, len(text)
+            if ok:
+                print(f"✅ [persist] {provider.upper()} report for {ticker} "
+                      f"({len(text):,} chars · price_target={summary.get('price_target')})")
+                return True, len(text)
+            print(f"❌ [persist] {provider.upper()} DB write returned False for {ticker} "
+                  f"({len(text):,} chars still on disk/result — Saved Reports will miss this until re-upsert)")
+            return False, len(text)
         except Exception as e:
             print(f"❌ [persist] {provider.upper()} DB write failed for {ticker}: {e!s:.300}")
             return False, len(text)
@@ -5708,14 +5712,18 @@ def _persist_analysis_text(
             _pptx_stale = False
         else:
             _pptx_stale = True if _has_pptx else False
-        _db_upsert_report(
+        ok = _db_upsert_report(
             ticker, text, summary,
             has_docx=_has_docx, has_pptx=_has_pptx, gamma_url=_gamma_url,
             pptx_stale=_pptx_stale, provider="grok",
         )
-        print(f"✅ [persist] GROK report for {ticker} "
-              f"({len(text):,} chars · price_target={summary.get('price_target')})")
-        return True, len(text)
+        if ok:
+            print(f"✅ [persist] GROK report for {ticker} "
+                  f"({len(text):,} chars · price_target={summary.get('price_target')})")
+            return True, len(text)
+        print(f"❌ [persist] GROK DB write returned False for {ticker} "
+              f"({len(text):,} chars still on disk/result — Saved Reports will miss this until re-upsert)")
+        return False, len(text)
     except Exception as e:
         print(f"❌ [persist] GROK DB write failed for {ticker}: {e!s:.300}")
         return False, len(text)
@@ -5932,11 +5940,27 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
             # so the UI can optionally show it, but don't mark the job 'failed'.
             _jobs[job_id]["status"] = "done"
             _jobs[job_id]["progress"] = {"step": "done", "pct": 1.0,
-                                          "label": "Report ready"}
+                                          "label": "Report ready" if persisted
+                                          else "Report ready (DB save pending)"}
             _jobs[job_id]["result"] = {k: v for k, v in result.items()
                                        if k != "report_text"}
             _jobs[job_id]["result"]["has_report"] = bool(result.get("report_text") or persisted)
-            if persisted and not result.get("ok"):
+            _jobs[job_id]["result"]["persisted_to_db"] = bool(persisted)
+            if result.get("ok") and not persisted:
+                # LLM finished but analyst_reports write failed after retries —
+                # this is the ROKU failure mode. File may still be on disk /
+                # Dropbox; hydrate will re-import. Do NOT claim Saved Reports
+                # is updated.
+                _jobs[job_id]["warning"] = (
+                    "Report generated but failed to save to Saved Reports database. "
+                    "It should reappear after refresh/hydrate; re-run Analyze if not."
+                )
+                try:
+                    _db_record_attempt_failure(
+                        ticker, "DB upsert failed after retries (report file may exist)")
+                except Exception:
+                    pass
+            elif persisted and not result.get("ok"):
                 _jobs[job_id]["warning"] = str(result.get("error") or "")[:300]
         else:
             _jobs[job_id]["status"] = "failed"
@@ -6652,7 +6676,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui394-20260731-db-lock-clear"
+WEB_BUILD_VERSION = "ui395-20260731-report-db-upsert-retry"
 
 
 @app.get("/api/build")
@@ -11488,38 +11512,36 @@ def _db_upsert_report(
     provider: str = "grok",
     *,
     touch_run_at: bool = True,
-) -> None:
+) -> bool:
     """Upsert one analyst report row into PostgreSQL.
 
-    provider:
-      • 'grok'   — writes report_md / generated_at / rating / price_target /
-                   upside_pct (the canonical columns; default)
-      • 'claude' — writes report_md_claude / claude_generated_at /
-                   claude_rating / claude_price_target / claude_upside_pct
-                   alongside the existing Grok columns (which stay intact)
+    Returns True only after a successful COMMIT. Returns False when the DB
+    write fails after retries (never raises). Callers MUST check the bool —
+    earlier builds logged DB-WRITE-FAILED then still reported persisted=True
+    (ROKU 2026-07-31: SSL closed mid-write, report missing from Saved Reports).
 
-    pptx_stale:
-      • None   — preserve existing value (don't touch the column)
-      • True   — mark deck as old/stale (report rerun without Gamma)
-      • False  — deck regenerated alongside the report (in sync)
+    provider:
+      • 'grok'   — canonical report_md / generated_at / rating / …
+      • 'claude' / 'kimi' / 'deepseek' — parallel provider columns
 
     touch_run_at:
-      • True  (default) — real Analyze run: stamp generated_at / provider_* / last_attempt
-      • False — hydrate / recovery re-import: refresh content fields but **never**
-        overwrite analysis timestamps (startup used to bulk-stamp NOW() and
-        scramble Saved Reports sort order so a fresh CEG sat 6th).
+      • True  — real Analyze run: stamp generated_at / last_attempt
+      • False — hydrate / recovery: refresh content, keep prior timestamps
 
-    Entirely wrapped in try/except — never raises, so a DB failure never
-    affects the job result or any calling code.
+    Reliability:
+      • Fresh psycopg2.connect per attempt (bypass pool) for large report
+        bodies — pooled SSL sessions were dying mid-INSERT.
+      • Explicit conn.commit() before declaring success.
+      • Up to 3 attempts on transient SSL / connection / timeout errors.
+      • Metric snapshot runs AFTER commit (never nested under the write txn).
     """
     if not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
-        return
-    # Pull the report-header date once — surfaces under the ticker in Saved
-    # Reports so the user sees the analyst's as-of date, not the DB upload time.
+        # File-only / local mode — nothing to write to DB.
+        return True
+    if not ticker or not (md_text or "").strip():
+        return False
+
     report_date = _extract_report_date(md_text)
-    # Defensive: ensure all schema columns this function references actually
-    # exist before INSERT. Earlier deploys may have missed a column ADD,
-    # leaving the INSERT to fail silently with 'column does not exist'.
     try:
         _ensure_analyst_reports_table_schema()
     except Exception:
@@ -11528,225 +11550,238 @@ def _db_upsert_report(
         _ensure_report_history_tables()
     except Exception:
         pass
-    # When touch_run_at is False (hydrate), keep prior analysis stamps so
-    # Saved Reports order reflects real Analyze runs, not deploy re-imports.
+
     _touch = bool(touch_run_at)
-    delta_from_prior = None
-    try:
-        with _fund_conn() as conn, conn.cursor() as cur:
-            # Snapshot prior version before overwrite (real Analyze only)
-            if _touch and (md_text or "").strip():
-                try:
-                    delta_from_prior = _archive_prior_report_version(
-                        cur, ticker, provider, summary or {}, md_text)
-                except Exception as _ae:
-                    print(f"[report-history] archive {ticker}/{provider}: {_ae!s:.120}", flush=True)
-            # ── Claude path: only touches the *_claude columns ──────────
-            if provider == "claude":
-                cur.execute("""
-                    INSERT INTO analyst_reports
-                        (ticker, generated_at, report_md, has_docx, has_pptx,
-                         report_md_claude, claude_generated_at, claude_report_date,
-                         claude_rating, claude_price_target, claude_upside_pct,
-                         last_attempt_at, last_attempt_status, last_attempt_error)
-                    VALUES (%s, NOW(), '', FALSE, FALSE,
-                            %s, NOW(), %s, %s, %s, %s,
-                            NOW(), 'success', NULL)
-                    ON CONFLICT (ticker) DO UPDATE SET
-                        report_md_claude    = EXCLUDED.report_md_claude,
-                        claude_generated_at = CASE WHEN %s THEN NOW()
-                                                   ELSE COALESCE(analyst_reports.claude_generated_at, NOW()) END,
-                        claude_report_date  = EXCLUDED.claude_report_date,
-                        claude_rating       = EXCLUDED.claude_rating,
-                        claude_price_target = EXCLUDED.claude_price_target,
-                        claude_upside_pct   = EXCLUDED.claude_upside_pct,
-                        archived            = FALSE,
-                        last_attempt_at     = CASE WHEN %s THEN NOW()
-                                                   ELSE analyst_reports.last_attempt_at END,
-                        last_attempt_status = CASE WHEN %s THEN 'success'
-                                                   ELSE analyst_reports.last_attempt_status END,
-                        last_attempt_error  = CASE WHEN %s THEN NULL
-                                                   ELSE analyst_reports.last_attempt_error END
-                """, (
-                    ticker, md_text, report_date,
-                    summary.get("rating"), summary.get("price_target"),
-                    summary.get("upside_pct"),
-                    _touch, _touch, _touch, _touch,
-                ))
-                if delta_from_prior is not None:
-                    _stamp_report_delta(cur, ticker, provider, delta_from_prior)
-                else:
-                    cur.execute(
-                        "UPDATE analyst_reports SET version_count = COALESCE(version_count,1) "
-                        "WHERE ticker=%s AND COALESCE(version_count,0) < 1",
-                        (ticker,))
-                try:
-                    _snapshot_ticker_metrics(ticker, {
-                        "report_price_target": summary.get("price_target"),
-                        "report_upside_pct": summary.get("upside_pct"),
-                    }, {"provider": "claude", "rating": summary.get("rating")})
-                except Exception:
-                    pass
-                return
+    provider = (provider or "grok").lower().strip()
+    summary = dict(summary or {})
+    # rating columns are varchar(30) — crude extractors can pull markdown table
+    # debris ("BUY                               | ★ CO…") and blow the INSERT.
+    if summary.get("rating") is not None:
+        summary["rating"] = str(summary["rating"]).strip()[:30] or None
+    last_err: Exception | None = None
+    max_attempts = 3
 
-            # ── Kimi path: parallel columns (does not overwrite Grok/Claude) ─
-            if provider == "kimi":
-                cur.execute("""
-                    INSERT INTO analyst_reports
-                        (ticker, generated_at, report_md, has_docx, has_pptx,
-                         report_md_kimi, kimi_generated_at, kimi_report_date,
-                         kimi_rating, kimi_price_target, kimi_upside_pct,
-                         last_attempt_at, last_attempt_status, last_attempt_error)
-                    VALUES (%s, NOW(), '', FALSE, FALSE,
-                            %s, NOW(), %s, %s, %s, %s,
-                            NOW(), 'success', NULL)
-                    ON CONFLICT (ticker) DO UPDATE SET
-                        report_md_kimi    = EXCLUDED.report_md_kimi,
-                        kimi_generated_at = CASE WHEN %s THEN NOW()
-                                                 ELSE COALESCE(analyst_reports.kimi_generated_at, NOW()) END,
-                        kimi_report_date  = EXCLUDED.kimi_report_date,
-                        kimi_rating       = EXCLUDED.kimi_rating,
-                        kimi_price_target = EXCLUDED.kimi_price_target,
-                        kimi_upside_pct   = EXCLUDED.kimi_upside_pct,
-                        archived          = FALSE,
-                        last_attempt_at   = CASE WHEN %s THEN NOW()
-                                                 ELSE analyst_reports.last_attempt_at END,
-                        last_attempt_status = CASE WHEN %s THEN 'success'
-                                                   ELSE analyst_reports.last_attempt_status END,
-                        last_attempt_error  = CASE WHEN %s THEN NULL
-                                                   ELSE analyst_reports.last_attempt_error END
-                """, (
-                    ticker, md_text, report_date,
-                    summary.get("rating"), summary.get("price_target"),
-                    summary.get("upside_pct"),
-                    _touch, _touch, _touch, _touch,
-                ))
-                if delta_from_prior is not None:
-                    _stamp_report_delta(cur, ticker, provider, delta_from_prior)
-                try:
-                    _snapshot_ticker_metrics(ticker, {
-                        "report_price_target": summary.get("price_target"),
-                        "report_upside_pct": summary.get("upside_pct"),
-                    }, {"provider": "kimi", "rating": summary.get("rating")})
-                except Exception:
-                    pass
-                return
+    def _is_transient(err: Exception) -> bool:
+        s = str(err).lower()
+        return any(tok in s for tok in (
+            "ssl", "connection", "closed", "terminat", "timeout",
+            "broken pipe", "server closed", "could not connect",
+            "connection reset", "eof detected", "network",
+            "admin_shutdown", "crash", "too many connections",
+            "remaining connection slots",
+        ))
 
-            # ── DeepSeek path: parallel columns ─────────────────────────
-            if provider == "deepseek":
-                cur.execute("""
-                    INSERT INTO analyst_reports
-                        (ticker, generated_at, report_md, has_docx, has_pptx,
-                         report_md_deepseek, deepseek_generated_at, deepseek_report_date,
-                         deepseek_rating, deepseek_price_target, deepseek_upside_pct,
-                         last_attempt_at, last_attempt_status, last_attempt_error)
-                    VALUES (%s, NOW(), '', FALSE, FALSE,
-                            %s, NOW(), %s, %s, %s, %s,
-                            NOW(), 'success', NULL)
-                    ON CONFLICT (ticker) DO UPDATE SET
-                        report_md_deepseek    = EXCLUDED.report_md_deepseek,
-                        deepseek_generated_at = CASE WHEN %s THEN NOW()
-                                                     ELSE COALESCE(analyst_reports.deepseek_generated_at, NOW()) END,
-                        deepseek_report_date  = EXCLUDED.deepseek_report_date,
-                        deepseek_rating       = EXCLUDED.deepseek_rating,
-                        deepseek_price_target = EXCLUDED.deepseek_price_target,
-                        deepseek_upside_pct   = EXCLUDED.deepseek_upside_pct,
-                        archived              = FALSE,
-                        last_attempt_at       = CASE WHEN %s THEN NOW()
+    def _is_schema(err: Exception) -> bool:
+        s = str(err)
+        return "does not exist" in s or "column" in s.lower() and "undefined" in s.lower() \
+            or "UndefinedColumn" in type(err).__name__
+
+    for attempt in range(1, max_attempts + 1):
+        conn = None
+        delta_from_prior = None
+        try:
+            # Fresh direct connection — do NOT use the pool for multi-KB report
+            # upserts. Stale pooled sockets produced "SSL connection has been
+            # closed unexpectedly" after long Analyze jobs (Grok ~minutes).
+            conn = psycopg2.connect(
+                os.environ["DATABASE_URL"], **_pg_connect_kwargs())
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                if _touch and (md_text or "").strip():
+                    try:
+                        delta_from_prior = _archive_prior_report_version(
+                            cur, ticker, provider, summary, md_text)
+                    except Exception as _ae:
+                        print(f"[report-history] archive {ticker}/{provider}: {_ae!s:.120}",
+                              flush=True)
+
+                if provider == "claude":
+                    cur.execute("""
+                        INSERT INTO analyst_reports
+                            (ticker, generated_at, report_md, has_docx, has_pptx,
+                             report_md_claude, claude_generated_at, claude_report_date,
+                             claude_rating, claude_price_target, claude_upside_pct,
+                             last_attempt_at, last_attempt_status, last_attempt_error)
+                        VALUES (%s, NOW(), '', FALSE, FALSE,
+                                %s, NOW(), %s, %s, %s, %s,
+                                NOW(), 'success', NULL)
+                        ON CONFLICT (ticker) DO UPDATE SET
+                            report_md_claude    = EXCLUDED.report_md_claude,
+                            claude_generated_at = CASE WHEN %s THEN NOW()
+                                                       ELSE COALESCE(analyst_reports.claude_generated_at, NOW()) END,
+                            claude_report_date  = EXCLUDED.claude_report_date,
+                            claude_rating       = EXCLUDED.claude_rating,
+                            claude_price_target = EXCLUDED.claude_price_target,
+                            claude_upside_pct   = EXCLUDED.claude_upside_pct,
+                            archived            = FALSE,
+                            last_attempt_at     = CASE WHEN %s THEN NOW()
+                                                       ELSE analyst_reports.last_attempt_at END,
+                            last_attempt_status = CASE WHEN %s THEN 'success'
+                                                       ELSE analyst_reports.last_attempt_status END,
+                            last_attempt_error  = CASE WHEN %s THEN NULL
+                                                       ELSE analyst_reports.last_attempt_error END
+                    """, (
+                        ticker, md_text, report_date,
+                        summary.get("rating"), summary.get("price_target"),
+                        summary.get("upside_pct"),
+                        _touch, _touch, _touch, _touch,
+                    ))
+                    if delta_from_prior is not None:
+                        _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+                    else:
+                        cur.execute(
+                            "UPDATE analyst_reports SET version_count = COALESCE(version_count,1) "
+                            "WHERE ticker=%s AND COALESCE(version_count,0) < 1",
+                            (ticker,))
+
+                elif provider == "kimi":
+                    cur.execute("""
+                        INSERT INTO analyst_reports
+                            (ticker, generated_at, report_md, has_docx, has_pptx,
+                             report_md_kimi, kimi_generated_at, kimi_report_date,
+                             kimi_rating, kimi_price_target, kimi_upside_pct,
+                             last_attempt_at, last_attempt_status, last_attempt_error)
+                        VALUES (%s, NOW(), '', FALSE, FALSE,
+                                %s, NOW(), %s, %s, %s, %s,
+                                NOW(), 'success', NULL)
+                        ON CONFLICT (ticker) DO UPDATE SET
+                            report_md_kimi    = EXCLUDED.report_md_kimi,
+                            kimi_generated_at = CASE WHEN %s THEN NOW()
+                                                     ELSE COALESCE(analyst_reports.kimi_generated_at, NOW()) END,
+                            kimi_report_date  = EXCLUDED.kimi_report_date,
+                            kimi_rating       = EXCLUDED.kimi_rating,
+                            kimi_price_target = EXCLUDED.kimi_price_target,
+                            kimi_upside_pct   = EXCLUDED.kimi_upside_pct,
+                            archived          = FALSE,
+                            last_attempt_at   = CASE WHEN %s THEN NOW()
                                                      ELSE analyst_reports.last_attempt_at END,
-                        last_attempt_status   = CASE WHEN %s THEN 'success'
-                                                     ELSE analyst_reports.last_attempt_status END,
-                        last_attempt_error    = CASE WHEN %s THEN NULL
-                                                     ELSE analyst_reports.last_attempt_error END
-                """, (
-                    ticker, md_text, report_date,
-                    summary.get("rating"), summary.get("price_target"),
-                    summary.get("upside_pct"),
-                    _touch, _touch, _touch, _touch,
-                ))
-                if delta_from_prior is not None:
-                    _stamp_report_delta(cur, ticker, provider, delta_from_prior)
-                try:
-                    _snapshot_ticker_metrics(ticker, {
-                        "report_price_target": summary.get("price_target"),
-                        "report_upside_pct": summary.get("upside_pct"),
-                    }, {"provider": "deepseek", "rating": summary.get("rating")})
-                except Exception:
-                    pass
-                return
+                            last_attempt_status = CASE WHEN %s THEN 'success'
+                                                       ELSE analyst_reports.last_attempt_status END,
+                            last_attempt_error  = CASE WHEN %s THEN NULL
+                                                       ELSE analyst_reports.last_attempt_error END
+                    """, (
+                        ticker, md_text, report_date,
+                        summary.get("rating"), summary.get("price_target"),
+                        summary.get("upside_pct"),
+                        _touch, _touch, _touch, _touch,
+                    ))
+                    if delta_from_prior is not None:
+                        _stamp_report_delta(cur, ticker, provider, delta_from_prior)
 
-            # ── Grok path (existing behavior) ──────────────────────────
-            if pptx_stale is None:
-                # Path A: do not touch pptx_stale
-                cur.execute("""
-                    INSERT INTO analyst_reports
-                        (ticker, generated_at, report_md, has_docx, has_pptx,
-                         rating, price_target, upside_pct, gamma_url, report_date,
-                         last_attempt_at, last_attempt_status, last_attempt_error)
-                    VALUES (%s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s,
-                            NOW(), 'success', NULL)
-                    ON CONFLICT (ticker) DO UPDATE SET
-                        generated_at        = CASE WHEN %s THEN NOW()
-                                                   ELSE COALESCE(analyst_reports.generated_at, NOW()) END,
-                        report_md           = EXCLUDED.report_md,
-                        has_docx            = EXCLUDED.has_docx,
-                        has_pptx            = EXCLUDED.has_pptx,
-                        rating              = EXCLUDED.rating,
-                        price_target        = EXCLUDED.price_target,
-                        upside_pct          = EXCLUDED.upside_pct,
-                        gamma_url           = EXCLUDED.gamma_url,
-                        report_date         = EXCLUDED.report_date,
-                        archived            = FALSE,
-                        last_attempt_at     = CASE WHEN %s THEN NOW()
-                                                   ELSE analyst_reports.last_attempt_at END,
-                        last_attempt_status = CASE WHEN %s THEN 'success'
-                                                   ELSE analyst_reports.last_attempt_status END,
-                        last_attempt_error  = CASE WHEN %s THEN NULL
-                                                   ELSE analyst_reports.last_attempt_error END
-                """, (
-                    ticker, md_text, has_docx, has_pptx,
-                    summary.get("rating"), summary.get("price_target"),
-                    summary.get("upside_pct"), gamma_url, report_date,
-                    _touch, _touch, _touch, _touch,
-                ))
-            else:
-                # Path B: explicitly set pptx_stale
-                cur.execute("""
-                    INSERT INTO analyst_reports
-                        (ticker, generated_at, report_md, has_docx, has_pptx,
-                         rating, price_target, upside_pct, gamma_url, pptx_stale, report_date,
-                         last_attempt_at, last_attempt_status, last_attempt_error)
-                    VALUES (%s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            NOW(), 'success', NULL)
-                    ON CONFLICT (ticker) DO UPDATE SET
-                        generated_at        = CASE WHEN %s THEN NOW()
-                                                   ELSE COALESCE(analyst_reports.generated_at, NOW()) END,
-                        report_md           = EXCLUDED.report_md,
-                        has_docx            = EXCLUDED.has_docx,
-                        has_pptx            = EXCLUDED.has_pptx,
-                        rating              = EXCLUDED.rating,
-                        price_target        = EXCLUDED.price_target,
-                        upside_pct          = EXCLUDED.upside_pct,
-                        gamma_url           = EXCLUDED.gamma_url,
-                        pptx_stale          = EXCLUDED.pptx_stale,
-                        report_date         = EXCLUDED.report_date,
-                        archived            = FALSE,
-                        last_attempt_at     = CASE WHEN %s THEN NOW()
-                                                   ELSE analyst_reports.last_attempt_at END,
-                        last_attempt_status = CASE WHEN %s THEN 'success'
-                                                   ELSE analyst_reports.last_attempt_status END,
-                        last_attempt_error  = CASE WHEN %s THEN NULL
-                                                   ELSE analyst_reports.last_attempt_error END
-                """, (
-                    ticker, md_text, has_docx, has_pptx,
-                    summary.get("rating"), summary.get("price_target"),
-                    summary.get("upside_pct"), gamma_url, bool(pptx_stale), report_date,
-                    _touch, _touch, _touch, _touch,
-                ))
+                elif provider == "deepseek":
+                    cur.execute("""
+                        INSERT INTO analyst_reports
+                            (ticker, generated_at, report_md, has_docx, has_pptx,
+                             report_md_deepseek, deepseek_generated_at, deepseek_report_date,
+                             deepseek_rating, deepseek_price_target, deepseek_upside_pct,
+                             last_attempt_at, last_attempt_status, last_attempt_error)
+                        VALUES (%s, NOW(), '', FALSE, FALSE,
+                                %s, NOW(), %s, %s, %s, %s,
+                                NOW(), 'success', NULL)
+                        ON CONFLICT (ticker) DO UPDATE SET
+                            report_md_deepseek    = EXCLUDED.report_md_deepseek,
+                            deepseek_generated_at = CASE WHEN %s THEN NOW()
+                                                         ELSE COALESCE(analyst_reports.deepseek_generated_at, NOW()) END,
+                            deepseek_report_date  = EXCLUDED.deepseek_report_date,
+                            deepseek_rating       = EXCLUDED.deepseek_rating,
+                            deepseek_price_target = EXCLUDED.deepseek_price_target,
+                            deepseek_upside_pct   = EXCLUDED.deepseek_upside_pct,
+                            archived              = FALSE,
+                            last_attempt_at       = CASE WHEN %s THEN NOW()
+                                                         ELSE analyst_reports.last_attempt_at END,
+                            last_attempt_status   = CASE WHEN %s THEN 'success'
+                                                         ELSE analyst_reports.last_attempt_status END,
+                            last_attempt_error    = CASE WHEN %s THEN NULL
+                                                         ELSE analyst_reports.last_attempt_error END
+                    """, (
+                        ticker, md_text, report_date,
+                        summary.get("rating"), summary.get("price_target"),
+                        summary.get("upside_pct"),
+                        _touch, _touch, _touch, _touch,
+                    ))
+                    if delta_from_prior is not None:
+                        _stamp_report_delta(cur, ticker, provider, delta_from_prior)
 
-            # Stamp delta vs prior + version count (Grok path)
-            if delta_from_prior is not None:
-                _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+                else:
+                    # Grok (canonical) path
+                    if pptx_stale is None:
+                        cur.execute("""
+                            INSERT INTO analyst_reports
+                                (ticker, generated_at, report_md, has_docx, has_pptx,
+                                 rating, price_target, upside_pct, gamma_url, report_date,
+                                 last_attempt_at, last_attempt_status, last_attempt_error)
+                            VALUES (%s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s,
+                                    NOW(), 'success', NULL)
+                            ON CONFLICT (ticker) DO UPDATE SET
+                                generated_at        = CASE WHEN %s THEN NOW()
+                                                           ELSE COALESCE(analyst_reports.generated_at, NOW()) END,
+                                report_md           = EXCLUDED.report_md,
+                                has_docx            = EXCLUDED.has_docx,
+                                has_pptx            = EXCLUDED.has_pptx,
+                                rating              = EXCLUDED.rating,
+                                price_target        = EXCLUDED.price_target,
+                                upside_pct          = EXCLUDED.upside_pct,
+                                gamma_url           = EXCLUDED.gamma_url,
+                                report_date         = EXCLUDED.report_date,
+                                archived            = FALSE,
+                                last_attempt_at     = CASE WHEN %s THEN NOW()
+                                                           ELSE analyst_reports.last_attempt_at END,
+                                last_attempt_status = CASE WHEN %s THEN 'success'
+                                                           ELSE analyst_reports.last_attempt_status END,
+                                last_attempt_error  = CASE WHEN %s THEN NULL
+                                                           ELSE analyst_reports.last_attempt_error END
+                        """, (
+                            ticker, md_text, has_docx, has_pptx,
+                            summary.get("rating"), summary.get("price_target"),
+                            summary.get("upside_pct"), gamma_url, report_date,
+                            _touch, _touch, _touch, _touch,
+                        ))
+                    else:
+                        cur.execute("""
+                            INSERT INTO analyst_reports
+                                (ticker, generated_at, report_md, has_docx, has_pptx,
+                                 rating, price_target, upside_pct, gamma_url, pptx_stale, report_date,
+                                 last_attempt_at, last_attempt_status, last_attempt_error)
+                            VALUES (%s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                    NOW(), 'success', NULL)
+                            ON CONFLICT (ticker) DO UPDATE SET
+                                generated_at        = CASE WHEN %s THEN NOW()
+                                                           ELSE COALESCE(analyst_reports.generated_at, NOW()) END,
+                                report_md           = EXCLUDED.report_md,
+                                has_docx            = EXCLUDED.has_docx,
+                                has_pptx            = EXCLUDED.has_pptx,
+                                rating              = EXCLUDED.rating,
+                                price_target        = EXCLUDED.price_target,
+                                upside_pct          = EXCLUDED.upside_pct,
+                                gamma_url           = EXCLUDED.gamma_url,
+                                pptx_stale          = EXCLUDED.pptx_stale,
+                                report_date         = EXCLUDED.report_date,
+                                archived            = FALSE,
+                                last_attempt_at     = CASE WHEN %s THEN NOW()
+                                                           ELSE analyst_reports.last_attempt_at END,
+                                last_attempt_status = CASE WHEN %s THEN 'success'
+                                                           ELSE analyst_reports.last_attempt_status END,
+                                last_attempt_error  = CASE WHEN %s THEN NULL
+                                                           ELSE analyst_reports.last_attempt_error END
+                        """, (
+                            ticker, md_text, has_docx, has_pptx,
+                            summary.get("rating"), summary.get("price_target"),
+                            summary.get("upside_pct"), gamma_url, bool(pptx_stale), report_date,
+                            _touch, _touch, _touch, _touch,
+                        ))
+                    if delta_from_prior is not None:
+                        _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+
+            # Commit BEFORE any secondary work — this is the success gate.
+            conn.commit()
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+
+            # Best-effort metrics AFTER commit (separate connection; never
+            # nested under the report write or able to poison the bool).
             try:
                 _snapshot_ticker_metrics(ticker, {
                     "report_price_target": summary.get("price_target"),
@@ -11754,29 +11789,53 @@ def _db_upsert_report(
                 }, {"provider": provider, "rating": summary.get("rating")})
             except Exception:
                 pass
-    except Exception as _e:
-        # LOUD log — easy to grep in Railway logs. Previous version used
-        # a vague 'non-fatal' message that buried real schema errors.
-        err_str = str(_e)
-        is_schema = ("does not exist" in err_str or "column" in err_str.lower())
-        prefix = "❌❌❌ SCHEMA-MISSING" if is_schema else "❌ DB-WRITE-FAILED"
-        print(f"{prefix} _db_upsert_report({ticker}/{provider}): {err_str!s:.500}", flush=True)
-        # On a schema error, force-run the table migration NOW and retry once.
-        # The migration is idempotent and cheap; if the column truly was missing
-        # this rescues the persist instead of dropping the report.
-        if is_schema:
+
+            if attempt > 1:
+                print(f"✅ [db-upsert] {ticker}/{provider} committed on attempt {attempt} "
+                      f"({len(md_text):,} chars)", flush=True)
+            return True
+
+        except Exception as _e:
+            last_err = _e
             try:
-                _ensure_analyst_reports_table_schema(force=True)
-                # Retry — call ourselves with the same args
-                return _db_upsert_report(
-                    ticker, md_text, summary,
-                    has_docx=has_docx, has_pptx=has_pptx,
-                    gamma_url=gamma_url, pptx_stale=pptx_stale,
-                    provider=provider,
-                    touch_run_at=touch_run_at,
-                )
-            except Exception as _e2:
-                print(f"❌❌❌ retry after schema-fix ALSO failed for {ticker}: {_e2!s:.300}", flush=True)
+                if conn is not None:
+                    conn.rollback()
+            except Exception:
+                pass
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+            conn = None
+
+            err_str = str(_e)
+            if _is_schema(_e):
+                print(f"❌❌❌ SCHEMA-MISSING _db_upsert_report({ticker}/{provider}) "
+                      f"attempt {attempt}: {err_str!s:.400}", flush=True)
+                try:
+                    _ensure_analyst_reports_table_schema(force=True)
+                except Exception as _se:
+                    print(f"❌ schema force-fix failed: {_se!s:.200}", flush=True)
+                if attempt < max_attempts:
+                    continue
+            elif _is_transient(_e) and attempt < max_attempts:
+                import time as _time
+                wait = 0.4 * attempt
+                print(f"⚠️  [db-upsert] transient error {ticker}/{provider} "
+                      f"attempt {attempt}/{max_attempts}: {err_str!s:.300} — retry in {wait:.1f}s",
+                      flush=True)
+                _time.sleep(wait)
+                continue
+            else:
+                print(f"❌ DB-WRITE-FAILED _db_upsert_report({ticker}/{provider}) "
+                      f"attempt {attempt}: {err_str!s:.500}", flush=True)
+                break
+
+    print(f"❌ [db-upsert] giving up on {ticker}/{provider} after {max_attempts} "
+          f"attempt(s): {last_err!s:.400}", flush=True)
+    return False
+
 
 
 def _db_record_attempt_failure(ticker: str, error: str) -> None:
@@ -12120,14 +12179,17 @@ def _hydrate_orphaned_grok_reports() -> None:
             summary = analyst.extract_summary_from_report(text) or {}
             has_docx = (folder / f"{tk}_DGA_Report.docx").exists()
             has_pptx = (folder / f"{tk}_DGA_Presentation.pptx").exists()
-            _db_upsert_report(
+            ok = _db_upsert_report(
                 tk, text, summary,
                 has_docx=has_docx, has_pptx=has_pptx, gamma_url=None,
                 pptx_stale=None, provider="grok",
                 touch_run_at=False,
             )
             src = "disk" if local_path.exists() else "Dropbox"
-            print(f"✅ [hydrate] backfilled Grok {tk} from {src} ({len(text):,} chars)", flush=True)
+            if ok:
+                print(f"✅ [hydrate] backfilled Grok {tk} from {src} ({len(text):,} chars)", flush=True)
+            else:
+                print(f"❌ [hydrate] Grok DB upsert failed for {tk} from {src} ({len(text):,} chars)", flush=True)
         except Exception as _e:
             print(f"❌ [hydrate] grok failed for {tk}: {_e!s:.200}", flush=True)
 
@@ -12210,14 +12272,17 @@ def _hydrate_orphaned_claude_reports() -> None:
             if not text or len(text) < 200:
                 continue
             summary = analyst.extract_summary_from_report(text) or {}
-            _db_upsert_report(
+            ok = _db_upsert_report(
                 tk, text, summary,
                 has_docx=False, has_pptx=False, gamma_url=None,
                 pptx_stale=None, provider="claude",
                 touch_run_at=False,
             )
             src = "disk" if local_path.exists() else "Dropbox"
-            print(f"✅ [hydrate] backfilled Claude {tk} from {src} ({len(text):,} chars)", flush=True)
+            if ok:
+                print(f"✅ [hydrate] backfilled Claude {tk} from {src} ({len(text):,} chars)", flush=True)
+            else:
+                print(f"❌ [hydrate] Claude DB upsert failed for {tk} from {src} ({len(text):,} chars)", flush=True)
         except Exception as _e:
             print(f"❌ [hydrate] claude failed for {tk}: {_e!s:.200}", flush=True)
 
