@@ -3609,100 +3609,100 @@ def earnings_detail(ticker: str, request: Request):
 
 @app.get("/api/watchlist")
 def watchlist_get(request: Request):
+    """Fast watchlist for login / desk paint.
+
+    Priorities (in order): in-process quote cache → market_quotes store →
+    live Yahoo (batch_quotes). Earnings calendar is **not** on this path —
+    chip click still uses GET /api/earnings/{ticker}. Blocking on Nasdaq + a
+    5s earnings deadline after a full quote cascade made login feel broken.
+    """
+    t0 = time.time()
     claims = _claims_or_401(request)
     lp_id = claims["lp_id"]
-    # First call after deploy: copy any legacy JSON file into the DB
     _watchlist_migrate_legacy_once()
     tickers = _wl_get_db(lp_id)
 
-    # Prices FIRST and always — mobile/desktop must not wait on earnings calendar.
     quotes: dict[str, dict] = {}
     if tickers:
-        try:
-            raw = batch_quotes(",".join(tickers)) or {}
-        except Exception as e:
-            print(f"[watchlist] batch_quotes failed: {e!s:.160}", flush=True)
-            raw = {}
+        # 1) In-process cache (filled by prior polls / other endpoints)
+        now = time.time()
+        need: list[str] = []
         for tk in tickers:
-            q = raw.get(tk) or {}
-            quotes[tk] = {
-                "price": q.get("price"),
-                "prev":  None,
-                "pct":   q.get("pct_change"),
-                "as_of": q.get("as_of"),
-            }
+            entry = _QUOTE_CACHE.get(tk)
+            if (entry and (now - entry.get("_ts", 0)) < _QUOTE_TTL
+                    and entry.get("price") is not None):
+                quotes[tk] = {
+                    "price": entry.get("price"),
+                    "prev": None,
+                    "pct": entry.get("pct_change"),
+                    "as_of": entry.get("as_of"),
+                }
+            else:
+                need.append(tk)
 
-    # Earnings calendar is best-effort with a hard deadline so a slow Nasdaq
-    # day never blocks price refresh on mobile (was hanging the whole payload).
-    earnings: dict[str, dict] = {}
+        # 2) DB store for cache misses (≤5 min) — no outbound HTTP
+        if need and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            try:
+                store = _db_quotes(need, max_age_s=300) or {}
+                still = []
+                for tk in need:
+                    q = store.get(tk) or {}
+                    if q.get("price") is not None:
+                        quotes[tk] = {
+                            "price": q.get("price"),
+                            "prev": None,
+                            "pct": q.get("pct_change"),
+                            "as_of": q.get("as_of"),
+                        }
+                        # Warm process cache so next poll is free
+                        _QUOTE_CACHE[tk] = {
+                            "price": q.get("price"),
+                            "pct_change": q.get("pct_change"),
+                            "as_of": q.get("as_of"),
+                            "_ts": now,
+                        }
+                    else:
+                        still.append(tk)
+                need = still
+            except Exception as e:
+                print(f"[watchlist] store quotes failed: {e!s:.120}", flush=True)
+
+        # 3) Live fetch only remaining — budget so login never waits on the
+        # full yfinance cascade (batch_quotes step-2 alone used to be 14s).
+        if need:
+            try:
+                raw = _batch_quotes_fast(need) or {}
+            except Exception as e:
+                print(f"[watchlist] live quotes failed: {e!s:.160}", flush=True)
+                raw = {}
+            for tk in need:
+                q = raw.get(tk) or {}
+                if q.get("price") is not None or tk not in quotes:
+                    quotes[tk] = {
+                        "price": q.get("price"),
+                        "prev": None,
+                        "pct": q.get("pct_change"),
+                        "as_of": q.get("as_of"),
+                    }
+
+    # Report flags only (cheap single SQL) — no earnings calendar
     report_tickers: set[str] = set()
-
-    def _wl_earnings_and_reports():
-        out_e: dict = {}
-        out_r: set = set()
+    if tickers and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
         try:
-            from market_data import earnings_upcoming
-            raw_e = earnings_upcoming(tickers, horizon_days=5, include_past_days=1) or {}
-            for tk, ev in raw_e.items():
-                du = int(ev.get("days_until") or 0)
-                tlabel = (ev.get("time") or "").lower()
-                if "pre" in tlabel:
-                    sess = "BMO"
-                elif "after" in tlabel or "post" in tlabel:
-                    sess = "AMC"
-                else:
-                    sess = ""
-                out_e[tk] = {
-                    "date": ev.get("date"),
-                    "days_until": du,
-                    "session": sess,
-                    "time": ev.get("time") or "",
-                    "fiscal_quarter": ev.get("fiscal_quarter") or "",
-                    "eps_forecast": ev.get("eps_forecast") or "",
-                    "label": (
-                        "TODAY" if du == 0 else
-                        ("YDAY" if du == -1 else
-                         (f"{du}d" if du > 0 else f"{abs(du)}d ago"))
-                    ),
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    SELECT ticker FROM analyst_reports
+                     WHERE archived IS NOT TRUE
+                       AND ticker = ANY(%s)
+                """, (list(tickers),))
+                report_tickers = {
+                    (r[0] or "").upper()
+                    for r in (cur.fetchall() or []) if r and r[0]
                 }
         except Exception as e:
-            print(f"[watchlist] earnings calendar failed: {e!s:.160}", flush=True)
-        try:
-            if globals().get("_PSYCOPG2_OK") and os.environ.get("DATABASE_URL"):
-                with _fund_conn() as conn, conn.cursor() as cur:
-                    cur.execute("""
-                        SELECT ticker FROM analyst_reports
-                         WHERE archived IS NOT TRUE
-                           AND ticker = ANY(%s)
-                    """, (list(tickers),))
-                    out_r = {(r[0] or "").upper() for r in (cur.fetchall() or []) if r and r[0]}
-        except Exception as e:
-            print(f"[watchlist] report lookup failed: {e!s:.160}", flush=True)
-        return out_e, out_r
-
-    if tickers:
-        try:
-            import concurrent.futures as _cf
-            with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
-                _fut = _ex.submit(_wl_earnings_and_reports)
-                try:
-                    earnings, report_tickers = _fut.result(timeout=5.0)
-                except _cf.TimeoutError:
-                    print("[watchlist] earnings enrichment timed out after 5s — returning quotes only",
-                          flush=True)
-                    try:
-                        _fut.cancel()
-                    except Exception:
-                        pass
-        except Exception as e:
-            print(f"[watchlist] earnings enrichment failed: {e!s:.160}", flush=True)
-
-    for tk in list(earnings.keys()):
-        earnings[tk]["has_report"] = tk in report_tickers
+            print(f"[watchlist] report lookup failed: {e!s:.120}", flush=True)
     reports_map = {tk: True for tk in report_tickers}
 
-    # Largest absolute day-move first (up or down). Earnings chips still show
-    # on rows; they no longer reorder the list above movers.
     def _wl_move_key(tk: str):
         pct = (quotes.get(tk) or {}).get("pct")
         if pct is None:
@@ -3713,13 +3713,17 @@ def watchlist_get(request: Request):
             return (1, 0.0, str(tk))
 
     tickers_sorted = sorted(tickers, key=_wl_move_key)
+    elapsed_ms = int((time.time() - t0) * 1000)
+    if elapsed_ms > 800:
+        print(f"[watchlist] slow path {elapsed_ms}ms n={len(tickers)}", flush=True)
 
     return {
         "tickers": tickers_sorted,
         "quotes": quotes,
-        "earnings": earnings,
+        "earnings": {},  # chips load on click via /api/earnings/{tk}
         "reports": reports_map,
         "earnings_horizon_days": 5,
+        "timing_ms": elapsed_ms,
     }
 
 
@@ -6627,7 +6631,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui389-20260730-analyze-mobile-mcap"
+WEB_BUILD_VERSION = "ui390-20260730-watchlist-fast"
 
 
 @app.get("/api/build")
@@ -13212,6 +13216,98 @@ def _tiingo_single(sym: str) -> dict:
     return result.get(sym.upper(), {})
 
 @app.get("/api/quotes")
+def _batch_quotes_fast(symbols: list[str]) -> dict:
+    """Watchlist / login path — cache + Yahoo chart only, no yfinance cascade.
+
+    Full ``batch_quotes`` can spend 10–14s on yfinance ThreadPool + download
+    when chart gaps exist; that blocked every login. This path returns what we
+    can get in a few seconds so the desk paints immediately.
+    """
+    originals = [str(s).strip().upper().rstrip("*") for s in (symbols or []) if s][:100]
+    if not originals:
+        return {}
+    null_row: dict = {"price": None, "pct_change": None}
+    result: dict = {}
+    now = time.time()
+    misses: list = []
+    for sym in originals:
+        entry = _QUOTE_CACHE.get(sym)
+        if (entry and (now - entry.get("_ts", 0)) < _QUOTE_TTL
+                and entry.get("price") is not None
+                and entry.get("pct_change") is not None):
+            result[sym] = {
+                "price": entry["price"],
+                "pct_change": entry.get("pct_change"),
+            }
+            if entry.get("as_of"):
+                result[sym]["as_of"] = entry["as_of"]
+        else:
+            misses.append(sym)
+    if not misses:
+        return result
+
+    def _pct_from(price, prev):
+        try:
+            if price is None or prev in (None, 0):
+                return None
+            return (float(price) - float(prev)) / float(prev) * 100.0
+        except (TypeError, ValueError):
+            return None
+
+    def _accept(sym, price, pct=None, prev=None, source="", as_of=None):
+        if price is None:
+            return
+        try:
+            price = float(price)
+        except (TypeError, ValueError):
+            return
+        if price != price:
+            return
+        if pct is None and prev is not None:
+            pct = _pct_from(price, prev)
+        row = {"price": price, "pct_change": pct}
+        if as_of:
+            row["as_of"] = as_of
+        if source:
+            row["source"] = source
+        prev_row = result.get(sym) or {}
+        if (prev_row.get("price") is not None
+                and prev_row.get("pct_change") is not None
+                and pct is None):
+            return
+        result[sym] = row
+        _QUOTE_CACHE[sym] = {**row, "_ts": now}
+
+    # Yahoo chart only (parallel in market_data.get_quotes)
+    try:
+        import market_data as _md
+        ymap = {orig: _resolve_ticker_alias(orig) for orig in misses}
+        rev: dict = {}
+        for orig, ysym in ymap.items():
+            rev.setdefault(ysym, []).append(orig)
+        mdq = _md.get_quotes(list(rev.keys())) or {}
+        for ysym, q in mdq.items():
+            px = q.get("price")
+            prev = q.get("prev_close")
+            pct = q.get("pct_change")
+            if pct is None:
+                pct = _pct_from(px, prev)
+            for orig in rev.get(ysym, [ysym]):
+                if orig in misses:
+                    _accept(
+                        orig, px, pct, prev,
+                        source=q.get("price_source") or q.get("source") or "yahoo-chart",
+                        as_of=q.get("as_of"),
+                    )
+    except Exception as e:
+        print(f"[batch_quotes_fast] market_data failed: {e!s:.140}", flush=True)
+
+    for sym in originals:
+        if sym not in result:
+            result[sym] = dict(null_row)
+    return result
+
+
 def batch_quotes(tickers: str = ""):
     """Return {symbol: {price, pct_change}} for a comma-separated ticker list.
 
@@ -13334,7 +13430,8 @@ def batch_quotes(tickers: str = ""):
 
             with ThreadPoolExecutor(max_workers=min(12, max(2, len(misses)))) as pool:
                 futs = {pool.submit(_snap_one, o): o for o in list(misses)}
-                for fut in as_completed(futs, timeout=14):
+                # 6s cap — was 14s and made login watchlist feel broken
+                for fut in as_completed(futs, timeout=6):
                     try:
                         orig, snap = fut.result()
                     except Exception:

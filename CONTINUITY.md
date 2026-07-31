@@ -30,7 +30,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | ui384–ui387 | FAILED healthchecks | Thin-ASGI / rollbacks — do not re-ship as-is |
 | **Boot + pool health** | **`ui388-20260729-boot-pool-health`** | ui383 product + defer import DB work; fix pool leak; larger pool; post-listen workers |
 | **Analyze + mobile** | **`ui389-20260730-analyze-mobile-mcap`** | LLM heartbeats; job poll 404 recovery; v1→GP claims for Financials; Yahoo mcap fill |
-| **Next deploy after this** | **`ui390-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Watchlist speed** | **`ui390-20260730-watchlist-fast`** | Drop FinTwit card; fast quote path (cache/store/Yahoo only); no earnings block on GET /api/watchlist |
+| **Next deploy after this** | **`ui391-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

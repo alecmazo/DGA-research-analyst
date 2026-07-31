@@ -1255,8 +1255,9 @@
         if (ffBody) ffBody.innerHTML = '<div class="feed-empty">' + _feedEsc(msg) + '</div>';
       }
     }
-    // Wire + FinTwit first (free, fast-ish); filings last — SEC can be slow
-    await Promise.all([loadWire(), loadXFinFeed(force)]);
+    // Market Wire only on boot — FinTwit card removed (was multi-account X
+    // fan-out on every Desk open and slowed login). Filings after wire.
+    await loadWire();
     await loadFilings();
   }
 
@@ -19578,13 +19579,18 @@
   }
 
   // ── Init ─────────────────────────────────────────────────────
+  // Watchlist + indices first (must feel instant on login). Heavy desk
+  // feeds (idea feed, SEC filings) start after first paint.
   loadIndices();
   loadWatchlist();
-  loadReports();
-  loadTrendingTickers(true);   // force — never paint overnight cache as "today"
-  // Desk (research shell) is the default landing tab
   initLiveMarkets();
   showTab('research');
+  // Defer non-critical work so the first /api/watchlist isn't contending
+  // with reports + trending + multi-feed Yahoo fan-out.
+  setTimeout(function () {
+    try { loadReports(); } catch (_) {}
+    try { loadTrendingTickers(true); } catch (_) {}
+  }, 400);
 
   // ── Archived Reports (Settings tab) ───────────────────────────────────────
   async function loadArchivedReports() {

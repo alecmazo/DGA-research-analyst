@@ -689,7 +689,8 @@ def _yahoo_chart_raw(symbol: str, rng: str, interval: str):
             r = requests.get(
                 f"https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}",
                 params={"range": rng, "interval": interval, "includePrePost": "false"},
-                timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+                # 5s — 15s per host × N tickers was a major watchlist hang
+                timeout=5, headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code != 200:
                 continue
             res = (((r.json().get("chart") or {}).get("result")) or [None])[0]
