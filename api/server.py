@@ -3613,19 +3613,140 @@ def earnings_detail(ticker: str, request: Request):
     return card
 
 
+
+# Process-level earnings calendar cache (day window, not per-user). Nasdaq
+# calendar is identical for every desk; filter per watchlist on the way out.
+_WL_EARNINGS_CACHE: dict = {"ts": 0.0, "raw": {}}  # symbol -> raw event
+_WL_EARNINGS_TTL_S = 3600
+_WL_EARNINGS_BG_LOCK = threading.Lock()
+_WL_EARNINGS_BG_RUNNING = False
+
+
+def _format_watchlist_earnings(tickers: list[str], raw: dict) -> dict[str, dict]:
+    """Shape Nasdaq/upcoming events into the chip payload the Desk UI expects."""
+    out: dict[str, dict] = {}
+    want = {str(t).strip().upper() for t in (tickers or []) if t}
+    if not want or not raw:
+        return out
+    for tk in want:
+        ev = raw.get(tk)
+        if not ev:
+            continue
+        try:
+            du = int(ev.get("days_until") if ev.get("days_until") is not None else 0)
+        except (TypeError, ValueError):
+            du = 0
+        tlabel = (ev.get("time") or "").lower()
+        if "pre" in tlabel:
+            sess = "BMO"
+        elif "after" in tlabel or "post" in tlabel:
+            sess = "AMC"
+        else:
+            sess = ""
+        out[tk] = {
+            "date": ev.get("date"),
+            "days_until": du,
+            "session": sess,
+            "time": ev.get("time") or "",
+            "fiscal_quarter": ev.get("fiscal_quarter") or "",
+            "eps_forecast": ev.get("eps_forecast") or "",
+            "label": (
+                "TODAY" if du == 0 else
+                ("YDAY" if du == -1 else
+                 (f"{du}d" if du > 0 else f"{abs(du)}d ago"))
+            ),
+        }
+    return out
+
+
+def _fetch_earnings_calendar_raw(horizon_days: int = 5,
+                                 include_past_days: int = 1) -> dict:
+    """Full SYMBOL→event map for the horizon window (cached by market_data)."""
+    from market_data import earnings_upcoming
+    return earnings_upcoming(
+        None,  # all symbols on the calendar — filter later
+        horizon_days=horizon_days,
+        include_past_days=include_past_days,
+    ) or {}
+
+
+def _bg_refresh_watchlist_earnings() -> None:
+    """Background calendar fill so the next watchlist paint has chips."""
+    global _WL_EARNINGS_BG_RUNNING
+    try:
+        raw = _fetch_earnings_calendar_raw(5, 1)
+        if raw:
+            _WL_EARNINGS_CACHE["raw"] = raw
+            _WL_EARNINGS_CACHE["ts"] = time.time()
+            print(f"[watchlist] earnings bg refresh ok n={len(raw)}", flush=True)
+    except Exception as e:
+        print(f"[watchlist] earnings bg refresh failed: {e!s:.160}", flush=True)
+    finally:
+        _WL_EARNINGS_BG_RUNNING = False
+
+
+def _watchlist_earnings_for(tickers: list[str],
+                            *,
+                            budget_s: float = 4.0) -> dict[str, dict]:
+    """Best-effort earnings chips for the watchlist — never blocks long.
+
+    Strategy:
+      1. Fresh process cache (≤1h) → instant filter
+      2. Else fetch with hard timeout (wait=False pool)
+      3. On timeout/fail → stale cache if any + kick background refresh
+    """
+    if not tickers:
+        return {}
+    now = time.time()
+    cached_raw = _WL_EARNINGS_CACHE.get("raw") or {}
+    cached_age = now - float(_WL_EARNINGS_CACHE.get("ts") or 0)
+
+    if cached_raw and cached_age < _WL_EARNINGS_TTL_S:
+        return _format_watchlist_earnings(tickers, cached_raw)
+
+    raw = _run_with_timeout(
+        lambda: _fetch_earnings_calendar_raw(5, 1),
+        budget_s,
+        default=None,
+    )
+    if isinstance(raw, dict) and raw:
+        _WL_EARNINGS_CACHE["raw"] = raw
+        _WL_EARNINGS_CACHE["ts"] = time.time()
+        return _format_watchlist_earnings(tickers, raw)
+
+    # Stale-while-revalidate
+    global _WL_EARNINGS_BG_RUNNING
+    if not _WL_EARNINGS_BG_RUNNING:
+        with _WL_EARNINGS_BG_LOCK:
+            if not _WL_EARNINGS_BG_RUNNING:
+                _WL_EARNINGS_BG_RUNNING = True
+                threading.Thread(
+                    target=_bg_refresh_watchlist_earnings,
+                    name="wl-earn-bg",
+                    daemon=True,
+                ).start()
+    if cached_raw:
+        print(f"[watchlist] earnings using stale cache age={cached_age:.0f}s n={len(cached_raw)}",
+              flush=True)
+        return _format_watchlist_earnings(tickers, cached_raw)
+    return {}
+
+
 @app.get("/api/watchlist")
 def watchlist_get(request: Request):
     """Fast watchlist for login / desk paint.
 
     Always returns the ticker list even if quotes fail. Quote path:
     process cache → market_quotes store → Yahoo chart (hard 6s wall).
-    Earnings calendar is NOT on this path (use GET /api/earnings/{tk}).
+    Earnings chips: process-cached Nasdaq calendar, ≤4s budget, never hangs
+    the list (stale-while-revalidate + background refresh).
     """
     t0 = time.time()
     tickers: list[str] = []
     tickers_sorted: list[str] = []
     quotes: dict[str, dict] = {}
     reports_map: dict[str, bool] = {}
+    earnings_map: dict = {}
     try:
         claims = _claims_or_401(request)
         lp_id = claims.get("lp_id") or ""
@@ -3719,6 +3840,17 @@ def watchlist_get(request: Request):
                 except Exception as e:
                     print(f"[watchlist] report lookup failed: {e!s:.120}", flush=True)
 
+        # Earnings chips (best-effort, hard-capped) — restored after ui390
+        # stripped them for login speed. Cache + budget keep Desk snappy.
+        if tickers:
+            try:
+                earnings_map = _watchlist_earnings_for(tickers, budget_s=4.0) or {}
+                for tk in list(earnings_map.keys()):
+                    earnings_map[tk]["has_report"] = bool(reports_map.get(tk))
+            except Exception as e:
+                print(f"[watchlist] earnings failed: {e!s:.160}", flush=True)
+                earnings_map = {}
+
         def _wl_move_key(tk: str):
             pct = (quotes.get(tk) or {}).get("pct")
             if pct is None:
@@ -3736,12 +3868,13 @@ def watchlist_get(request: Request):
         tickers_sorted = list(tickers or [])
 
     elapsed_ms = int((time.time() - t0) * 1000)
-    print(f"[watchlist] ok n={len(tickers_sorted)} quotes={len(quotes)} {elapsed_ms}ms",
+    print(f"[watchlist] ok n={len(tickers_sorted)} quotes={len(quotes)} "
+          f"earn={len(earnings_map)} {elapsed_ms}ms",
           flush=True)
     return {
         "tickers": tickers_sorted,
         "quotes": quotes,
-        "earnings": {},
+        "earnings": earnings_map,
         "reports": reports_map,
         "earnings_horizon_days": 5,
         "timing_ms": elapsed_ms,
@@ -6676,7 +6809,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui395-20260731-report-db-upsert-retry"
+WEB_BUILD_VERSION = "ui396-20260731-watchlist-earnings-chips"
 
 
 @app.get("/api/build")

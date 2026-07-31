@@ -36,7 +36,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Reports + idea feed fast** | **`ui393-20260731-reports-idea-fast`** | list_reports: no Dropbox/Yahoo on hot path; idea-feed stop force spam; load reports on init |
 | **DB lock clear** | **`ui394-20260731-db-lock-clear`** | Hydrate no longer holds txn across Dropbox; no length(report_md) on list; idle_in_txn timeout 15s |
 | **Report DB upsert reliability** | **`ui395-20260731-report-db-upsert-retry`** | Fresh-conn + SSL retries; True only after commit; ROKU recovery |
-| **Next deploy after this** | **`ui396-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Watchlist earnings chips restored** | **`ui396-20260731-watchlist-earnings-chips`** | Nasdaq calendar chips back on Desk watchlist (cached, ≤4s) |
+| **Next deploy after this** | **`ui397-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

@@ -1003,17 +1003,37 @@ def earnings_upcoming(symbols: list[str] | None = None,
 
     # Parallel day fetches — sequential was stacking 4–12s and blocking mobile
     # watchlist price refresh after the earnings feature landed.
+    # CRITICAL: never `with ThreadPoolExecutor` — its __exit__ waits for hung
+    # workers and freezes the caller (watchlist hang ui390). shutdown(wait=False).
     day_rows: list[tuple[str, list]] = []
     try:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        with ThreadPoolExecutor(max_workers=min(6, max(1, len(days)))) as pool:
+        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutTimeout
+        pool = ThreadPoolExecutor(max_workers=min(6, max(1, len(days))))
+        try:
             futs = {pool.submit(nasdaq_earnings_for_day, day): day for day in days}
-            for fut in as_completed(futs, timeout=8):
-                day = futs[fut]
-                try:
-                    day_rows.append((day, fut.result() or []))
-                except Exception:
-                    day_rows.append((day, []))
+            try:
+                for fut in as_completed(futs, timeout=8):
+                    day = futs[fut]
+                    try:
+                        day_rows.append((day, fut.result() or []))
+                    except Exception:
+                        day_rows.append((day, []))
+            except FutTimeout:
+                # Collect whatever finished; leave stragglers to die in the pool
+                done_days = {d for d, _ in day_rows}
+                for fut, day in futs.items():
+                    if day in done_days:
+                        continue
+                    if fut.done():
+                        try:
+                            day_rows.append((day, fut.result() or []))
+                        except Exception:
+                            day_rows.append((day, []))
+        finally:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)
     except Exception:
         for day in days:
             try:
