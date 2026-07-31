@@ -1178,6 +1178,236 @@ def extract_financials_from_db(ticker: str) -> Optional[dict[str, Any]]:
     }
 
 
+
+def _period_end_str(obj: dict | None) -> str:
+    if not obj:
+        return ""
+    e = obj.get("end") or obj.get("reportDate") or ""
+    return str(e)[:10]
+
+
+def merge_primary_financials(
+    db_data: Optional[dict],
+    excel_data: Optional[dict],
+) -> Optional[dict[str, Any]]:
+    """Build the Analyze PRIMARY payload from DB history + live SEC 10-Q.
+
+    Rules (ROKU / earnings-print correctness):
+      • Annuals → prefer company_financials (multi-year, YE-aligned).
+      • Latest quarter / YTD / prior-year Q → prefer the SEC Excel 10-Q
+        extract whenever its period_end is as new as or newer than the DB,
+        or when the DB has no quarterly rows. This is how a just-filed
+        earnings 10-Q enters the report even if overnight sync skipped
+        the ticker (skip_if_stored).
+      • TTM is always recomputed from the chosen annuals + quarterly.
+    """
+    db = db_data if isinstance(db_data, dict) else None
+    xl = excel_data if isinstance(excel_data, dict) else None
+    if not db and not xl:
+        return None
+
+    db_ann = list((db or {}).get("annuals") or [])
+    xl_ann = list((xl or {}).get("annuals") or [])
+    db_q = dict((db or {}).get("quarterly") or {})
+    xl_q = dict((xl or {}).get("quarterly") or {})
+
+    # ── Annuals: union by FY, prefer row with revenue + later end ─────
+    by_fy: dict[int, dict] = {}
+    for src in (db_ann, xl_ann):
+        for row in src:
+            try:
+                fy = int(row.get("fy")) if row.get("fy") is not None else None
+            except (TypeError, ValueError):
+                fy = None
+            if fy is None:
+                continue
+            prev = by_fy.get(fy)
+            if prev is None:
+                by_fy[fy] = dict(row)
+                continue
+            # Prefer has Revenue
+            if row.get("Revenue") is not None and prev.get("Revenue") is None:
+                by_fy[fy] = dict(row)
+            elif (row.get("Revenue") is not None) == (prev.get("Revenue") is not None):
+                if _period_end_str(row) >= _period_end_str(prev):
+                    by_fy[fy] = dict(row)
+    annuals = [by_fy[k] for k in sorted(by_fy.keys(), reverse=True)
+               if by_fy[k].get("Revenue") is not None]
+    if not annuals:
+        annuals = [by_fy[k] for k in sorted(by_fy.keys(), reverse=True)]
+    if not annuals:
+        # last resort: take whichever source has annuals raw
+        annuals = db_ann or xl_ann
+
+    # ── Quarterly: SEC Excel wins when newer or sole source ───────────
+    xl_cur_end = _period_end_str((xl_q.get("current") if xl_q else None) or {})
+    db_cur_end = _period_end_str((db_q.get("current") if db_q else None) or {})
+    use_excel_q = False
+    if xl_q.get("current") and xl_cur_end:
+        if not db_cur_end or xl_cur_end >= db_cur_end:
+            use_excel_q = True
+    quarterly = dict(xl_q) if use_excel_q else dict(db_q)
+    q_source = "sec_10q_excel" if use_excel_q else (
+        "company_financials_db" if quarterly.get("current") else "none")
+
+    ttm = _compute_ttm(annuals, quarterly) if annuals else {}
+    if (not ttm or ttm.get("Revenue") is None) and quarterly.get("current"):
+        # sum last-4 not available in this merge path without history; keep bridge
+        pass
+
+    ticker = ((db or xl or {}).get("ticker") or "").upper()
+    entity = (db or {}).get("entity_name") or (xl or {}).get("entity_name") or ticker
+    cik = (db or {}).get("cik") or (xl or {}).get("cik") or ""
+
+    latest_filings = {}
+    if db and db.get("latest_filings"):
+        latest_filings.update(db["latest_filings"])
+    if xl and xl.get("latest_filings"):
+        # Excel has the just-downloaded accession/filed — prefer those
+        for form, meta in (xl.get("latest_filings") or {}).items():
+            latest_filings[form] = meta
+
+    if quarterly.get("current"):
+        latest_filing_type = "10-Q"
+    elif (xl or {}).get("latest_filing_type") == "10-Q":
+        latest_filing_type = "10-Q"
+    else:
+        latest_filing_type = (xl or db or {}).get("latest_filing_type") or "10-K"
+
+    src_parts = []
+    if db_ann:
+        src_parts.append("db_annuals")
+    if xl_ann and not db_ann:
+        src_parts.append("excel_annuals")
+    if q_source != "none":
+        src_parts.append(q_source)
+    source = "+".join(src_parts) if src_parts else "merged"
+
+    out = {
+        "ticker": ticker,
+        "cik": str(cik or ""),
+        "entity_name": entity,
+        "latest_filings": latest_filings,
+        "latest_filing_type": latest_filing_type,
+        "annuals": annuals,
+        "quarterly": quarterly,
+        "ttm": ttm or {},
+        "errors": list((db or {}).get("errors") or []) + list((xl or {}).get("errors") or []),
+        "source": source,
+        "as_of_period_end": _period_end_str(quarterly.get("current")) or (
+            annuals[0].get("end") if annuals else ""),
+        "quarterly_source": q_source,
+    }
+    return out
+
+
+def upsert_extract_to_company_financials(data: dict) -> int:
+    """Best-effort: write annual + quarter periods from an extract into
+    company_financials so Financials tab picks up a just-filed 10-Q.
+
+    ON CONFLICT (ticker, period_type, period_end) DO UPDATE — refreshes
+    metrics for that period. Returns number of rows upserted. Never raises.
+    """
+    if not isinstance(data, dict):
+        return 0
+    tkr = (data.get("ticker") or "").strip().upper()
+    if not tkr:
+        return 0
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not url:
+        return 0
+    try:
+        import psycopg2
+    except ImportError:
+        return 0
+
+    metric_cols = list(_DB_TO_METRIC.keys())  # snake_case columns
+    # Build rows from annuals + quarterly current/prior
+    rows: list[dict] = []
+
+    def _add(period: dict | None, ptype: str):
+        if not period or not period.get("end"):
+            return
+        try:
+            fy = int(period["fy"]) if period.get("fy") is not None else None
+        except (TypeError, ValueError):
+            fy = None
+        if fy is None:
+            return
+        fp = period.get("fp") or ("FY" if ptype == "annual" else "")
+        if not fp:
+            return
+        r = {
+            "period_type": ptype,
+            "fy": fy,
+            "fp": fp,
+            "end": str(period["end"])[:10],
+            "start": str(period.get("start") or "")[:10] or None,
+            "filed": str(period.get("filed") or "")[:10] or None,
+            "accession": period.get("accession") or None,
+        }
+        for snake, camel in _DB_TO_METRIC.items():
+            v = period.get(camel)
+            if v is None:
+                r[snake] = None
+            else:
+                try:
+                    r[snake] = float(v)
+                except (TypeError, ValueError):
+                    r[snake] = None
+        rows.append(r)
+
+    for a in (data.get("annuals") or [])[:6]:
+        _add(a, "annual")
+    q = data.get("quarterly") or {}
+    for key, ptype in (
+        ("current", "quarter"),
+        ("prior_year_same_q", "quarter"),
+    ):
+        _add(q.get(key), ptype)
+
+    if not rows:
+        return 0
+
+    cols = (["ticker", "cik", "entity_name", "period_type", "fy", "fp",
+             "period_end", "period_start", "filed", "accession", "derived"]
+            + metric_cols)
+    ph = ",".join(["%s"] * len(cols))
+    upd = [c for c in cols if c not in ("ticker", "period_type", "period_end")]
+    set_clause = ",".join(f"{c}=EXCLUDED.{c}" for c in upd) + ", updated_at=now()"
+    sql = (f"INSERT INTO company_financials ({','.join(cols)}) VALUES ({ph}) "
+           f"ON CONFLICT (ticker, period_type, period_end) DO UPDATE SET {set_clause}")
+
+    n = 0
+    try:
+        conn = psycopg2.connect(url, connect_timeout=10,
+                                options="-c statement_timeout=20000")
+        try:
+            with conn.cursor() as cur:
+                for r in rows:
+                    vals = [
+                        tkr,
+                        (data.get("cik") or None) or None,
+                        (data.get("entity_name") or None) or None,
+                        r["period_type"], int(r["fy"]), r["fp"],
+                        r["end"], r.get("start"), r.get("filed"),
+                        r.get("accession"), False,
+                    ]
+                    vals += [r.get(c) for c in metric_cols]
+                    cur.execute(sql, vals)
+                    n += 1
+            conn.commit()
+        finally:
+            conn.close()
+        if n:
+            print(f"[excel_financials] upserted {n} period(s) for {tkr} → "
+                  f"company_financials", flush=True)
+    except Exception as e:
+        print(f"[excel_financials] upsert {tkr} failed: {e!s:.160}", flush=True)
+        return 0
+    return n
+
+
 def format_verified_block(data: dict) -> str:
     lines: list[str] = []
     lines.append(f"=== VERIFIED FINANCIAL DATA FOR {data['ticker']} ===")

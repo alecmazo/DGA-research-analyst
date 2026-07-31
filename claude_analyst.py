@@ -8317,63 +8317,83 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             print(f"   ⚠️  Could not download fresh Excel files: {exc}")
             print("   Falling back to existing workbooks (if any) or companyfacts API.")
 
-        # --- Step 2: build verified data (prefer Financials-tab DB)
+        # --- Step 2: SEC Excel (latest 10-Q earnings) + Financials DB merge
         _ck()
         _emit_progress(on_progress, "financials", 0.20,
-                       "Extracting filing-accurate financials")
-        # Source priority:
-        #   1) Postgres company_financials (same store as Financials tab —
-        #      latest periods, calendar-aligned FY labels). Fixes ROKU-class
-        #      bugs where Excel was wiped on deploy and companyfacts / LLM
-        #      rewrote FY2023 numbers as "FY2025".
-        #   2) Excel workbooks from pull_sec_financials (filing-exact).
-        #   3) SEC companyfacts API (last resort).
+                       "Extracting 10-K/10-Q financials")
+        # Always read the just-downloaded SEC Excel workbooks so the LATEST
+        # quarterly earnings print (10-Q) is in PRIMARY — even when the
+        # company_financials store still has an older quarter (overnight sync
+        # skips names that already have any rows).
+        #
+        # Merge rules (see excel_financials.merge_primary_financials):
+        #   • Annuals  → DB history (YE-aligned, multi-year)
+        #   • Quarter  → SEC Excel 10-Q when period_end >= DB latest Q
+        #   • TTM      → recomputed from chosen annuals + quarterly
+        #   • Fallback → companyfacts API
         data = None
         verified_block = None
         primary_ok = False
+        _excel_data = None
+        _db_data = None
+        try:
+            _excel_data = xlsx_edgar.extract_financials(ticker)
+            _xq = (_excel_data or {}).get("quarterly") or {}
+            _xa = (_excel_data or {}).get("annuals") or []
+            print(f"   📑 SEC Excel: {len(_xa)} annual col(s), "
+                  f"quarter={(_xq.get('current') or {}).get('fp')}/"
+                  f"{(_xq.get('current') or {}).get('end') or '—'} "
+                  f"(source=excel_xbrl)")
+        except Exception as exc:  # noqa: BLE001
+            print(f"   ⚠️  Excel reader raised: {exc}")
+            _excel_data = None
+
         try:
             _db_data = xlsx_edgar.extract_financials_from_db(ticker)
-            _db_ann = (_db_data or {}).get("annuals") or []
-            if _db_ann:
-                # Prefer DB when it has at least one annual with revenue and a
-                # period_end in the last ~3 calendar years (otherwise stale store
-                # should not block a fresh SEC pull).
-                _newest_end = str(_db_ann[0].get("end") or "")
-                _fresh = True
-                try:
-                    from datetime import date as _date
-                    if _newest_end:
-                        _ye = _date.fromisoformat(_newest_end[:10])
-                        _fresh = (_date.today() - _ye).days <= 400  # ~13 months
-                except Exception:
-                    _fresh = True
-                if _fresh or len(_db_ann) >= 2:
-                    data = _db_data
-                    verified_block = xlsx_edgar.format_verified_block(data)
-                    primary_ok = True
-                    print(f"   ✅ Loaded {len(_db_ann)} annual row(s) from "
-                          f"company_financials DB (newest end={_newest_end}).")
-                else:
-                    print(f"   ⚠️  company_financials for {ticker} looks stale "
-                          f"(newest end={_newest_end}) — trying Excel/SEC.")
+            if _db_data:
+                _dq = (_db_data.get("quarterly") or {}).get("current") or {}
+                print(f"   🗄  company_financials: "
+                      f"{len(_db_data.get('annuals') or [])} annual(s), "
+                      f"quarter={_dq.get('fp')}/{_dq.get('end') or '—'}")
         except Exception as _dbe:  # noqa: BLE001
-            print(f"   ⚠️  company_financials DB load failed ({_dbe!s:.120}); "
-                  f"trying Excel/SEC.")
+            print(f"   ⚠️  company_financials DB load failed ({_dbe!s:.120})")
+            _db_data = None
+
+        try:
+            data = xlsx_edgar.merge_primary_financials(_db_data, _excel_data)
+            if data and (data.get("annuals") or data.get("quarterly")):
+                verified_block = xlsx_edgar.format_verified_block(data)
+                primary_ok = True
+                _qc = (data.get("quarterly") or {}).get("current") or {}
+                print(f"   ✅ PRIMARY ready (source={data.get('source')}, "
+                      f"q_src={data.get('quarterly_source')}, "
+                      f"latest_Q={_qc.get('fp')}/{_qc.get('end') or '—'}, "
+                      f"annuals={len(data.get('annuals') or [])})")
+                # Push just-filed 10-Q / 10-K periods into the Financials store
+                # so the tab stays in sync with Analyze (best-effort).
+                try:
+                    if _excel_data:
+                        xlsx_edgar.upsert_extract_to_company_financials(_excel_data)
+                except Exception as _ue:
+                    print(f"   ⚠️  DB upsert of SEC extract skipped: {_ue!s:.100}")
+            else:
+                print(f"   ⚠️  Merge produced no annuals/quarters for {ticker}")
+        except Exception as _me:  # noqa: BLE001
+            print(f"   ⚠️  merge_primary_financials failed: {_me!s:.160}")
+            # Fall back to whichever single source worked
+            for _cand, _label in ((_excel_data, "Excel"), (_db_data, "DB")):
+                if _cand and (_cand.get("annuals") or _cand.get("quarterly")):
+                    data = _cand
+                    try:
+                        verified_block = xlsx_edgar.format_verified_block(data)
+                        primary_ok = True
+                        print(f"   ✅ Using {_label} extract as PRIMARY (merge failed)")
+                        break
+                    except Exception:
+                        pass
 
         if not primary_ok:
-            try:
-                data = xlsx_edgar.extract_financials(ticker)
-                _ann = data.get("annuals", []) if isinstance(data, dict) else []
-                if _ann and len(_ann) >= 1:
-                    verified_block = xlsx_edgar.format_verified_block(data)
-                    primary_ok = True
-                    print(f"   ✅ Loaded {len(_ann)} annual rows from Excel workbooks.")
-                else:
-                    print(f"   ⚠️  Excel reader returned 0 annual rows for {ticker} — "
-                          f"trying companyfacts fallback for completeness.")
-            except Exception as exc:  # noqa: BLE001
-                print(f"   ⚠️  Excel reader raised: {exc}")
-                print(f"   Falling back to SEC companyfacts API…")
+            print(f"   Falling back to SEC companyfacts API…")
 
         if not primary_ok:
             try:
