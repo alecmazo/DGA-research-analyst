@@ -3016,7 +3016,8 @@ def _build_x_fin_feed(limit: int = 36, handles: list[str] | None = None) -> dict
     from concurrent.futures import ThreadPoolExecutor, as_completed
     merged: list[dict] = []
     errors: list[str] = []
-    with ThreadPoolExecutor(max_workers=min(8, max(2, len(accts)))) as pool:
+    pool = ThreadPoolExecutor(max_workers=min(8, max(2, len(accts))))
+    try:
         futs = {
             pool.submit(_x_fin_fetch_handle, a["handle"], 5): a
             for a in accts
@@ -3026,7 +3027,7 @@ def _build_x_fin_feed(limit: int = 36, handles: list[str] | None = None) -> dict
             for fut in iterator:
                 a = futs[fut]
                 try:
-                    rows = fut.result()
+                    rows = fut.result(timeout=0.1)
                     for r in rows:
                         r2 = dict(r)
                         h = (r2.get("handle") or a["handle"]).lower()
@@ -3051,6 +3052,11 @@ def _build_x_fin_feed(limit: int = 36, handles: list[str] | None = None) -> dict
                             merged.append(r2)
                 except Exception:
                     pass
+    finally:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=False)
 
     seen: set[str] = set()
     uniq: list[dict] = []
@@ -3673,22 +3679,17 @@ def watchlist_get(request: Request):
                 except Exception as e:
                     print(f"[watchlist] store quotes failed: {e!s:.120}", flush=True)
 
-            # Live Yahoo with hard wall — never block the response forever
+            # Live Yahoo — MUST use shutdown(wait=False). A `with ThreadPoolExecutor`
+            # after result(timeout=…) still waits for the hung worker on exit and
+            # freezes GET /api/watchlist forever (ui390–ui391 hang).
             if need:
                 raw: dict = {}
                 try:
-                    import concurrent.futures as _cf
-                    with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
-                        _fut = _ex.submit(_batch_quotes_fast, need)
-                        try:
-                            raw = _fut.result(timeout=7.0) or {}
-                        except _cf.TimeoutError:
-                            print(f"[watchlist] live quotes wall 7s n={len(need)}", flush=True)
-                            try:
-                                _fut.cancel()
-                            except Exception:
-                                pass
-                            raw = {}
+                    raw = _run_with_timeout(
+                        lambda: _batch_quotes_fast(need) or {},
+                        6.0,
+                        default={},
+                    ) or {}
                 except Exception as e:
                     print(f"[watchlist] live quotes failed: {e!s:.160}", flush=True)
                     raw = {}
@@ -6651,7 +6652,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui391-20260731-watchlist-unhang"
+WEB_BUILD_VERSION = "ui392-20260731-executor-hang-fix"
 
 
 @app.get("/api/build")
@@ -13448,12 +13449,13 @@ def batch_quotes(tickers: str = ""):
                 except Exception as e:
                     return orig, {"error": str(e)[:80]}
 
-            with ThreadPoolExecutor(max_workers=min(12, max(2, len(misses)))) as pool:
+            pool = ThreadPoolExecutor(max_workers=min(12, max(2, len(misses))))
+            try:
                 futs = {pool.submit(_snap_one, o): o for o in list(misses)}
-                # 6s cap — was 14s and made login watchlist feel broken
+                # 6s cap — was 14s; wait=False on exit so hung snaps don't block
                 for fut in as_completed(futs, timeout=6):
                     try:
-                        orig, snap = fut.result()
+                        orig, snap = fut.result(timeout=0.1)
                     except Exception:
                         continue
                     px = snap.get("price")
@@ -13464,6 +13466,13 @@ def batch_quotes(tickers: str = ""):
                     if px is not None:
                         _accept(orig, px, pct, prev,
                                 source=snap.get("source") or "fast_info")
+            except Exception as e:
+                print(f"[batch_quotes] fast_info batch timeout/fail: {e!s:.140}", flush=True)
+            finally:
+                try:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    pool.shutdown(wait=False)
             misses = [s for s in misses if _still_need(s)]
         except Exception as e:
             print(f"[batch_quotes] fast_info batch failed: {e!s:.140}", flush=True)
@@ -14869,6 +14878,7 @@ def _ddl_once(fn):
 # Failures are logged but don't crash the app.
 # ---------------------------------------------------------------------------
 _MIGRATIONS_APPLIED = False
+_MIGRATIONS_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # SQL statement splitter — handles dollar-quoted strings ($$...$$, $tag$...$tag$)
@@ -15509,78 +15519,94 @@ def _apply_self_migrations() -> None:
         return
     if not os.environ.get("DATABASE_URL"):
         return
-
-    def _step(name: str, fn):
-        try:
-            fn()
-        except Exception as ex:
-            print(f"[migration] step {name!r} failed (non-fatal): {ex!s:.200}")
-            try: conn.rollback()
-            except Exception: pass
-
-    try:
-        conn = psycopg2.connect(os.environ["DATABASE_URL"], **_pg_connect_kwargs())
-    except Exception as e:
-        print(f"[migration] could not connect: {e}")
+    # Thread race: many concurrent _fund_conn() calls all saw the flag False
+    # and re-ran full migrations (benchmark seed spam × N requests), starving
+    # the pool and freezing watchlist/reports/idea-feed.
+    if not _MIGRATIONS_LOCK.acquire(blocking=False):
+        # Another thread is migrating — don't pile on; queries can proceed
         return
     try:
-        # Check whether the funds table already exists
-        funds_exists = False
+        if _MIGRATIONS_APPLIED:
+            return
+
+        def _step(name: str, fn):
+            try:
+                fn()
+            except Exception as ex:
+                print(f"[migration] step {name!r} failed (non-fatal): {ex!s:.200}")
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
         try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT 1 FROM information_schema.tables
-                     WHERE table_schema = 'public' AND table_name = 'funds'
-                """)
-                funds_exists = cur.fetchone() is not None
-        except Exception as ex:
-            print(f"[migration] funds-table probe failed: {ex!s:.200}")
-            try: conn.rollback()
-            except Exception: pass
+            conn = psycopg2.connect(os.environ["DATABASE_URL"], **_pg_connect_kwargs())
+        except Exception as e:
+            print(f"[migration] could not connect: {e}")
+            return
+        try:
+            funds_exists = False
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT 1 FROM information_schema.tables
+                         WHERE table_schema = 'public' AND table_name = 'funds'
+                    """)
+                    funds_exists = cur.fetchone() is not None
+            except Exception as ex:
+                print(f"[migration] funds-table probe failed: {ex!s:.200}")
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
-        if not funds_exists:
-            print("[migration] funds table missing — bootstrapping schema from SQL files")
-            _step("bootstrap", lambda: _bootstrap_fund_schema(conn))
-        else:
-            print("[migration] funds table exists — running incremental migrations")
-            base = Path(__file__).parent.parent / "apps" / "fund" / "db" / "migrations"
-            for fname in ("0002_annual_snapshots.sql", "0004_ytd_cache.sql"):
-                p = base / fname
-                if p.exists():
-                    _step(fname, lambda p=p: _exec_sql_file(conn, p))
+            if not funds_exists:
+                print("[migration] funds table missing — bootstrapping schema from SQL files")
+                _step("bootstrap", lambda: _bootstrap_fund_schema(conn))
+            else:
+                print("[migration] funds table exists — running incremental migrations")
+                base = Path(__file__).parent.parent / "apps" / "fund" / "db" / "migrations"
+                for fname in ("0002_annual_snapshots.sql", "0004_ytd_cache.sql"):
+                    p = base / fname
+                    if p.exists():
+                        _step(fname, lambda p=p: _exec_sql_file(conn, p))
 
-        _step("fix_fund_type_column",       lambda: _fix_fund_type_column(conn))
-        _step("balance_history_table",      lambda: _ensure_balance_history_table(conn))
-        _step("ytd_baseline_table",         lambda: _ensure_ytd_baseline_table(conn))
-        _step("lp_creds_table",             lambda: _ensure_lp_creds_table(conn))
-        _step("fund_display_settings",      lambda: _ensure_fund_display_settings_table(conn))
-        _step("kv_store_table",             lambda: _ensure_kv_store_table(conn))
-        _step("analyst_reports_v1",         lambda: _ensure_analyst_reports_table(conn))
-        _step("report_history_tables",      lambda: _ensure_report_history_tables())
-        _step("watchlists_table",           lambda: _ensure_watchlists_table(conn))
-        _step("benchmark_annual_returns",   lambda: _ensure_benchmark_annual_returns_table(conn))
-        _step("seed_benchmark_historical",  lambda: _seed_benchmark_historical(conn))
-        _step("manual_annual_returns",      lambda: _ensure_manual_annual_returns_table(conn))
-        _step("seed_manual_annual_returns", lambda: _seed_manual_annual_returns(conn))
-        _step("support_tickets_table",      lambda: _ensure_support_tickets_table(conn))
+            _step("fix_fund_type_column",       lambda: _fix_fund_type_column(conn))
+            _step("balance_history_table",      lambda: _ensure_balance_history_table(conn))
+            _step("ytd_baseline_table",         lambda: _ensure_ytd_baseline_table(conn))
+            _step("lp_creds_table",             lambda: _ensure_lp_creds_table(conn))
+            _step("fund_display_settings",      lambda: _ensure_fund_display_settings_table(conn))
+            _step("kv_store_table",             lambda: _ensure_kv_store_table(conn))
+            _step("analyst_reports_v1",         lambda: _ensure_analyst_reports_table(conn))
+            _step("report_history_tables",      lambda: _ensure_report_history_tables())
+            _step("watchlists_table",           lambda: _ensure_watchlists_table(conn))
+            _step("benchmark_annual_returns",   lambda: _ensure_benchmark_annual_returns_table(conn))
+            _step("seed_benchmark_historical",  lambda: _seed_benchmark_historical(conn))
+            _step("manual_annual_returns",      lambda: _ensure_manual_annual_returns_table(conn))
+            _step("seed_manual_annual_returns", lambda: _seed_manual_annual_returns(conn))
+            # support_tickets_table is optional — only if helper exists
+            if callable(globals().get("_ensure_support_tickets_table")):
+                _step("support_tickets_table", lambda: _ensure_support_tickets_table(conn))
 
-        def _tax_lots_open_idx():
-            # 30+ queries filter tax_lots by fund + open; no index existed.
-            with conn.cursor() as cur:
-                cur.execute("CREATE INDEX IF NOT EXISTS tax_lots_fund_open_idx "
-                            "ON tax_lots(fund_id) WHERE closed_at IS NULL")
-            conn.commit()
-        _step("tax_lots_open_index", _tax_lots_open_idx)
+            def _tax_lots_open_idx():
+                with conn.cursor() as cur:
+                    cur.execute("CREATE INDEX IF NOT EXISTS tax_lots_open_idx "
+                                "ON tax_lots(fund_id) WHERE closed_at IS NULL")
+                conn.commit()
+            _step("tax_lots_open_index", _tax_lots_open_idx)
 
-        # Mark the migration as applied EVEN IF some optional seed step
-        # failed — those failures are logged once and ignored. This
-        # prevents the per-request re-run that was making every page
-        # load redundantly re-execute the whole migration sequence.
-        _MIGRATIONS_APPLIED = True
-        print("[migration] self-migrations complete (flag set)")
+            _MIGRATIONS_APPLIED = True
+            print("[migration] self-migrations complete (flag set)")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
     finally:
-        try: conn.close()
-        except Exception: pass
+        try:
+            _MIGRATIONS_LOCK.release()
+        except Exception:
+            pass
 
 
 def _hydrate_analyst_reports_to_db() -> None:

@@ -641,11 +641,13 @@ def get_quotes(symbols: list) -> dict:
     if not symbols:
         return {}
     out = {}
-    # Parallel Yahoo chart — sequential was ~2s/ticker and hung the watchlist UI.
-    # Hard wall-clock so a stuck Yahoo never blocks GET /api/watchlist forever.
+    # Parallel Yahoo chart. NEVER use `with ThreadPoolExecutor` + timeout —
+    # executor.__exit__ calls shutdown(wait=True) and hangs the request while
+    # Yahoo workers finish (watchlist / idea-feed freeze).
     workers = min(12, max(1, len(symbols)))
     wall_s = float(os.environ.get("QUOTE_FANOUT_TIMEOUT_S", "6") or 6)
-    with ThreadPoolExecutor(max_workers=workers) as ex:
+    ex = ThreadPoolExecutor(max_workers=workers)
+    try:
         futs = {ex.submit(_yahoo_chart_quote, sym): sym for sym in symbols}
         try:
             for fut in as_completed(futs, timeout=wall_s):
@@ -658,8 +660,12 @@ def get_quotes(symbols: list) -> dict:
                 if q:
                     out[sym] = q
         except Exception as e:
-            # Timeout on as_completed — keep whatever we already have
             print(f"[market_data] get_quotes wall {wall_s}s: {e!s:.100}", flush=True)
+    finally:
+        try:
+            ex.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            ex.shutdown(wait=False)
     missing = [s for s in symbols if s not in out or out[s].get("price") is None]
     if missing:
         try:
