@@ -81,39 +81,50 @@ export default function AnalysisScreen({ route, navigation }) {
     return () => clearInterval(elapsedRef.current);
   }, []);
 
+  const missRef = useRef(0);
+  const lastProgRef = useRef({ pct: null, at: Date.now() });
+
   const poll = async () => {
     try {
       const data = await api.getJobStatus(jobId);
+      missRef.current = 0;
       setJob(data);
       if (data.progress) {
-        setProgress(data.progress);
+        const p = data.progress;
+        const prev = lastProgRef.current;
+        const pct = p.pct != null ? Number(p.pct) : null;
+        let label = p.label || '';
+        // Heartbeat may stall on old servers — surface that it's still alive
+        if (data.status === 'running' && pct != null && pct === prev.pct
+            && (Date.now() - prev.at) > 3 * 60 * 1000) {
+          label = (label || 'Working') + ' · still running (LLM can take several minutes)…';
+        } else if (pct !== prev.pct || (p.label || '') !== (prev.label || '')) {
+          lastProgRef.current = { pct, label: p.label || '', at: Date.now() };
+        }
+        setProgress({ ...p, label });
       }
 
       if (data.status === 'done') {
         clearInterval(timerRef.current);
         haptics.onSuccess();
-        // If the server recovered this job from disk after a restart,
-        // auto-navigate to the report immediately — no need for user action.
-        if (data.result?.recovered) {
+        // Recovered after restart, or normal finish — open report when ready
+        if (data.result?.recovered || data.result?.has_report) {
           navigation.replace('Report', { ticker });
         }
       } else if (data.status === 'failed') {
         clearInterval(timerRef.current);
         haptics.onError();
       } else if (data.status === 'canceled') {
-        // User-requested cancel completed server-side — stop polling.
-        // (While the server is still winding down it reports status 'running'
-        // with a 'canceling…' progress.label, so we keep polling until here.)
         clearInterval(timerRef.current);
         haptics.onWarn();
       }
     } catch (err) {
-      clearInterval(timerRef.current);
       const msg = err?.message || String(err);
+      missRef.current += 1;
 
-      // 404 means the server restarted and lost the in-memory job.
-      // Try to find the report on disk — if it exists, navigate straight there.
+      // 404 = job lost mid-run (deploy). Try report recovery before failing.
       if (msg.includes('404') || msg.toLowerCase().includes('job not found') || msg.toLowerCase().includes('job was lost')) {
+        clearInterval(timerRef.current);
         try {
           const report = await api.getReport(ticker);
           if (report?.report_md) {
@@ -126,12 +137,15 @@ export default function AnalysisScreen({ route, navigation }) {
           error: 'The server restarted mid-analysis (a new deploy landed). Tap Retry to re-run.',
           result: null, created_at: '',
         });
-      } else {
-        setJob(prev => ({
-          ...(prev || { job_id: jobId, ticker, created_at: '' }),
-          status: 'failed', error: msg, result: null,
-        }));
+        return;
       }
+      // Transient network: keep polling a few times instead of hard-failing
+      if (missRef.current < 4) return;
+      clearInterval(timerRef.current);
+      setJob(prev => ({
+        ...(prev || { job_id: jobId, ticker, created_at: '' }),
+        status: 'failed', error: msg, result: null,
+      }));
     }
   };
 

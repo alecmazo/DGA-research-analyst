@@ -3490,12 +3490,31 @@ def _wl_remove_db(lp_id: str, ticker: str) -> None:
 
 
 def _claims_or_401(request: Request) -> dict:
-    """Extract v2 auth claims attached by the middleware. 401 if missing
-    (i.e. the request only had a legacy v1 token, not a v2 token)."""
+    """Extract v2 auth claims attached by the middleware.
+
+    Mobile (and older web shells) often send only the legacy v1 HMAC token.
+    Financials / watchlist used to 401 those sessions even though middleware
+    already authenticated them — treat valid v1 as a GP-equivalent session so
+    the mobile Financials tab and desk keep working.
+    """
     claims = getattr(request.state, "auth_claims", None)
-    if not claims:
-        raise HTTPException(status_code=401, detail="v2 token required for /api/watchlist")
-    return claims
+    if claims:
+        return claims
+    # Legacy v1 path: middleware already accepted x-auth-token
+    token = (request.headers.get("x-auth-token")
+             or request.query_params.get("token")
+             or "")
+    if token and _valid_token(token):
+        return {
+            "role": "gp",
+            "lp_id": "legacy-v1",
+            "name": "GP",
+            "email": "",
+            "legacy_v1": True,
+            "fund_memberships": {},
+            "managed_account_ids": [],
+        }
+    raise HTTPException(status_code=401, detail="Authentication required")
 
 
 @app.get("/api/earnings/{ticker}")
@@ -6608,7 +6627,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui388-20260729-boot-pool-health"
+WEB_BUILD_VERSION = "ui389-20260730-analyze-mobile-mcap"
 
 
 @app.get("/api/build")
@@ -7145,7 +7164,8 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
       • llm_provider   — 'grok' (default) | 'claude' | 'both'
     """
     ticker = req.ticker.strip().upper()
-    if not ticker or not ticker.isalpha() or len(ticker) > 10:
+    # Allow class shares (BRK.B) and hyphens; reject junk.
+    if not ticker or len(ticker) > 12 or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,11}", ticker):
         raise HTTPException(status_code=422, detail="Invalid ticker symbol")
 
     provider = (req.llm_provider or "grok").lower().strip()
@@ -7191,24 +7211,55 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
 def get_job_status(job_id: str):
     """Poll for the status of a previously submitted job.
 
-    If the job is not in memory (server restarted), we fall back to the
-    on-disk job-index: if the report file already exists we return a
-    synthetic "done" response so the mobile app can navigate to the report.
-    If neither the in-memory job nor the report file exists we return 404.
+    After a redeploy, in-memory jobs vanish. Recover from on-disk report files
+    or Postgres analyst_reports when the report finished; otherwise 404 with a
+    clear re-run message (never leave clients polling forever at ~50%).
     """
     with _jobs_lock:
         job = _jobs.get(job_id)
     if job:
         return job
 
-    # --- Recovery path after server restart ---
     idx = _load_job_index()
     entry = idx.get(job_id)
     if entry and entry.get("type") == "analysis":
-        ticker = entry.get("ticker", "").upper()
-        md_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report.md"
-        if md_path.exists():
-            # Report was completed before the restart — synthesize a done response.
+        ticker = (entry.get("ticker") or "").upper()
+        provider = (entry.get("provider") or "grok").lower()
+        if provider == "volume":
+            provider = "deepseek"
+
+        def _fs_has(prov: str) -> bool:
+            suf = "" if prov == "grok" else f"_{prov}"
+            return (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report{suf}.md").exists()
+
+        def _db_has(prov: str) -> bool:
+            if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL") and ticker):
+                return False
+            col = {
+                "grok": "report_md",
+                "claude": "report_md_claude",
+                "kimi": "report_md_kimi",
+                "deepseek": "report_md_deepseek",
+            }.get(prov, "report_md")
+            try:
+                with _fund_conn() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT COALESCE(length({col}),0) FROM analyst_reports WHERE ticker=%s",
+                        (ticker,),
+                    )
+                    row = cur.fetchone()
+                    return bool(row and int(row[0] or 0) > 200)
+            except Exception:
+                return False
+
+        check_order = [provider] + [p for p in ("grok", "claude", "deepseek") if p != provider]
+        found_prov = None
+        for p in check_order:
+            if _fs_has(p) or _db_has(p):
+                found_prov = p
+                break
+
+        if found_prov:
             has_docx = (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report.docx").exists()
             has_pptx = (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Presentation.pptx").exists()
             recovered = {
@@ -7217,26 +7268,29 @@ def get_job_status(job_id: str):
                 "status": "done",
                 "created_at": entry.get("created_at", ""),
                 "error": None,
+                "progress": {"step": "done", "pct": 1.0, "label": "Report ready (recovered)"},
                 "result": {
                     "ok": True,
                     "has_report": True,
                     "has_docx": has_docx,
                     "has_pptx": has_pptx,
+                    "provider": found_prov,
                     "gamma_url": None,
                     "gamma_error": None,
-                    "recovered": True,   # flag so client knows it was recovered
+                    "recovered": True,
                 },
             }
-            # Re-hydrate in memory so subsequent polls are fast.
             with _jobs_lock:
                 _jobs[job_id] = recovered
             return recovered
-        else:
-            # Index entry exists but the report never finished — the job was lost.
-            raise HTTPException(
-                status_code=404,
-                detail=f"Job was lost in a server restart before completing. Please re-run the analysis for {ticker}.",
-            )
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Job was lost in a server restart before completing. "
+                f"Please re-run Analyze for {ticker}."
+            ),
+        )
 
     raise HTTPException(status_code=404, detail="Job not found")
 
@@ -8198,20 +8252,19 @@ def get_stock_info(ticker: str):
                 px = (out.get("quote") or {}).get("price")
                 sh = fin.get("shares_outstanding")
                 eps = fin.get("diluted_eps")
-                if px and sh:
-                    mcap = px * sh
-                    out["derived"] = {
-                        "market_cap": round(mcap, 0),
-                        "pe": round(px / eps, 1) if eps else None,
-                        "fcf_yield_pct": (round(fin["free_cash_flow"] / mcap * 100, 2)
-                                          if fin.get("free_cash_flow") else None),
-                        "net_cash": (round(fin["cash"] - fin["total_debt"], 0)
-                                     if fin.get("cash") is not None and fin.get("total_debt") is not None
-                                     else None),
-                        "debt_to_equity": (round(fin["total_debt"] / fin["stockholders_equity"], 2)
-                                           if fin.get("total_debt") and fin.get("stockholders_equity")
-                                           else None),
-                    }
+                mcap = (px * sh) if (px and sh) else None
+                out["derived"] = {
+                    "market_cap": round(mcap, 0) if mcap else None,
+                    "pe": round(px / eps, 1) if (px and eps) else None,
+                    "fcf_yield_pct": (round(fin["free_cash_flow"] / mcap * 100, 2)
+                                      if mcap and fin.get("free_cash_flow") else None),
+                    "net_cash": (round(fin["cash"] - fin["total_debt"], 0)
+                                 if fin.get("cash") is not None and fin.get("total_debt") is not None
+                                 else None),
+                    "debt_to_equity": (round(fin["total_debt"] / fin["stockholders_equity"], 2)
+                                       if fin.get("total_debt") and fin.get("stockholders_equity")
+                                       else None),
+                }
             # Saved-report pointer — UI links ONLY when one exists.
             cur.execute("""
                 SELECT generated_at, rating, price_target, upside_pct
@@ -8229,10 +8282,13 @@ def get_stock_info(ticker: str):
     except Exception as e:
         out["warning"] = str(e)[:160]
 
-    # Meta / range enrichment when local store is thin (still zero LLM).
+    # Meta / range / market-cap enrichment when local store is thin (still zero LLM).
+    # Many watchlist names have meta+quote but no SEC shares_outstanding → blank
+    # market cap on mobile StockInfoCard. Always fill mcap from Yahoo when missing.
     need_quote = not (out.get("quote") or {}).get("price")
     need_meta = not (out.get("meta") or {}).get("name")
-    if need_quote or need_meta:
+    need_mcap = not (out.get("derived") or {}).get("market_cap")
+    if need_quote or need_meta or need_mcap:
         try:
             if need_quote:
                 snap = analyst.fetch_market_snapshot(alias) or {}
@@ -8247,29 +8303,33 @@ def get_stock_info(ticker: str):
                         "source": snap.get("source") or "fast_info",
                     }
                     out["live_source"] = snap.get("source") or "fast_info"
-            if need_meta and yf is not None:
+            if (need_meta or need_mcap) and yf is not None:
                 info = _builder_call_timeout(
                     lambda: getattr(yf.Ticker(_resolve_ticker_alias(tk)), "info", {}) or {},
                     8.0, {}) or {}
-                name = info.get("longName") or info.get("shortName")
-                if name or info.get("sector") or info.get("industry"):
-                    out["meta"] = {
-                        "name": name or tk,
-                        "sector": info.get("sector"),
-                        "industry": info.get("industry"),
-                        "analyst_target": info.get("targetMeanPrice"),
-                    }
-                if not out.get("derived"):
-                    mcap = info.get("marketCap")
-                    pe = info.get("trailingPE") or info.get("forwardPE")
-                    if mcap or pe:
-                        out["derived"] = {
-                            "market_cap": float(mcap) if mcap else None,
-                            "pe": round(float(pe), 1) if pe else None,
-                            "fcf_yield_pct": None,
-                            "net_cash": None,
-                            "debt_to_equity": info.get("debtToEquity"),
+                if need_meta:
+                    name = info.get("longName") or info.get("shortName")
+                    if name or info.get("sector") or info.get("industry"):
+                        out["meta"] = {
+                            "name": name or tk,
+                            "sector": info.get("sector"),
+                            "industry": info.get("industry"),
+                            "analyst_target": info.get("targetMeanPrice"),
                         }
+                mcap = info.get("marketCap")
+                pe = info.get("trailingPE") or info.get("forwardPE")
+                if need_mcap and (mcap or pe):
+                    dv = dict(out.get("derived") or {})
+                    if mcap and not dv.get("market_cap"):
+                        dv["market_cap"] = float(mcap)
+                    if pe and not dv.get("pe"):
+                        try:
+                            dv["pe"] = round(float(pe), 1)
+                        except (TypeError, ValueError):
+                            pass
+                    if info.get("debtToEquity") is not None and dv.get("debt_to_equity") is None:
+                        dv["debt_to_equity"] = info.get("debtToEquity")
+                    out["derived"] = dv
                 # 52w from live info when store empty
                 if not out.get("range52w"):
                     hi = info.get("fiftyTwoWeekHigh")

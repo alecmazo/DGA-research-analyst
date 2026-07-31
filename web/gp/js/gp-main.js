@@ -443,39 +443,101 @@
   // onCanceled (optional): called when the job reports status 'canceled'
   // (user hit a Cancel button — server discards the result, nothing saved).
   function pollJob(jobId, pollPath, btn, idleLabel, onDone, onFail, onProgress, onCanceled) {
+    // After Railway redeploys, in-memory jobs vanish and /api/jobs/{id} returns
+    // 404. Older pollers ignored that and left the bar stuck at the last %
+    // forever (often ~50% mid-Grok). Fail clearly instead.
+    let miss = 0;
+    let lastPct = null;
+    let lastLbl = '';
+    let lastChangeAt = Date.now();
+    const STALL_MS = 12 * 60 * 1000; // 12 min no progress → stall hint
     async function tick() {
       try {
-        const r = await window.dgaFetch(pollPath + jobId);
-        const job = await r.json();
-        const pct = job.progress?.pct;
-        const lbl = job.progress?.label || '';
-        // Surface model/provider from job result while running when available
+        const r = await window.dgaFetch(pollPath + jobId, { cache: 'no-store' });
+        let job = null;
+        try { job = await r.json(); } catch (_) { job = null; }
+
+        if (!r.ok || !job || !job.status) {
+          miss += 1;
+          const detail = (job && (job.detail || job.error)) || ('HTTP ' + r.status);
+          const fatal = (r.status === 404 || r.status === 401 || r.status === 403 || miss >= 4);
+          if (fatal) {
+            clearInterval(iv);
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = r.status === 404 ? '❌ Lost' : '❌ Failed';
+              setTimeout(function () { btn.textContent = idleLabel; }, 3500);
+            }
+            if (typeof onFail === 'function') {
+              onFail({
+                status: 'failed',
+                job_id: jobId,
+                error: r.status === 404
+                  ? ('Job lost (server restarted mid-run). Re-run Analyze. ' + detail)
+                  : String(detail),
+              });
+            }
+          }
+          return;
+        }
+        miss = 0;
+
+        const pct = job.progress && job.progress.pct;
+        const lbl = (job.progress && job.progress.label) || '';
         const res = job.result || {};
         const modelHint = res.model || res.provider || job.model || job.provider || '';
-        if (pct != null) {
-          const pctInt = Math.round(pct * 100);
-          // If a progress renderer is supplied, use it (keeps the button clean).
-          // Otherwise fall back to writing into the button text.
-          if (typeof onProgress === 'function') onProgress(pctInt, lbl, job);
-          else {
+        if (pct != null || lbl) {
+          const pctInt = pct != null ? Math.round(Number(pct) * 100) : null;
+          let showLbl = lbl;
+          if (pctInt !== lastPct || lbl !== lastLbl) {
+            lastPct = pctInt;
+            lastLbl = lbl;
+            lastChangeAt = Date.now();
+          } else if (job.status === 'running' && (Date.now() - lastChangeAt) > STALL_MS) {
+            showLbl = (lbl || 'Working') + ' · still running (LLM can take several minutes)…';
+          }
+          if (typeof onProgress === 'function') onProgress(pctInt, showLbl, job);
+          else if (btn) {
             const m = modelHint ? ' · ' + String(modelHint).slice(0, 22) : '';
-            btn.textContent = pctInt + '% — ' + (lbl || '…') + m;
+            btn.textContent = (pctInt != null ? pctInt + '% — ' : '… ') + (showLbl || '…') + m;
           }
         } else if (typeof onProgress === 'function') {
           onProgress(null, lbl, job);
         } else if (modelHint && btn && btn.disabled) {
           btn.textContent = '⏳ ' + String(modelHint).slice(0, 28) + '…';
         }
-        if (job.status === 'done')   { clearInterval(iv); btn.disabled=false; btn.textContent=idleLabel; onDone(job); }
-        if (job.status === 'failed') { clearInterval(iv); btn.disabled=false; btn.textContent='❌ Failed'; setTimeout(()=>btn.textContent=idleLabel,3000); if(onFail) onFail(job); }
+        if (job.status === 'done') {
+          clearInterval(iv);
+          if (btn) { btn.disabled = false; btn.textContent = idleLabel; }
+          if (typeof onDone === 'function') onDone(job);
+        }
+        if (job.status === 'failed') {
+          clearInterval(iv);
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = '❌ Failed';
+            setTimeout(function () { btn.textContent = idleLabel; }, 3000);
+          }
+          if (typeof onFail === 'function') onFail(job);
+        }
         if (job.status === 'canceled' || job.status === 'cancelled') {
-          clearInterval(iv); btn.disabled = false; btn.textContent = idleLabel;
+          clearInterval(iv);
+          if (btn) { btn.disabled = false; btn.textContent = idleLabel; }
           if (typeof onCanceled === 'function') onCanceled(job);
         }
-      } catch { clearInterval(iv); btn.disabled=false; btn.textContent=idleLabel; }
+      } catch (err) {
+        miss += 1;
+        if (miss >= 4) {
+          clearInterval(iv);
+          if (btn) { btn.disabled = false; btn.textContent = idleLabel; }
+          if (typeof onFail === 'function') {
+            onFail({ status: 'failed', job_id: jobId, error: String(err && err.message || err || 'poll failed') });
+          }
+        }
+      }
     }
     tick(); // immediate first check
-    const iv = setInterval(tick, 3000);
+    const iv = setInterval(tick, 2500);
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -6290,7 +6352,11 @@
           break;
         }
         if (outcome.failed || !outcome.ok) {
-          results.push({ eng: eng, failed: true, job: outcome.job });
+          const errMsg = (outcome.job && (outcome.job.error || outcome.job.detail))
+            || (eng + ' failed');
+          results.push({ eng: eng, failed: true, job: outcome.job, error: errMsg });
+          $heroHint.style.color = 'var(--red)';
+          $heroHint.textContent = String(errMsg).slice(0, 220);
           continue;
         }
         const j = outcome.job || {};

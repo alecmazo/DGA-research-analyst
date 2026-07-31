@@ -132,7 +132,10 @@ export default function StockInfoCard({
     { label: 'YTD', value: fmtPct(w.ytd_pct), color: w.ytd_pct != null && w.ytd_pct < 0 ? RED : GREEN },
     { label: '1Y', value: fmtPct(w.one_year_pct), color: w.one_year_pct != null && w.one_year_pct < 0 ? RED : GREEN },
     { label: 'Realized Vol', value: q.realized_vol != null ? Number(q.realized_vol).toFixed(1) + '%' : null },
-    { label: 'Mkt Cap', value: fmtCompact(dv.market_cap) },
+    // Prefer derived.market_cap; fall back to Yahoo-style fields if present
+    { label: 'Mkt Cap', value: fmtCompact(
+      dv.market_cap ?? dv.marketCap ?? m.market_cap ?? m.marketCap ?? q.market_cap
+    ) },
     { label: 'P/E', value: dv.pe != null ? Number(dv.pe).toFixed(1) : null },
     { label: 'FCF Yield', value: dv.fcf_yield_pct != null ? Number(dv.fcf_yield_pct).toFixed(2) + '%' : null },
     { label: 'Net Cash', value: fmtCompact(dv.net_cash) },

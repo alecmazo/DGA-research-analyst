@@ -7549,6 +7549,84 @@ def call_llm(provider: str, system_prompt: str, user_content: str,
     raise ValueError(f"Unknown LLM provider: {provider!r}")
 
 
+def call_llm_with_heartbeat(
+    provider: str,
+    system_prompt: str,
+    user_content: str,
+    *,
+    live_search: bool = False,
+    on_delta=None,
+    usage_capture=None,
+    should_cancel=None,
+    on_progress=None,
+    progress_step: str = "llm",
+    progress_base: float = 0.40,
+    progress_cap: float = 0.82,
+    timeout_s: float | None = None,
+) -> str:
+    """Run ``call_llm`` on a worker thread with progress heartbeats.
+
+    Grok's non-streaming call can sit silent for many minutes (live search +
+    long report). Without heartbeats the UI freezes at ~40–50%. Optional
+    ``timeout_s`` aborts with a clear error so the bar never spins forever.
+    """
+    import threading
+    if timeout_s is None:
+        timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "900")  # 15 min
+    timeout_s = max(120.0, min(float(timeout_s), 1800.0))
+
+    box: dict = {"text": None, "err": None}
+    done = threading.Event()
+
+    def _work() -> None:
+        try:
+            box["text"] = call_llm(
+                provider, system_prompt, user_content,
+                live_search=live_search,
+                on_delta=on_delta,
+                usage_capture=usage_capture,
+                should_cancel=should_cancel,
+            )
+        except BaseException as e:  # noqa: BLE001
+            box["err"] = e
+        finally:
+            done.set()
+
+    th = threading.Thread(target=_work, name=f"llm-{provider}", daemon=True)
+    th.start()
+    t0 = time.time()
+    while not done.wait(12.0):
+        if should_cancel is not None:
+            try:
+                if should_cancel():
+                    raise ClaudeCancelled("cancelled during LLM call")
+            except ClaudeCancelled:
+                raise
+            except Exception:
+                pass
+        elapsed = time.time() - t0
+        if elapsed >= timeout_s:
+            raise TimeoutError(
+                f"{provider} LLM call exceeded {int(timeout_s)}s — try again "
+                f"or disable Gamma / live-search-heavy models."
+            )
+        span = max(0.01, progress_cap - progress_base)
+        pct = progress_base + span * min(0.95, elapsed / timeout_s)
+        mins = int(elapsed // 60)
+        secs = int(elapsed % 60)
+        _emit_progress(
+            on_progress, progress_step, pct,
+            f"{provider.title()} generating… {mins}m {secs:02d}s",
+        )
+    th.join(timeout=2.0)
+    if box["err"] is not None:
+        raise box["err"]
+    text = box.get("text")
+    if not text:
+        raise RuntimeError(f"{provider} returned empty response")
+    return text
+
+
 # ============================================================================
 # Ratings / price-target extraction for portfolio ranking
 # ============================================================================
@@ -8476,11 +8554,19 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                    + (" + live X/news search" if _live else ""))
     _usage: dict = {}   # filled by call_* → {model, input/output_tokens, cost_usd}
     try:
-        report_text = call_llm(_prov, system_prompt, user_msg,
-                               live_search=_live,
-                               on_delta=on_delta,
-                               usage_capture=lambda u: _usage.update(u or {}),
-                               should_cancel=should_cancel)
+        # Heartbeats keep Desk + mobile progress bars moving during long
+        # non-stream Grok/Claude calls. Without this UI freezes ~40–50%.
+        report_text = call_llm_with_heartbeat(
+            _prov, system_prompt, user_msg,
+            live_search=_live,
+            on_delta=on_delta,
+            usage_capture=lambda u: _usage.update(u or {}),
+            should_cancel=should_cancel,
+            on_progress=on_progress,
+            progress_step="grok",
+            progress_base=0.40,
+            progress_cap=0.82,
+        )
     except ClaudeCancelled:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -8500,12 +8586,16 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                        f"{_prov.title()} — re-running tables without live search")
         try:
             _usage2: dict = {}
-            report_text2 = call_llm(
+            report_text2 = call_llm_with_heartbeat(
                 _prov, system_prompt, user_msg,
                 live_search=False,
                 on_delta=on_delta,
                 usage_capture=lambda u: _usage2.update(u or {}),
                 should_cancel=should_cancel,
+                on_progress=on_progress,
+                progress_step="grok",
+                progress_base=0.55,
+                progress_cap=0.80,
             )
             if report_text2 and not _financial_tables_look_degraded(report_text2):
                 report_text = report_text2
