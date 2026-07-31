@@ -34,7 +34,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Watchlist unhang** | **`ui391-20260731-watchlist-unhang`** | Hard 6–7s quote walls; always return tickers; client 12s abort; store fallback without age |
 | **Executor hang root fix** | **`ui392-20260731-executor-hang-fix`** | Never `with ThreadPoolExecutor` after timeout (shutdown wait=True froze watchlist); migration lock |
 | **Reports + idea feed fast** | **`ui393-20260731-reports-idea-fast`** | list_reports: no Dropbox/Yahoo on hot path; idea-feed stop force spam; load reports on init |
-| **Next deploy after this** | **`ui394-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **DB lock clear** | **`ui394-20260731-db-lock-clear`** | Hydrate no longer holds txn across Dropbox; no length(report_md) on list; idle_in_txn timeout 15s |
+| **Next deploy after this** | **`ui395-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

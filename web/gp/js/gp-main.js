@@ -11216,11 +11216,15 @@
   function _pulseRenderAll() { _PULSE_PREFIXES.forEach(_pulseRenderRows); }
 
   async function _pulseLoadLatest() {
+    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (_) {} }, 8000) : null;
     try {
-      // Ensure watchlist set is warm so we can hide ghost pulse rows.
+      // Watchlist set is best-effort; don't block pulse on it
       if (!(window._DGA_WL_SET instanceof Set) || !window._DGA_WL_SET.size) {
         try {
-          const wr = await window.dgaFetch('/api/watchlist');
+          const wr = await window.dgaFetch('/api/watchlist', {
+            signal: ctrl ? ctrl.signal : undefined,
+          });
           if (wr.ok) {
             const wd = await wr.json();
             window._DGA_WL_SET = new Set((wd.tickers || []).map(function (t) {
@@ -11230,14 +11234,36 @@
           }
         } catch (_) {}
       }
-      const r = await window.dgaFetch('/api/scan/latest');
+      const r = await window.dgaFetch('/api/scan/latest', {
+        cache: 'no-store',
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+      if (timer) clearTimeout(timer);
       if (!r.ok) throw new Error(r.status);
       const d = await r.json();
       _pulseLatest    = (d.exists && d.results) ? d.results : {};
-      // Prefer newest among watchlist entries for header (not global max over ghosts).
       const disp = _pulseDisplayEntries();
       _pulseScannedAt = _pulseNewestIso(disp) || d.scanned_at || null;
-    } catch (e) { console.warn('[pulse]', e); }
+      if (!d.exists || !Object.keys(_pulseLatest).length) {
+        _PULSE_PREFIXES.forEach(function (px) {
+          const el = document.getElementById(px + '-rows');
+          if (el && !el.querySelector('[data-pulse-tk]')) {
+            el.innerHTML = '<div style="padding:14px;font-size:12px;color:var(--dim);text-align:center;">'
+              + 'No pulse data yet — click Run Pulse to scan the watchlist.</div>';
+          }
+        });
+      }
+    } catch (e) {
+      if (timer) clearTimeout(timer);
+      console.warn('[pulse]', e);
+      _PULSE_PREFIXES.forEach(function (px) {
+        const el = document.getElementById(px + '-rows');
+        if (el && el.textContent && el.textContent.indexOf('Loading') >= 0) {
+          el.innerHTML = '<div style="padding:14px;font-size:12px;color:var(--dim);text-align:center;">'
+            + 'Pulse unavailable — tap Run Pulse or reload.</div>';
+        }
+      });
+    }
     _pulseRenderAll();
   }
 

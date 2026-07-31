@@ -6652,7 +6652,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui393-20260731-reports-idea-fast"
+WEB_BUILD_VERSION = "ui394-20260731-db-lock-clear"
 
 
 @app.get("/api/build")
@@ -12076,43 +12076,60 @@ def _hydrate_orphaned_grok_reports() -> None:
     if not candidates:
         return
 
+    # Which tickers already have Grok content? Quick query WITHOUT loading
+    # report_md bodies — then RELEASE the connection before Dropbox/network.
+    # Holding a connection open across fetch_report_from_drive left sessions
+    # "idle in transaction" for minutes, blocked ALTER + every SELECT on
+    # analyst_reports, and froze Saved Reports / Idea Generator / Filings.
+    already: set[str] = set()
     try:
-        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            for tk in candidates:
-                # Skip if DB already has Grok content
-                cur.execute("""SELECT report_md FROM analyst_reports
-                               WHERE ticker = %s""", (tk,))
-                row = cur.fetchone()
-                if row and (row["report_md"] or "").strip():
-                    continue
-                # Pull text — disk first, then Drive/Dropbox/Sheets
-                text = ""
-                local_path = folder / f"{tk}_DGA_Report.md"
-                if local_path.exists():
-                    try: text = local_path.read_text()
-                    except Exception: pass
-                if not text or len(text) < 200:
-                    try:
-                        text = analyst.fetch_report_from_drive(tk, provider="grok") or ""
-                    except Exception: pass
-                if not text or len(text) < 200:
-                    print(f"[hydrate] could not source Grok report for {tk} (no disk + no Drive)", flush=True)
-                    continue
-                try:
-                    summary = analyst.extract_summary_from_report(text) or {}
-                    has_docx = (folder / f"{tk}_DGA_Report.docx").exists()
-                    has_pptx = (folder / f"{tk}_DGA_Presentation.pptx").exists()
-                    _db_upsert_report(
-                        tk, text, summary,
-                        has_docx=has_docx, has_pptx=has_pptx, gamma_url=None,
-                        pptx_stale=None, provider="grok",
-                    )
-                    src = "disk" if local_path.exists() else "Dropbox"
-                    print(f"✅ [hydrate] backfilled Grok report for {tk} from {src} ({len(text):,} chars)", flush=True)
-                except Exception as _e:
-                    print(f"❌ [hydrate] grok failed for {tk}: {_e!s:.200}", flush=True)
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT ticker FROM analyst_reports
+                 WHERE ticker = ANY(%s)
+                   AND report_md IS NOT NULL
+                   AND length(report_md) > 200
+            """, (list(candidates),))
+            already = {(r[0] or "").upper() for r in (cur.fetchall() or []) if r and r[0]}
     except Exception as _e:
-        print(f"❌ [hydrate] grok outer error: {_e!s:.200}", flush=True)
+        print(f"[hydrate] presence check failed: {_e!s:.120}", flush=True)
+        # Fall back: try all candidates (still without holding a long txn)
+        already = set()
+
+    missing = [tk for tk in sorted(candidates) if tk not in already]
+    if not missing:
+        return
+    print(f"[hydrate] grok: {len(missing)} missing of {len(candidates)}", flush=True)
+
+    for tk in missing:
+        try:
+            text = ""
+            local_path = folder / f"{tk}_DGA_Report.md"
+            if local_path.exists():
+                try:
+                    text = local_path.read_text()
+                except Exception:
+                    pass
+            if not text or len(text) < 200:
+                try:
+                    text = analyst.fetch_report_from_drive(tk, provider="grok") or ""
+                except Exception:
+                    pass
+            if not text or len(text) < 200:
+                continue
+            summary = analyst.extract_summary_from_report(text) or {}
+            has_docx = (folder / f"{tk}_DGA_Report.docx").exists()
+            has_pptx = (folder / f"{tk}_DGA_Presentation.pptx").exists()
+            _db_upsert_report(
+                tk, text, summary,
+                has_docx=has_docx, has_pptx=has_pptx, gamma_url=None,
+                pptx_stale=None, provider="grok",
+                touch_run_at=False,
+            )
+            src = "disk" if local_path.exists() else "Dropbox"
+            print(f"✅ [hydrate] backfilled Grok {tk} from {src} ({len(text):,} chars)", flush=True)
+        except Exception as _e:
+            print(f"❌ [hydrate] grok failed for {tk}: {_e!s:.200}", flush=True)
 
 
 def _hydrate_orphaned_claude_reports() -> None:
@@ -12156,41 +12173,53 @@ def _hydrate_orphaned_claude_reports() -> None:
     if not candidates:
         return
 
+    # Presence check then release connection — never hold txn across Dropbox I/O
+    already: set[str] = set()
     try:
-        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            for tk in candidates:
-                # Skip if DB already has Claude content
-                cur.execute("""SELECT claude_generated_at, report_md_claude
-                               FROM analyst_reports WHERE ticker = %s""", (tk,))
-                row = cur.fetchone()
-                if row and row.get("claude_generated_at") and (row.get("report_md_claude") or "").strip():
-                    continue
-                # Pull text — disk first, then Dropbox
-                text = ""
-                local_path = folder / f"{tk}_DGA_Report_claude.md"
-                if local_path.exists():
-                    try: text = local_path.read_text()
-                    except Exception: pass
-                if not text or len(text) < 200:
-                    try:
-                        text = analyst.fetch_report_from_drive(tk, provider="claude") or ""
-                    except Exception: pass
-                if not text or len(text) < 200:
-                    print(f"[hydrate] could not source Claude report for {tk} (no disk + no Dropbox)", flush=True)
-                    continue
-                try:
-                    summary = analyst.extract_summary_from_report(text) or {}
-                    _db_upsert_report(
-                        tk, text, summary,
-                        has_docx=False, has_pptx=False, gamma_url=None,
-                        pptx_stale=None, provider="claude",
-                    )
-                    src = "disk" if local_path.exists() else "Dropbox"
-                    print(f"✅ [hydrate] backfilled Claude report for {tk} from {src} ({len(text):,} chars)", flush=True)
-                except Exception as _e:
-                    print(f"❌ [hydrate] claude failed for {tk}: {_e!s:.200}", flush=True)
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT ticker FROM analyst_reports
+                 WHERE ticker = ANY(%s)
+                   AND claude_generated_at IS NOT NULL
+                   AND report_md_claude IS NOT NULL
+                   AND length(report_md_claude) > 200
+            """, (list(candidates),))
+            already = {(r[0] or "").upper() for r in (cur.fetchall() or []) if r and r[0]}
     except Exception as _e:
-        print(f"❌ [hydrate] claude outer error: {_e!s:.200}", flush=True)
+        print(f"[hydrate] claude presence check failed: {_e!s:.120}", flush=True)
+
+    missing = [tk for tk in sorted(candidates) if tk not in already]
+    if not missing:
+        return
+    print(f"[hydrate] claude: {len(missing)} missing of {len(candidates)}", flush=True)
+
+    for tk in missing:
+        try:
+            text = ""
+            local_path = folder / f"{tk}_DGA_Report_claude.md"
+            if local_path.exists():
+                try:
+                    text = local_path.read_text()
+                except Exception:
+                    pass
+            if not text or len(text) < 200:
+                try:
+                    text = analyst.fetch_report_from_drive(tk, provider="claude") or ""
+                except Exception:
+                    pass
+            if not text or len(text) < 200:
+                continue
+            summary = analyst.extract_summary_from_report(text) or {}
+            _db_upsert_report(
+                tk, text, summary,
+                has_docx=False, has_pptx=False, gamma_url=None,
+                pptx_stale=None, provider="claude",
+                touch_run_at=False,
+            )
+            src = "disk" if local_path.exists() else "Dropbox"
+            print(f"✅ [hydrate] backfilled Claude {tk} from {src} ({len(text):,} chars)", flush=True)
+        except Exception as _e:
+            print(f"❌ [hydrate] claude failed for {tk}: {_e!s:.200}", flush=True)
 
 
 def _parse_report_date_ts(val) -> float:
@@ -12302,6 +12331,9 @@ def list_reports(request: Request = None):
     if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
         try:
             with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                # NEVER length(report_md) here — detoasts multi-MB bodies and
+                # can hold locks for minutes under concurrent hydrate/ALTER.
+                # Provider pills use timestamps (stamped on every real Analyze).
                 cur.execute("""
                     SELECT ticker, generated_at, has_docx, has_pptx,
                            rating, price_target, upside_pct, gamma_url,
@@ -12314,12 +12346,7 @@ def list_reports(request: Request = None):
                            kimi_rating, kimi_price_target, kimi_upside_pct,
                            deepseek_rating, deepseek_price_target, deepseek_upside_pct,
                            COALESCE(version_count, 1) AS version_count,
-                           delta_from_prior,
-                           -- Content presence (avoid loading full report_md into list)
-                           (COALESCE(length(report_md), 0) > 200)            AS has_grok_md,
-                           (COALESCE(length(report_md_claude), 0) > 200)     AS has_claude_md,
-                           (COALESCE(length(report_md_kimi), 0) > 200)       AS has_kimi_md,
-                           (COALESCE(length(report_md_deepseek), 0) > 200)   AS has_deepseek_md
+                           delta_from_prior
                     FROM analyst_reports
                     WHERE archived IS NOT TRUE
                     ORDER BY GREATEST(
@@ -12334,21 +12361,10 @@ def list_reports(request: Request = None):
             if rows:
                 out = []
                 for r in rows:
-                    # Provider pills: prefer markdown content length (so Kimi/DeepSeek
-                    # show when report_md_* is filled). Fall back to timestamps for
-                    # legacy rows where length flags are missing.
-                    has_grok   = bool(r.get("has_grok_md")) if r.get("has_grok_md") is not None else bool(r.get("generated_at"))
-                    has_claude = bool(r.get("has_claude_md")) if r.get("has_claude_md") is not None else bool(r.get("claude_generated_at"))
-                    has_kimi   = bool(r.get("has_kimi_md")) if r.get("has_kimi_md") is not None else bool(r.get("kimi_generated_at"))
-                    has_ds     = bool(r.get("has_deepseek_md")) if r.get("has_deepseek_md") is not None else bool(r.get("deepseek_generated_at"))
-                    # Timestamp fallback if content flag is false but stamp exists
-                    # (rare: race between write of text vs timestamp)
-                    if not has_claude and r.get("claude_generated_at"):
-                        has_claude = True
-                    if not has_kimi and r.get("kimi_generated_at"):
-                        has_kimi = True
-                    if not has_ds and r.get("deepseek_generated_at"):
-                        has_ds = True
+                    has_grok   = bool(r.get("generated_at"))
+                    has_claude = bool(r.get("claude_generated_at"))
+                    has_kimi   = bool(r.get("kimi_generated_at"))
+                    has_ds     = bool(r.get("deepseek_generated_at"))
                     providers = []
                     if has_grok:   providers.append("grok")
                     if has_claude: providers.append("claude")
@@ -14647,13 +14663,19 @@ _FUND_POOL_LOCK = threading.Lock()
 
 def _pg_connect_kwargs() -> dict:
     """Always set a short connect_timeout so a bad/slow DATABASE_URL cannot
-    hang process boot or pin every worker thread forever."""
+    hang process boot or pin every worker thread forever.
+
+    idle_in_transaction_session_timeout kills connections that hold a txn
+    open without progress (the hydrate-across-Dropbox bug locked the whole
+    analyst_reports table for 15+ minutes).
+    """
     return {
         "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "10")),
         "keepalives": 1,
         "keepalives_idle": 30,
         "keepalives_interval": 10,
         "keepalives_count": 3,
+        "options": "-c idle_in_transaction_session_timeout=15000 -c statement_timeout=60000",
     }
 
 
