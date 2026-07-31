@@ -356,7 +356,7 @@ MODEL_TASKS: dict[str, dict] = {
         "group": "Agents",
         "allowed": ("claude", "grok", "deepseek"),
         "default": "claude",
-        "note": "Tool-use agent. Pick Grok 4.5, Claude 4.8, or DeepSeek. Kimi not available for agents.",
+        "note": "Tool-use agent. Pick Grok 4.5, Claude Opus 5, or DeepSeek. Kimi not available for agents.",
     },
     "strategist": {
         "label": "Portfolio Strategist",
@@ -632,7 +632,7 @@ def providers_catalog() -> dict[str, dict]:
         },
         "claude": {
             "id": "claude",
-            "label": "Claude Opus 4.8",
+            "label": "Claude Opus 5",
             "model": c_model,
             "configured": _provider_key_set(("ANTHROPIC_API_KEY", "CLAUDE_API_KEY")),
             "key_env": "ANTHROPIC_API_KEY",
@@ -7195,15 +7195,14 @@ def call_grok(system_prompt: str, user_content: str,
 # but live news that broke since training cutoff will appear in Grok but
 # not in Claude. The UI discloses this in the comparison modal.
 
-CLAUDE_MODEL = _optional_env("CLAUDE_MODEL", "claude-opus-4-8")
-# ↑ Default to Opus 4.8 — Anthropic's current flagship reasoning model (the
-# "Claude" engine on Analyze Ticker), the fair matchup against Grok-4-reasoning.
-# `claude-opus-4-8` is a STABLE ALIAS — no date suffix. It's also CHEAPER than
-# the old Opus 4.1 ($5/$25 vs $15/$75 per Mtok) and far stronger on long-horizon
-# reasoning. The analyst call streams with no temperature/budget_tokens/prefill,
-# so it's 400-free on 4.8 (those params were removed on Opus 4.7+).
-# NOTE: if CLAUDE_MODEL is set as a Railway env var to the old ID, update it
-# there too — the env var overrides this default. To save money on routine runs:
+CLAUDE_MODEL = _optional_env("CLAUDE_MODEL", "claude-opus-5")
+# ↑ Default to Claude Opus 5 — Anthropic's current flagship (API id
+# `claude-opus-5`, stable alias). Same $5/$25 per Mtok as Opus 4.8; stronger
+# on agentic / long-horizon work. Streams without temperature/budget_tokens/
+# prefill (400-free — those params were removed on Opus 4.7+).
+# NOTE: if CLAUDE_MODEL or AGENTIC_MODEL is set as a Railway env var to an
+# old id (e.g. claude-opus-4-8), update it there too — env overrides this.
+# To save money on routine runs:
 #   Railway env var → CLAUDE_MODEL=claude-sonnet-4-6    (~1.7× cheaper)
 
 # Idea Generator "Prioritize" — Grok 4.5 triage (not Claude).
@@ -7338,10 +7337,12 @@ def screen_universe(candidates: list[dict], *, top_n: int = 5) -> dict:
 # pricing if a model isn't listed (conservative — Sonnet is cheap).
 CLAUDE_PRICING_PER_MTOK = {
     # model_id                         : (input $/Mtok, output $/Mtok)
-    "claude-opus-4-8":                     (5.0, 25.0),    # current flagship (stable alias)
+    "claude-opus-5":                       (5.0, 25.0),    # current flagship (stable alias)
+    "claude-opus-4-8":                     (5.0, 25.0),    # prior flagship
     "claude-opus-4-7":                     (5.0, 25.0),
     "claude-opus-4-6":                     (5.0, 25.0),
     "claude-opus-4-1-20250805":           (15.0, 75.0),
+    "claude-sonnet-5":                     (3.0, 15.0),
     "claude-sonnet-4-6":                   (3.0, 15.0),
     "claude-sonnet-4-5-20250929":          (3.0, 15.0),
 }

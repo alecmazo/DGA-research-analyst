@@ -6809,7 +6809,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui396-20260731-watchlist-earnings-chips"
+WEB_BUILD_VERSION = "ui397-20260731-claude-opus-5"
 
 
 @app.get("/api/build")
@@ -23098,13 +23098,13 @@ _podcast_jobs_lock = threading.Lock()
 # decides which tools to call and when it has enough to answer.
 #
 # Model: env AGENTIC_MODEL, defaults to the same Opus the rest of the app uses
-# (claude-opus-4-8 — current flagship, stable alias). Newer Opus uses adaptive
+# (claude-opus-5 — current flagship, stable alias). Newer Opus uses adaptive
 # thinking + effort instead of budget_tokens — _agentic_thinking_kwargs() already
 # emits {"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}} for
-# opus-4-6/4-7/4-8, so the loop is 400-free on 4.8.
+# opus-5 / opus-4.x, so the loop is 400-free on current Opus.
 # ═══════════════════════════════════════════════════════════════════════
 _AGENTIC_MODEL = os.environ.get("AGENTIC_MODEL", "").strip() or getattr(
-    analyst, "CLAUDE_MODEL", "claude-opus-4-8")
+    analyst, "CLAUDE_MODEL", "claude-opus-5")
 _AGENTIC_MAX_STEPS = 12          # hard cap on tool-call rounds (cost guard)
 # Portfolio Strategist reviews a whole book — needs more tool rounds than Q&A.
 # Grok/Kimi/DeepSeek often burn 1 step per name; 12 was too low (ticket d754f5b2).
@@ -23113,12 +23113,15 @@ _agentic_jobs: dict[str, dict] = {}
 
 
 def _agentic_thinking_kwargs(model: str) -> dict:
-    """Return model-appropriate thinking/effort kwargs. Opus 4.6+ uses
-    adaptive thinking + effort; 4.1/4.5 and earlier omit it (the old
-    budget_tokens API isn't worth the complexity here). Keeps us 400-free
-    across every model string."""
+    """Return model-appropriate thinking/effort kwargs. Opus 5 / 4.6+ and
+    Sonnet 5 / 4.6 use adaptive thinking + effort; 4.1/4.5 and earlier omit
+    it (the old budget_tokens API isn't worth the complexity here). Keeps us
+    400-free across every model string."""
     m = (model or "").lower()
-    if any(tag in m for tag in ("opus-4-6", "opus-4-7", "opus-4-8", "sonnet-4-6")):
+    if any(tag in m for tag in (
+        "opus-5", "opus-4-6", "opus-4-7", "opus-4-8",
+        "sonnet-5", "sonnet-4-6",
+    )):
         return {"thinking": {"type": "adaptive"},
                 "output_config": {"effort": "high"}}
     return {}   # 4.1 / 4.5 / older: plain tool use, no thinking params
@@ -24113,7 +24116,7 @@ def _agent_route_and_model(mode: str = "agentic",
     if prov == "deepseek":
         return "deepseek", getattr(analyst, "DEEPSEEK_MODEL", "deepseek-chat")
     # default Claude
-    return "claude", _AGENTIC_MODEL or getattr(analyst, "CLAUDE_MODEL", "claude-opus-4-8")
+    return "claude", _AGENTIC_MODEL or getattr(analyst, "CLAUDE_MODEL", "claude-opus-5")
 
 
 def _agentic_tools_openai(tools: list) -> list:
@@ -24732,7 +24735,7 @@ def research_agentic_status(job_id: str, request: Request):
 def models_check(request: Request):
     """Diagnostic: list available Claude models, confirm the configured
     AGENTIC_MODEL is present, and ping it with a tiny call to prove it works.
-    GP-only. Use this to verify opus-4-8 is live before relying on it."""
+    GP-only. Use this to verify claude-opus-5 is live before relying on it."""
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")

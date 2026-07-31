@@ -4764,7 +4764,7 @@
       const p = selected();
       const cfg = window.DGA_LLM || {};
       const map = {
-        claude: cfg.claude || cfg.agentic || 'claude-opus-4-8',
+        claude: cfg.claude || cfg.agentic || 'claude-opus-5',
         grok: cfg.grok || 'grok-4.5',
         deepseek: (cfg.routing && cfg.routing.deepseek_model) || 'deepseek-chat',
       };

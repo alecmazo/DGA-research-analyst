@@ -21,7 +21,7 @@ import { relativeTime } from '../design/format';
 const ANALYST_BUILD = 'an-v3-20260719';
 const ENGINE_KEY = '@dga_agentic_engine_v1';
 const ENGINES = [
-  { id: 'claude', label: 'Claude', sub: 'Opus 4.8' },
+  { id: 'claude', label: 'Claude', sub: 'Opus 5' },
   { id: 'grok', label: 'Grok', sub: '4.5' },
   { id: 'deepseek', label: 'DeepSeek', sub: 'cheap' },
 ];
