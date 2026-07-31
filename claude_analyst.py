@@ -7197,18 +7197,24 @@ def call_grok(system_prompt: str, user_content: str,
 
 CLAUDE_MODEL = _optional_env("CLAUDE_MODEL", "claude-opus-5")
 # ↑ Default to Claude Opus 5 — Anthropic's current flagship (API id
-# `claude-opus-5`, stable alias). Same $5/$25 per Mtok as Opus 4.8; stronger
-# on agentic / long-horizon work. Streams without temperature/budget_tokens/
-# prefill (400-free — those params were removed on Opus 4.7+).
+# `claude-opus-5`, stable alias). Same $5/$25 per Mtok as Opus 4.8.
 # NOTE: if CLAUDE_MODEL or AGENTIC_MODEL is set as a Railway env var to an
 # old id (e.g. claude-opus-4-8), update it there too — env overrides this.
-# To save money on routine runs:
-#   Railway env var → CLAUDE_MODEL=claude-sonnet-4-6    (~1.7× cheaper)
 #
-# Opus 5 spends output budget on thinking BEFORE text. Analyze reports need a
-# large max_tokens or the stream ends with only thinking blocks and
-# "claude returned empty response" (FOXA SUP_20260731_93d73cab).
-CLAUDE_REPORT_MAX_TOKENS = int(os.environ.get("CLAUDE_REPORT_MAX_TOKENS") or "64000")
+# Opus 5 behavior vs 4.8 (critical for Analyze speed):
+#   • Thinking is ON BY DEFAULT (4.8 was off unless adaptive was set).
+#   • Default effort is high → long silent "thinking" then text.
+#   • Full equity reports already pack SEC data in user_msg — deep thinking
+#     adds latency more than quality. Report path disables thinking and uses
+#     medium effort (benchmark: ~15s vs ~25s plain on a brief; multiplies on
+#     full dossiers). Agentic tool-use keeps adaptive thinking separately.
+# Env knobs (no redeploy of defaults needed if set on Railway):
+#   CLAUDE_REPORT_MAX_TOKENS=28000
+#   CLAUDE_REPORT_EFFORT=medium|low|high
+#   CLAUDE_REPORT_THINKING=disabled|adaptive
+CLAUDE_REPORT_MAX_TOKENS = int(os.environ.get("CLAUDE_REPORT_MAX_TOKENS") or "28000")
+CLAUDE_REPORT_EFFORT = (os.environ.get("CLAUDE_REPORT_EFFORT") or "medium").strip().lower()
+CLAUDE_REPORT_THINKING = (os.environ.get("CLAUDE_REPORT_THINKING") or "disabled").strip().lower()
 
 # Idea Generator "Prioritize" — Grok 4.5 triage (not Claude).
 # Override without redeploy:  GROK_SCREEN_MODEL=grok-4.5-latest
@@ -7383,10 +7389,11 @@ def call_claude(system_prompt: str, user_content: str,
     latency is well under 10 min. We accumulate the streamed text and
     return it as a single string so the caller never has to care.
 
-    Opus 5 allocates output tokens to thinking *before* text. A 16k cap is
-    often fully consumed by thinking on long equity reports, leaving
-    ``text_stream`` empty (FOXA ticket). Default is 64k; if the stream is
-    still empty with ``stop_reason=max_tokens``, we retry once at 96k.
+    Opus 5 has thinking ON by default (unlike 4.8). For Analyze reports we
+    disable thinking + use medium effort so latency matches historical Opus
+    report quality without multi-minute silent reasoning. max_tokens default
+    is 28k (enough for a full dossier). Empty+max_tokens still retries once
+    with a higher budget.
 
     If ``on_delta`` is provided, it's invoked with each text chunk as it
     arrives — enables the UI to render the report live. Exceptions in the
@@ -7410,14 +7417,35 @@ def call_claude(system_prompt: str, user_content: str,
     MAX_RETRIES = 4
     BACKOFFS    = [4, 10, 22, 45]   # seconds
 
-    # Opus 5 / modern flagship needs headroom for thinking + full report body.
+    # Report defaults: enough room for a full dossier (~25–40k chars) without
+    # inviting a 10+ minute thinking marathon. Opus 5 thinking is opt-down.
     _m = (model or CLAUDE_MODEL or "").lower()
+    _is_opus5 = ("opus-5" in _m) or _m.endswith("opus-5")
     if max_tokens is None:
-        if "opus-5" in _m or _m.endswith("opus-5"):
-            max_tokens = int(CLAUDE_REPORT_MAX_TOKENS)
-        else:
-            max_tokens = max(16000, int(CLAUDE_REPORT_MAX_TOKENS) // 2)
+        max_tokens = int(CLAUDE_REPORT_MAX_TOKENS) if _is_opus5 else max(
+            16000, int(CLAUDE_REPORT_MAX_TOKENS))
     max_tokens = max(1024, min(int(max_tokens), 128000))
+
+    # Thinking / effort — only for Opus 5+ (older models reject unknown fields
+    # in some SDK versions; keep 4.x plain).
+    _stream_extra: dict = {}
+    if _is_opus5:
+        th = CLAUDE_REPORT_THINKING
+        ef = CLAUDE_REPORT_EFFORT if CLAUDE_REPORT_EFFORT in (
+            "low", "medium", "high", "xhigh", "max") else "medium"
+        if th in ("disabled", "off", "false", "0"):
+            # Fast path matching pre-Opus-5 report latency. Disabling thinking
+            # requires effort high or below (API 400 otherwise).
+            if ef in ("xhigh", "max"):
+                ef = "high"
+            _stream_extra["thinking"] = {"type": "disabled"}
+            _stream_extra["output_config"] = {"effort": ef}
+        else:
+            # adaptive thinking (Opus 5 default) — control depth via effort
+            _stream_extra["thinking"] = {"type": "adaptive"}
+            _stream_extra["output_config"] = {"effort": ef}
+        print(f"   [call_claude] opus-5 thinking={th} effort={ef} "
+              f"max_tokens={max_tokens}", flush=True)
 
     def _harvest_text(final_msg) -> str:
         """Pull text from final content blocks (not only text_stream)."""
@@ -7444,6 +7472,7 @@ def call_claude(system_prompt: str, user_content: str,
                 max_tokens=max_tokens,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_content}],
+                **_stream_extra,
             ) as stream:
                 # text_stream yields raw text deltas as they arrive
                 _cancel_count = 0
@@ -7509,7 +7538,7 @@ def call_claude(system_prompt: str, user_content: str,
             if not text and stop_reason == "max_tokens" and _empty_budget_retries < 1:
                 # Opus 5 spent the whole budget on thinking — bump and retry once.
                 _empty_budget_retries += 1
-                new_cap = min(128000, max(max_tokens * 2, 96000))
+                new_cap = min(64000, max(max_tokens * 2, 48000))
                 print(f"⚠️  [call_claude] empty text with stop=max_tokens "
                       f"(budget={max_tokens}); retrying with max_tokens={new_cap}",
                       flush=True)
@@ -7653,18 +7682,36 @@ def call_llm_with_heartbeat(
     """
     import threading
     if timeout_s is None:
-        timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "1200")  # 20 min (Opus 5 thinking+report)
+        # Hard cap — Claude with thinking-disabled + medium effort usually
+        # finishes a full report in 2–6 min; 15 min is safety only.
+        timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "900")
     timeout_s = max(120.0, min(float(timeout_s), 1800.0))
+    # Progress bar uses *expected* duration so 5 min ≠ "only 51% of a 20 min bar".
+    if (provider or "").lower() == "claude":
+        expected_s = float(os.environ.get("ANALYZE_CLAUDE_EXPECTED_S") or "240")  # 4 min
+    elif (provider or "").lower() == "grok":
+        expected_s = float(os.environ.get("ANALYZE_GROK_EXPECTED_S") or "300")
+    else:
+        expected_s = float(os.environ.get("ANALYZE_LLM_EXPECTED_S") or "240")
+    expected_s = max(60.0, min(expected_s, timeout_s))
 
-    box: dict = {"text": None, "err": None}
+    box: dict = {"text": None, "err": None, "chars": 0}
     done = threading.Event()
 
     def _work() -> None:
+        def _delta_wrap(chunk: str) -> None:
+            if chunk:
+                box["chars"] = int(box.get("chars") or 0) + len(chunk)
+            if on_delta is not None:
+                try:
+                    on_delta(chunk)
+                except Exception:
+                    pass
         try:
             box["text"] = call_llm(
                 provider, system_prompt, user_content,
                 live_search=live_search,
-                on_delta=on_delta,
+                on_delta=_delta_wrap,  # always wrap so char counter advances for progress
                 usage_capture=usage_capture,
                 should_cancel=should_cancel,
             )
@@ -7676,7 +7723,7 @@ def call_llm_with_heartbeat(
     th = threading.Thread(target=_work, name=f"llm-{provider}", daemon=True)
     th.start()
     t0 = time.time()
-    while not done.wait(12.0):
+    while not done.wait(8.0):
         if should_cancel is not None:
             try:
                 if should_cancel():
@@ -7692,13 +7739,21 @@ def call_llm_with_heartbeat(
                 f"or disable Gamma / live-search-heavy models."
             )
         span = max(0.01, progress_cap - progress_base)
-        pct = progress_base + span * min(0.95, elapsed / timeout_s)
+        # Time-based toward expected, plus a boost once tokens are streaming
+        time_frac = min(0.90, elapsed / expected_s)
+        chars = int(box.get("chars") or 0)
+        # ~35k chars ≈ full report; start boosting once any text arrives
+        stream_frac = min(0.95, chars / 35000.0) if chars else 0.0
+        frac = max(time_frac, stream_frac * 0.85 + time_frac * 0.15)
+        pct = progress_base + span * min(0.95, frac)
         mins = int(elapsed // 60)
         secs = int(elapsed % 60)
-        _emit_progress(
-            on_progress, progress_step, pct,
-            f"{provider.title()} generating… {mins}m {secs:02d}s",
-        )
+        if chars > 200:
+            label = (f"{provider.title()} writing… {mins}m {secs:02d}s "
+                     f"· {chars:,} chars")
+        else:
+            label = f"{provider.title()} generating… {mins}m {secs:02d}s"
+        _emit_progress(on_progress, progress_step, pct, label)
     th.join(timeout=2.0)
     if box["err"] is not None:
         raise box["err"]
