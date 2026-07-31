@@ -854,6 +854,330 @@ def _filing_url(cik: str, accession: str, primary_doc: str = "") -> str:
     return f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&filenum=&action=getcompany&accession_number={accession}"
 
 
+
+# ---------------------------------------------------------------------------
+# Financials-tab Postgres store → same shape as extract_financials()
+# ---------------------------------------------------------------------------
+# The desk Financials tab persists SEC XBRL history into company_financials
+# (period_end keyed, calendar-aligned FY labels). Analyze used to re-pull
+# Excel/companyfacts at report time — after Railway restarts those workbooks
+# are gone, companyfacts often lags or mislabels FY, and the LLM then
+# rewrote "FY2023 ending 2023-12-31" as "FY2025" while keeping 2023 numbers
+# (ROKU ticket 2026-07-31). Prefer the store when it has annuals.
+# ---------------------------------------------------------------------------
+_DB_TO_METRIC = {
+    "revenue": "Revenue", "cost_of_revenue": "CostOfRevenue",
+    "gross_profit": "GrossProfit", "operating_income": "OperatingIncome",
+    "net_income": "NetIncome", "rnd": "RnD", "dep_amort": "DepreciationAmortization",
+    "operating_cash_flow": "OperatingCashFlow", "capex": "CapEx",
+    "free_cash_flow": "FreeCashFlow", "dividends": "Dividends",
+    "buybacks": "BuybacksCash", "ebitda": "EBITDA",
+    "diluted_eps": "DilutedEPS", "diluted_shares": "DilutedShares",
+    "shares_outstanding": "SharesOutstanding", "cash": "Cash",
+    "short_term_investments": "ShortTermInvestments",
+    "total_assets": "TotalAssets", "total_liabilities": "TotalLiabilities",
+    "stockholders_equity": "StockholdersEquity",
+    "long_term_debt": "LongTermDebt", "short_term_debt": "ShortTermDebt",
+    "total_debt": "TotalDebt",
+    "gross_margin": "GrossMargin", "operating_margin": "OperatingMargin",
+    "net_margin": "NetMargin", "ebitda_margin": "EBITDAMargin",
+}
+
+
+def _db_row_to_period(r: dict) -> dict[str, Any]:
+    """Map a company_financials row (snake_case, dollars) → extract shape."""
+    pe = r.get("period_end")
+    if hasattr(pe, "isoformat"):
+        end = pe.isoformat()[:10]
+    else:
+        end = str(pe or "")[:10]
+    ps = r.get("period_start")
+    if hasattr(ps, "isoformat"):
+        start = ps.isoformat()[:10]
+    else:
+        start = str(ps or "")[:10] if ps else ""
+    fy = r.get("fy")
+    try:
+        fy_i = int(fy) if fy is not None else None
+    except (TypeError, ValueError):
+        fy_i = None
+    # Align annual FY label with period-end year when SEC/store drifted
+    # (calendar YE filers). Non-calendar annuals (e.g. Sep FY) still have
+    # end.year == fiscal year label in our history extractor.
+    if (r.get("period_type") or "").lower() == "annual" and end and len(end) >= 4:
+        try:
+            end_y = int(end[:4])
+            if fy_i is None or abs(fy_i - end_y) >= 2:
+                fy_i = end_y
+        except ValueError:
+            pass
+    out: dict[str, Any] = {
+        "fy": fy_i,
+        "fp": (r.get("fp") or ("FY" if (r.get("period_type") or "") == "annual" else "")),
+        "end": end,
+        "start": start,
+        "ytd": False,
+        "accession": r.get("accession") or "",
+        "filed": (r.get("filed").isoformat()[:10] if hasattr(r.get("filed"), "isoformat")
+                  else str(r.get("filed") or "")[:10]),
+    }
+    for col, metric in _DB_TO_METRIC.items():
+        v = r.get(col)
+        if v is None:
+            continue
+        try:
+            out[metric] = float(v)
+        except (TypeError, ValueError):
+            continue
+    # Re-derive margins if missing (DB may store fractions already)
+    rev = out.get("Revenue")
+    if rev and out.get("GrossProfit") is not None and "GrossMargin" not in out:
+        out["GrossMargin"] = out["GrossProfit"] / rev
+    if rev and out.get("OperatingIncome") is not None and "OperatingMargin" not in out:
+        out["OperatingMargin"] = out["OperatingIncome"] / rev
+    if rev and out.get("NetIncome") is not None and "NetMargin" not in out:
+        out["NetMargin"] = out["NetIncome"] / rev
+    if (out.get("EBITDA") is None and out.get("OperatingIncome") is not None
+            and out.get("DepreciationAmortization") is not None):
+        out["EBITDA"] = out["OperatingIncome"] + out["DepreciationAmortization"]
+    if rev and out.get("EBITDA") is not None and "EBITDAMargin" not in out:
+        out["EBITDAMargin"] = out["EBITDA"] / rev
+    return out
+
+
+def _sum_metric_rows(rows: list[dict], metric: str) -> Optional[float]:
+    vals = []
+    for r in rows:
+        v = r.get(metric)
+        if v is None:
+            continue
+        try:
+            vals.append(float(v))
+        except (TypeError, ValueError):
+            pass
+    if not vals:
+        return None
+    return sum(vals)
+
+
+def extract_financials_from_db(ticker: str) -> Optional[dict[str, Any]]:
+    """Load PRIMARY financials from Postgres company_financials (Financials tab).
+
+    Returns the same shape as extract_financials(), or None if unavailable /
+    empty. Never raises for missing table / no rows — returns None.
+    """
+    tkr = (ticker or "").strip().upper()
+    if not tkr:
+        return None
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not url:
+        return None
+    try:
+        import psycopg2
+        import psycopg2.extras
+    except ImportError:
+        return None
+
+    try:
+        conn = psycopg2.connect(url, connect_timeout=10,
+                                options="-c statement_timeout=15000")
+        conn.autocommit = True
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT * FROM company_financials
+                     WHERE ticker = %s
+                     ORDER BY period_end DESC NULLS LAST
+                    """,
+                    (tkr,),
+                )
+                raw = cur.fetchall() or []
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[excel_financials] DB load {tkr}: {e!s:.160}", flush=True)
+        return None
+
+    if not raw:
+        return None
+
+    # Normalize keys to plain dicts
+    rows = [dict(r) for r in raw]
+    entity = ""
+    cik = ""
+    for r in rows:
+        entity = entity or (r.get("entity_name") or "")
+        cik = cik or (r.get("cik") or "")
+
+    annuals_raw = [r for r in rows if (r.get("period_type") or "").lower() == "annual"]
+    quarters_raw = [r for r in rows if (r.get("period_type") or "").lower() in ("quarter", "quarterly")]
+
+    # Dedupe annuals: one per FY, prefer has-revenue + later period_end
+    by_fy: dict[int, dict] = {}
+    for r in annuals_raw:
+        p = _db_row_to_period(r)
+        fy = p.get("fy")
+        if fy is None:
+            continue
+        prev = by_fy.get(int(fy))
+        if prev is None:
+            by_fy[int(fy)] = p
+            continue
+        # Prefer row with revenue
+        if p.get("Revenue") is not None and prev.get("Revenue") is None:
+            by_fy[int(fy)] = p
+        elif (p.get("Revenue") is not None) == (prev.get("Revenue") is not None):
+            if (p.get("end") or "") > (prev.get("end") or ""):
+                by_fy[int(fy)] = p
+
+    annuals = [by_fy[k] for k in sorted(by_fy.keys(), reverse=True)
+               if by_fy[k].get("Revenue") is not None][:5]
+    if not annuals:
+        # Accept annuals without revenue only if nothing better
+        annuals = [by_fy[k] for k in sorted(by_fy.keys(), reverse=True)][:3]
+    if not annuals:
+        return None
+
+    # Quarters newest-first
+    q_periods = [_db_row_to_period(r) for r in quarters_raw]
+    q_periods = [q for q in q_periods if q.get("end")]
+    q_periods.sort(key=lambda q: q.get("end") or "", reverse=True)
+
+    quarterly: dict[str, Any] = {}
+    if q_periods:
+        cur = q_periods[0]
+        quarterly["current"] = dict(cur)
+        # Same fiscal quarter prior year
+        cur_fp = cur.get("fp") or ""
+        cur_fy = cur.get("fy")
+        prior = None
+        if cur_fy is not None and cur_fp:
+            for q in q_periods[1:]:
+                if q.get("fp") == cur_fp and q.get("fy") == int(cur_fy) - 1:
+                    prior = q
+                    break
+        if prior is None and cur.get("end"):
+            # Fallback: period_end ~1 year earlier
+            try:
+                y, m, d = cur["end"].split("-")
+                target = f"{int(y)-1}-{m}-{d}"
+                prior = next((q for q in q_periods if q.get("end") == target), None)
+            except Exception:
+                prior = None
+        if prior:
+            quarterly["prior_year_same_q"] = dict(prior)
+
+        # YTD = sum of quarters in same FY with end <= current end
+        def _ytd_sum(fy_val, end_cap: str) -> Optional[dict]:
+            parts = [q for q in q_periods
+                     if q.get("fy") == fy_val and (q.get("end") or "") <= end_cap]
+            if not parts:
+                return None
+            # Sort oldest first for start date
+            parts_asc = sorted(parts, key=lambda q: q.get("end") or "")
+            out = {
+                "fy": fy_val,
+                "fp": cur_fp,
+                "end": end_cap,
+                "start": parts_asc[0].get("start") or "",
+                "ytd": True,
+            }
+            for metric in ("Revenue", "GrossProfit", "OperatingIncome", "NetIncome",
+                           "EBITDA", "OperatingCashFlow", "CapEx", "FreeCashFlow",
+                           "DepreciationAmortization"):
+                s = _sum_metric_rows(parts, metric)
+                if s is not None:
+                    out[metric] = s
+            # EPS: don't sum — leave blank for YTD aggregate
+            rev = out.get("Revenue")
+            if rev and out.get("GrossProfit") is not None:
+                out["GrossMargin"] = out["GrossProfit"] / rev
+            if rev and out.get("OperatingIncome") is not None:
+                out["OperatingMargin"] = out["OperatingIncome"] / rev
+            if rev and out.get("NetIncome") is not None:
+                out["NetMargin"] = out["NetIncome"] / rev
+            # BS from latest quarter in the set
+            latest_q = max(parts, key=lambda q: q.get("end") or "")
+            for metric in ("Cash", "TotalDebt", "TotalAssets", "StockholdersEquity"):
+                if latest_q.get(metric) is not None:
+                    out[metric] = latest_q[metric]
+            return out
+
+        if cur_fy is not None:
+            ytd_cur = _ytd_sum(int(cur_fy), cur.get("end") or "")
+            if ytd_cur:
+                quarterly["current_ytd"] = ytd_cur
+            ytd_prior = _ytd_sum(int(cur_fy) - 1, (prior or {}).get("end") or "")
+            if ytd_prior:
+                quarterly["prior_ytd"] = ytd_prior
+
+        quarterly["meta"] = {
+            "fy": cur.get("fy"),
+            "fp": cur.get("fp"),
+            "reportDate": cur.get("end"),
+            "accession": cur.get("accession") or "",
+            "filed": cur.get("filed") or "",
+        }
+
+    ttm = _compute_ttm(annuals, quarterly)
+    # If bridge TTM thin, fall back to sum of last 4 quarters
+    if (not ttm or ttm.get("Revenue") is None) and len(q_periods) >= 4:
+        last4 = q_periods[:4]
+        ttm = {
+            "method": "sum4q",
+            "end": last4[0].get("end"),
+        }
+        for metric in ("Revenue", "GrossProfit", "OperatingIncome", "NetIncome",
+                       "EBITDA", "OperatingCashFlow", "CapEx", "FreeCashFlow"):
+            s = _sum_metric_rows(last4, metric)
+            if s is not None:
+                ttm[metric] = s
+        # BS from latest quarter
+        for metric in ("Cash", "TotalDebt", "TotalAssets", "StockholdersEquity"):
+            if last4[0].get(metric) is not None:
+                ttm[metric] = last4[0][metric]
+        rev = ttm.get("Revenue")
+        if rev and ttm.get("GrossProfit") is not None:
+            ttm["GrossMargin"] = ttm["GrossProfit"] / rev
+        if rev and ttm.get("OperatingIncome") is not None:
+            ttm["OperatingMargin"] = ttm["OperatingIncome"] / rev
+        if rev and ttm.get("NetIncome") is not None:
+            ttm["NetMargin"] = ttm["NetIncome"] / rev
+
+    latest_end = (quarterly.get("current") or {}).get("end") or (annuals[0].get("end") if annuals else "")
+    latest_filing_type = "10-Q" if quarterly.get("current") else "10-K"
+
+    return {
+        "ticker": tkr,
+        "cik": str(cik or ""),
+        "entity_name": entity or tkr,
+        "latest_filings": {
+            "10-K": {
+                "accession": (annuals[0].get("accession") if annuals else "") or "",
+                "filed": (annuals[0].get("filed") if annuals else "") or "",
+                "reportDate": (annuals[0].get("end") if annuals else "") or "",
+                "primaryDocument": "",
+            },
+            **({
+                "10-Q": {
+                    "accession": (quarterly.get("current") or {}).get("accession") or "",
+                    "filed": (quarterly.get("current") or {}).get("filed") or "",
+                    "reportDate": (quarterly.get("current") or {}).get("end") or "",
+                    "primaryDocument": "",
+                }
+            } if quarterly.get("current") else {}),
+        },
+        "latest_filing_type": latest_filing_type,
+        "annuals": annuals,
+        "quarterly": quarterly,
+        "ttm": ttm or {},
+        "errors": [],
+        "source": "company_financials_db",
+        "as_of_period_end": latest_end,
+    }
+
+
 def format_verified_block(data: dict) -> str:
     lines: list[str] = []
     lines.append(f"=== VERIFIED FINANCIAL DATA FOR {data['ticker']} ===")
@@ -875,7 +1199,7 @@ def format_verified_block(data: dict) -> str:
         )
 
     lines.append("")
-    lines.append("[ANNUAL DATA - from latest 10-K, $ in millions unless noted]")
+    lines.append(f"[ANNUAL DATA - source={data.get('source') or 'sec'}, $ in millions unless noted]")
     header = ["FY", "PeriodEnd", "Revenue", "GrossProfit", "GrossMargin%",
               "EBITDA", "EBITDAMargin%", "OpInc", "OpMargin%",
               "NetInc", "NetMargin%", "DilEPS", "OCF", "CapEx", "FCF",
@@ -980,8 +1304,10 @@ def format_verified_block(data: dict) -> str:
             lines.append(f" - {e}")
 
     lines.append("")
+    src = data.get("source") or "sec_xbrl"
     lines.append(
         "Instruction: use ONLY these numbers for all tables and calculations. "
+        f"(source={src}) "
         "The TTM row is pre-computed via the bridge formula (last FY + current YTD delta) — "
         "use it directly for the TTM column; do NOT attempt to recompute it. "
         "GrossProfit may be derived (Revenue - CostOfRevenue) if not directly tagged. "
@@ -990,7 +1316,11 @@ def format_verified_block(data: dict) -> str:
         "If a cell is 'N/A', write 'N/A' — do NOT write a long disclaimer phrase. "
         "NEVER put qualitative words (Elevated, Improving, Turning positive, Solid, "
         "Manageable, Higher, ~7+) in table cells — numbers or N/A only. "
-        "This PRIMARY block wins over any multi-year trend block or live web/news."
+        "CRITICAL YEAR LABELS: Copy FY{year} and PeriodEnd EXACTLY as printed in "
+        "the ANNUAL/QUARTERLY rows above. If a row says FY2023 | 2023-12-31, write "
+        "FY2023 (ended 2023-12-31) — NEVER relabel older years as the current fiscal "
+        "year while keeping old numbers. This PRIMARY block wins over any multi-year "
+        "trend block or live web/news."
     )
     return "\n".join(lines)
 

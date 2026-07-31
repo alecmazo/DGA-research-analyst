@@ -8317,31 +8317,63 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             print(f"   ⚠️  Could not download fresh Excel files: {exc}")
             print("   Falling back to existing workbooks (if any) or companyfacts API.")
 
-        # --- Step 2: read the Excel workbooks and build the verified data dict
+        # --- Step 2: build verified data (prefer Financials-tab DB)
         _ck()
         _emit_progress(on_progress, "financials", 0.20,
                        "Extracting filing-accurate financials")
-        # Two-source extraction with completeness check. The primary path
-        # (Excel workbooks from each filing) is filing-exact when it works,
-        # but it returns an empty annuals[] for some tickers (workbook format
-        # variations, missing sheets). When that happens we MUST fall through
-        # to the companyfacts API — not just on raised exceptions.
+        # Source priority:
+        #   1) Postgres company_financials (same store as Financials tab —
+        #      latest periods, calendar-aligned FY labels). Fixes ROKU-class
+        #      bugs where Excel was wiped on deploy and companyfacts / LLM
+        #      rewrote FY2023 numbers as "FY2025".
+        #   2) Excel workbooks from pull_sec_financials (filing-exact).
+        #   3) SEC companyfacts API (last resort).
         data = None
         verified_block = None
         primary_ok = False
         try:
-            data = xlsx_edgar.extract_financials(ticker)
-            _ann = data.get("annuals", []) if isinstance(data, dict) else []
-            if _ann and len(_ann) >= 1:
-                verified_block = xlsx_edgar.format_verified_block(data)
-                primary_ok = True
-                print(f"   ✅ Loaded {len(_ann)} annual rows from Excel workbooks.")
-            else:
-                print(f"   ⚠️  Excel reader returned 0 annual rows for {ticker} — "
-                      f"trying companyfacts fallback for completeness.")
-        except Exception as exc:  # noqa: BLE001
-            print(f"   ⚠️  Excel reader raised: {exc}")
-            print(f"   Falling back to SEC companyfacts API…")
+            _db_data = xlsx_edgar.extract_financials_from_db(ticker)
+            _db_ann = (_db_data or {}).get("annuals") or []
+            if _db_ann:
+                # Prefer DB when it has at least one annual with revenue and a
+                # period_end in the last ~3 calendar years (otherwise stale store
+                # should not block a fresh SEC pull).
+                _newest_end = str(_db_ann[0].get("end") or "")
+                _fresh = True
+                try:
+                    from datetime import date as _date
+                    if _newest_end:
+                        _ye = _date.fromisoformat(_newest_end[:10])
+                        _fresh = (_date.today() - _ye).days <= 400  # ~13 months
+                except Exception:
+                    _fresh = True
+                if _fresh or len(_db_ann) >= 2:
+                    data = _db_data
+                    verified_block = xlsx_edgar.format_verified_block(data)
+                    primary_ok = True
+                    print(f"   ✅ Loaded {len(_db_ann)} annual row(s) from "
+                          f"company_financials DB (newest end={_newest_end}).")
+                else:
+                    print(f"   ⚠️  company_financials for {ticker} looks stale "
+                          f"(newest end={_newest_end}) — trying Excel/SEC.")
+        except Exception as _dbe:  # noqa: BLE001
+            print(f"   ⚠️  company_financials DB load failed ({_dbe!s:.120}); "
+                  f"trying Excel/SEC.")
+
+        if not primary_ok:
+            try:
+                data = xlsx_edgar.extract_financials(ticker)
+                _ann = data.get("annuals", []) if isinstance(data, dict) else []
+                if _ann and len(_ann) >= 1:
+                    verified_block = xlsx_edgar.format_verified_block(data)
+                    primary_ok = True
+                    print(f"   ✅ Loaded {len(_ann)} annual rows from Excel workbooks.")
+                else:
+                    print(f"   ⚠️  Excel reader returned 0 annual rows for {ticker} — "
+                          f"trying companyfacts fallback for completeness.")
+            except Exception as exc:  # noqa: BLE001
+                print(f"   ⚠️  Excel reader raised: {exc}")
+                print(f"   Falling back to SEC companyfacts API…")
 
         if not primary_ok:
             try:
@@ -8492,11 +8524,16 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             "VERIFIED FINANCIAL DATA block above. Numbers or N/A only — never "
             "'Elevated', 'Improving', 'Turning positive', 'Solid', 'Manageable', "
             "'Higher', '~7+', or any adjective in a table cell.\n"
-            "2. If MULTI-YEAR TREND (SECONDARY) conflicts on year labels or magnitudes, "
+            "2. FY LABELS + PERIOD ENDS are part of the data. Copy them exactly "
+            "(e.g. if PRIMARY shows 'FY2025 | 2025-12-31 | 4737.3' write "
+            "'FY2025 (ended 2025-12-31)' with 4737.3). NEVER re-label an older "
+            "year as the current FY while keeping old magnitudes (e.g. do not "
+            "write FY2025 ended 2023-12-31 with 2023 revenue).\n"
+            "3. If MULTI-YEAR TREND (SECONDARY) conflicts on year labels or magnitudes, "
             "ignore it for tables; use PRIMARY only. Secondary is for narrative trend.\n"
-            "3. Live web/X search (if enabled) is ONLY for news, catalysts, filings "
+            "4. Live web/X search (if enabled) is ONLY for news, catalysts, filings "
             "headlines, and sentiment — NEVER to fill or override financial tables.\n"
-            "4. EPS, Revenue, FCF, Debt, Cash must appear as numeric figures investors "
+            "5. EPS, Revenue, FCF, Debt, Cash must appear as numeric figures investors "
             "can audit (e.g. 1288.0, 4.49, 5.7%), not prose descriptors.\n"
         )
         user_msg = (

@@ -38,7 +38,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Report DB upsert reliability** | **`ui395-20260731-report-db-upsert-retry`** | Fresh-conn + SSL retries; True only after commit; ROKU recovery |
 | **Watchlist earnings chips restored** | **`ui396-20260731-watchlist-earnings-chips`** | Nasdaq calendar chips back on Desk watchlist (cached, ≤4s) |
 | **Claude Opus 5 default** | **`ui397-20260731-claude-opus-5`** | CLAUDE_MODEL/AGENTIC → claude-opus-5; labels + pricing |
-| **Next deploy after this** | **`ui398-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Analyze uses Financials DB** | **`ui398-20260731-financials-db-primary`** | PRIMARY from company_financials; fix FY mislabel (ROKU) |
+| **Next deploy after this** | **`ui399-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

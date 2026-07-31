@@ -639,6 +639,17 @@ def extract_financials(
             row["EBITDA"] = row["OperatingIncome"] + row["DepreciationAmortization"]
             if rev:
                 row["EBITDAMargin"] = row["EBITDA"] / rev
+        # Align FY label with period-end year when SEC companyfacts fy is
+        # wildly off (classic 2-year shift). For annuals, end.year is the
+        # correct FY label for both calendar and Sep/Jun FY filers in practice.
+        end = row.get("end") or ""
+        if len(end) >= 4 and row.get("fy") is not None:
+            try:
+                end_y = int(end[:4])
+                if abs(int(row["fy"]) - end_y) >= 2:
+                    row["fy"] = end_y
+            except (TypeError, ValueError):
+                pass
         annuals.append(row)
 
     # ---------- Quarterly (latest 10-Q) ----------
