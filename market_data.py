@@ -642,22 +642,31 @@ def get_quotes(symbols: list) -> dict:
         return {}
     out = {}
     # Parallel Yahoo chart — sequential was ~2s/ticker and hung the watchlist UI.
+    # Hard wall-clock so a stuck Yahoo never blocks GET /api/watchlist forever.
     workers = min(12, max(1, len(symbols)))
+    wall_s = float(os.environ.get("QUOTE_FANOUT_TIMEOUT_S", "6") or 6)
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(_yahoo_chart_quote, sym): sym for sym in symbols}
-        for fut in as_completed(futs):
-            sym = futs[fut]
-            try:
-                q = fut.result()
-            except Exception as e:
-                print(f"[market_data] get_quotes {sym}: {e!s:.100}", flush=True)
-                q = None
-            if q:
-                out[sym] = q
+        try:
+            for fut in as_completed(futs, timeout=wall_s):
+                sym = futs[fut]
+                try:
+                    q = fut.result(timeout=0.1)
+                except Exception as e:
+                    print(f"[market_data] get_quotes {sym}: {e!s:.100}", flush=True)
+                    q = None
+                if q:
+                    out[sym] = q
+        except Exception as e:
+            # Timeout on as_completed — keep whatever we already have
+            print(f"[market_data] get_quotes wall {wall_s}s: {e!s:.100}", flush=True)
     missing = [s for s in symbols if s not in out or out[s].get("price") is None]
     if missing:
-        tq = _tiingo_quotes(missing)
-        out.update(tq)
+        try:
+            tq = _tiingo_quotes(missing)
+            out.update(tq or {})
+        except Exception as e:
+            print(f"[market_data] tiingo fill: {e!s:.100}", flush=True)
     return out
 
 

@@ -3611,116 +3611,136 @@ def earnings_detail(ticker: str, request: Request):
 def watchlist_get(request: Request):
     """Fast watchlist for login / desk paint.
 
-    Priorities (in order): in-process quote cache → market_quotes store →
-    live Yahoo (batch_quotes). Earnings calendar is **not** on this path —
-    chip click still uses GET /api/earnings/{ticker}. Blocking on Nasdaq + a
-    5s earnings deadline after a full quote cascade made login feel broken.
+    Always returns the ticker list even if quotes fail. Quote path:
+    process cache → market_quotes store → Yahoo chart (hard 6s wall).
+    Earnings calendar is NOT on this path (use GET /api/earnings/{tk}).
     """
     t0 = time.time()
-    claims = _claims_or_401(request)
-    lp_id = claims["lp_id"]
-    _watchlist_migrate_legacy_once()
-    tickers = _wl_get_db(lp_id)
-
+    tickers: list[str] = []
+    tickers_sorted: list[str] = []
     quotes: dict[str, dict] = {}
-    if tickers:
-        # 1) In-process cache (filled by prior polls / other endpoints)
-        now = time.time()
-        need: list[str] = []
-        for tk in tickers:
-            entry = _QUOTE_CACHE.get(tk)
-            if (entry and (now - entry.get("_ts", 0)) < _QUOTE_TTL
-                    and entry.get("price") is not None):
-                quotes[tk] = {
-                    "price": entry.get("price"),
-                    "prev": None,
-                    "pct": entry.get("pct_change"),
-                    "as_of": entry.get("as_of"),
-                }
-            else:
-                need.append(tk)
+    reports_map: dict[str, bool] = {}
+    try:
+        claims = _claims_or_401(request)
+        lp_id = claims.get("lp_id") or ""
+        try:
+            _watchlist_migrate_legacy_once()
+        except Exception as e:
+            print(f"[watchlist] migrate: {e!s:.100}", flush=True)
+        tickers = list(_wl_get_db(lp_id) or [])
 
-        # 2) DB store for cache misses (≤5 min) — no outbound HTTP
-        if need and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
-            try:
-                store = _db_quotes(need, max_age_s=300) or {}
-                still = []
+        if tickers:
+            now = time.time()
+            need: list[str] = []
+            for tk in tickers:
+                entry = _QUOTE_CACHE.get(tk)
+                if (entry and (now - float(entry.get("_ts") or 0)) < _QUOTE_TTL
+                        and entry.get("price") is not None):
+                    quotes[tk] = {
+                        "price": entry.get("price"),
+                        "prev": None,
+                        "pct": entry.get("pct_change"),
+                        "as_of": entry.get("as_of"),
+                    }
+                else:
+                    need.append(tk)
+
+            # DB store first (no HTTP) — paint immediately even if Yahoo is down
+            if need and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+                try:
+                    store = _db_quotes(need, max_age_s=300) or {}
+                    if not store:
+                        store = _db_quotes(need, max_age_s=None) or {}
+                    still = []
+                    for tk in need:
+                        q = store.get(tk) or {}
+                        if q.get("price") is not None:
+                            quotes[tk] = {
+                                "price": q.get("price"),
+                                "prev": None,
+                                "pct": q.get("pct_change"),
+                                "as_of": q.get("as_of"),
+                            }
+                            _QUOTE_CACHE[tk] = {
+                                "price": q.get("price"),
+                                "pct_change": q.get("pct_change"),
+                                "as_of": q.get("as_of"),
+                                "_ts": now,
+                            }
+                        else:
+                            still.append(tk)
+                    need = still
+                except Exception as e:
+                    print(f"[watchlist] store quotes failed: {e!s:.120}", flush=True)
+
+            # Live Yahoo with hard wall — never block the response forever
+            if need:
+                raw: dict = {}
+                try:
+                    import concurrent.futures as _cf
+                    with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+                        _fut = _ex.submit(_batch_quotes_fast, need)
+                        try:
+                            raw = _fut.result(timeout=7.0) or {}
+                        except _cf.TimeoutError:
+                            print(f"[watchlist] live quotes wall 7s n={len(need)}", flush=True)
+                            try:
+                                _fut.cancel()
+                            except Exception:
+                                pass
+                            raw = {}
+                except Exception as e:
+                    print(f"[watchlist] live quotes failed: {e!s:.160}", flush=True)
+                    raw = {}
                 for tk in need:
-                    q = store.get(tk) or {}
-                    if q.get("price") is not None:
+                    q = raw.get(tk) or {}
+                    if q.get("price") is not None or tk not in quotes:
                         quotes[tk] = {
                             "price": q.get("price"),
                             "prev": None,
                             "pct": q.get("pct_change"),
                             "as_of": q.get("as_of"),
                         }
-                        # Warm process cache so next poll is free
-                        _QUOTE_CACHE[tk] = {
-                            "price": q.get("price"),
-                            "pct_change": q.get("pct_change"),
-                            "as_of": q.get("as_of"),
-                            "_ts": now,
+
+            # Report flags (cheap) — never fail the list
+            if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+                try:
+                    with _fund_conn() as conn, conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT ticker FROM analyst_reports
+                             WHERE archived IS NOT TRUE
+                               AND ticker = ANY(%s)
+                        """, (list(tickers),))
+                        reports_map = {
+                            (r[0] or "").upper(): True
+                            for r in (cur.fetchall() or []) if r and r[0]
                         }
-                    else:
-                        still.append(tk)
-                need = still
-            except Exception as e:
-                print(f"[watchlist] store quotes failed: {e!s:.120}", flush=True)
+                except Exception as e:
+                    print(f"[watchlist] report lookup failed: {e!s:.120}", flush=True)
 
-        # 3) Live fetch only remaining — budget so login never waits on the
-        # full yfinance cascade (batch_quotes step-2 alone used to be 14s).
-        if need:
+        def _wl_move_key(tk: str):
+            pct = (quotes.get(tk) or {}).get("pct")
+            if pct is None:
+                return (1, 0.0, str(tk))
             try:
-                raw = _batch_quotes_fast(need) or {}
-            except Exception as e:
-                print(f"[watchlist] live quotes failed: {e!s:.160}", flush=True)
-                raw = {}
-            for tk in need:
-                q = raw.get(tk) or {}
-                if q.get("price") is not None or tk not in quotes:
-                    quotes[tk] = {
-                        "price": q.get("price"),
-                        "prev": None,
-                        "pct": q.get("pct_change"),
-                        "as_of": q.get("as_of"),
-                    }
+                return (0, -abs(float(pct)), str(tk))
+            except (TypeError, ValueError):
+                return (1, 0.0, str(tk))
 
-    # Report flags only (cheap single SQL) — no earnings calendar
-    report_tickers: set[str] = set()
-    if tickers and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
-        try:
-            with _fund_conn() as conn, conn.cursor() as cur:
-                cur.execute("""
-                    SELECT ticker FROM analyst_reports
-                     WHERE archived IS NOT TRUE
-                       AND ticker = ANY(%s)
-                """, (list(tickers),))
-                report_tickers = {
-                    (r[0] or "").upper()
-                    for r in (cur.fetchall() or []) if r and r[0]
-                }
-        except Exception as e:
-            print(f"[watchlist] report lookup failed: {e!s:.120}", flush=True)
-    reports_map = {tk: True for tk in report_tickers}
+        tickers_sorted = sorted(tickers, key=_wl_move_key)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[watchlist] FATAL: {e!s:.200}", flush=True)
+        tickers_sorted = list(tickers or [])
 
-    def _wl_move_key(tk: str):
-        pct = (quotes.get(tk) or {}).get("pct")
-        if pct is None:
-            return (1, 0.0, str(tk))
-        try:
-            return (0, -abs(float(pct)), str(tk))
-        except (TypeError, ValueError):
-            return (1, 0.0, str(tk))
-
-    tickers_sorted = sorted(tickers, key=_wl_move_key)
     elapsed_ms = int((time.time() - t0) * 1000)
-    if elapsed_ms > 800:
-        print(f"[watchlist] slow path {elapsed_ms}ms n={len(tickers)}", flush=True)
-
+    print(f"[watchlist] ok n={len(tickers_sorted)} quotes={len(quotes)} {elapsed_ms}ms",
+          flush=True)
     return {
         "tickers": tickers_sorted,
         "quotes": quotes,
-        "earnings": {},  # chips load on click via /api/earnings/{tk}
+        "earnings": {},
         "reports": reports_map,
         "earnings_horizon_days": 5,
         "timing_ms": elapsed_ms,
@@ -6631,7 +6651,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui390-20260730-watchlist-fast"
+WEB_BUILD_VERSION = "ui391-20260731-watchlist-unhang"
 
 
 @app.get("/api/build")

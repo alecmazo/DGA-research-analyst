@@ -1603,8 +1603,21 @@
 
   // ── Watchlist ───────────────────────────────────────────────────
   async function loadWatchlist() {
+    const rowsEl = document.getElementById('wl-rows');
+    if (!rowsEl) return;
+    // Soft loading state only if empty — don't flash on 60s refresh
+    if (!rowsEl.querySelector('.wl-row[data-ticker]')) {
+      rowsEl.innerHTML =
+        '<div class="wl-row wl-row-empty"><div class="wl-empty-cell">Loading watchlist…</div></div>';
+    }
+    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (_) {} }, 12000) : null;
     try {
-      const r = await window.dgaFetch('/api/watchlist');
+      const r = await window.dgaFetch('/api/watchlist', {
+        cache: 'no-store',
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+      if (timer) clearTimeout(timer);
       if (!r.ok) throw new Error('watchlist ' + r.status);
       const data = await r.json();
       renderWatchlist(
@@ -1614,9 +1627,16 @@
         data.reports || {}
       );
     } catch (e) {
+      if (timer) clearTimeout(timer);
       console.warn('[watchlist]', e);
-      document.getElementById('wl-rows').innerHTML =
-        '<div class="wl-row wl-row-empty"><div class="wl-empty-cell">Could not load watchlist</div></div>';
+      const msg = (e && e.name === 'AbortError')
+        ? 'Watchlist timed out — tap refresh or reload.'
+        : 'Could not load watchlist';
+      // Don't wipe existing rows on a failed refresh
+      if (!rowsEl.querySelector('.wl-row[data-ticker]')) {
+        rowsEl.innerHTML =
+          '<div class="wl-row wl-row-empty"><div class="wl-empty-cell">' + msg + '</div></div>';
+      }
     }
   }
 

@@ -31,7 +31,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Boot + pool health** | **`ui388-20260729-boot-pool-health`** | ui383 product + defer import DB work; fix pool leak; larger pool; post-listen workers |
 | **Analyze + mobile** | **`ui389-20260730-analyze-mobile-mcap`** | LLM heartbeats; job poll 404 recovery; v1→GP claims for Financials; Yahoo mcap fill |
 | **Watchlist speed** | **`ui390-20260730-watchlist-fast`** | Drop FinTwit card; fast quote path (cache/store/Yahoo only); no earnings block on GET /api/watchlist |
-| **Next deploy after this** | **`ui391-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Watchlist unhang** | **`ui391-20260731-watchlist-unhang`** | Hard 6–7s quote walls; always return tickers; client 12s abort; store fallback without age |
+| **Next deploy after this** | **`ui392-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
