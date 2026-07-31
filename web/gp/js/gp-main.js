@@ -5653,31 +5653,44 @@
   })();
 
   async function loadReports() {
+    const tbody = document.getElementById('reports-tbody');
+    const countEl = document.getElementById('reports-count');
+    if (tbody && !tbody.querySelector('tr[data-ticker]')) {
+      tbody.innerHTML = '<tr><td colspan="8" style="padding:12px;color:var(--dim);">Loading saved reports…</td></tr>';
+    }
+    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (_) {} }, 15000) : null;
     try {
-      // Fire both in parallel: reports list + podcast episode list. We only
-      // wait on reports for render; the podcast set arrives as a side-effect
-      // and is consulted by renderReports() each time it runs.
-      const [rRep, rPod] = await Promise.all([
-        window.dgaFetch('/api/reports'),
-        window.dgaFetch('/api/podcast/list').catch(function() { return null; }),
-      ]);
-      if (rPod && rPod.ok) {
-        try {
-          const pd = await rPod.json();
-          window._podcastEpisodeTickers = new Set((pd.episodes || []).map(function(e) { return e.ticker; }));
-        } catch {}
-      }
+      // Reports list first (fast DB). Podcast list is optional side-channel.
+      const rRep = await window.dgaFetch('/api/reports', {
+        cache: 'no-store',
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+      if (timer) clearTimeout(timer);
       if (!rRep.ok) throw new Error('reports ' + rRep.status);
       const list = await rRep.json();
       const arr = Array.isArray(list) ? list : [];
-      // Keep a light in-memory index so openReport() can read PT/rating
-      // without re-fetching the full /api/reports book on every click.
       window._reportsListCache = arr;
       renderReports(arr);
-      // Inject news headlines as a side-effect after the rows render.
-      setTimeout(loadNewsForReports, 200);
+      // Podcast set + news after paint — never block the table
+      window.dgaFetch('/api/podcast/list').then(function (rPod) {
+        if (!rPod || !rPod.ok) return;
+        return rPod.json().then(function (pd) {
+          window._podcastEpisodeTickers = new Set((pd.episodes || []).map(function (e) { return e.ticker; }));
+          try { renderReports(window._reportsListCache || arr); } catch (_) {}
+        });
+      }).catch(function () {});
+      setTimeout(loadNewsForReports, 400);
     } catch (e) {
+      if (timer) clearTimeout(timer);
       console.warn('[reports]', e);
+      if (tbody && !tbody.querySelector('tr[data-ticker]')) {
+        const msg = (e && e.name === 'AbortError')
+          ? 'Saved reports timed out — reload the page.'
+          : ('Could not load reports' + (e && e.message ? ': ' + e.message : ''));
+        tbody.innerHTML = '<tr><td colspan="8" style="padding:12px;color:var(--red);">' + msg + '</td></tr>';
+      }
+      if (countEl && countEl.textContent === '—') countEl.textContent = '0';
     }
   }
 
@@ -5758,7 +5771,10 @@
 
   function renderReports(reports) {
     const tbody = document.getElementById('reports-tbody');
-    document.getElementById('reports-count').textContent = String(reports.length);
+    if (!tbody) return;
+    const countEl = document.getElementById('reports-count');
+    if (countEl) countEl.textContent = String((reports || []).length);
+    reports = reports || [];
 
     // Most recent analysis run first (newest → oldest) unless upside mode.
     if (_repSortMode !== 'upside') {
@@ -7169,22 +7185,22 @@
         if (_ideaFeedPanelOpen) loadIdeaFeed(false);
       });
     }
-    // Initial fetch on page load (Research is the default tab)
-    // Delay slightly so auth token is ready
-    setTimeout(function() { loadIdeaFeed(true); }, 500);
-    // Auto-refresh every 2 min while Research is active (force — bust server cache)
+    // Initial fetch once — use cache when warm (force only on manual ↻)
+    setTimeout(function () { loadIdeaFeed(false); }, 300);
+    // Auto-refresh every 3 min without force=true (was re-quoting full book
+    // every 2 min and competing with watchlist/reports for Yahoo)
     if (!_ideaFeedTimer) {
-      _ideaFeedTimer = setInterval(function() {
+      _ideaFeedTimer = setInterval(function () {
         if (document.hidden) return;
         if (document.getElementById('tab-research')?.classList.contains('active')) {
-          loadIdeaFeed(true);
+          loadIdeaFeed(false);
         }
-      }, 2 * 60 * 1000);
+      }, 3 * 60 * 1000);
     }
-    document.addEventListener('visibilitychange', function() {
+    document.addEventListener('visibilitychange', function () {
       if (document.hidden) return;
       if (document.getElementById('tab-research')?.classList.contains('active')) {
-        loadIdeaFeed(true);
+        loadIdeaFeed(false);
       }
     });
   });
@@ -19599,18 +19615,16 @@
   }
 
   // ── Init ─────────────────────────────────────────────────────
-  // Watchlist + indices first (must feel instant on login). Heavy desk
-  // feeds (idea feed, SEC filings) start after first paint.
+  // Critical paint first: indices + watchlist + saved reports (DB-fast).
   loadIndices();
   loadWatchlist();
+  loadReports();   // was deferred → looked "broken" when /api/reports hung
   initLiveMarkets();
   showTab('research');
-  // Defer non-critical work so the first /api/watchlist isn't contending
-  // with reports + trending + multi-feed Yahoo fan-out.
+  // Trending last — market movers can wait a beat
   setTimeout(function () {
-    try { loadReports(); } catch (_) {}
     try { loadTrendingTickers(true); } catch (_) {}
-  }, 400);
+  }, 800);
 
   // ── Archived Reports (Settings tab) ───────────────────────────────────────
   async function loadArchivedReports() {

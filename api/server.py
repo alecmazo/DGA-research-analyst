@@ -6652,7 +6652,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui392-20260731-executor-hang-fix"
+WEB_BUILD_VERSION = "ui393-20260731-reports-idea-fast"
 
 
 @app.get("/api/build")
@@ -12257,46 +12257,46 @@ def _report_freshness_key(row: dict) -> tuple:
 
 @app.get("/api/reports")
 def list_reports(request: Request = None):
+    """Return saved-report tickers for the Research table.
+
+    Hot path is a single SELECT + store prices only. Dropbox/disk hydrate
+    and full-book Yahoo fan-out used to run on this request and hang the
+    panel for tens of seconds (or forever) — hydrate stays on the
+    background worker started after listen.
+    """
+    t0 = time.time()
     if request is not None and _request_is_demo(request):
         rows = _kv_get("demo.reports") or []
         demo = [{k: v for k, v in r.items() if k != "report_md"} for r in rows]
         demo.sort(key=_report_freshness_key, reverse=True)
         return demo
-    """Return all tickers that have saved reports.
 
-    Each entry now includes an extracted summary (`rating`, `price_target`,
-    `upside_pct`) so the Research tab can show a target-vs-price chip in
-    the saved-reports list without an extra API round-trip per row.
-
-    Primary source: PostgreSQL `analyst_reports` table (survives Railway redeploys).
-    Fallback: filesystem glob of *_DGA_Report.md files.
-    """
-    # Defensive: ensure all schema columns this endpoint references actually
-    # exist before SELECT. Without this, a missed migration on Railway means
-    # the SELECT fails → silent fallback to empty filesystem → user sees
-    # NO reports even though they exist in the DB.
+    # Schema only — never Dropbox/disk scan here
     try:
         _ensure_analyst_reports_table_schema()
     except Exception:
         pass
 
-    # Hydration / date backfill run AT MOST once per process — they were
-    # re-scanning Dropbox/disk on every Saved Reports / list open (~seconds).
+    # Kick one-shot hydrate off the request thread (never await it)
     global _REPORTS_HYDRATE_ONCE  # noqa: PLW0603
     if not _REPORTS_HYDRATE_ONCE:
         _REPORTS_HYDRATE_ONCE = True
-        try:
-            _hydrate_orphaned_grok_reports()
-        except Exception:
-            pass
-        try:
-            _hydrate_orphaned_claude_reports()
-        except Exception:
-            pass
-        try:
-            _backfill_report_dates()
-        except Exception:
-            pass
+
+        def _bg_hydrate():
+            try:
+                _hydrate_orphaned_grok_reports()
+            except Exception as e:
+                print(f"[reports] bg grok hydrate: {e!s:.120}", flush=True)
+            try:
+                _hydrate_orphaned_claude_reports()
+            except Exception as e:
+                print(f"[reports] bg claude hydrate: {e!s:.120}", flush=True)
+            try:
+                _backfill_report_dates()
+            except Exception as e:
+                print(f"[reports] bg date backfill: {e!s:.120}", flush=True)
+
+        threading.Thread(target=_bg_hydrate, daemon=True, name="reports-hydrate").start()
 
     # ── Primary: PostgreSQL ──────────────────────────────────────────────────
     if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
@@ -12431,23 +12431,32 @@ def list_reports(request: Request = None):
                         "last_attempt_status": r.get("last_attempt_status"),
                         "last_attempt_error":  r.get("last_attempt_error"),
                     })
-                # Live prices for the Saved Reports table — never leave the
-                # client depending solely on a second /api/quotes round-trip
-                # (that was leaving Price + Upside blank when the quotes call
-                # failed or dual-provider rows only computed upside from px).
-                # Prefer market_data.get_quotes (batch Yahoo chart) over
-                # batch_quotes cascade — full book via cascade can take 15s+.
+                # Prices from process cache + market_quotes store ONLY.
+                # Full-book Yahoo here blocked the Saved Reports panel for
+                # 10–60s (98 tickers × chart fan-out). Client can refresh
+                # day-% via /api/quotes after paint.
                 try:
                     tks = [row["ticker"] for row in out if row.get("ticker")]
                     if tks:
-                        qmap = {}
-                        try:
-                            import market_data as _md
-                            qmap = _md.get_quotes(tks) or {}
-                        except Exception as _qe:
-                            print(f"[reports] market_data quotes: {_qe!s:.100}", flush=True)
-                        if not qmap:
-                            qmap = batch_quotes(",".join(tks[:60])) or {}
+                        qmap: dict = {}
+                        now = time.time()
+                        need = []
+                        for tk in tks:
+                            ent = _QUOTE_CACHE.get(tk)
+                            if (ent and (now - float(ent.get("_ts") or 0)) < _QUOTE_TTL
+                                    and ent.get("price") is not None):
+                                qmap[tk] = {
+                                    "price": ent.get("price"),
+                                    "pct_change": ent.get("pct_change"),
+                                }
+                            else:
+                                need.append(tk)
+                        if need:
+                            try:
+                                store = _db_quotes(need, max_age_s=None) or {}
+                                qmap.update(store)
+                            except Exception as _se:
+                                print(f"[reports] store quotes: {_se!s:.100}", flush=True)
                         for row in out:
                             q = qmap.get(row["ticker"]) or {}
                             px = q.get("price")
@@ -12458,29 +12467,17 @@ def list_reports(request: Request = None):
                                     px = None
                             row["current_price"] = px
                             row["pct_change"] = q.get("pct_change")
-                            # Refresh upside vs live price when we have a target
                             if px and px > 0 and row.get("price_target") is not None:
                                 try:
                                     row["upside_pct"] = round(
                                         (float(row["price_target"]) - px) / px * 100.0, 2)
                                 except Exception:
                                     pass
-                            if px and px > 0 and row.get("grok_price_target") is not None:
-                                try:
-                                    row["grok_upside_pct"] = round(
-                                        (float(row["grok_price_target"]) - px) / px * 100.0, 2)
-                                except Exception:
-                                    pass
-                            if px and px > 0 and row.get("claude_price_target") is not None:
-                                try:
-                                    row["claude_upside_pct"] = round(
-                                        (float(row["claude_price_target"]) - px) / px * 100.0, 2)
-                                except Exception:
-                                    pass
                 except Exception as e:
-                    print(f"[list_reports] live quote enrich failed: {e!s:.140}", flush=True)
-                # Most recent analysis run first (not narrative as-of date).
+                    print(f"[list_reports] quote enrich failed: {e!s:.140}", flush=True)
                 out.sort(key=_report_freshness_key, reverse=True)
+                print(f"[list_reports] ok n={len(out)} {(time.time()-t0)*1000:.0f}ms",
+                      flush=True)
                 return out
         except Exception as _e:
             print(f"[analyst_reports] list_reports DB query failed (falling back): {_e!s:.200}")
