@@ -40,7 +40,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Claude Opus 5 default** | **`ui397-20260731-claude-opus-5`** | CLAUDE_MODEL/AGENTIC → claude-opus-5; labels + pricing |
 | **Analyze uses Financials DB** | **`ui398-20260731-financials-db-primary`** | PRIMARY from company_financials; fix FY mislabel (ROKU) |
 | **SEC 10-Q into Analyze PRIMARY** | **`ui399-20260731-sec-10q-into-analyze`** | Merge live 10-Q earnings with DB annuals; upsert store |
-| **Next deploy after this** | **`ui400-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Claude Opus 5 empty report fix** | **`ui400-20260731-claude-opus5-empty-fix`** | 64k max_tokens + empty/max_tokens retry (FOXA ticket) |
+| **Next deploy after this** | **`ui401-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

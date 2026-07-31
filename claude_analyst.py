@@ -7204,6 +7204,11 @@ CLAUDE_MODEL = _optional_env("CLAUDE_MODEL", "claude-opus-5")
 # old id (e.g. claude-opus-4-8), update it there too — env overrides this.
 # To save money on routine runs:
 #   Railway env var → CLAUDE_MODEL=claude-sonnet-4-6    (~1.7× cheaper)
+#
+# Opus 5 spends output budget on thinking BEFORE text. Analyze reports need a
+# large max_tokens or the stream ends with only thinking blocks and
+# "claude returned empty response" (FOXA SUP_20260731_93d73cab).
+CLAUDE_REPORT_MAX_TOKENS = int(os.environ.get("CLAUDE_REPORT_MAX_TOKENS") or "64000")
 
 # Idea Generator "Prioritize" — Grok 4.5 triage (not Claude).
 # Override without redeploy:  GROK_SCREEN_MODEL=grok-4.5-latest
@@ -7365,7 +7370,7 @@ def call_claude(system_prompt: str, user_content: str,
                 live_search: bool = False,           # accepted for signature parity with call_grok; ignored
                 search_from_date: str | None = None, # accepted for parity; ignored
                 on_delta=None,                       # optional callable(str) invoked for each streamed chunk
-                max_tokens: int = 16000,             # cap on output tokens; raise for long-form formats
+                max_tokens: int | None = None,       # default: CLAUDE_REPORT_MAX_TOKENS (64k for Opus 5)
                 usage_capture=None,                  # optional callable({model, input_tokens, output_tokens, cost_usd})
                 should_cancel=None,                  # optional callable() → bool; polled mid-stream to abort
                 ) -> str:
@@ -7377,6 +7382,11 @@ def call_claude(system_prompt: str, user_content: str,
     reasons longer) easily crosses that threshold even when wall-clock
     latency is well under 10 min. We accumulate the streamed text and
     return it as a single string so the caller never has to care.
+
+    Opus 5 allocates output tokens to thinking *before* text. A 16k cap is
+    often fully consumed by thinking on long equity reports, leaving
+    ``text_stream`` empty (FOXA ticket). Default is 64k; if the stream is
+    still empty with ``stop_reason=max_tokens``, we retry once at 96k.
 
     If ``on_delta`` is provided, it's invoked with each text chunk as it
     arrives — enables the UI to render the report live. Exceptions in the
@@ -7399,10 +7409,36 @@ def call_claude(system_prompt: str, user_content: str,
     # most likely to hit "Overloaded" — without retry the job fails outright.
     MAX_RETRIES = 4
     BACKOFFS    = [4, 10, 22, 45]   # seconds
+
+    # Opus 5 / modern flagship needs headroom for thinking + full report body.
+    _m = (model or CLAUDE_MODEL or "").lower()
+    if max_tokens is None:
+        if "opus-5" in _m or _m.endswith("opus-5"):
+            max_tokens = int(CLAUDE_REPORT_MAX_TOKENS)
+        else:
+            max_tokens = max(16000, int(CLAUDE_REPORT_MAX_TOKENS) // 2)
+    max_tokens = max(1024, min(int(max_tokens), 128000))
+
+    def _harvest_text(final_msg) -> str:
+        """Pull text from final content blocks (not only text_stream)."""
+        if final_msg is None:
+            return ""
+        parts: list[str] = []
+        for b in (getattr(final_msg, "content", None) or []):
+            btype = getattr(b, "type", None)
+            if btype == "text":
+                tx = getattr(b, "text", None) or ""
+                if tx:
+                    parts.append(tx)
+        return "".join(parts)
+
     chunks: list[str] = []
+    _empty_budget_retries = 0
     for attempt in range(MAX_RETRIES + 1):
         try:
             chunks = []   # reset on retry
+            final = None
+            stop_reason = None
             with client.messages.stream(
                 model=model,
                 max_tokens=max_tokens,
@@ -7437,10 +7473,16 @@ def call_claude(system_prompt: str, user_content: str,
                         except Exception:
                             pass  # bad cancel callback shouldn't kill the call
 
-                # ── Capture exact usage from the final message ──
-                if usage_capture is not None:
+                # ── Final message: usage + text harvest ──
+                try:
+                    final = stream.get_final_message()
+                    stop_reason = getattr(final, "stop_reason", None)
+                except Exception as _fe:
+                    print(f"⚠️  [call_claude] get_final_message failed: {_fe!s:.120}", flush=True)
+                    final = None
+
+                if usage_capture is not None and final is not None:
                     try:
-                        final = stream.get_final_message()
                         u = final.usage
                         cost = estimate_claude_cost(model, u.input_tokens, u.output_tokens)
                         usage_capture({
@@ -7451,9 +7493,47 @@ def call_claude(system_prompt: str, user_content: str,
                         })
                     except Exception as _e:
                         print(f"⚠️  [call_claude] usage capture failed: {_e!s:.120}", flush=True)
-            break   # success — exit retry loop
+
+            text = "".join(chunks)
+            if not text and final is not None:
+                # Some SDK/model combos put text only on final content blocks
+                # (or thinking-only streams leave text_stream empty).
+                harvested = _harvest_text(final)
+                if harvested:
+                    print(f"⚠️  [call_claude] text_stream empty; harvested "
+                          f"{len(harvested):,} chars from final content blocks",
+                          flush=True)
+                    text = harvested
+                    chunks = [harvested]
+
+            if not text and stop_reason == "max_tokens" and _empty_budget_retries < 1:
+                # Opus 5 spent the whole budget on thinking — bump and retry once.
+                _empty_budget_retries += 1
+                new_cap = min(128000, max(max_tokens * 2, 96000))
+                print(f"⚠️  [call_claude] empty text with stop=max_tokens "
+                      f"(budget={max_tokens}); retrying with max_tokens={new_cap}",
+                      flush=True)
+                max_tokens = new_cap
+                continue
+
+            if not text:
+                types = []
+                try:
+                    types = [getattr(b, "type", "?") for b in (final.content if final else [])]
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    f"claude returned empty response "
+                    f"(stop={stop_reason}, content_types={types}, max_tokens={max_tokens})"
+                )
+
+            return text
         except ClaudeCancelled:
             # Caller asked us to stop — do not retry, bubble up immediately.
+            raise
+        except RuntimeError:
+            # Empty-response RuntimeError: only auto-retry via budget bump above;
+            # re-raise if we're out of empty retries.
             raise
         except Exception as e:
             # Identify retryable conditions: 529 overloaded, 503, 502, 504,
@@ -7573,7 +7653,7 @@ def call_llm_with_heartbeat(
     """
     import threading
     if timeout_s is None:
-        timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "900")  # 15 min
+        timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "1200")  # 20 min (Opus 5 thinking+report)
     timeout_s = max(120.0, min(float(timeout_s), 1800.0))
 
     box: dict = {"text": None, "err": None}
