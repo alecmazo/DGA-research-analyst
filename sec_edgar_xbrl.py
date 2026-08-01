@@ -26,6 +26,8 @@ Design notes on mapping accuracy:
 
 from __future__ import annotations
 
+import os
+
 import json
 import os
 import time
@@ -205,7 +207,13 @@ def _get_json(sess: requests.Session, url: str, *, retries: int = 8) -> dict:
     """
     last_err: Exception | None = None
     # Seconds to sleep after each consecutive 429 (index = attempt number).
-    _429_WAITS = (10, 30, 60, 120, 300, 600, 600, 600)
+    # Interactive Analyze must never sit 5–10 min on a single 429. Cap waits;
+    # bulk overnight sync can set SEC_429_AGGRESSIVE=1 for longer backoff.
+    if os.environ.get("SEC_429_AGGRESSIVE", "").strip() in ("1", "true", "yes"):
+        _429_WAITS = (10, 30, 60, 120, 300, 600, 600, 600)
+    else:
+        _429_WAITS = (5, 10, 15, 20, 20, 20, 20, 20)
+    # Default retries 8 → but total sleep still bounded by shorter waits.
     for attempt in range(retries):
         try:
             resp = sess.get(url, timeout=45)

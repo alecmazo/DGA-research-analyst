@@ -8728,143 +8728,211 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             _cache_hit = False
 
     if not _cache_hit:
-        # --- Step 1: download the latest 10-K and 10-Q into stock-financials/{TICKER}/
-        # This parses the actual XBRL instance documents from each filing, so the
-        # columns we read later map 1-to-1 onto the filing's own period contexts.
-        print(f"\n🚀 {ticker}: downloading latest 10-K + 10-Q Excel workbooks…")
-        _ck()
-        _emit_progress(on_progress, "sec_filings", 0.05,
-                       "Downloading SEC filings (10-K, 10-Q)")
+        # --- Fast financials path ---
+        # Prefer Postgres company_financials (Financials tab) — instant.
+        # Only hit live SEC/edgartools when the store is empty or the latest
+        # quarter is stale. SEC 429s were blocking Analyze for minutes at 10%
+        # ("Extracting 10-K/10-Q") even when the DB already had the numbers.
         data: dict | None = None
-        try:
-            pull_sec_financials.download_financials(ticker)
-        except Exception as exc:  # noqa: BLE001
-            print(f"   ⚠️  Could not download fresh Excel files: {exc}")
-            print("   Falling back to existing workbooks (if any) or companyfacts API.")
-
-        # --- Step 2: SEC Excel (latest 10-Q earnings) + Financials DB merge
-        _ck()
-        _emit_progress(on_progress, "financials", 0.20,
-                       "Extracting 10-K/10-Q financials")
-        # Always read the just-downloaded SEC Excel workbooks so the LATEST
-        # quarterly earnings print (10-Q) is in PRIMARY — even when the
-        # company_financials store still has an older quarter (overnight sync
-        # skips names that already have any rows).
-        #
-        # Merge rules (see excel_financials.merge_primary_financials):
-        #   • Annuals  → DB history (YE-aligned, multi-year)
-        #   • Quarter  → SEC Excel 10-Q when period_end >= DB latest Q
-        #   • TTM      → recomputed from chosen annuals + quarterly
-        #   • Fallback → companyfacts API
-        data = None
         verified_block = None
         primary_ok = False
         _excel_data = None
         _db_data = None
-        try:
-            _excel_data = xlsx_edgar.extract_financials(ticker)
-            _xq = (_excel_data or {}).get("quarterly") or {}
-            _xa = (_excel_data or {}).get("annuals") or []
-            print(f"   📑 SEC Excel: {len(_xa)} annual col(s), "
-                  f"quarter={(_xq.get('current') or {}).get('fp')}/"
-                  f"{(_xq.get('current') or {}).get('end') or '—'} "
-                  f"(source=excel_xbrl)")
-        except Exception as exc:  # noqa: BLE001
-            print(f"   ⚠️  Excel reader raised: {exc}")
-            _excel_data = None
 
+        def _sec_download_timeout(timeout_s: float = 25.0) -> bool:
+            """Download latest 10-K/10-Q Excel with a hard wall-clock cap."""
+            import concurrent.futures as _cf
+            print(f"\n🚀 {ticker}: SEC Excel pull (budget {timeout_s:.0f}s)…", flush=True)
+            _emit_progress(on_progress, "sec_filings", 0.10,
+                           f"SEC 10-K/10-Q (≤{int(timeout_s)}s)…")
+            # Conservative rate limit when we do hit EDGAR
+            os.environ.setdefault("EDGAR_RATE_LIMIT_PER_SEC", "3")
+            pool = _cf.ThreadPoolExecutor(max_workers=1)
+            try:
+                fut = pool.submit(pull_sec_financials.download_financials, ticker)
+                fut.result(timeout=timeout_s)
+                return True
+            except _cf.TimeoutError:
+                print(f"   ⚠️  SEC Excel pull timed out after {timeout_s:.0f}s — using store",
+                      flush=True)
+                try:
+                    fut.cancel()
+                except Exception:
+                    pass
+                return False
+            except Exception as exc:  # noqa: BLE001
+                print(f"   ⚠️  SEC Excel pull failed: {exc!s:.160}", flush=True)
+                return False
+            finally:
+                try:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    pool.shutdown(wait=False)
+
+        def _db_looks_usable(db: dict | None) -> bool:
+            if not db:
+                return False
+            anns = db.get("annuals") or []
+            if not anns:
+                return False
+            # Need at least one annual with revenue
+            if not any(a.get("Revenue") is not None for a in anns):
+                return False
+            return True
+
+        def _quarter_age_days(db: dict | None) -> float | None:
+            try:
+                from datetime import date as _date
+                qend = ((db or {}).get("quarterly") or {}).get("current") or {}
+                e = str(qend.get("end") or "")[:10]
+                if not e:
+                    # fall back to newest annual end
+                    anns = (db or {}).get("annuals") or []
+                    e = str((anns[0] if anns else {}).get("end") or "")[:10]
+                if not e:
+                    return None
+                return float((_date.today() - _date.fromisoformat(e)).days)
+            except Exception:
+                return None
+
+        # 1) DB first (milliseconds)
+        _ck()
+        _emit_progress(on_progress, "financials", 0.08, "Loading financials store…")
         try:
             _db_data = xlsx_edgar.extract_financials_from_db(ticker)
             if _db_data:
                 _dq = (_db_data.get("quarterly") or {}).get("current") or {}
-                print(f"   🗄  company_financials: "
-                      f"{len(_db_data.get('annuals') or [])} annual(s), "
-                      f"quarter={_dq.get('fp')}/{_dq.get('end') or '—'}")
+                print(
+                    f"   🗄  company_financials: "
+                    f"{len(_db_data.get('annuals') or [])} annual(s), "
+                    f"quarter={_dq.get('fp')}/{_dq.get('end') or '—'}",
+                    flush=True,
+                )
         except Exception as _dbe:  # noqa: BLE001
-            print(f"   ⚠️  company_financials DB load failed ({_dbe!s:.120})")
+            print(f"   ⚠️  company_financials DB load failed ({_dbe!s:.120})", flush=True)
             _db_data = None
 
+        _age = _quarter_age_days(_db_data)
+        _need_sec = (not _db_looks_usable(_db_data)) or (
+            _age is not None and _age > 100  # no recent quarter — try live 10-Q
+        ) or (_age is None and _db_looks_usable(_db_data))
+
+        # If DB is good and quarter is reasonably fresh, skip SEC entirely.
+        if _db_looks_usable(_db_data) and not (
+            _age is not None and _age > 100
+        ):
+            _need_sec = False
+            print(
+                f"   ⚡ Using financials store (skip live SEC; "
+                f"latest period age={_age if _age is not None else '?'}d)",
+                flush=True,
+            )
+
+        # 2) Optional short SEC Excel pull (never multi-minute 429 sleep)
+        if _need_sec:
+            _budget = 20.0 if _db_looks_usable(_db_data) else 35.0
+            _sec_download_timeout(_budget)
+            try:
+                _excel_data = xlsx_edgar.extract_financials(ticker)
+                _xq = (_excel_data or {}).get("quarterly") or {}
+                _xa = (_excel_data or {}).get("annuals") or []
+                print(
+                    f"   📑 SEC Excel: {len(_xa)} annual col(s), "
+                    f"quarter={(_xq.get('current') or {}).get('fp')}/"
+                    f"{(_xq.get('current') or {}).get('end') or '—'} "
+                    f"(source=excel_xbrl)",
+                    flush=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"   ⚠️  Excel reader raised: {exc!s:.160}", flush=True)
+                _excel_data = None
+        else:
+            # Still try local Excel if a prior download exists (no network)
+            try:
+                _excel_data = xlsx_edgar.extract_financials(ticker)
+            except Exception:
+                _excel_data = None
+
+        # 3) Merge DB + Excel
+        _ck()
+        _emit_progress(on_progress, "financials", 0.22, "Building verified financials…")
         try:
             data = xlsx_edgar.merge_primary_financials(_db_data, _excel_data)
             if data and (data.get("annuals") or data.get("quarterly")):
                 verified_block = xlsx_edgar.format_verified_block(data)
                 primary_ok = True
                 _qc = (data.get("quarterly") or {}).get("current") or {}
-                print(f"   ✅ PRIMARY ready (source={data.get('source')}, "
-                      f"q_src={data.get('quarterly_source')}, "
-                      f"latest_Q={_qc.get('fp')}/{_qc.get('end') or '—'}, "
-                      f"annuals={len(data.get('annuals') or [])})")
-                # Push just-filed 10-Q / 10-K periods into the Financials store
-                # so the tab stays in sync with Analyze (best-effort).
+                print(
+                    f"   ✅ PRIMARY ready (source={data.get('source')}, "
+                    f"q_src={data.get('quarterly_source')}, "
+                    f"latest_Q={_qc.get('fp')}/{_qc.get('end') or '—'}, "
+                    f"annuals={len(data.get('annuals') or [])})",
+                    flush=True,
+                )
                 try:
                     if _excel_data:
                         xlsx_edgar.upsert_extract_to_company_financials(_excel_data)
                 except Exception as _ue:
-                    print(f"   ⚠️  DB upsert of SEC extract skipped: {_ue!s:.100}")
+                    print(f"   ⚠️  DB upsert of SEC extract skipped: {_ue!s:.100}", flush=True)
             else:
-                print(f"   ⚠️  Merge produced no annuals/quarters for {ticker}")
+                print(f"   ⚠️  Merge produced no annuals/quarters for {ticker}", flush=True)
         except Exception as _me:  # noqa: BLE001
-            print(f"   ⚠️  merge_primary_financials failed: {_me!s:.160}")
-            # Fall back to whichever single source worked
+            print(f"   ⚠️  merge_primary_financials failed: {_me!s:.160}", flush=True)
             for _cand, _label in ((_excel_data, "Excel"), (_db_data, "DB")):
                 if _cand and (_cand.get("annuals") or _cand.get("quarterly")):
                     data = _cand
                     try:
                         verified_block = xlsx_edgar.format_verified_block(data)
                         primary_ok = True
-                        print(f"   ✅ Using {_label} extract as PRIMARY (merge failed)")
+                        print(f"   ✅ Using {_label} extract as PRIMARY (merge failed)", flush=True)
                         break
                     except Exception:
                         pass
 
+        # 4) companyfacts only if still empty — short timeout via thread
         if not primary_ok:
-            print(f"   Falling back to SEC companyfacts API…")
-
-        if not primary_ok:
+            print(f"   Falling back to SEC companyfacts API (budget 25s)…", flush=True)
+            _emit_progress(on_progress, "financials", 0.18, "SEC companyfacts fallback…")
             try:
-                _ed_data = edgar.extract_financials(ticker, user_agent=get_sec_user_agent())
-                _ed_ann = _ed_data.get("annuals", []) if isinstance(_ed_data, dict) else []
+                import concurrent.futures as _cf
+                pool = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
+                    fut = pool.submit(
+                        edgar.extract_financials, ticker, get_sec_user_agent())
+                    _ed_data = fut.result(timeout=25.0)
+                except _cf.TimeoutError:
+                    print("   ⚠️  companyfacts timed out (25s)", flush=True)
+                    _ed_data = None
+                    try:
+                        fut.cancel()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        pool.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        pool.shutdown(wait=False)
+                _ed_ann = (_ed_data or {}).get("annuals", []) if isinstance(_ed_data, dict) else []
                 if _ed_ann:
-                    # The companyfacts module doesn't compute TTM (only
-                    # xlsx_edgar does). Without this, the report's TTM column
-                    # would be all N/A even though the underlying YTD quarterly
-                    # data is present. Bolt the TTM calc on here and render
-                    # via xlsx_edgar's format_verified_block (which knows how
-                    # to emit a TTM row).
                     data = _ed_data
                     try:
-                        _ed_ttm = xlsx_edgar._compute_ttm(_ed_ann, _ed_data.get("quarterly", {}))
+                        _ed_ttm = xlsx_edgar._compute_ttm(
+                            _ed_ann, _ed_data.get("quarterly", {}))
                         if _ed_ttm:
                             data["ttm"] = _ed_ttm
-                            print(f"   ✅ Computed TTM bridge from companyfacts YTD data "
-                                  f"(method: {_ed_ttm.get('method','bridge')})")
-                    except Exception as _tex:
-                        print(f"   ⚠️  TTM bridge calc failed ({_tex}); annuals still usable")
-                    # Render with xlsx_edgar's block (handles the TTM row);
-                    # falls back to companyfacts' own renderer on error.
+                    except Exception:
+                        pass
                     try:
                         verified_block = xlsx_edgar.format_verified_block(data)
                     except Exception:
                         verified_block = edgar.format_verified_block(data)
-                    print(f"   ✅ Loaded {len(_ed_ann)} annual rows via companyfacts API.")
-                else:
-                    print(f"   ⚠️  Companyfacts also returned no annuals for {ticker}.")
-                    # Keep the partial Excel data (TTM only) rather than nothing
-                    if data is None:
-                        data = _ed_data
-                    if verified_block is None:
-                        try:
-                            verified_block = (edgar.format_verified_block(_ed_data)
-                                              if _ed_data
-                                              else xlsx_edgar.format_verified_block(data or {"ticker": ticker, "annuals": []}))
-                        except Exception:
-                            verified_block = ""
+                    primary_ok = True
+                    print(f"   ✅ Loaded {len(_ed_ann)} annual rows via companyfacts", flush=True)
+                elif data is None and _ed_data is not None:
+                    data = _ed_data
             except Exception as exc2:  # noqa: BLE001
-                print(f"   ❌ EDGAR fallback also failed: {exc2}")
-                traceback.print_exc()
+                print(f"   ❌ EDGAR fallback also failed: {exc2!s:.160}", flush=True)
                 if data is None:
-                    # Last-resort stub
-                    print(f"   ⚠️  Proceeding without verified financials for {ticker}.")
                     verified_block = (
                         f"## ⚠️ Financial Data Unavailable\n\n"
                         f"Automated extraction failed for **{ticker}**. "
@@ -8874,31 +8942,45 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                         f"have been verified."
                     )
                     data = {"ticker": ticker, "errors": [str(exc2)]}
-                elif verified_block is None:
-                    # Excel returned data but no annuals AND companyfacts also blew up.
-                    # Use whatever Excel got (TTM only) — better than nothing.
-                    try:
-                        verified_block = xlsx_edgar.format_verified_block(data)
-                    except Exception:
-                        verified_block = ""
 
         if verified_block is None:
             verified_block = ""
 
-        # Append a multi-year quarterly + annual TREND block (best-effort) so the
-        # report can discuss trajectory — growth, margin direction, cash-flow
-        # trend — not just the latest filing. One extra companyfacts fetch.
-        try:
-            _hist = edgar.extract_financials_history(
-                ticker, years_back=10, user_agent=get_sec_user_agent())
-            _hist_block = edgar.format_history_block(_hist)
-            if _hist_block:
-                verified_block = (verified_block + "\n\n" + _hist_block
-                                  if verified_block else _hist_block)
-                print(f"   ✅ Appended multi-year trend block "
-                      f"({len(_hist.get('rows', []))} periods).")
-        except Exception as _hx:  # noqa: BLE001
-            print(f"   ⚠️  Multi-year trend block skipped: {_hx!s:.150}")
+        # Multi-year trend: DO NOT re-hit SEC when DB already supplied history
+        # (was stacking 429 waits of 60–300s during interactive Analyze).
+        if primary_ok and _db_looks_usable(_db_data):
+            print("   ⚡ Skip multi-year companyfacts trend (store already multi-year)",
+                  flush=True)
+        else:
+            try:
+                import concurrent.futures as _cf
+                pool = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
+                    fut = pool.submit(
+                        edgar.extract_financials_history,
+                        ticker, 6, get_sec_user_agent())
+                    _hist = fut.result(timeout=20.0)
+                except Exception as _hx:
+                    print(f"   ⚠️  Multi-year trend skipped: {_hx!s:.120}", flush=True)
+                    _hist = None
+                finally:
+                    try:
+                        pool.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        pool.shutdown(wait=False)
+                if _hist:
+                    _hist_block = edgar.format_history_block(_hist)
+                    if _hist_block:
+                        verified_block = (
+                            verified_block + "\n\n" + _hist_block
+                            if verified_block else _hist_block)
+                        print(
+                            f"   ✅ Appended multi-year trend block "
+                            f"({len(_hist.get('rows', []))} periods).",
+                            flush=True,
+                        )
+            except Exception as _hx:  # noqa: BLE001
+                print(f"   ⚠️  Multi-year trend block skipped: {_hx!s:.150}", flush=True)
 
         # Cache the raw extract for auditing.
         try:

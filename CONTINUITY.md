@@ -43,6 +43,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Claude Opus 5 empty report fix** | **`ui400-20260731-claude-opus5-empty-fix`** | 64k max_tokens + empty/max_tokens retry (FOXA ticket) |
 | **Claude Analyze speed** | **`ui401-20260731-claude-report-speed`** | Opus 5: thinking off + medium effort for reports; honest progress |
 | **Grok 90d catalysts + Munger 8.5** | **`ui402-20260731-grok-news-munger`** | Free headlines + live search reinforce; Grok-only Munger latticework |
+| **Fast financials for Analyze** | **`ui403-20260801-fast-financials-db`** | DB first; SEC Excel hard-timeout; no multi-min 429 wait |
 | **Next deploy after this** | **`ui402-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
