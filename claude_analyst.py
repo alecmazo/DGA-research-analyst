@@ -1762,8 +1762,9 @@ def load_system_prompt() -> str:
 
 
 _MUNGER_CORE_PATHS = (
-    STOCKS_FOLDER / "munger_core_context.md",
+    # Repo-shipped path first (survives Railway redeploys). stocks/ override optional.
     Path(__file__).resolve().parent / "prompts" / "munger_core_context.md",
+    STOCKS_FOLDER / "munger_core_context.md",
 )
 
 
