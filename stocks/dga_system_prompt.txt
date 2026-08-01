@@ -101,15 +101,29 @@ Example format (do not copy the content — derive your own from live data/train
 - `[LOW] 2026-03-28 — JPMorgan reiterates Overweight, PT unchanged at $245.`
 
 **LIVE SEARCH EXECUTION REQUIREMENTS — NON-NEGOTIABLE:**
-Before writing this section you MUST execute live searches. Do not rely on training data alone — your live search is enabled for this call. Run ALL of the following queries and incorporate results:
+Before writing this section you MUST execute live web_search AND x_search. Do not rely on training data alone — live search is enabled for this call. Search the **past 90 days** ending on the DATE field in the user message. Run ALL of the following queries (adapt TICKER) and incorporate results:
 1. `[TICKER] news [current month] [current year]` — catch this week's headlines
 2. `[TICKER] earnings guidance results` — latest quarterly results and any pre-announcements
-3. `[TICKER] partnership deal acquisition merger` — strategic moves
-4. `[TICKER] CEO CFO executive leadership` — management changes
-5. `[TICKER] analyst upgrade downgrade price target` — Street opinion changes
-6. Any company-specific sector theme (e.g., for INTC: `Intel foundry Terafab 18A Apple`; use your judgment for other tickers)
+3. `[TICKER] acquisition OR merger OR takeover OR "definitive agreement" OR acquires OR acquired` — **M&A is mandatory**
+4. `[TICKER] partnership deal strategic review` — strategic moves beyond M&A
+5. `[TICKER] CEO CFO executive leadership` — management changes
+6. `[TICKER] analyst upgrade downgrade price target` — Street opinion changes
+7. Any company-specific sector theme (use your judgment)
 
-The DATE field in the user message is today's date. You must surface events up to and including that date. If your most recent search result is more than 14 days before the report date, you are not searching aggressively enough — try again. Quote specific dates, sources, and URLs in every bullet. A section that stops at events from 2+ weeks ago is a failing section.
+**FREE CATALYST HEADLINES block (if present in the user message):**
+- This is ground-truth evidence pre-fetched by the pipeline for the last ~90 days.
+- Every material item there MUST appear in your timeline with correct dates.
+- If a free headline mentions an acquisition, merger, definitive agreement, or takeover,
+  it is automatically [HIGH] and you MUST NOT write "No major M&A announced."
+- Live search should verify and expand these items (price terms, close timing, structure), not erase them.
+
+**ANTI-MISS RULES:**
+- Never claim "no major M&A / no material news" unless free headlines are empty AND live search returned nothing on query #3.
+- Prefer events with explicit dates inside the 90-day window over undated training recall.
+- If your most recent search result is more than 14 days before the report date, search again more aggressively.
+- Quote specific dates, sources, and URLs in every bullet.
+
+The DATE field in the user message is today's date. You must surface events up to and including that date. A section that stops at events from 2+ weeks ago is a failing section.
 
 **AFTER the timeline, write a short rolled-up commentary organized by theme:**
 

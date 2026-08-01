@@ -1753,11 +1753,95 @@ End with a sources section listing every data source used in this report.
 """
 
 
+
 def load_system_prompt() -> str:
     """Use override file in /stocks/dga_system_prompt.txt if present."""
     if _DEFAULT_SYSTEM_PROMPT_PATH.exists():
         return _DEFAULT_SYSTEM_PROMPT_PATH.read_text()
     return DEFAULT_DGA_SYSTEM_PROMPT
+
+
+_MUNGER_CORE_PATHS = (
+    STOCKS_FOLDER / "munger_core_context.md",
+    Path(__file__).resolve().parent / "prompts" / "munger_core_context.md",
+)
+
+
+def load_munger_core_context() -> str:
+    """Charlie Munger latticework persona — used only for Grok full reports."""
+    for p in _MUNGER_CORE_PATHS:
+        try:
+            if p.exists():
+                txt = p.read_text(encoding="utf-8", errors="replace").strip()
+                if len(txt) > 200:
+                    return txt
+        except Exception:
+            continue
+    return ""
+
+
+def build_munger_system_appendix() -> str:
+    """Grok-only mandatory SECTION 8.5 + full core context."""
+    ctx = load_munger_core_context()
+    if not ctx:
+        ctx = (
+            "(Munger core context file missing — still write SECTION 8.5 using "
+            "circle of competence, invert, margin of safety, incentives, "
+            "lollapalooza, too-hard pile, and sit-on-your-ass investing.)"
+        )
+    header = """
+
+================================================================================
+SECTION 8.5 — CHARLIE MUNGER LATTICEWORK ASSESSMENT  (GROK ONLY — REQUIRED)
+================================================================================
+
+This section is MANDATORY on **Grok** full equity reports only (never omit).
+Claude reports skip this section entirely (avoids duplication on multi-provider runs).
+
+Place **after** the Verdict / risk-reward framework and **before** institutional
+activity / holders. Make it a real, standalone core of the report — not a stub.
+
+Write in Munger's intellectual tradition: direct, rational, anti-narrative,
+prefer avoiding stupidity over brilliance. Use the CORE CONTEXT below as the
+authoritative persona.
+
+Required subsections (use these headings):
+
+### 8.5.1 Circle of Competence
+Is this business inside a disciplined investor's circle? What is hard to
+understand? Should any part go in the **too-hard pile**?
+
+### 8.5.2 Invert — How This Loses Money
+Invert always: permanent capital impairment scenarios, failure modes, and what
+would make Munger walk away.
+
+### 8.5.3 Moat, Incentives & Two-Track Analysis
+Durable competitive advantage? Map management / employee / customer incentives.
+Rational economics track + psychological track.
+
+### 8.5.4 Latticework & Lollapalooza
+Which mental models interact? Where do multiple forces (including psychology)
+align into a lollapalooza outcome — good or bad?
+
+### 8.5.5 Psychology Checklist (selected)
+Name 3–5 of the 25 standard misjudgment tendencies most relevant here and how
+they may be operating on management, the market, or the analyst.
+
+### 8.5.6 Investment Labels (explicit tags)
+Assign **one primary** label and any secondary labels from:
+**TOO HARD · HOMERUN · SIT-ON-YOUR-ASS · WONDERFUL BUSINESS AT FAIR PRICE ·
+FAIR BUSINESS AT WONDERFUL PRICE · AVOID · MARGIN OF SAFETY ADEQUATE ·
+MARGIN OF SAFETY INADEQUATE**
+
+### 8.5.7 What Munger Would Likely Do
+Plain-spoken conclusion: buy / pass / too-hard — with the single best reason
+and the single biggest stupidity to avoid. No soft-pedaling.
+
+================================================================================
+MUNGER CORE CONTEXT (authoritative — follow strictly)
+================================================================================
+"""
+    return header + ctx + "\n"
 
 
 # ============================================================================
@@ -2123,11 +2207,28 @@ Produce a market scan for {ticker}. Use this exact format:
 """
 
 
+
+def _http_get_text_ssl_tolerant(url: str, timeout: float = 8.0) -> str:
+    """GET text; fall back to unverified SSL when local cert store is broken."""
+    import urllib.request as _req
+    import ssl
+    headers = {
+        "User-Agent": "DGA-Capital-Research/1.0 (catalyst-news)",
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    }
+    req = _req.Request(url, headers=headers)
+    try:
+        with _req.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", "replace")
+    except Exception:
+        ctx = ssl._create_unverified_context()
+        with _req.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return resp.read().decode("utf-8", "replace")
+
+
 def _free_ticker_headlines(ticker: str, limit: int = 6) -> list[dict]:
     """Free Yahoo Finance RSS headlines for one ticker (no LLM, no paid news API)."""
-    import urllib.request as _req
     import xml.etree.ElementTree as _ET
-    from email.utils import parsedate_to_datetime
     from urllib.parse import quote as _q
 
     tk = (ticker or "").strip().upper()
@@ -2140,17 +2241,12 @@ def _free_ticker_headlines(ticker: str, limit: int = 6) -> list[dict]:
         if len(items) >= limit:
             return
         try:
-            req = _req.Request(url, headers={
-                "User-Agent": "DGA-Capital-Research/1.0 (market-pulse volume)",
-                "Accept": "application/rss+xml, application/xml, text/xml, */*",
-            })
-            with _req.urlopen(req, timeout=6) as resp:
-                xml_text = resp.read().decode("utf-8", "replace")
+            xml_text = _http_get_text_ssl_tolerant(url, timeout=6)
             root = _ET.fromstring(xml_text)
             channel = root.find("channel")
             if channel is None:
                 return
-            for it in channel.findall("item")[:limit]:
+            for it in channel.findall("item")[: max(limit, 12)]:
                 title = (it.findtext("title") or "").strip()
                 link = (it.findtext("link") or "").strip()
                 pub = (it.findtext("pubDate") or "").strip()
@@ -2164,7 +2260,6 @@ def _free_ticker_headlines(ticker: str, limit: int = 6) -> list[dict]:
         except Exception:
             pass
 
-    # Yahoo finance RSS first, then Google News RSS
     _pull(
         f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={_q(tk)}&region=US&lang=en-US",
         "Yahoo Finance",
@@ -2175,6 +2270,135 @@ def _free_ticker_headlines(ticker: str, limit: int = 6) -> list[dict]:
             "Google News",
         )
     return items[:limit]
+
+
+def free_ticker_catalyst_headlines(
+    ticker: str,
+    *,
+    days: int = 90,
+    limit: int = 24,
+) -> list[dict]:
+    """Multi-query free RSS headlines for Analyze catalyst coverage (~90 days)."""
+    import xml.etree.ElementTree as _ET
+    from email.utils import parsedate_to_datetime
+    from urllib.parse import quote as _q
+    from datetime import datetime, timezone, timedelta
+
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        return []
+    days = max(7, min(int(days), 180))
+    limit = max(6, min(int(limit), 40))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    queries = [
+        f"{tk} stock",
+        f"{tk} acquisition OR merger OR takeover",
+        f'{tk} "definitive agreement" OR acquires OR acquired OR buyout',
+        f"{tk} earnings OR guidance OR results",
+        f"{tk} CEO OR CFO OR activist",
+    ]
+    seen: set[str] = set()
+    raw: list[dict] = []
+
+    def _parse_pub(pub: str):
+        if not pub:
+            return None
+        try:
+            dt = parsedate_to_datetime(pub)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    def _pull(url: str, source: str) -> None:
+        try:
+            xml_text = _http_get_text_ssl_tolerant(url, timeout=8)
+            root = _ET.fromstring(xml_text)
+            channel = root.find("channel")
+            if channel is None:
+                return
+            for it in channel.findall("item")[:15]:
+                title = (it.findtext("title") or "").strip()
+                link = (it.findtext("link") or "").strip()
+                pub = (it.findtext("pubDate") or "").strip()
+                if not title:
+                    continue
+                key = title.lower()[:160]
+                if key in seen:
+                    continue
+                seen.add(key)
+                dt = _parse_pub(pub)
+                if dt is not None and dt < cutoff:
+                    continue
+                raw.append({
+                    "title": title,
+                    "url": link,
+                    "publisher": source,
+                    "pub": pub,
+                    "published_at": dt.date().isoformat() if dt else None,
+                })
+        except Exception:
+            pass
+
+    for q in queries:
+        _pull(
+            f"https://news.google.com/rss/search?q={_q(q)}&hl=en-US&gl=US&ceid=US:en",
+            "Google News",
+        )
+        if len(raw) >= limit:
+            break
+    _pull(
+        f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={_q(tk)}&region=US&lang=en-US",
+        "Yahoo Finance",
+    )
+
+    def _rank(it: dict) -> tuple:
+        title_l = (it.get("title") or "").lower()
+        ma = 1 if any(w in title_l for w in (
+            "acqui", "merger", "takeover", "buyout", "definitive agreement",
+            "to buy", "to acquire", "deal to",
+        )) else 0
+        dated = 1 if it.get("published_at") else 0
+        return (-ma, -dated, it.get("published_at") or "", it.get("title") or "")
+
+    raw.sort(key=_rank)
+    return raw[:limit]
+
+
+def format_catalyst_headlines_block(ticker: str, items: list[dict], *, days: int = 90) -> str:
+    """Markdown block injected into Analyze user_msg for Grok."""
+    tk = (ticker or "").strip().upper()
+    out: list[str] = [
+        f"=== FREE CATALYST HEADLINES — {tk} (past ~{days} days, free RSS ground truth) ===",
+        "These headlines are pre-fetched by the pipeline. Treat material items as FACTS to",
+        "verify/expand with live web_search + x_search — do NOT invent beyond them without",
+        "search, and do NOT erase M&A/deal items that appear here.",
+        "",
+    ]
+    if not items:
+        out.append("(no free headlines fetched — you MUST still live-search aggressively)")
+        out.append("")
+        return "\n".join(out)
+    for it in items:
+        d = it.get("published_at") or "undated"
+        src = it.get("publisher") or "RSS"
+        title = it.get("title") or ""
+        url = it.get("url") or ""
+        row = f"- [{d}] {title}  ({src})"
+        if url:
+            row += f"  {url}"
+        out.append(row)
+    out.append("")
+    out.append(
+        "MANDATORY SEARCHES (live tools): "
+        f'1) "{tk} acquisition OR merger OR definitive agreement"  '
+        f'2) "{tk} news"  3) "{tk} earnings guidance"  '
+        "Never write 'No major M&A announced' if any headline above mentions a deal."
+    )
+    out.append("")
+    return "\n".join(out)
 
 
 def scan_ticker_news(ticker: str, verbose: bool = True) -> dict:
@@ -7145,8 +7369,23 @@ def call_grok(system_prompt: str, user_content: str,
         except Exception as _e:
             print(f"⚠️  [call_grok] usage capture failed: {_e!s:.120}", flush=True)
 
+    if live_search and search_from_date:
+        prefix = (
+            f"LIVE SEARCH WINDOW: from {search_from_date} through today (~90 days). "
+            "You MUST use web_search and x_search inside this window for material "
+            "news, M&A (acquisition/merger/definitive agreement), earnings, "
+            "management, and regulatory items. Prefer dated primary sources.\n\n"
+        )
+        user_content = prefix + user_content
+
     if live_search:
         try:
+            print(
+                "   🔎 Grok live-search ON (web_search + x_search"
+                + (f", from={search_from_date}" if search_from_date else "")
+                + ")…",
+                flush=True,
+            )
             resp = client.responses.create(
                 model=model,
                 input=[
@@ -7159,16 +7398,63 @@ def call_grok(system_prompt: str, user_content: str,
                 ],
             )
             text = _extract_responses_text(resp)
-            if text:
-                # Assume 1 search invocation on average (xAI doesn't expose
-                # exact counts in the response; could be 1-3). Conservative.
-                _capture(resp, search_count=1)
+            n_cite = 0
+            try:
+                cites = getattr(resp, "citations", None) or []
+                n_cite = len(list(cites)) if cites is not None else 0
+            except Exception:
+                n_cite = 0
+            try:
+                usage = getattr(resp, "server_side_tool_usage", None) or {}
+                if usage:
+                    print(f"   🔎 server_side_tool_usage={str(usage)[:200]}", flush=True)
+            except Exception:
+                pass
+            if text and len(text.strip()) >= 200:
+                _capture(resp, search_count=max(1, n_cite or 1))
+                extra = f", citations={n_cite}" if n_cite else ""
+                print(f"   ✅ Grok live-search OK ({len(text):,} chars{extra})", flush=True)
                 return text
-            print("   ⚠️  Grok live-search returned empty text; retrying without search.")
+            print(
+                "   ⚠️  Grok live-search returned empty/short text; "
+                "retrying once with reinforced M&A query…",
+                flush=True,
+            )
+            reinforce = (
+                user_content
+                + "\n\nREINFORCE: Explicitly search for acquisitions, mergers, "
+                + "definitive agreements, and takeovers involving this ticker "
+                + "in the last 90 days. If a deal exists you MUST lead with it."
+            )
+            resp2 = client.responses.create(
+                model=model,
+                input=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": reinforce},
+                ],
+                tools=[
+                    {"type": "web_search"},
+                    {"type": "x_search"},
+                ],
+            )
+            text2 = _extract_responses_text(resp2)
+            if text2 and len(text2.strip()) >= 200:
+                _capture(resp2, search_count=2)
+                print(f"   ✅ Grok live-search retry OK ({len(text2):,} chars)", flush=True)
+                return text2
+            print(
+                "   ❌ Grok live-search failed to produce text — "
+                "falling back to chat WITHOUT search (catalyst quality will suffer).",
+                flush=True,
+            )
         except Exception as exc:
-            print(f"   ⚠️  Grok live-search call failed ({exc}); retrying without search.")
+            print(
+                f"   ❌ Grok live-search call failed ({str(exc)[:200]}); "
+                "falling back to chat without search.",
+                flush=True,
+            )
 
-    # Fallback / default path.
+    # Fallback / default path (no server-side search).
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -7618,7 +7904,8 @@ def _financial_tables_look_degraded(report_md: str) -> bool:
 
 
 def call_llm(provider: str, system_prompt: str, user_content: str,
-             *, live_search: bool = False, on_delta=None, usage_capture=None,
+             *, live_search: bool = False, search_from_date: str | None = None,
+             on_delta=None, usage_capture=None,
              should_cancel=None) -> str:
     """Provider-routed LLM call. ``provider`` ∈ {'grok', 'claude', 'kimi', 'volume'}.
 
@@ -7665,6 +7952,7 @@ def call_llm_with_heartbeat(
     user_content: str,
     *,
     live_search: bool = False,
+    search_from_date: str | None = None,
     on_delta=None,
     usage_capture=None,
     should_cancel=None,
@@ -7711,6 +7999,7 @@ def call_llm_with_heartbeat(
             box["text"] = call_llm(
                 provider, system_prompt, user_content,
                 live_search=live_search,
+                search_from_date=search_from_date,
                 on_delta=_delta_wrap,  # always wrap so char counter advances for progress
                 usage_capture=usage_capture,
                 should_cancel=should_cancel,
@@ -8739,12 +9028,43 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     else:
         _model_label = _prov
     _live = (_prov == "grok")
+    # Grok-only: 90-day free catalyst headlines + Munger latticework section.
+    # Claude skips both (no live search; Munger would duplicate multi-provider runs).
+    _search_from = None
+    if _prov == "grok":
+        try:
+            from datetime import date as _date, timedelta as _td
+            _search_from = (_date.today() - _td(days=90)).isoformat()
+        except Exception:
+            _search_from = None
+        try:
+            _heads = free_ticker_catalyst_headlines(ticker, days=90, limit=24)
+            _news_blk = format_catalyst_headlines_block(ticker, _heads, days=90)
+            user_msg = user_msg.rstrip() + "\n\n" + _news_blk
+            print(
+                f"   📰 Injected {len(_heads)} free catalyst headline(s) "
+                f"(90d) into Grok user_msg",
+                flush=True,
+            )
+        except Exception as _ne:
+            print(f"   ⚠️  Catalyst headline inject failed: {_ne!s:.120}", flush=True)
+        try:
+            _mung = build_munger_system_appendix()
+            if _mung:
+                system_prompt = (system_prompt or load_system_prompt()).rstrip() + "\n" + _mung
+                print(
+                    f"   🧠 Munger SECTION 8.5 appendix attached ({len(_mung):,} chars)",
+                    flush=True,
+                )
+        except Exception as _me:
+            print(f"   ⚠️  Munger appendix failed: {_me!s:.120}", flush=True)
+
     print(f"   🧠 Calling {_prov.upper()} ({_model_label})"
-          + (" with live X/news/web search…" if _live else "…"))
+          + (" with live X/news/web search (90d)…" if _live else "…"))
     _ck()
     _emit_progress(on_progress, "grok", 0.40,
                    f"{_prov.title()} ({_model_label}) — analyzing"
-                   + (" + live X/news search" if _live else ""))
+                   + (" + live X/news search (90d)" if _live else ""))
     _usage: dict = {}   # filled by call_* → {model, input/output_tokens, cost_usd}
     try:
         # Heartbeats keep Desk + mobile progress bars moving during long
@@ -8752,6 +9072,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         report_text = call_llm_with_heartbeat(
             _prov, system_prompt, user_msg,
             live_search=_live,
+            search_from_date=_search_from if _live else None,
             on_delta=on_delta,
             usage_capture=lambda u: _usage.update(u or {}),
             should_cancel=should_cancel,

@@ -42,6 +42,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **SEC 10-Q into Analyze PRIMARY** | **`ui399-20260731-sec-10q-into-analyze`** | Merge live 10-Q earnings with DB annuals; upsert store |
 | **Claude Opus 5 empty report fix** | **`ui400-20260731-claude-opus5-empty-fix`** | 64k max_tokens + empty/max_tokens retry (FOXA ticket) |
 | **Claude Analyze speed** | **`ui401-20260731-claude-report-speed`** | Opus 5: thinking off + medium effort for reports; honest progress |
+| **Grok 90d catalysts + Munger 8.5** | **`ui402-20260731-grok-news-munger`** | Free headlines + live search reinforce; Grok-only Munger latticework |
 | **Next deploy after this** | **`ui402-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
