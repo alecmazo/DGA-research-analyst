@@ -15531,14 +15531,14 @@
       if (id === 'claude') return { bg: '#f3e8ff', fg: '#6b21a8', border: '#d8b4fe' };
       if (id === 'kimi') return { bg: '#dcfce7', fg: '#166534', border: '#86efac' };
       if (id === 'deepseek') return { bg: '#e0e7ff', fg: '#3730a3', border: '#a5b4fc' };
-      if (id === 'both') return { bg: '#fef3c7', fg: '#92400e', border: '#fcd34d' };
       return { bg: '#f1f5f9', fg: '#475569', border: '#e2e8f0' };
     }
 
     function renderProviders(providers) {
       if (!$prov) return;
-      // Five distinct cards — Kimi and DeepSeek are never merged
-      const order = ['grok', 'claude', 'kimi', 'deepseek', 'both'];
+      // One card per real engine — pick engines yourself via Analyze / Compare
+      // (no redundant "Grok + Claude both" card).
+      const order = ['grok', 'claude', 'kimi', 'deepseek'];
       const cards = order.map(function (id) {
         const p = (providers || {})[id];
         if (!p) return '';

@@ -668,20 +668,8 @@ def providers_catalog() -> dict[str, dict]:
             "capabilities": ["reports", "desk", "volume", "agentic"],
             "note": "Separate from Kimi K3. Default model deepseek-v4-pro.",
         },
-        "both": {
-            "id": "both",
-            "label": "Grok + Claude (both)",
-            "model": f"{g_model} + {c_model}",
-            "configured": (
-                _provider_key_set(("XAI_API_KEY",))
-                and _provider_key_set(("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"))
-            ),
-            "key_env": "XAI_API_KEY + ANTHROPIC_API_KEY",
-            "rates_usd_per_mtok": None,
-            "live_search": True,
-            "capabilities": ["reports"],
-            "note": "Runs both engines; ~sum of costs.",
-        },
+        # No "both" card — multi-engine runs are chosen per Analyze / Compare,
+        # not as a separate Settings provider.
     }
 
 

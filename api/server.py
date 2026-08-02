@@ -6866,7 +6866,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui406-20260802-compare-deepseek-edgar"
+WEB_BUILD_VERSION = "ui407-20260802-settings-drop-both-card"
 
 
 @app.get("/api/build")
