@@ -629,7 +629,7 @@
       if (p === 'deepseek') {
         return (cfg.routing && cfg.routing.deepseek_model)
           || vol.deepseek_model
-          || 'deepseek-chat';
+          || 'deepseek-v4-pro';
       }
       return p || '—';
     }
@@ -4766,7 +4766,7 @@
       const map = {
         claude: cfg.claude || cfg.agentic || 'claude-opus-5',
         grok: cfg.grok || 'grok-4.5',
-        deepseek: (cfg.routing && cfg.routing.deepseek_model) || 'deepseek-chat',
+        deepseek: (cfg.routing && cfg.routing.deepseek_model) || 'deepseek-v4-pro',
       };
       tag.textContent = map[p] || p;
       tag.title = 'Engine for this run · ' + p;
@@ -6492,7 +6492,7 @@
     const g = (_HERO_MODELS && _HERO_MODELS.grok) || 'grok';
     const c = (_HERO_MODELS && _HERO_MODELS.claude) || 'claude';
     const ds = (_HERO_MODELS && _HERO_MODELS.routing && _HERO_MODELS.routing.deepseek_model)
-      || 'deepseek-chat';
+      || 'deepseek-v4-pro';
     const map = { grok: g, claude: c, deepseek: ds };
     const sel = _heroSelectedEngines();
     tag.textContent = sel.map(function (e) { return map[e] || e; }).join(' + ') || '—';
@@ -6528,7 +6528,7 @@
       if (gc) gc.title = (_HERO_MODELS.grok || 'Grok') + ' · full report · ' + (_HERO_COST_EST.grok || '') + ' · toggle multi-select';
       if (cc) cc.title = (_HERO_MODELS.claude || 'Claude') + ' · full report · ' + (_HERO_COST_EST.claude || '') + ' · toggle multi-select';
       if (dc) {
-        const dm = (_HERO_MODELS.routing && _HERO_MODELS.routing.deepseek_model) || 'deepseek-chat';
+        const dm = (_HERO_MODELS.routing && _HERO_MODELS.routing.deepseek_model) || 'deepseek-v4-pro';
         dc.title = dm + ' · full report · ' + (_HERO_COST_EST.deepseek || '') + ' · toggle multi-select';
       }
       const est = _HERO_MODELS.est;

@@ -6809,7 +6809,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui403-20260801-fast-financials-db"
+WEB_BUILD_VERSION = "ui404-20260802-deepseek-v4-pro"
 
 
 @app.get("/api/build")
@@ -6974,7 +6974,7 @@ def config_models():
         # Price volume chips from the *actual* route majority (DeepSeek when
         # Settings point desk jobs there) — not the legacy Kimi VOLUME_* alias.
         v_model = vol.get("model") or getattr(analyst, "VOLUME_LLM_MODEL", "kimi-k3")
-        ds_model = vol.get("deepseek_model") or getattr(analyst, "DEEPSEEK_MODEL", "deepseek-chat")
+        ds_model = vol.get("deepseek_model") or getattr(analyst, "DEEPSEEK_MODEL", "deepseek-v4-pro")
         km_model = vol.get("kimi_model") or getattr(analyst, "KIMI_MODEL", "kimi-k3")
         routes = (vol.get("task_routes") or vol.get("routes")
                   or (out.get("routing") or {}).get("routes") or {})
@@ -24114,7 +24114,7 @@ def _agent_route_and_model(mode: str = "agentic",
     if prov == "grok":
         return "grok", getattr(analyst, "GROK_MODEL", None) or _AGENTIC_MODEL
     if prov == "deepseek":
-        return "deepseek", getattr(analyst, "DEEPSEEK_MODEL", "deepseek-chat")
+        return "deepseek", getattr(analyst, "DEEPSEEK_MODEL", "deepseek-v4-pro")
     # default Claude
     return "claude", _AGENTIC_MODEL or getattr(analyst, "CLAUDE_MODEL", "claude-opus-5")
 

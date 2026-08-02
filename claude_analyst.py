@@ -201,7 +201,7 @@ GROK_INTEL_MODEL = GROK_MODEL
 # DeepSeek:
 #   DEEPSEEK_API_KEY  (preferred)
 #   or VOLUME_LLM_API_KEY when base is DeepSeek / model is deepseek-*
-#   base https://api.deepseek.com/v1 · model deepseek-chat (→ V4 Flash compat)
+#   base https://api.deepseek.com/v1 · model deepseek-v4-pro (current flagship)
 #
 # Optional shared overrides (only apply when they match that host):
 #   VOLUME_LLM_BASE_URL / VOLUME_LLM_MODEL / VOLUME_LLM_ENABLED
@@ -211,7 +211,7 @@ GROK_INTEL_MODEL = GROK_MODEL
 _KIMI_DEFAULT_BASE = "https://api.moonshot.ai/v1"
 _KIMI_DEFAULT_MODEL = "kimi-k3"
 _DEEPSEEK_DEFAULT_BASE = "https://api.deepseek.com/v1"
-_DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
+_DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-pro"
 
 _kimi_key = (
     _optional_env("KIMI_API_KEY", "")
@@ -265,7 +265,9 @@ DEEPSEEK_BASE_URL = (
     _vol_base if (_vol_looks_deepseek and _vol_base) else _DEEPSEEK_DEFAULT_BASE
 )
 DEEPSEEK_MODEL = (
-    _vol_model if (_vol_looks_deepseek and _vol_model) else _DEEPSEEK_DEFAULT_MODEL
+    (os.environ.get("DEEPSEEK_MODEL") or "").strip()
+    or (_vol_model if (_vol_looks_deepseek and _vol_model) else "")
+    or _DEEPSEEK_DEFAULT_MODEL
 )
 
 # Back-compat aliases: VOLUME_* = primary cheap host (Kimi if set, else DeepSeek)
@@ -381,11 +383,11 @@ VOLUME_PRICING_PER_MTOK: dict[str, tuple[float, float]] = {
     "kimi-k2":                  (0.60, 2.50),
     "moonshot-v1":              (0.60, 2.50),
     # ── DeepSeek (cache-miss input / output) ──
-    # deepseek-chat / reasoner map to V4 Flash non-thinking / thinking (compat).
-    "deepseek-chat":            (0.14, 0.28),
+    # deepseek-v4-pro is current default; legacy deepseek-chat kept for old env.
+    "deepseek-v4-pro":          (0.435, 0.87),
+    "deepseek-chat":            (0.14, 0.28),  # legacy V4 Flash-compat id
     "deepseek-reasoner":        (0.14, 0.28),
     "deepseek-v4-flash":        (0.14, 0.28),
-    "deepseek-v4-pro":          (0.435, 0.87),
     "deepseek-v3":              (0.27, 1.10),
 }
 VOLUME_CACHE_HIT_PER_MTOK: dict[str, float] = {
@@ -655,7 +657,7 @@ def providers_catalog() -> dict[str, dict]:
         },
         "deepseek": {
             "id": "deepseek",
-            "label": "DeepSeek V4 Flash",
+            "label": "DeepSeek V4 Pro",
             "model": DEEPSEEK_MODEL,
             "configured": deepseek_configured(),
             "key_env": _DEEPSEEK_KEY_SOURCE or "DEEPSEEK_API_KEY",
@@ -664,7 +666,7 @@ def providers_catalog() -> dict[str, dict]:
             "live_search": False,
             "master_enabled": volume_llm_enabled() if deepseek_configured() else False,
             "capabilities": ["reports", "desk", "volume", "agentic"],
-            "note": "Separate from Kimi K3. deepseek-chat → V4 Flash compat rates.",
+            "note": "Separate from Kimi K3. Default model deepseek-v4-pro.",
         },
         "both": {
             "id": "both",

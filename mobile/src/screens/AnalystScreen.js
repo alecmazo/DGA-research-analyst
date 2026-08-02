@@ -23,7 +23,7 @@ const ENGINE_KEY = '@dga_agentic_engine_v1';
 const ENGINES = [
   { id: 'claude', label: 'Claude', sub: 'Opus 5' },
   { id: 'grok', label: 'Grok', sub: '4.5' },
-  { id: 'deepseek', label: 'DeepSeek', sub: 'cheap' },
+  { id: 'deepseek', label: 'DeepSeek', sub: 'V4 Pro' },
 ];
 
 const TOOL_ICON = {
