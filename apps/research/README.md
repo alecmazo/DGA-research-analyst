@@ -3,7 +3,7 @@
 The DGA Capital Research app currently lives at the **repo root**, not
 inside this directory:
 
-- Backend: `claude_analyst.py` + `api/server.py`
+- Backend: `DGA_analyst.py` + `api/server.py`
 - Mobile:  `mobile/`
 - Web:     `web/`
 

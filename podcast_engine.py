@@ -287,7 +287,7 @@ def _enrich_positions_with_sectors_and_ytd(positions: list[dict],
     by eyeballing tickers. Pre-resolve sectors here so the prompt can hand it
     a deterministic breakdown.
     """
-    import claude_analyst as _ca
+    import DGA_analyst as _ca
     from datetime import datetime as _dt, timedelta as _td
 
     # ── Pass 1: sectors + company name (with cash override) ─────────────────
@@ -1146,7 +1146,7 @@ def validate_script(script: dict[str, Any]) -> dict[str, Any]:
 
 def classify_stance(report_md: str) -> dict[str, Any]:
     """Pull direction + magnitude + conviction out of one report's text."""
-    import claude_analyst as _ca
+    import DGA_analyst as _ca
     summary = {}
     try:
         summary = _ca.extract_summary_from_report(report_md) or {}
@@ -1254,7 +1254,7 @@ def generate_devils_advocate_brief(
     reports didn't address. Empty string if either pass fails (caller
     should treat that as "no brief, proceed without").
     """
-    import claude_analyst as _ca
+    import DGA_analyst as _ca
     if on_progress:
         try: on_progress("da_research", "Grok researching bear case (live web search)…")
         except Exception: pass
@@ -1382,8 +1382,8 @@ def generate_script(
     if not (claude_md and claude_md.strip()):
         raise ValueError("claude_md is empty — need both reports to generate a debate")
 
-    # Lazy import — avoids pulling claude_analyst at module load
-    import claude_analyst as _ca
+    # Lazy import — avoids pulling DGA_analyst at module load
+    import DGA_analyst as _ca
 
     import time as _t
     _t0 = _t.time()
@@ -2021,7 +2021,7 @@ def generate_roundup_script(
     script, validation, alignment, raw_response}. The synthetic ticker
     is "ROUNDUP_<comma-list>" so the DB row key is unique.
     """
-    import claude_analyst as _ca
+    import DGA_analyst as _ca
     import time as _t
 
     if not tickers or len(tickers) < 2:
@@ -2157,7 +2157,7 @@ def fetch_macro_context(*, on_progress=None, usage_capture=None) -> str:
     On failure: returns a short '[macro unavailable: …]' string — caller treats
     that as "no macro" and the script still generates (degraded but workable).
     """
-    import claude_analyst as _ca
+    import DGA_analyst as _ca
     if on_progress:
         try: on_progress("macro_pull", "Grok pulling today's macro headlines…")
         except Exception: pass
@@ -2213,7 +2213,7 @@ def screen_bolton_candidates(
     Constrained universe (not free-form) — Sonnet only picks from common,
     well-known US-listed names so we don't get hallucinated tickers.
     """
-    import claude_analyst as _ca
+    import DGA_analyst as _ca
     import json as _json
     if on_progress:
         try: on_progress("bolton_screen", "Sonnet 4.6 screening bolt-on candidates…")
@@ -2292,7 +2292,7 @@ def generate_portfolio_roundup_script(
     (you generate a new one every refresh, vs single-ticker formats
     which keep one row per ticker).
     """
-    import claude_analyst as _ca
+    import DGA_analyst as _ca
     import time as _t
 
     tickers = [t.upper().strip() for t in (tickers or []) if t and t.strip()]

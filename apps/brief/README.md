@@ -2,7 +2,7 @@
 
 Future home of the **DGA Capital Daily Brief** podcast app. The text
 generation logic already exists inside Research at
-`claude_analyst.py::run_daily_brief`. This app will:
+`DGA_analyst.py::run_daily_brief`. This app will:
 
 1. Consume Research's `/api/daily-brief` endpoint (text).
 2. Render to MP3 via ElevenLabs TTS.

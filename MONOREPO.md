@@ -13,7 +13,7 @@ apps that can each deploy and break independently.
 
 ```
 Claude_Research_Analyst/
-├── claude_analyst.py        ← Research backend logic (~9000 lines)
+├── DGA_analyst.py        ← Research backend logic (~9000 lines)
 ├── api/server.py            ← FastAPI server for Research
 ├── mobile/                  ← Research mobile app (Expo SDK 54)
 ├── web/                     ← Research web app (vanilla JS)
@@ -30,7 +30,7 @@ Claude_Research_Analyst/
 ```
 
 **Nothing has moved.** The Research app still deploys from the root —
-Railway picks up `claude_analyst.py` + `api/server.py`, EAS Build picks
+Railway picks up `DGA_analyst.py` + `api/server.py`, EAS Build picks
 up `mobile/`, FastAPI serves `web/` at `/app/`. All existing
 functionality is unchanged. The new directories are scaffolding for
 future migrations.
@@ -42,7 +42,7 @@ future migrations.
 ```
 dga-suite/
 ├── apps/
-│   ├── research/            ← formerly claude_analyst.py + api/ + mobile/ + web/
+│   ├── research/            ← formerly DGA_analyst.py + api/ + mobile/ + web/
 │   ├── fund/                ← cap table, mgmt fee, carry, LP statements
 │   └── brief/               ← TTS podcast generator
 ├── packages/
@@ -101,7 +101,7 @@ once we have two apps to switch between.
 ### Phase 3 — Move Research into `apps/research/`
 - This is the biggest single migration. We move only after Phases 1–2
   prove the new structure works on a fresh app.
-- Split `claude_analyst.py` (~9000 lines) into modules: data, prompts,
+- Split `DGA_analyst.py` (~9000 lines) into modules: data, prompts,
   rendering, gamma, intelligence.
 - Move FastAPI server to `apps/research/api/`.
 - Move web to `apps/research/web/`.
@@ -174,7 +174,7 @@ These are documented here as decisions but not implemented in Phase 0.
 
 | Risk | Mitigation |
 |------|------------|
-| Moving `claude_analyst.py` breaks Railway | Don't do that until Phase 3. Phases 0–2 leave it untouched. |
+| Moving `DGA_analyst.py` breaks Railway | Don't do that until Phase 3. Phases 0–2 leave it untouched. |
 | Moving `mobile/` breaks EAS Build | Same. Phase 0 only adds `apps/`, leaves `mobile/` alone. |
 | Hoisting the design system breaks mobile imports | Phase 2 happens after Phase 1 proves the new layout. Mobile imports are find/replaced as a single commit. |
 | Two apps on one Expo binary risk one-app-crashes-all | Each app folder gets a top-level error boundary. |

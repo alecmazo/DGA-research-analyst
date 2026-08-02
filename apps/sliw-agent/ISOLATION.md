@@ -19,7 +19,7 @@ It must never break research, fund admin, LP dashboards, or auth.
 
 ## What Sliw does *not* touch
 
-- SEC / research pipeline (`claude_analyst.py`)
+- SEC / research pipeline (`DGA_analyst.py`)
 - Fund DB schema or LP capital accounts
 - Portfolio watchlists, podcasts, SnapTrade
 - Auth credential seed (except reading existing tokens)

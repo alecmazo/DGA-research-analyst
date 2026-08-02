@@ -1,7 +1,7 @@
 # `@dga/wall-street-format` (placeholder)
 
 The Goldman / Morgan Stanley / Merrill institutional-research formatting
-templates and prompts currently live inside `claude_analyst.py`'s
+templates and prompts currently live inside `DGA_analyst.py`'s
 `load_system_prompt()` and the `report.docx`/Gamma rendering helpers.
 
 This package will hold:

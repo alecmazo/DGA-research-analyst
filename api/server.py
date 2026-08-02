@@ -1191,7 +1191,7 @@ from pydantic import BaseModel
 # Make the project root importable when running from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import claude_analyst as analyst
+import DGA_analyst as analyst
 
 app = FastAPI(title="DGA Research Analyst API", version="1.0.0")
 
@@ -3315,7 +3315,7 @@ _GURUFOCUS_TTL = 900                          # 15 min — saves API calls
 
 def _gurufocus_token() -> Optional[str]:
     """Read the GuruFocus token from either env var name (supports both the
-    legacy GURUFOCUS_TOKEN used in claude_analyst.py and the newer
+    legacy GURUFOCUS_TOKEN used in DGA_analyst.py and the newer
     GURUFOCUS_API_TOKEN that was added to Railway for the v2 frontend)."""
     return (os.environ.get("GURUFOCUS_API_TOKEN")
             or os.environ.get("GURUFOCUS_TOKEN")
@@ -6809,7 +6809,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui404-20260802-deepseek-v4-pro"
+WEB_BUILD_VERSION = "ui405-20260802-dga-analyst-rename"
 
 
 @app.get("/api/build")
@@ -30387,7 +30387,7 @@ def _run_script_generation(ticker: str, format: str = "debate") -> None:
         # Check cancel before updating progress — stage transitions are the
         # cheapest abort points (before the big Claude call begins).
         if _should_cancel():
-            from claude_analyst import ClaudeCancelled as _CC
+            from DGA_analyst import ClaudeCancelled as _CC
             raise _CC(f"cancelled at stage={stage}")
         # generate_script's on_progress signature: (stage, label_str)
         # — but DA brief uses (stage, label) too. Normalize to a single label.
@@ -30481,7 +30481,7 @@ def _run_script_generation(ticker: str, format: str = "debate") -> None:
                 "transcript":  podcast_engine.script_to_transcript(result["script"]),
              })
     except Exception as e:
-        from claude_analyst import ClaudeCancelled as _CC
+        from DGA_analyst import ClaudeCancelled as _CC
         if isinstance(e, _CC):
             print(f"🛑 [podcast/script {tk}] cancelled by user", flush=True)
             _set(stage="cancelled", status="cancelled",

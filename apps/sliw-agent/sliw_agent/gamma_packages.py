@@ -1,7 +1,7 @@
 """
 Gamma.app marketing package generator for corporate prospects.
 
-Reuses the same public API pattern as claude_analyst.py:
+Reuses the same public API pattern as DGA_analyst.py:
   POST https://public-api.gamma.app/v1.0/generations
   GET  https://public-api.gamma.app/v1.0/generations/{id}
 

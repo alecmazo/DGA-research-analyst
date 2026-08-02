@@ -421,7 +421,7 @@ async function startAnalysis() {
   }
 }
 
-// Ordered list of progress steps emitted by claude_analyst._emit_progress.
+// Ordered list of progress steps emitted by DGA_analyst._emit_progress.
 // Must stay in sync with mobile/src/screens/AnalysisScreen.js STEPS.
 const ANALYSIS_STEPS = [
   'sec_filings', 'financials', 'market_data', 'grok',

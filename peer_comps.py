@@ -6,7 +6,7 @@ Morgan Stanley / Goldman / BofA (Merrill) comps desks pick peers by:
   3. Geography and listing quality (US large/mid liquid names)
 
 This module is the shared source of truth for:
-  • Research-report verified peer blocks (claude_analyst)
+  • Research-report verified peer blocks (DGA_analyst)
   • Financials dashboard peer comps + rank-card industry peers (api/server)
 """
 from __future__ import annotations

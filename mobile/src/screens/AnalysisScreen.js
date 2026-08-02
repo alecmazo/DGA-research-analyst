@@ -11,7 +11,7 @@ import { haptics, fontSize, radius, shadow, useTheme } from '../design';
 const POLL_INTERVAL_MS = 2000;
 
 // Pipeline step definitions — must match the `step` keys emitted by
-// claude_analyst.py's _emit_progress(...). Order matters: it drives the
+// DGA_analyst.py's _emit_progress(...). Order matters: it drives the
 // progress checklist UI top-to-bottom.
 const STEPS = [
   { key: 'sec_filings', label: 'Downloading SEC Filings', icon: 'cloud-download-outline' },

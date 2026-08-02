@@ -13,7 +13,7 @@ The pipeline downloads the latest 10-K and 10-Q for each ticker, saves each as a
 
 | File | Purpose |
 |---|---|
-| `claude_analyst.py` | Main terminal entry-point. Prompts for ticker or portfolio, runs the pipeline. |
+| `DGA_analyst.py` | Main terminal entry-point. Prompts for ticker or portfolio, runs the pipeline. |
 | `pull_sec_financials.py` | Downloads the latest 10-K + 10-Q XBRL financials as Excel workbooks using `edgartools`. CLI and programmatic API. |
 | `excel_financials.py` | Reads the Excel workbooks, normalizes US-GAAP concepts, and emits the canonical `data` dict consumed by the report builder. |
 | `sec_edgar_xbrl.py` | Legacy companyfacts API fallback (used only if the Excel pipeline fails). |
@@ -38,7 +38,7 @@ pip3 install openai python-docx pandas openpyxl requests python-dotenv edgartool
 ## Configuration — secrets & PII live in `.env`
 
 All API keys and your SEC User-Agent are read from environment variables. A
-`.env` file sitting next to `claude_analyst.py` is auto-loaded at startup.
+`.env` file sitting next to `DGA_analyst.py` is auto-loaded at startup.
 
 ### Set up `.env`
 
@@ -78,7 +78,7 @@ that tells you exactly what to set and where.
 
 ### Interactive
 ```bash
-python3 claude_analyst.py
+python3 DGA_analyst.py
 ```
 You'll be prompted to:
 1. Pick single-ticker or portfolio mode
@@ -88,16 +88,16 @@ You'll be prompted to:
 ### One-shot
 ```bash
 # single ticker
-python3 claude_analyst.py AAPL
+python3 DGA_analyst.py AAPL
 
 # portfolio (CSV or XLSX with a "ticker" or "symbol" column)
-python3 claude_analyst.py --portfolio ~/Downloads/my_portfolio.xlsx
+python3 DGA_analyst.py --portfolio ~/Downloads/my_portfolio.xlsx
 
 # skip Gamma (no credits burned)
-python3 claude_analyst.py AAPL --no-gamma
+python3 DGA_analyst.py AAPL --no-gamma
 
 # force Gamma on
-python3 claude_analyst.py --portfolio ~/Downloads/my_portfolio.csv --gamma
+python3 DGA_analyst.py --portfolio ~/Downloads/my_portfolio.csv --gamma
 ```
 
 ---
@@ -173,7 +173,7 @@ in each period.
 
 ### Fallback path
 
-If `edgartools` isn't installed or SEC is unreachable, `claude_analyst.py`
+If `edgartools` isn't installed or SEC is unreachable, `DGA_analyst.py`
 falls back to `sec_edgar_xbrl.py`, which pulls the same metrics from the
 SEC **companyfacts** JSON API. This is less accurate for certain filers
 (see AYI) but requires zero extra dependencies.
