@@ -1604,7 +1604,7 @@ class CreateFundRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     ticker: str
     generate_gamma: bool = False
-    llm_provider:   str  = "grok"   # 'grok' | 'claude' | 'deepseek' | 'both' (kimi not allowed)
+    llm_provider:   str  = "grok"   # 'grok' | 'claude' | 'deepseek' | 'kimi' | 'both'
 
 
 class JobStatus(BaseModel):
@@ -5980,21 +5980,15 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
     llm_provider:
       • 'grok'     — default; live web/X; canonical analyst_reports columns
       • 'claude'   — alternate engine; {TICKER}_DGA_Report_claude.md + *_claude cols
-      • 'deepseek' — DeepSeek V4 Flash; {TICKER}_DGA_Report_deepseek.md + *_deepseek cols
+      • 'deepseek' — DeepSeek; {TICKER}_DGA_Report_deepseek.md + *_deepseek cols
+      • 'kimi'     — Kimi K3; {TICKER}_DGA_Report_kimi.md + *_kimi cols
       • 'both'     — Grok then Claude sequentially (job stays running until both done)
-      Kimi is not accepted for full equity reports / Analyze.
     """
     provider = (llm_provider or "grok").lower().strip()
     if provider == "volume":
-        provider = "deepseek"
-    if provider == "kimi":
-        # Defense-in-depth: endpoint already 422s; worker must not spend on Kimi.
-        with _jobs_lock:
-            if job_id in _jobs:
-                _jobs[job_id]["status"] = "failed"
-                _jobs[job_id]["error"] = "Kimi is not available for Analyze / full reports"
-        return
-    if provider not in ("grok", "claude", "deepseek", "both"):
+        # Legacy alias: prefer Kimi when configured, else DeepSeek
+        provider = "kimi" if getattr(analyst, "kimi_configured", lambda: False)() else "deepseek"
+    if provider not in ("grok", "claude", "deepseek", "kimi", "both"):
         provider = "grok"
 
     # Dispatch 'both' to the dedicated runner
@@ -6027,8 +6021,8 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
     result: dict = {}
     try:
         system_prompt = analyst.load_system_prompt()
-        # For Claude path, reuse Grok's cached user_msg so the LLMs see
-        # identical inputs (the same trick the Compare button uses).
+        # Claude/Kimi reuse Grok's cached user_msg for fair same-input A/B.
+        # DeepSeek re-gathers (independent EDGAR pull for cross-check).
         result = analyst.analyze_ticker(
             ticker,
             system_prompt=system_prompt,
@@ -6036,7 +6030,7 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
             verbose=False,
             on_progress=_record_progress,
             llm_provider=provider,
-            reuse_user_msg=(provider in ("claude", "kimi", "deepseek")),
+            reuse_user_msg=(provider in ("claude", "kimi")),
             should_cancel=_cancel_requested,
         )
     except analyst.ClaudeCancelled:
@@ -6866,7 +6860,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui407-20260802-settings-drop-both-card"
+WEB_BUILD_VERSION = "ui408-20260802-edgar-first-kimi-bs"
 
 
 @app.get("/api/build")
@@ -7400,7 +7394,7 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
     Body fields:
       • ticker         — required
       • generate_gamma — whether to also generate the Gamma deck (Grok only)
-      • llm_provider   — 'grok' (default) | 'claude' | 'both'
+      • llm_provider   — 'grok' (default) | 'claude' | 'deepseek' | 'kimi' | 'both'
     """
     ticker = req.ticker.strip().upper()
     # Allow class shares (BRK.B) and hyphens; reject junk.
@@ -7409,15 +7403,16 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
 
     provider = (req.llm_provider or "grok").lower().strip()
     if provider == "volume":
-        # Volume alias used to map to Kimi; full reports no longer accept Kimi.
-        provider = "deepseek"
-    if provider == "kimi":
+        # Legacy alias → Kimi when configured, else DeepSeek
+        provider = (
+            "kimi" if getattr(analyst, "kimi_configured", lambda: False)()
+            else "deepseek"
+        )
+    if provider not in ("grok", "claude", "deepseek", "kimi", "both"):
         raise HTTPException(
             status_code=422,
-            detail="Kimi is not available for Analyze / full reports. Use grok, claude, or deepseek.",
+            detail="llm_provider must be 'grok' | 'claude' | 'deepseek' | 'kimi' | 'both'",
         )
-    if provider not in ("grok", "claude", "deepseek", "both"):
-        raise HTTPException(status_code=422, detail="llm_provider must be 'grok' | 'claude' | 'deepseek' | 'both'")
 
     # DEMO: no paid LLM call ever — synthesize a sample report instantly.
     if request is not None and _request_is_demo(request):

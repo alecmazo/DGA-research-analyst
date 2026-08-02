@@ -231,8 +231,34 @@ State quarter end dates explicitly (e.g., "Q2 FY2026 ended Feb 28, 2026 vs. Q2 F
 
 Add 2–3 sentences of commentary: highlight any material acceleration, deceleration, or inflection in the data.
 
-**5C. Balance Sheet Health:**
-Current ratio, quick ratio, debt-to-equity, net leverage (net debt/EBITDA). Flag any covenant risks or upcoming maturities. One brief paragraph.
+**5C. Balance Sheet Structure & Health** (MANDATORY — every report, all engines)
+
+Use ONLY verified SEC numbers from the VERIFIED FINANCIAL DATA block (latest quarter end preferred, else latest FY end). State the as-of date explicitly.
+
+**(i) Balance Sheet Structure table** — two periods when available (latest Q end vs prior FY end, or FY[N] vs FY[N-1]):
+
+| Line item ($M)              | Latest ([Date]) | Prior ([Date]) | Δ / note |
+|-----------------------------|-----------------|----------------|----------|
+| Cash & Equivalents          | [exact]         | [exact]        |          |
+| Short-term Investments      | [exact or N/A]  | [exact or N/A] |          |
+| Total Current Assets*       | [exact or N/A]  | [exact or N/A] |          |
+| Total Assets                | [exact]         | [exact]        |          |
+| Short-term Debt             | [exact or N/A]  | [exact or N/A] |          |
+| Long-term Debt              | [exact or N/A]  | [exact or N/A] |          |
+| Total Debt                  | [exact]         | [exact]        |          |
+| Total Liabilities           | [exact]         | [exact]        |          |
+| Stockholders' Equity        | [exact]         | [exact]        |          |
+| Net Debt / (Net Cash)       | [exact]         | [exact]        |          |
+
+\*If Total Current Assets is not in the verified block, write N/A — do not invent.
+
+**(ii) Composition analysis** (2–4 sentences, company-specific):
+- **Asset mix:** What share of Total Assets is cash / ST investments vs operating / long-lived assets? Is the balance sheet asset-light, inventory-heavy, or goodwill-heavy (flag if intangibles dominate when known)?
+- **Liability mix:** Debt vs non-debt liabilities; short-term vs long-term debt share; any concentration risk.
+- **Equity & leverage:** Debt/Equity, Net Debt/EBITDA (use TTM EBITDA from verified block), Current / quick ratio if current assets are available.
+- **Red flags:** Going-concern signals, negative equity, debt rising while cash falls, large off-balance items you can infer from footnotes in training data (label as estimate).
+
+**(iii) Solvency one-liner:** Current ratio, quick ratio (if data allows), net leverage (net debt/EBITDA). Flag covenant or maturity risk when known.
 
 **5D. Cash Flow Quality:**
 Operating cash flow vs. net income ratio (OCF/NI). Flag if OCF is consistently below NI — a warning sign. Comment on capital allocation: buybacks (shares retired YoY), dividends, M&A, R&D intensity.
@@ -514,6 +540,8 @@ You are Grok 4.20 with extended reasoning. Use your full reasoning capacity on t
 
    c. SECTION 6 — 5-YEAR PROJECTIONS: Must include the multi-year Revenue / Growth / EBITDA / Margin / EPS / FCF table with (A)/(E) labels so growth assumptions are explicit.
 
-   d. SECTION 11 — TOP 5 INSTITUTIONAL HOLDERS: Must produce the full 5-row holders table with Shares Held, % of Float, Qtr Change, and Signal columns. Use your most current training data or live search. If exact current data is unavailable, use best estimates and append "(est.)" — but the table must exist.
+   d. SECTION 5C — BALANCE SHEET STRUCTURE: Must include the Balance Sheet Structure table (Cash, Total Assets, Total Debt, Total Liabilities, Equity, Net Debt at minimum for latest period + prior) plus composition analysis of assets and liabilities. A single leverage sentence is NOT sufficient.
+
+   e. SECTION 11 — TOP 5 INSTITUTIONAL HOLDERS: Must produce the full 5-row holders table with Shares Held, % of Float, Qtr Change, and Signal columns. Use your most current training data or live search. If exact current data is unavailable, use best estimates and append "(est.)" — but the table must exist.
 
    If you are uncertain about any section's data, produce the best estimate and label each estimated cell with "(E)". Never omit the section.

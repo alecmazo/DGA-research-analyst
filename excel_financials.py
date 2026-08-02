@@ -1527,6 +1527,70 @@ def format_verified_block(data: dict) -> str:
             "TTM cash metrics are pre-computed above using the bridge formula and must be used directly."
         )
 
+    # ── Balance sheet structure (for Section 5C) ──────────────────────────
+    # Prefer latest quarter end (point-in-time), then latest annual.
+    bs_latest = None
+    bs_prior = None
+    bs_latest_label = ""
+    bs_prior_label = ""
+    q_cur = (data.get("quarterly") or {}).get("current") or {}
+    anns = data.get("annuals") or []
+    if q_cur and any(q_cur.get(k) is not None for k in (
+            "TotalAssets", "Cash", "TotalDebt", "StockholdersEquity", "TotalLiabilities")):
+        bs_latest = q_cur
+        bs_latest_label = f"Q end {q_cur.get('end') or ''} ({q_cur.get('fp') or 'Q'})"
+        if anns:
+            bs_prior = anns[0]
+            bs_prior_label = f"FY{anns[0].get('fy', '')} end {anns[0].get('end') or ''}"
+    elif anns:
+        bs_latest = anns[0]
+        bs_latest_label = f"FY{anns[0].get('fy', '')} end {anns[0].get('end') or ''}"
+        if len(anns) > 1:
+            bs_prior = anns[1]
+            bs_prior_label = f"FY{anns[1].get('fy', '')} end {anns[1].get('end') or ''}"
+
+    if bs_latest:
+        lines.append("")
+        lines.append(
+            f"[BALANCE SHEET STRUCTURE — point-in-time, $ in millions | "
+            f"source={data.get('quarterly_source') or data.get('source') or 'sec'}]"
+        )
+        lines.append(
+            "Use this table for Section 5C (Balance Sheet Structure). "
+            "Do not invent line items not shown; write N/A."
+        )
+        lines.append(
+            f"Line | {bs_latest_label}"
+            + (f" | {bs_prior_label}" if bs_prior else "")
+        )
+        for label, key in [
+            ("Cash & Equivalents", "Cash"),
+            ("Short-term Investments", "ShortTermInvestments"),
+            ("Total Assets", "TotalAssets"),
+            ("Short-term Debt", "ShortTermDebt"),
+            ("Long-term Debt", "LongTermDebt"),
+            ("Total Debt", "TotalDebt"),
+            ("Total Liabilities", "TotalLiabilities"),
+            ("Stockholders' Equity", "StockholdersEquity"),
+            ("Net Debt / (Net Cash)", "NetDebt"),
+        ]:
+            lv = bs_latest.get(key)
+            if key == "NetDebt" and lv is None:
+                td = bs_latest.get("TotalDebt")
+                cash = bs_latest.get("Cash")
+                if td is not None and cash is not None:
+                    lv = td - cash
+            row = f"{label} | {_fmt_money(lv)}"
+            if bs_prior:
+                pv = bs_prior.get(key)
+                if key == "NetDebt" and pv is None:
+                    td = bs_prior.get("TotalDebt")
+                    cash = bs_prior.get("Cash")
+                    if td is not None and cash is not None:
+                        pv = td - cash
+                row += f" | {_fmt_money(pv)}"
+            lines.append(row)
+
     if data.get("errors"):
         lines.append("")
         lines.append("NOTES / CAVEATS:")

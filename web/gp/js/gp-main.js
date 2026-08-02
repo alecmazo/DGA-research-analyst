@@ -6234,9 +6234,8 @@
   }
 
   // Multi-select engines on Analyze card (each run → separate Saved Report)
-  // Kimi deliberately excluded — full reports only: Grok / Claude / DeepSeek.
-  const _HERO_ENGINES = ['grok', 'claude', 'deepseek'];
-  const _HERO_ENG_KEY = 'dga.hero.engines.v2';
+  const _HERO_ENGINES = ['grok', 'claude', 'deepseek', 'kimi'];
+  const _HERO_ENG_KEY = 'dga.hero.engines.v3';
 
   function _heroSelectedEngines() {
     const chips = document.querySelectorAll('#hero-llm-chips .hero-llm-chip.active');
@@ -6251,6 +6250,7 @@
   function _heroActFor(eng) {
     if (eng === 'claude') return 'report_claude';
     if (eng === 'deepseek') return 'report_deepseek';
+    if (eng === 'kimi') return 'report_kimi';
     return 'report_grok';
   }
 
@@ -6263,14 +6263,16 @@
   function _heroRestoreEngines() {
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(_HERO_ENG_KEY) || 'null'); } catch (_) {}
-    // Migrate old v1 prefs that may still list kimi
+    // Migrate older prefs
+    if (!Array.isArray(saved) || !saved.length) {
+      try { saved = JSON.parse(localStorage.getItem('dga.hero.engines.v2') || 'null'); } catch (_) {}
+    }
     if (!Array.isArray(saved) || !saved.length) {
       try { saved = JSON.parse(localStorage.getItem('dga.hero.engines.v1') || 'null'); } catch (_) {}
     }
     if (!Array.isArray(saved) || !saved.length) return;
     const set = {};
     saved.forEach(function (e) {
-      if (e === 'kimi') return; // retired from Analyze
       if (_HERO_ENGINES.indexOf(e) >= 0) set[e] = true;
     });
     if (!Object.keys(set).length) return;
@@ -6493,7 +6495,9 @@
     const c = (_HERO_MODELS && _HERO_MODELS.claude) || 'claude';
     const ds = (_HERO_MODELS && _HERO_MODELS.routing && _HERO_MODELS.routing.deepseek_model)
       || 'deepseek-v4-pro';
-    const map = { grok: g, claude: c, deepseek: ds };
+    const km = (_HERO_MODELS && _HERO_MODELS.routing && _HERO_MODELS.routing.kimi_model)
+      || 'kimi-k3';
+    const map = { grok: g, claude: c, deepseek: ds, kimi: km };
     const sel = _heroSelectedEngines();
     tag.textContent = sel.map(function (e) { return map[e] || e; }).join(' + ') || '—';
     tag.title = sel.length + ' engine' + (sel.length === 1 ? '' : 's')
@@ -6520,16 +6524,17 @@
       const gc = document.querySelector('#hero-llm-chips .hero-llm-chip[data-llm="grok"]');
       const cc = document.querySelector('#hero-llm-chips .hero-llm-chip[data-llm="claude"]');
       const dc = document.querySelector('#hero-llm-chips .hero-llm-chip[data-llm="deepseek"]');
-      // Hide any leftover Kimi chip from older HTML caches
-      document.querySelectorAll('#hero-llm-chips .hero-llm-chip[data-llm="kimi"]').forEach(function (el) {
-        el.style.display = 'none';
-        el.classList.remove('active');
-      });
+      const kc = document.querySelector('#hero-llm-chips .hero-llm-chip[data-llm="kimi"]');
       if (gc) gc.title = (_HERO_MODELS.grok || 'Grok') + ' · full report · ' + (_HERO_COST_EST.grok || '') + ' · toggle multi-select';
       if (cc) cc.title = (_HERO_MODELS.claude || 'Claude') + ' · full report · ' + (_HERO_COST_EST.claude || '') + ' · toggle multi-select';
       if (dc) {
         const dm = (_HERO_MODELS.routing && _HERO_MODELS.routing.deepseek_model) || 'deepseek-v4-pro';
         dc.title = dm + ' · full report · ' + (_HERO_COST_EST.deepseek || '') + ' · toggle multi-select';
+      }
+      if (kc) {
+        const km = (_HERO_MODELS.routing && _HERO_MODELS.routing.kimi_model) || 'kimi-k3';
+        kc.title = km + ' · full report · ' + (_HERO_COST_EST.kimi || '') + ' · toggle multi-select';
+        kc.style.display = '';
       }
       const est = _HERO_MODELS.est;
       if (est) {
@@ -6538,6 +6543,7 @@
         if (est.grok_report)     _HERO_COST_EST.grok     = rng(est.grok_report);
         if (est.claude_report)   _HERO_COST_EST.claude   = rng(est.claude_report);
         if (est.deepseek_report) _HERO_COST_EST.deepseek = rng(est.deepseek_report);
+        if (est.kimi_report)     _HERO_COST_EST.kimi     = rng(est.kimi_report);
         if (est.pulse_per_ticker) _PULSE_COST_PER_TICKER = est.pulse_per_ticker;
         if (typeof _updateHeroCost === 'function') _updateHeroCost();
       }
@@ -6551,7 +6557,7 @@
   const $heroCost  = document.getElementById('hero-cost-est');
   let _HERO_COST_EST = {
     grok: '$0.30–0.60', claude: '$0.50–1.00',
-    deepseek: '$0.01–0.05',
+    deepseek: '$0.01–0.05', kimi: '$0.15–0.60',
   };
   function _updateHeroCost() {
     if (!$heroCost) return;

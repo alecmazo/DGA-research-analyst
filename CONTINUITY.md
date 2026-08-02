@@ -48,7 +48,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Rename DGA_analyst** | **`ui405-20260802-dga-analyst-rename`** | claude_analyst.py → DGA_analyst.py (multi-LLM core) |
 | **Compare 3 engines + DeepSeek EDGAR** | **`ui406-20260802-compare-deepseek-edgar`** | Desk+Lab multi-pane compare (Grok/Claude/DeepSeek/Kimi); DeepSeek-only live EDGAR financials |
 | **Settings drop both card** | **`ui407-20260802-settings-drop-both-card`** | Remove yellow Grok+Claude (both) provider card from Settings |
-| **Next deploy after this** | **`ui408-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **EDGAR-first + Kimi + BS** | **`ui408-20260802-edgar-first-kimi-bs`** | All engines live SEC Excel primary; enable Kimi Analyze; mandatory §5C balance sheet structure |
+| **Next deploy after this** | **`ui409-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
