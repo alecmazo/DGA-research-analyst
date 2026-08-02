@@ -46,7 +46,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Fast financials for Analyze** | **`ui403-20260801-fast-financials-db`** | DB first; SEC Excel hard-timeout; no multi-min 429 wait |
 | **DeepSeek V4 Pro default** | **`ui404-20260802-deepseek-v4-pro`** | deepseek-chat → deepseek-v4-pro everywhere |
 | **Rename DGA_analyst** | **`ui405-20260802-dga-analyst-rename`** | claude_analyst.py → DGA_analyst.py (multi-LLM core) |
-| **Next deploy after this** | **`ui402-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Compare 3 engines + DeepSeek EDGAR** | **`ui406-20260802-compare-deepseek-edgar`** | Desk+Lab multi-pane compare (Grok/Claude/DeepSeek/Kimi); DeepSeek-only live EDGAR financials |
+| **Next deploy after this** | **`ui407-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

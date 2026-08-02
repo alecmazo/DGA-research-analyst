@@ -5864,7 +5864,7 @@
                 + ' onclick="event.stopPropagation();">DEEPSEEK</span>'
               : '') +
             '<button class="rep-compare-btn" data-compare-ticker="' + rep.ticker + '"'
-              + ' title="Compare engines side-by-side (≈2-3 min)"'
+              + ' title="Compare Grok / Claude / DeepSeek / Kimi side-by-side (≈2-3 min per engine)"'
               + ' onclick="event.stopPropagation();">🔬</button>' +
             // 🎙️ Podcast — only when an episode exists for this ticker.
             // Click opens the LLM Lab tab + auto-plays this episode.
@@ -8672,51 +8672,159 @@
     }
   }
 
+  function _labEngineOrder(data) {
+    const engines = data.engines || {};
+    const show = (data.show && data.show.length)
+      ? data.show.slice()
+      : ['grok', 'claude', 'deepseek', 'kimi'].filter(function(p) {
+          const e = engines[p] || {};
+          return e.has_report || e.configured || p === 'grok';
+        });
+    // Always surface at least grok + any alt with a report or key
+    if (!show.includes('grok')) show.unshift('grok');
+    return show;
+  }
+
+  function _labBuildPanes(order) {
+    const panes = document.getElementById('lab-panes');
+    if (!panes) return;
+    panes.style.setProperty('--lab-pane-count', String(Math.max(2, order.length)));
+    panes.innerHTML = order.map(function(eng) {
+      const label = eng.toUpperCase();
+      return '<div class="lab-pane" data-engine="' + eng + '">'
+        + '<div class="cmp-pane-hdr">'
+        +   '<span class="cmp-pane-engine ' + eng + '">' + label + '</span>'
+        +   '<span class="cmp-pane-meta" id="lab-' + eng + '-meta">—</span>'
+        + '</div>'
+        + '<div class="cmp-pane-body md-body" id="lab-' + eng + '-body"></div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function _labUpdateRunButtons(data) {
+    const wrap = document.getElementById('lab-run-btns');
+    const legacy = document.getElementById('lab-runclaude-btn');
+    if (legacy) legacy.style.display = 'none';
+    if (!wrap) return;
+    const engines = data.engines || {};
+    const order = _labEngineOrder(data);
+    const missing = order.filter(function(p) {
+      if (p === 'grok') return false; // baseline — use Analyze, not Compare
+      const e = engines[p] || {};
+      return !e.has_report && e.configured !== false;
+    });
+    // Also offer configured engines not yet in show if they lack reports
+    ['claude', 'deepseek', 'kimi'].forEach(function(p) {
+      const e = engines[p] || {};
+      if (!e.has_report && e.configured && missing.indexOf(p) < 0) missing.push(p);
+    });
+    if (!missing.length) {
+      wrap.style.display = 'none';
+      wrap.innerHTML = '';
+      return;
+    }
+    wrap.style.display = 'flex';
+    wrap.innerHTML = missing.map(function(p) {
+      const label = p === 'deepseek' ? 'DeepSeek' : (p === 'kimi' ? 'Kimi' : 'Claude');
+      const note = p === 'deepseek' ? ' · live EDGAR' : '';
+      return '<button type="button" class="' + p + '" data-lab-run="' + p + '">'
+        + '⚡ Run ' + label + note + '</button>';
+    }).join('');
+    wrap.querySelectorAll('[data-lab-run]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        _labRunProvider(btn.getAttribute('data-lab-run'));
+      });
+    });
+  }
+
   async function _labLoadComparison(ticker) {
     _labCurrentTicker = ticker;
     const wrap = document.getElementById('lab-compare');
     if (!wrap) return;
     wrap.style.display = 'block';
 
-    document.getElementById('lab-compare-title').textContent = '🔬 ' + ticker + ': Grok vs Claude';
-    document.getElementById('lab-grok-body').innerHTML = '<div style="padding:20px;color:#94a3b8;font-style:italic;">Loading Grok report…</div>';
-    document.getElementById('lab-claude-body').innerHTML = '<div style="padding:20px;color:#94a3b8;font-style:italic;">Loading Claude report…</div>';
-    document.getElementById('lab-runclaude-btn').style.display = 'none';
+    document.getElementById('lab-compare-title').textContent = '🔬 ' + ticker + ': multi-engine compare';
+    const panes = document.getElementById('lab-panes');
+    if (panes) {
+      panes.innerHTML = '<div class="lab-pane"><div class="cmp-pane-body" style="padding:20px;color:#94a3b8;font-style:italic;">Loading reports…</div></div>';
+    }
 
     try {
-      const r = await window.dgaFetch('/api/reports/' + encodeURIComponent(ticker) + '/comparison?provider=claude');
+      const r = await window.dgaFetch('/api/reports/' + encodeURIComponent(ticker) + '/comparison');
       if (!r.ok) throw new Error('comparison ' + r.status);
       const data = await r.json();
       _labCurrentData = data;
       _labRenderComparison(data);
     } catch (e) {
-      document.getElementById('lab-grok-body').innerHTML = '<div style="padding:20px;color:#dc2626;">Error: ' + e.message + '</div>';
+      if (panes) {
+        panes.innerHTML = '<div class="lab-pane"><div class="cmp-pane-body" style="padding:20px;color:#dc2626;">Error: '
+          + (e.message || e) + '</div></div>';
+      }
     }
   }
 
   function _labRenderComparison(data) {
-    const grok = data.grok || {};
-    const alt  = data.alt  || {};
+    const engines = data.engines || {};
+    // Backward-compat if older API without engines map
+    if (!data.engines) {
+      engines.grok = data.grok || {};
+      engines.claude = data.alt || {};
+      engines.grok.provider = 'grok';
+      engines.claude.provider = (data.alt && data.alt.provider) || 'claude';
+    }
+    const order = _labEngineOrder(Object.assign({}, data, { engines: engines }));
+    _labBuildPanes(order);
 
-    // Meta lines
-    document.getElementById('lab-grok-meta').innerHTML   = (grok.model || 'grok') + ' · <strong>' + _labFmtRelDate(grok.generated_at) + '</strong>';
-    document.getElementById('lab-claude-meta').innerHTML = (alt.model  || 'claude') + ' · <strong>' + _labFmtRelDate(alt.generated_at)  + '</strong>';
+    const names = order.map(function(p) { return p.toUpperCase(); }).join(' · ');
+    const title = document.getElementById('lab-compare-title');
+    if (title) title.textContent = '🔬 ' + data.ticker + ': ' + names;
 
-    // Top summary strip (same as compare modal)
+    // Meta + bodies
+    order.forEach(function(eng) {
+      const e = engines[eng] || {};
+      const meta = document.getElementById('lab-' + eng + '-meta');
+      const body = document.getElementById('lab-' + eng + '-body');
+      if (meta) {
+        meta.innerHTML = (e.model || eng) + ' · <strong>' + _labFmtRelDate(e.generated_at) + '</strong>';
+      }
+      if (!body) return;
+      if (e.has_report) {
+        _cmpRenderMdInto(body, e.text);
+      } else {
+        const label = eng.toUpperCase();
+        body.innerHTML = '<div style="padding:20px;color:#94a3b8;font-style:italic;">No '
+          + label + ' report yet'
+          + (eng === 'grok' ? ' — run Analyze from the desk first.'
+            : ' — click Run ' + label + ' above (~2-3 min).')
+          + (eng === 'deepseek' ? ' DeepSeek pulls financials from live EDGAR.' : '')
+          + '</div>';
+      }
+    });
+
+    // Summary strip across all engines that have reports
     const strip = document.getElementById('lab-summary-strip');
     if (strip) {
-      if (grok.has_report && alt.has_report) {
-        const gs = grok.summary || {}, as = alt.summary || {};
-        let html = '<div>Grok: <strong>' + (gs.rating || '—') + '</strong>'
-          + ' · target <strong>' + (gs.price_target != null ? ('$' + Number(gs.price_target).toFixed(2)) : '—') + '</strong>'
-          + ' · upside <strong>' + (gs.upside_pct != null ? ((gs.upside_pct>=0?'+':'')+Number(gs.upside_pct).toFixed(1)+'%') : '—') + '</strong></div>';
-        html += '<div>Claude: <strong>' + (as.rating || '—') + '</strong>'
-          + ' · target <strong>' + (as.price_target != null ? ('$' + Number(as.price_target).toFixed(2)) : '—') + '</strong>'
-          + ' · upside <strong>' + (as.upside_pct != null ? ((as.upside_pct>=0?'+':'')+Number(as.upside_pct).toFixed(1)+'%') : '—') + '</strong></div>';
-        if (gs.price_target && as.price_target) {
-          const d = (Number(as.price_target) - Number(gs.price_target)) / Number(gs.price_target) * 100;
-          const cls = Math.abs(d) > 5 ? '#dc2626' : '#16a34a';
-          html += '<div>Δ Target: <strong style="color:' + cls + ';">' + ((d>=0?'+':'')+d.toFixed(1)+'%') + '</strong></div>';
+      const withRep = order.filter(function(p) { return engines[p] && engines[p].has_report; });
+      if (withRep.length >= 2) {
+        let html = '';
+        withRep.forEach(function(p) {
+          const s = (engines[p].summary || {});
+          html += '<div>' + p.toUpperCase() + ': <strong>' + (s.rating || '—') + '</strong>'
+            + ' · target <strong>' + (s.price_target != null ? ('$' + Number(s.price_target).toFixed(2)) : '—') + '</strong>'
+            + ' · upside <strong>' + (s.upside_pct != null ? ((s.upside_pct>=0?'+':'')+Number(s.upside_pct).toFixed(1)+'%') : '—') + '</strong></div>';
+        });
+        // Δ vs Grok when both present
+        const g = engines.grok || {};
+        if (g.has_report && g.summary && g.summary.price_target != null) {
+          withRep.forEach(function(p) {
+            if (p === 'grok') return;
+            const at = engines[p].summary && engines[p].summary.price_target;
+            if (at == null) return;
+            const d = (Number(at) - Number(g.summary.price_target)) / Number(g.summary.price_target) * 100;
+            const cls = Math.abs(d) > 5 ? '#dc2626' : '#16a34a';
+            html += '<div>Δ ' + p.toUpperCase() + ' vs Grok: <strong style="color:' + cls + ';">'
+              + ((d>=0?'+':'')+d.toFixed(1)+'%') + '</strong></div>';
+          });
         }
         strip.innerHTML = html;
         strip.style.display = 'flex';
@@ -8725,26 +8833,14 @@
       }
     }
 
-    // Pane bodies
-    const gBody = document.getElementById('lab-grok-body');
-    const cBody = document.getElementById('lab-claude-body');
-    if (grok.has_report) {
-      _cmpRenderMdInto(gBody, grok.text);
-    } else {
-      gBody.innerHTML = '<div style="padding:20px;color:#94a3b8;font-style:italic;">No Grok report on disk for ' + data.ticker + '.</div>';
-    }
-    if (alt.has_report) {
-      _cmpRenderMdInto(cBody, alt.text);
-      document.getElementById('lab-runclaude-btn').style.display = 'none';
-    } else {
-      cBody.innerHTML = '<div style="padding:20px;color:#94a3b8;font-style:italic;">No Claude comparison yet — click "Run Claude analysis" above (~2-3 min).</div>';
-      document.getElementById('lab-runclaude-btn').style.display = '';
-    }
+    _labUpdateRunButtons(Object.assign({}, data, { engines: engines }));
 
     // Reset vote button state, prefill if a vote exists for this ticker
     document.querySelectorAll('.lab-vote-btn').forEach(function(b) { b.dataset.cast = '0'; });
-    document.getElementById('lab-vote-status').style.display = 'none';
-    document.getElementById('lab-vote-note').value = '';
+    const st = document.getElementById('lab-vote-status');
+    if (st) st.style.display = 'none';
+    const note = document.getElementById('lab-vote-note');
+    if (note) note.value = '';
     _labLoadExistingVote(data.ticker);
   }
 
@@ -8766,36 +8862,67 @@
   }
 
   async function _labRunClaude() {
+    // Legacy entrypoint (cost-chip wiring / old button)
+    return _labRunProvider('claude');
+  }
+
+  async function _labRunProvider(provider) {
     const tk = _labCurrentTicker;
     if (!tk) return;
-    const btn = document.getElementById('lab-runclaude-btn');
-    btn.disabled = true; btn.textContent = '⏳ Starting…';
+    provider = (provider || 'claude').toLowerCase();
+    const label = provider === 'deepseek' ? 'DeepSeek'
+      : (provider === 'kimi' ? 'Kimi' : provider.charAt(0).toUpperCase() + provider.slice(1));
+    // Disable matching run buttons
+    document.querySelectorAll('[data-lab-run]').forEach(function(b) {
+      if (b.getAttribute('data-lab-run') === provider) {
+        b.disabled = true;
+        b.textContent = '⏳ Starting ' + label + '…';
+      }
+    });
+    const body = document.getElementById('lab-' + provider + '-body');
     try {
-      const r = await window.dgaFetch('/api/reports/' + encodeURIComponent(tk) + '/compare?provider=claude', { method: 'POST' });
-      if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.status); }
+      const r = await window.dgaFetch(
+        '/api/reports/' + encodeURIComponent(tk) + '/compare?provider=' + encodeURIComponent(provider),
+        { method: 'POST' });
+      if (!r.ok) {
+        const e = await r.json().catch(function(){ return {}; });
+        throw new Error(e.detail || r.status);
+      }
       const job = await r.json();
-      document.getElementById('lab-claude-body').innerHTML =
-        '<div style="padding:20px;color:#d97706;">'
-        + '<div style="display:flex;align-items:center;gap:8px;"><span class="cmp-wait-pulse"></span><strong>Claude running…</strong></div>'
-        + '<div style="margin-top:10px;font-size:11px;color:#94a3b8;" id="lab-run-status">Job ' + job.job_id.slice(0,8) + '… (this can take 30-60s to start streaming)</div>'
-        + '<div class="cmp-pane-body md-body" id="lab-claude-stream" style="margin-top:12px;max-height:50vh;overflow-y:auto;"></div>'
-        + '</div>';
-      _labPollClaudeJob(tk, job.job_id);
+      if (body) {
+        body.innerHTML =
+          '<div style="padding:20px;color:#d97706;">'
+          + '<div style="display:flex;align-items:center;gap:8px;"><span class="cmp-wait-pulse"></span><strong>'
+          + label + ' running…</strong></div>'
+          + '<div style="margin-top:10px;font-size:11px;color:#94a3b8;" id="lab-run-status-' + provider + '">Job '
+          + job.job_id.slice(0,8) + '…'
+          + (provider === 'deepseek' ? ' · live EDGAR financials' : '')
+          + '</div>'
+          + '<div class="cmp-pane-body md-body" id="lab-stream-' + provider
+          + '" style="margin-top:12px;max-height:50vh;overflow-y:auto;"></div>'
+          + '</div>';
+      }
+      _labPollProviderJob(tk, provider, job.job_id);
     } catch (e) {
-      btn.disabled = false; btn.textContent = '⚡ Run Claude analysis';
-      alert('Could not start: ' + e.message);
+      document.querySelectorAll('[data-lab-run="' + provider + '"]').forEach(function(b) {
+        b.disabled = false;
+        b.textContent = '⚡ Run ' + label + (provider === 'deepseek' ? ' · live EDGAR' : '');
+      });
+      alert('Could not start ' + label + ': ' + e.message);
     }
   }
 
-  async function _labPollClaudeJob(ticker, jobId) {
+  async function _labPollProviderJob(ticker, provider, jobId) {
     if (_labPollTimer) clearInterval(_labPollTimer);
+    const label = provider === 'deepseek' ? 'DeepSeek'
+      : (provider === 'kimi' ? 'Kimi' : provider.charAt(0).toUpperCase() + provider.slice(1));
     const tick = async function() {
       try {
         const r = await window.dgaFetch('/api/jobs/' + encodeURIComponent(jobId));
         if (!r.ok) return;
         const job = await r.json();
-        const stat = document.getElementById('lab-run-status');
-        const stream = document.getElementById('lab-claude-stream');
+        const stat = document.getElementById('lab-run-status-' + provider);
+        const stream = document.getElementById('lab-stream-' + provider);
         const streamedLen = (job.streamed_text || '').length;
         if (stat) {
           stat.textContent = streamedLen > 0
@@ -8809,13 +8936,19 @@
         }
         if (job.status === 'done' || job.status === 'failed') {
           clearInterval(_labPollTimer); _labPollTimer = null;
-          const btn = document.getElementById('lab-runclaude-btn');
-          if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Claude analysis'; }
           if (job.status === 'failed') {
-            document.getElementById('lab-claude-body').innerHTML = '<div style="padding:20px;color:#dc2626;">Failed: ' + (job.error || 'unknown') + '</div>';
+            const body = document.getElementById('lab-' + provider + '-body');
+            if (body) {
+              body.innerHTML = '<div style="padding:20px;color:#dc2626;">Failed: '
+                + (job.error || 'unknown') + '</div>';
+            }
+            document.querySelectorAll('[data-lab-run="' + provider + '"]').forEach(function(b) {
+              b.disabled = false;
+              b.textContent = '⚡ Run ' + label + (provider === 'deepseek' ? ' · live EDGAR' : '');
+            });
             return;
           }
-          // Reload the comparison so the final report shows formatted
+          // Reload so final report shows formatted + new panes
           _labLoadComparison(ticker);
         }
       } catch (e) {}
@@ -8823,6 +8956,11 @@
     tick();
     _labPollTimer = setInterval(tick, 1500);
   }
+
+  // Alias for older call sites
+  const _labPollClaudeJob = function(ticker, jobId) {
+    return _labPollProviderJob(ticker, 'claude', jobId);
+  };
 
   async function _labVote(winner) {
     if (!_labCurrentData || !_labCurrentTicker) return;
@@ -18199,11 +18337,11 @@
   // RIGHT COLUMN — Market Pulse (scan results as news)
   // Auto-refreshes every 15 minutes
   // ══════════════════════════════════════════════════════════════
-  // ── 🔬 Compare modal — Grok vs Claude side-by-side ───────────────────────
-  // Opens with whatever's already on disk; if the Claude (alt) side is
-  // missing, shows a button to kick off the comparison run. Polls the
-  // job and live-replaces the empty pane with the rendered report once done.
+  // ── 🔬 Compare modal — multi-engine (Grok / Claude / DeepSeek / Kimi) ──
+  // Opens with all saved engines; missing configured engines get a Run btn.
+  // DeepSeek pulls live EDGAR financials; Claude/Kimi reuse Grok's cache.
   var _cmpActiveJobId  = null;
+  var _cmpActiveProvider = null;
   var _cmpActiveTicker = null;
   var _cmpPollTimer    = null;
   var _cmpJobStartMs   = null;   // wall-clock start for elapsed-time display
@@ -18225,29 +18363,100 @@
     el.textContent = md || '';
   }
 
-  function _cmpSummaryStrip(grok, alt) {
-    // Quick at-a-glance row: price target delta + rating + upside between the two
-    const gs = (grok.summary || {});
-    const as = (alt.summary || {});
-    const gt = gs.price_target, at = as.price_target;
-    const gu = gs.upside_pct,   au = as.upside_pct;
-    if (gt == null && at == null && gu == null && au == null) return '';
+  function _cmpFmtDate(iso) {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleString('en-US', {
+        ..._PT, year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+    } catch (e) { return '—'; }
+  }
+
+  function _cmpEngineOrder(data) {
+    const engines = data.engines || {};
+    if (data.show && data.show.length) return data.show.slice();
+    const order = ['grok', 'claude', 'deepseek', 'kimi'];
+    return order.filter(function(p) {
+      const e = engines[p] || {};
+      return e.has_report || e.configured || p === 'grok';
+    });
+  }
+
+  function _cmpSummaryStripMulti(engines, order) {
+    const withRep = order.filter(function(p) {
+      return engines[p] && engines[p].has_report;
+    });
+    if (withRep.length < 2) return '';
     let row = '<div class="cmp-summary-strip">';
-    row += '<div>Grok: <strong>' + (gs.rating || '—') + '</strong>'
+    withRep.forEach(function(p) {
+      const s = engines[p].summary || {};
+      const gt = s.price_target, gu = s.upside_pct;
+      row += '<div>' + p.toUpperCase() + ': <strong>' + (s.rating || '—') + '</strong>'
         + ' · target <strong>' + (gt != null ? ('$' + Number(gt).toFixed(2)) : '—') + '</strong>'
         + ' · upside <strong>' + (gu != null ? ((gu>=0?'+':'')+Number(gu).toFixed(1)+'%') : '—') + '</strong></div>';
-    row += '<div>Claude: <strong>' + (as.rating || '—') + '</strong>'
-        + ' · target <strong>' + (at != null ? ('$' + Number(at).toFixed(2)) : '—') + '</strong>'
-        + ' · upside <strong>' + (au != null ? ((au>=0?'+':'')+Number(au).toFixed(1)+'%') : '—') + '</strong></div>';
-    // Delta
-    if (gt != null && at != null) {
-      const pctDelta = ((at - gt) / gt) * 100;
-      const cls = Math.abs(pctDelta) > 5 ? 'delta-bad' : 'delta-good';
-      row += '<div>Δ Target: <span class="' + cls + '">'
-        + ((pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%') + '</span></div>';
+    });
+    const g = engines.grok || {};
+    if (g.has_report && g.summary && g.summary.price_target != null) {
+      withRep.forEach(function(p) {
+        if (p === 'grok') return;
+        const at = engines[p].summary && engines[p].summary.price_target;
+        if (at == null) return;
+        const pctDelta = ((Number(at) - Number(g.summary.price_target)) / Number(g.summary.price_target)) * 100;
+        const cls = Math.abs(pctDelta) > 5 ? 'delta-bad' : 'delta-good';
+        row += '<div>Δ ' + p.toUpperCase() + ' vs Grok: <span class="' + cls + '">'
+          + ((pctDelta>=0?'+':'')+pctDelta.toFixed(1)+'%') + '</span></div>';
+      });
     }
     row += '</div>';
     return row;
+  }
+
+  function _cmpPaneHtml(eng, e, tk) {
+    const label = eng.toUpperCase();
+    const date = _cmpFmtDate(e.generated_at);
+    let body;
+    if (e.has_report) {
+      body = '<div class="cmp-pane-body md-body" id="cmp-' + eng + '-body"></div>';
+    } else if (_cmpActiveJobId && _cmpActiveTicker === tk && _cmpActiveProvider === eng) {
+      body = '<div style="display:flex;flex-direction:column;height:100%;">'
+        + '<div class="cmp-progress" style="margin:0;border-radius:0;'
+        + 'border-bottom:1px solid #fed7aa;flex-shrink:0;">'
+        + '<div id="cmp-progress-label">Starting ' + label + '…</div>'
+        + '<div class="cmp-progress-bar"><div class="cmp-progress-fill" id="cmp-progress-fill"></div></div>'
+        + '</div>'
+        + '<div class="cmp-pane-body md-body" id="cmp-stream-body" style="flex:1;">'
+        + '<div style="padding:20px;color:#94a3b8;font-size:12px;line-height:1.6;">'
+        +   '<div style="display:flex;align-items:center;gap:8px;">'
+        +     '<span class="cmp-wait-pulse"></span>'
+        +     '<span style="font-weight:600;">Starting up</span>'
+        +   '</div>'
+        +   '<div style="margin-top:10px;">Initialising ' + label + ' comparison'
+        +     (eng === 'deepseek' ? ' · live EDGAR financials' : '')
+        +     '<span class="cmp-dots"><span>.</span><span>.</span><span>.</span></span>'
+        +   '</div>'
+        + '</div></div></div>';
+    } else if (eng === 'grok') {
+      body = '<div class="cmp-pane-empty">No Grok report for ' + tk
+        + '.<br><small style="color:#94a3b8;">Run Analyze from the desk first.</small></div>';
+    } else {
+      const note = eng === 'deepseek'
+        ? 'Pulls financials from live EDGAR (not the local store) for cross-check (~2-3 min).'
+        : 'Same system prompt + gathered data as Grok (~2-3 min).';
+      body = '<div class="cmp-pane-empty">'
+        + 'No ' + label + ' comparison report yet.<br>'
+        + '<small style="color:#94a3b8;">' + note + '</small><br>'
+        + '<button class="cmp-start-btn" data-provider="' + eng + '" data-ticker="' + tk
+        + '">⚡ Run ' + label + ' analysis now</button>'
+        + '</div>';
+    }
+    return '<div class="cmp-pane" data-engine="' + eng + '">'
+      + '<div class="cmp-pane-hdr">'
+      +   '<span class="cmp-pane-engine ' + eng + '">' + label + '</span>'
+      +   '<span class="cmp-pane-meta">' + (e.model || eng) + ' · <strong>' + date + '</strong></span>'
+      + '</div>'
+      + body
+      + '</div>';
   }
 
   function _cmpRenderModal(data) {
@@ -18258,106 +18467,64 @@
       modal.className = 'cmp-modal-backdrop';
       document.body.appendChild(modal);
     }
-    const grok = data.grok || {};
-    const alt  = data.alt  || {};
-    const tk   = data.ticker;
-    const altProvider = (alt.provider || 'claude');
-
-    const grokDate = grok.generated_at ? new Date(grok.generated_at).toLocaleString('en-US', { ..._PT, year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
-    const altDate  = alt.generated_at  ? new Date(alt.generated_at).toLocaleString('en-US',  { ..._PT, year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
-
-    const grokPane = grok.has_report
-      ? '<div class="cmp-pane-body md-body" id="cmp-grok-body"></div>'
-      : '<div class="cmp-pane-empty">No Grok report on disk for ' + tk + '.</div>';
-
-    let altPane;
-    if (alt.has_report) {
-      altPane = '<div class="cmp-pane-body md-body" id="cmp-alt-body"></div>';
-    } else if (_cmpActiveJobId && _cmpActiveTicker === tk) {
-      // Live-streaming state: sticky progress header on top + scrollable body
-      // below that progressively fills with the rendered Markdown as deltas
-      // arrive from /api/jobs/{id} polling (1s interval while streaming).
-      altPane = '<div style="display:flex;flex-direction:column;height:100%;">'
-        + '<div class="cmp-progress" id="cmp-progress-' + tk + '" style="margin:0;border-radius:0;'
-        + 'border-bottom:1px solid #fed7aa;flex-shrink:0;">'
-        + '<div id="cmp-progress-label">Starting comparison…</div>'
-        + '<div class="cmp-progress-bar"><div class="cmp-progress-fill" id="cmp-progress-fill"></div></div>'
-        + '</div>'
-        + '<div class="cmp-pane-body md-body" id="cmp-stream-body" style="flex:1;">'
-        + '<div style="padding:20px;color:#94a3b8;font-size:12px;line-height:1.6;">'
-        +   '<div style="display:flex;align-items:center;gap:8px;">'
-        +     '<span class="cmp-wait-pulse"></span>'
-        +     '<span style="font-weight:600;">Starting up</span>'
-        +   '</div>'
-        +   '<div style="margin-top:10px;">Initialising comparison job — polling for status'
-        +     '<span class="cmp-dots"><span>.</span><span>.</span><span>.</span></span>'
-        +   '</div>'
-        + '</div>'
-        + '</div>'
-        + '</div>';
-    } else {
-      altPane = '<div class="cmp-pane-empty">'
-        + 'No ' + altProvider.toUpperCase() + ' comparison report yet.<br>'
-        + '<small style="color:#94a3b8;">Reruns the analysis using ' + altProvider.toUpperCase() + ' with the same system prompt + gathered data (~2-3 min).</small><br>'
-        + '<button id="cmp-start-btn" data-ticker="' + tk + '">⚡ Run ' + altProvider.toUpperCase() + ' analysis now</button>'
-        + '</div>';
+    const engines = data.engines || {};
+    // Backward-compat for older API
+    if (!data.engines) {
+      engines.grok = data.grok || {};
+      engines.claude = data.alt || {};
+      engines.grok.provider = 'grok';
+      engines.claude.provider = (data.alt && data.alt.provider) || 'claude';
     }
+    const tk = data.ticker;
+    const order = _cmpEngineOrder(Object.assign({}, data, { engines: engines }));
+    const names = order.map(function(p) { return p.toUpperCase(); }).join(' · ');
+
+    const panesHtml = order.map(function(eng) {
+      return _cmpPaneHtml(eng, engines[eng] || {}, tk);
+    }).join('');
+
+    const withRep = order.filter(function(p) {
+      return engines[p] && engines[p].has_report;
+    }).length;
 
     modal.innerHTML =
       '<div class="cmp-modal">'
         + '<div class="cmp-modal-hdr">'
-          + '<div class="cmp-modal-title">🔬 Comparison: ' + tk + ' &nbsp;—&nbsp; Grok vs ' + altProvider.toUpperCase() + '</div>'
+          + '<div class="cmp-modal-title">🔬 Comparison: ' + tk + ' &nbsp;—&nbsp; ' + names + '</div>'
           + '<button class="cmp-modal-close" id="cmp-modal-close">×</button>'
         + '</div>'
-        + (grok.has_report && alt.has_report ? _cmpSummaryStrip(grok, alt) : '')
-        + '<div class="cmp-modal-body">'
-          + '<div class="cmp-pane">'
-            + '<div class="cmp-pane-hdr">'
-              + '<span class="cmp-pane-engine grok">GROK</span>'
-              + '<span class="cmp-pane-meta">' + (grok.model || 'grok') + ' · <strong>' + grokDate + '</strong></span>'
-            + '</div>'
-            + grokPane
-          + '</div>'
-          + '<div class="cmp-pane">'
-            + '<div class="cmp-pane-hdr">'
-              + '<span class="cmp-pane-engine claude">' + altProvider.toUpperCase() + '</span>'
-              + '<span class="cmp-pane-meta">' + (alt.model || altProvider) + ' · <strong>' + altDate + '</strong></span>'
-            + '</div>'
-            + altPane
-          + '</div>'
+        + (withRep >= 2 ? _cmpSummaryStripMulti(engines, order) : '')
+        + '<div class="cmp-modal-body" style="--cmp-pane-count: ' + Math.max(2, order.length) + ';">'
+          + panesHtml
         + '</div>'
-        + '<div class="cmp-disclaimer">Note: Grok runs with live web/X search; Claude works only from the same gathered SEC + market data passed via system prompt. This reflects the real capability difference between the two providers — read accordingly.</div>'
+        + '<div class="cmp-disclaimer">Note: Grok uses live web/X search. Claude/Kimi reuse the Grok gather cache for fair A/B. DeepSeek re-pulls financials from live SEC EDGAR so you can cross-reference numbers against the public filings.</div>'
       + '</div>';
 
-    // Wire close
     document.getElementById('cmp-modal-close').addEventListener('click', _cmpCloseModal);
     modal.addEventListener('click', function(e) {
       if (e.target === modal) _cmpCloseModal();
     });
-    // Wire start button (if shown)
-    const startBtn = document.getElementById('cmp-start-btn');
-    if (startBtn) {
-      startBtn.addEventListener('click', function() {
-        startBtn.disabled = true;
-        startBtn.textContent = 'Starting…';
-        _cmpStartCompare(tk, altProvider);
+    modal.querySelectorAll('.cmp-start-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const p = btn.getAttribute('data-provider');
+        btn.disabled = true;
+        btn.textContent = 'Starting…';
+        _cmpStartCompare(tk, p);
       });
-    }
-    // Render Markdown into both panes using the SAME renderMd() that
-    // openReport() uses → matching look-and-feel between the two viewers.
-    if (grok.has_report) {
-      _cmpRenderMdInto(document.getElementById('cmp-grok-body'), grok.text);
-    }
-    if (alt.has_report) {
-      _cmpRenderMdInto(document.getElementById('cmp-alt-body'), alt.text);
-    }
+    });
+    // Render Markdown for engines that already have reports
+    order.forEach(function(eng) {
+      const e = engines[eng] || {};
+      if (e.has_report) {
+        _cmpRenderMdInto(document.getElementById('cmp-' + eng + '-body'), e.text);
+      }
+    });
   }
 
   async function openCompareModal(ticker) {
     _cmpActiveTicker = ticker;
-    // First render with current disk state
     try {
-      const r = await window.dgaFetch('/api/reports/' + encodeURIComponent(ticker) + '/comparison?provider=claude');
+      const r = await window.dgaFetch('/api/reports/' + encodeURIComponent(ticker) + '/comparison');
       if (!r.ok) throw new Error('comparison ' + r.status);
       const data = await r.json();
       _cmpRenderModal(data);
@@ -18376,14 +18543,17 @@
         throw new Error(err.detail || r.status);
       }
       const job = await r.json();
-      _cmpActiveJobId   = job.job_id;
-      _cmpJobStartMs    = Date.now();
-      _cmpFirstTokenMs  = null;
-      // Re-render modal to show progress block
-      const data = await (await window.dgaFetch('/api/reports/' + encodeURIComponent(ticker) + '/comparison?provider=' + encodeURIComponent(provider))).json();
+      _cmpActiveJobId    = job.job_id;
+      _cmpActiveProvider = provider;
+      _cmpJobStartMs     = Date.now();
+      _cmpFirstTokenMs   = null;
+      const data = await (await window.dgaFetch(
+        '/api/reports/' + encodeURIComponent(ticker) + '/comparison')).json();
       _cmpRenderModal(data);
-      // Poll fast (1s) while streaming so the live-text view is fluid.
-      _cmpPollTimer = setInterval(function() { _cmpPollCompare(ticker, provider, job.job_id); }, 1000);
+      if (_cmpPollTimer) clearInterval(_cmpPollTimer);
+      _cmpPollTimer = setInterval(function() {
+        _cmpPollCompare(ticker, provider, job.job_id);
+      }, 1000);
       _cmpPollCompare(ticker, provider, job.job_id);
     } catch (e) {
       alert('Could not start compare: ' + e.message);
@@ -18391,7 +18561,6 @@
   }
 
   // Track scroll position so we only auto-follow if user is already at bottom.
-  // If they scroll up to read earlier sections, we leave them alone.
   function _cmpIsAtBottom(el, slack) {
     if (!el) return true;
     return (el.scrollTop + el.clientHeight) >= (el.scrollHeight - (slack || 24));
@@ -18410,24 +18579,22 @@
       const r = await window.dgaFetch('/api/jobs/' + encodeURIComponent(jobId));
       if (!r.ok) throw new Error('job ' + r.status);
       const job = await r.json();
+      const labelName = (provider || 'alt').toUpperCase();
 
       const streamedLen = (job.streamed_text || '').length;
       const elapsedMs   = _cmpJobStartMs ? (Date.now() - _cmpJobStartMs) : 0;
       const elapsedTxt  = _cmpFmtElapsed(elapsedMs);
 
-      // Capture time-to-first-token for the streaming rate display
       if (streamedLen > 0 && _cmpFirstTokenMs == null) {
         _cmpFirstTokenMs = Date.now();
       }
 
-      // ── Update progress header ────────────────────────────────────────
       const lbl  = document.getElementById('cmp-progress-label');
       const fill = document.getElementById('cmp-progress-fill');
       if (lbl && job.progress) {
         const pct = Math.round((job.progress.pct || 0) * 100);
         let label = job.progress.label || 'Running';
         if (job.status === 'running' && streamedLen > 0) {
-          // Streaming: char count + rough chars/sec rate
           const streamMs = _cmpFirstTokenMs ? (Date.now() - _cmpFirstTokenMs) : 1;
           const rate = streamMs > 0 ? Math.round((streamedLen / streamMs) * 1000) : 0;
           lbl.textContent = label + ' — streaming · ' + streamedLen.toLocaleString() + ' chars · '
@@ -18438,22 +18605,20 @@
       }
       if (fill && job.progress) fill.style.width = Math.round((job.progress.pct||0)*100) + '%';
 
-      // ── Right pane body: either waiting state or live-streamed text ──
       const streamBody = document.getElementById('cmp-stream-body');
       if (streamBody) {
         if (streamedLen === 0 && job.status !== 'done' && job.status !== 'failed') {
-          // No tokens yet — show informative wait state that changes over time
           const sec = Math.floor(elapsedMs / 1000);
           let msg, color = '#94a3b8';
           if (sec < 15) {
-            msg = 'Waiting for Claude to start generating';
+            msg = 'Waiting for ' + labelName + ' to start generating';
           } else if (sec < 45) {
-            msg = 'Claude is processing your prompt — Opus typically needs 30–60s before the first token on large inputs (your DGA prompt is ~50K tokens)';
+            msg = labelName + ' is processing the prompt — large models often need 30–60s before the first token';
           } else if (sec < 120) {
-            msg = 'Still processing — large reasoning models can take 1–2 min on dense prompts. Hang tight, this is normal';
+            msg = 'Still processing — dense prompts can take 1–2 min. Hang tight.';
             color = '#d97706';
           } else {
-            msg = 'Taking longer than expected (>2 min with no text). The request may have stalled — if it doesn\'t start streaming in another 60s, close this modal and try again';
+            msg = 'Taking longer than expected (>2 min with no text). If it doesn\'t start streaming soon, close and retry.';
             color = '#dc2626';
           }
           streamBody.innerHTML =
@@ -18464,13 +18629,11 @@
             +   '</div>'
             +   '<div style="margin-top:10px;">' + msg + '<span class="cmp-dots"><span>.</span><span>.</span><span>.</span></span></div>'
             +   '<div style="margin-top:14px;font-size:10px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:10px;">'
-            +     '💡 You can close this modal and keep using the site — the job is running on the server and reopening 🔬 will resume the live view.'
+            +     '💡 You can close this modal — the job keeps running; reopening 🔬 resumes the live view.'
             +   '</div>'
             + '</div>';
         } else if (streamedLen > 0) {
           const wasAtBottom = _cmpIsAtBottom(streamBody, 40);
-          // Render rich markdown via the same helper as openReport, then
-          // append the blinking caret so the user can see it's still writing.
           _cmpRenderMdInto(streamBody, job.streamed_text);
           const caret = document.createElement('span');
           caret.style.cssText = 'display:inline-block;width:7px;height:13px;background:#d97706;margin-left:2px;vertical-align:-2px;animation:cmpBlink 1s steps(2) infinite;';
@@ -18479,26 +18642,24 @@
         }
       }
 
-      // ── Terminal states ───────────────────────────────────────────────
       if (job.status === 'done' || job.status === 'failed') {
         clearInterval(_cmpPollTimer); _cmpPollTimer = null;
         if (job.status === 'failed') {
           if (lbl) lbl.textContent = 'Failed: ' + (job.error || 'unknown error');
-          // Show error in the pane body too
           if (streamBody) {
             streamBody.innerHTML = '<div style="padding:20px;color:#dc2626;font-size:12px;">'
-              + '<strong>Claude analysis failed.</strong><br>'
+              + '<strong>' + labelName + ' analysis failed.</strong><br>'
               + (job.error || 'Unknown error') + '</div>';
           }
           return;
         }
-        _cmpActiveJobId  = null;
-        _cmpJobStartMs   = null;
-        _cmpFirstTokenMs = null;
-        // Re-fetch comparison data so the summary strip + final formatted
-        // text replace the streaming view (drops the blinking cursor too).
+        _cmpActiveJobId    = null;
+        _cmpActiveProvider = null;
+        _cmpJobStartMs     = null;
+        _cmpFirstTokenMs   = null;
         try {
-          const d = await (await window.dgaFetch('/api/reports/' + encodeURIComponent(ticker) + '/comparison?provider=' + encodeURIComponent(provider))).json();
+          const d = await (await window.dgaFetch(
+            '/api/reports/' + encodeURIComponent(ticker) + '/comparison')).json();
           _cmpRenderModal(d);
         } catch(e) {}
       }
@@ -18512,8 +18673,8 @@
     if (m) m.remove();
     if (_cmpPollTimer) { clearInterval(_cmpPollTimer); _cmpPollTimer = null; }
     // Note: Compare job keeps running on the server if still in flight.
-    // Reopen the modal anytime to resume display.
     _cmpActiveTicker = null;
+    _cmpActiveProvider = null;
   }
 
   // Expose for inline handlers + console

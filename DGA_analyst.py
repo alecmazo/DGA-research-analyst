@@ -8622,7 +8622,12 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     _cached_um_path  = STOCKS_FOLDER / f"{ticker}_user_msg.txt"
     _cached_mkt_path = STOCKS_FOLDER / f"{ticker}_market_snapshot.json"
     _cache_hit = False
-    if reuse_user_msg and _cached_um_path.exists():
+    # DeepSeek always gathers its own financials from live EDGAR (never the
+    # shared user_msg cache / company_financials store) so numbers can be
+    # cross-checked against the public filing source. Other engines still
+    # reuse the Grok cache for fair A/B compares.
+    _is_deepseek = str(llm_provider or "").lower().strip() == "deepseek"
+    if reuse_user_msg and (not _is_deepseek) and _cached_um_path.exists():
         # Full cache hit — read everything off disk, zero new SEC calls.
         try:
             user_msg = _cached_um_path.read_text()
@@ -8651,7 +8656,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         except Exception as _re:  # noqa: BLE001
             print(f"   ⚠️  Cached-input reuse failed ({_re}); falling through to fresh gathering")
             _cache_hit = False
-    elif reuse_user_msg and audit_path.exists():
+    elif reuse_user_msg and (not _is_deepseek) and audit_path.exists():
         # Partial cache hit — covers reports run BEFORE user_msg caching was
         # added. The XBRL audit JSON has the financials; rebuild verified_block
         # from it and only re-fetch the small (yfinance) market snapshot —
@@ -8735,11 +8740,16 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         # Only hit live SEC/edgartools when the store is empty or the latest
         # quarter is stale. SEC 429s were blocking Analyze for minutes at 10%
         # ("Extracting 10-K/10-Q") even when the DB already had the numbers.
+        #
+        # EXCEPTION — DeepSeek only: always pull from live EDGAR (SEC Excel
+        # filings / companyfacts), never the local company_financials store,
+        # so report numbers can be cross-referenced against the public source.
         data: dict | None = None
         verified_block = None
         primary_ok = False
         _excel_data = None
         _db_data = None
+        _force_edgar = _is_deepseek
 
         def _sec_download_timeout(timeout_s: float = 25.0) -> bool:
             """Download latest 10-K/10-Q Excel with a hard wall-clock cap."""
@@ -8797,42 +8807,58 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             except Exception:
                 return None
 
-        # 1) DB first (milliseconds)
+        # 1) DB first (milliseconds) — skipped for DeepSeek (live EDGAR only)
         _ck()
-        _emit_progress(on_progress, "financials", 0.08, "Loading financials store…")
-        try:
-            _db_data = xlsx_edgar.extract_financials_from_db(ticker)
-            if _db_data:
-                _dq = (_db_data.get("quarterly") or {}).get("current") or {}
-                print(
-                    f"   🗄  company_financials: "
-                    f"{len(_db_data.get('annuals') or [])} annual(s), "
-                    f"quarter={_dq.get('fp')}/{_dq.get('end') or '—'}",
-                    flush=True,
-                )
-        except Exception as _dbe:  # noqa: BLE001
-            print(f"   ⚠️  company_financials DB load failed ({_dbe!s:.120})", flush=True)
-            _db_data = None
-
-        _age = _quarter_age_days(_db_data)
-        _need_sec = (not _db_looks_usable(_db_data)) or (
-            _age is not None and _age > 100  # no recent quarter — try live 10-Q
-        ) or (_age is None and _db_looks_usable(_db_data))
-
-        # If DB is good and quarter is reasonably fresh, skip SEC entirely.
-        if _db_looks_usable(_db_data) and not (
-            _age is not None and _age > 100
-        ):
-            _need_sec = False
+        if _force_edgar:
             print(
-                f"   ⚡ Using financials store (skip live SEC; "
-                f"latest period age={_age if _age is not None else '?'}d)",
+                f"   🌐 DeepSeek path: forcing live EDGAR financials "
+                f"(skipping company_financials store)",
                 flush=True,
             )
+            _emit_progress(on_progress, "financials", 0.08,
+                           "DeepSeek · live EDGAR financials…")
+            _db_data = None
+            _need_sec = True
+            _age = None
+        else:
+            _emit_progress(on_progress, "financials", 0.08, "Loading financials store…")
+            try:
+                _db_data = xlsx_edgar.extract_financials_from_db(ticker)
+                if _db_data:
+                    _dq = (_db_data.get("quarterly") or {}).get("current") or {}
+                    print(
+                        f"   🗄  company_financials: "
+                        f"{len(_db_data.get('annuals') or [])} annual(s), "
+                        f"quarter={_dq.get('fp')}/{_dq.get('end') or '—'}",
+                        flush=True,
+                    )
+            except Exception as _dbe:  # noqa: BLE001
+                print(f"   ⚠️  company_financials DB load failed ({_dbe!s:.120})", flush=True)
+                _db_data = None
+
+            _age = _quarter_age_days(_db_data)
+            _need_sec = (not _db_looks_usable(_db_data)) or (
+                _age is not None and _age > 100  # no recent quarter — try live 10-Q
+            ) or (_age is None and _db_looks_usable(_db_data))
+
+            # If DB is good and quarter is reasonably fresh, skip SEC entirely.
+            if _db_looks_usable(_db_data) and not (
+                _age is not None and _age > 100
+            ):
+                _need_sec = False
+                print(
+                    f"   ⚡ Using financials store (skip live SEC; "
+                    f"latest period age={_age if _age is not None else '?'}d)",
+                    flush=True,
+                )
 
         # 2) Optional short SEC Excel pull (never multi-minute 429 sleep)
+        # DeepSeek always hits SEC (longer budget); others only when store is stale.
         if _need_sec:
-            _budget = 20.0 if _db_looks_usable(_db_data) else 35.0
+            if _force_edgar:
+                _budget = 45.0
+            else:
+                _budget = 20.0 if _db_looks_usable(_db_data) else 35.0
             _sec_download_timeout(_budget)
             try:
                 _excel_data = xlsx_edgar.extract_financials(ticker)

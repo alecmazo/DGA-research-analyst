@@ -6352,13 +6352,15 @@ def _run_compare_analysis(job_id: str, ticker: str, provider: str) -> None:
     """Background worker for /api/reports/{ticker}/compare.
 
     Calls analyst.analyze_ticker with llm_provider=<provider> and generate_gamma=False.
-    Writes to "{ticker}_DGA_Report_{provider}.md" instead of the canonical path.
-    Does NOT persist to the analyst_reports DB table — the comparison report
-    is intentionally treated as a side artifact, not a replacement.
+    Persists via _persist_analysis_text into the provider-specific column
+    (report_md_claude / report_md_deepseek / report_md_kimi / report_md).
 
     on_delta hook: while the LLM is streaming, each text chunk is appended
     to _jobs[job_id]['streamed_text'] so the frontend can poll and render
     the report live in the comparison modal.
+
+    Claude/Kimi reuse the Grok user_msg cache (fair A/B, no second EDGAR hit).
+    DeepSeek always gathers live EDGAR financials for cross-check.
     """
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
@@ -6385,6 +6387,9 @@ def _run_compare_analysis(job_id: str, ticker: str, provider: str) -> None:
     # flow's whole purpose is the LLM output; downstream artifact failures
     # must not throw that away.
     result: dict = {}
+    # DeepSeek: do not reuse Grok's cached financials — force live EDGAR path.
+    # Claude/Kimi: reuse cached user_msg for fair same-input A/B.
+    _reuse = str(provider or "").lower().strip() != "deepseek"
     try:
         result = analyst.analyze_ticker(
             ticker,
@@ -6394,10 +6399,7 @@ def _run_compare_analysis(job_id: str, ticker: str, provider: str) -> None:
             on_progress=_record,
             llm_provider=provider,
             on_delta=_record_delta,
-            # CRITICAL for Compare: reuse the EXACT user_msg from the
-            # canonical Grok run so both engines see identical inputs.
-            # Also avoids re-hitting SEC EDGAR.
-            reuse_user_msg=True,
+            reuse_user_msg=_reuse,
         )
     except BaseException as exc:  # noqa: BLE001
         tb_str = traceback.format_exc()
@@ -6433,28 +6435,50 @@ def _run_compare_analysis(job_id: str, ticker: str, provider: str) -> None:
 def start_report_compare(ticker: str, request: Request,
                          background_tasks: BackgroundTasks,
                          provider: str = "claude"):
-    """Kick off a comparison analysis of `ticker` using the alt LLM provider.
+    """Kick off a comparison analysis of `ticker` using an alt LLM provider.
 
     Returns a standard job dict — poll /api/jobs/{job_id} for progress like
-    any other single-ticker analysis. When done, fetch the side-by-side data
+    any other single-ticker analysis. When done, fetch multi-engine data
     via /api/reports/{ticker}/comparison.
 
-    provider: 'claude' (default) | 'grok'
+    provider: 'claude' (default) | 'deepseek' | 'kimi' | 'grok'
     """
     _claims_or_401(request)
     provider = (provider or "claude").lower().strip()
-    if provider not in ("claude", "grok"):
-        raise HTTPException(422, f"Unknown provider: {provider!r}")
+    if provider not in ("claude", "grok", "deepseek", "kimi"):
+        raise HTTPException(422, f"Unknown provider: {provider!r}. "
+                                  "Use claude | deepseek | kimi | grok")
     tk = (ticker or "").strip().upper()
     if not tk or not tk.replace(".", "").replace("-", "").isalnum() or len(tk) > 12:
         raise HTTPException(422, "Invalid ticker")
 
-    # Verify the canonical Grok report exists — comparing against nothing is
-    # nonsensical and points to a UX bug or a stale tickers list.
+    # Prefer a Grok baseline for A/B, but allow DeepSeek/Kimi compare if any
+    # engine already has a saved report (multi-engine desk).
     grok_md = analyst.STOCKS_FOLDER / f"{tk}_DGA_Report.md"
-    if not grok_md.exists() and provider == "claude":
-        raise HTTPException(404, f"No canonical Grok report for {tk} to compare against. "
-                                  "Run the standard analyzer first.")
+    has_grok_disk = grok_md.exists()
+    has_any_report = has_grok_disk
+    if not has_any_report and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT report_md, report_md_claude, report_md_deepseek, report_md_kimi
+                      FROM analyst_reports WHERE ticker = %s
+                """, (tk,))
+                row = cur.fetchone() or {}
+            has_any_report = any(
+                (row.get(c) or "").strip()
+                for c in ("report_md", "report_md_claude",
+                          "report_md_deepseek", "report_md_kimi")
+            )
+            has_grok_disk = has_grok_disk or bool((row.get("report_md") or "").strip())
+        except Exception:
+            pass
+    if not has_any_report and provider != "grok":
+        raise HTTPException(
+            404,
+            f"No saved report for {tk} to compare against. "
+            "Run a standard analysis first.",
+        )
 
     job_id  = str(uuid.uuid4())
     now_iso = datetime.utcnow().isoformat()
@@ -6467,7 +6491,7 @@ def start_report_compare(ticker: str, request: Request,
             "error":            None,
             "result":           None,
             "compare_provider": provider,
-            "streamed_text":    "",   # filled by Claude streaming deltas in _run_compare_analysis
+            "streamed_text":    "",   # filled by streaming deltas in _run_compare_analysis
             "progress":         {"step": "queued", "pct": 0.0,
                                   "label": f"Queued — {provider.title()} comparison"},
         }
@@ -6479,79 +6503,79 @@ def start_report_compare(ticker: str, request: Request,
 
 @app.get("/api/reports/{ticker}/comparison")
 def get_report_comparison(ticker: str, request: Request, provider: str = "claude"):
-    """Return both the canonical (Grok) report and the alt-provider comparison.
+    """Return multi-engine report comparison for `ticker`.
 
-    Either side may be missing (text=None) — frontend renders an empty-state
-    on that side with an action button to generate it.
+    Response includes:
+      • engines — map of grok/claude/deepseek/kimi panes (text, model, summary)
+      • configured — which providers have API keys right now
+      • alt / grok — backward-compat fields (alt = requested `provider`)
 
-    Hydration strategy:
-      Both providers — DB first (analyst_reports.report_md /
-      report_md_claude), then filesystem. The DB read survives Railway
-      redeploys that wipe /stocks; without this, Claude reports the user
-      ran via Compare or LLM Lab disappeared after every redeploy, even
-      though they were persisted to the DB by ui113.
+    Missing engines have has_report=false; the UI offers a Run button.
+    Hydration: Postgres first, then filesystem under stocks/.
     """
     _claims_or_401(request)
     provider = (provider or "claude").lower().strip()
+    if provider not in ("claude", "grok", "deepseek", "kimi"):
+        provider = "claude"
     tk = (ticker or "").strip().upper()
 
-    grok_text:  str | None = None
-    grok_mtime: str | None = None
-    alt_text:   str | None = None
-    alt_mtime:  str | None = None
-    grok_path  = analyst.STOCKS_FOLDER / f"{tk}_DGA_Report.md"
-    alt_path   = analyst.STOCKS_FOLDER / f"{tk}_DGA_Report_{provider}.md"
+    # provider → (db md col, db ts col, disk filename suffix, model attr)
+    _ENGINE_SPEC = (
+        ("grok",     "report_md",         "generated_at",         "",         "GROK_MODEL"),
+        ("claude",   "report_md_claude",  "claude_generated_at",  "claude",   "CLAUDE_MODEL"),
+        ("deepseek", "report_md_deepseek","deepseek_generated_at","deepseek", "DEEPSEEK_MODEL"),
+        ("kimi",     "report_md_kimi",    "kimi_generated_at",    "kimi",     "KIMI_MODEL"),
+    )
 
-    # ── Single DB read pulls BOTH providers' text + timestamps ───────────
+    texts:  dict[str, str | None] = {e[0]: None for e in _ENGINE_SPEC}
+    mtimes: dict[str, str | None] = {e[0]: None for e in _ENGINE_SPEC}
+    paths = {
+        "grok": analyst.STOCKS_FOLDER / f"{tk}_DGA_Report.md",
+        "claude": analyst.STOCKS_FOLDER / f"{tk}_DGA_Report_claude.md",
+        "deepseek": analyst.STOCKS_FOLDER / f"{tk}_DGA_Report_deepseek.md",
+        "kimi": analyst.STOCKS_FOLDER / f"{tk}_DGA_Report_kimi.md",
+    }
+
+    # ── Single DB read pulls ALL engines' text + timestamps ─────────────
     if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
         try:
             with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
                 cur.execute("""
                     SELECT report_md, generated_at,
-                           report_md_claude, claude_generated_at
+                           report_md_claude, claude_generated_at,
+                           report_md_deepseek, deepseek_generated_at,
+                           report_md_kimi, kimi_generated_at
                       FROM analyst_reports
                      WHERE ticker = %s
                 """, (tk,))
                 row = cur.fetchone()
             if row:
-                if row.get("report_md"):
-                    grok_text  = row["report_md"]
-                    grok_mtime = row["generated_at"].isoformat() if row["generated_at"] else None
+                for eng, md_col, ts_col, _suf, _mattr in _ENGINE_SPEC:
+                    md = (row.get(md_col) or "").strip()
+                    if not md:
+                        continue
+                    texts[eng] = md
+                    ts = row.get(ts_col)
+                    mtimes[eng] = ts.isoformat() if ts else None
+                    # Best-effort hydrate local file for reuse_user_msg / disk reads
                     try:
-                        if not grok_path.exists():
-                            grok_path.write_text(grok_text)
-                    except Exception:
-                        pass
-                if provider == "claude" and row.get("report_md_claude"):
-                    alt_text  = row["report_md_claude"]
-                    alt_mtime = (row["claude_generated_at"].isoformat()
-                                 if row.get("claude_generated_at") else None)
-                    # Best-effort: hydrate local file so the next read + any
-                    # _run_compare_analysis(reuse_user_msg=True) finds the
-                    # cached user_msg + can write to disk in the standard spot.
-                    try:
-                        if not alt_path.exists():
-                            alt_path.write_text(alt_text)
+                        p = paths[eng]
+                        if not p.exists():
+                            p.write_text(md)
                     except Exception:
                         pass
         except Exception as _e:
             print(f"[compare] DB read failed for {tk} (falling back to disk): {_e!s:.200}")
 
     # Filesystem fallback if DB miss or unavailable
-    if grok_text is None and grok_path.exists():
-        try:
-            grok_text  = grok_path.read_text()
-            from datetime import datetime as _dt
-            grok_mtime = _dt.fromtimestamp(grok_path.stat().st_mtime).isoformat()
-        except Exception:
-            pass
-    if alt_text is None and alt_path.exists():
-        try:
-            alt_text  = alt_path.read_text()
-            from datetime import datetime as _dt
-            alt_mtime = _dt.fromtimestamp(alt_path.stat().st_mtime).isoformat()
-        except Exception:
-            pass
+    for eng, p in paths.items():
+        if texts[eng] is None and p.exists():
+            try:
+                texts[eng] = p.read_text()
+                from datetime import datetime as _dt
+                mtimes[eng] = _dt.fromtimestamp(p.stat().st_mtime).isoformat()
+            except Exception:
+                pass
 
     def _safe_summary(text: str | None) -> dict:
         if not text:
@@ -6561,25 +6585,58 @@ def get_report_comparison(ticker: str, request: Request, provider: str = "claude
         except Exception:
             return {}
 
+    def _model_for(eng: str, attr: str) -> str:
+        return getattr(analyst, attr, eng)
+
+    # Configured providers (API keys present) — UI shows Run for these
+    try:
+        catalog = analyst.providers_catalog() or {}
+    except Exception:
+        catalog = {}
+    configured = {
+        eng: bool((catalog.get(eng) or {}).get("configured"))
+        for eng, *_ in _ENGINE_SPEC
+    }
+    # Always treat grok as available when we have a report (baseline)
+    if texts["grok"]:
+        configured["grok"] = True
+
+    engines: dict[str, dict] = {}
+    for eng, _md, _ts, _suf, mattr in _ENGINE_SPEC:
+        txt = texts[eng]
+        engines[eng] = {
+            "provider":     eng,
+            "text":         txt,
+            "generated_at": mtimes[eng],
+            "model":        _model_for(eng, mattr),
+            "summary":      _safe_summary(txt),
+            "has_report":   bool(txt),
+            "configured":   bool(configured.get(eng)),
+        }
+
+    # Engines to show in the UI: any with a report, plus configured alts
+    # (so user can click Run). Always include grok + requested provider.
+    show = []
+    for eng, *_ in _ENGINE_SPEC:
+        e = engines[eng]
+        if e["has_report"] or e["configured"] or eng == "grok" or eng == provider:
+            show.append(eng)
+    # Prefer a stable order: grok, claude, deepseek, kimi
+    order = ["grok", "claude", "deepseek", "kimi"]
+    show = [e for e in order if e in show]
+
+    # Backward-compat: grok + single alt (requested provider)
+    alt_eng = provider if provider != "grok" else "claude"
+    alt = dict(engines.get(alt_eng) or {})
+    alt["provider"] = alt_eng
+
     return {
         "ticker": tk,
-        "grok": {
-            "text":         grok_text,
-            "generated_at": grok_mtime,
-            "model":        getattr(analyst, "GROK_MODEL", "grok"),
-            "summary":      _safe_summary(grok_text),
-            "has_report":   bool(grok_text),
-        },
-        "alt": {
-            "provider":     provider,
-            "text":         alt_text,
-            "generated_at": alt_mtime,
-            "model":        getattr(analyst,
-                                     f"{provider.upper()}_MODEL",
-                                     provider),
-            "summary":      _safe_summary(alt_text),
-            "has_report":   bool(alt_text),
-        },
+        "engines": engines,
+        "show": show,
+        "configured": configured,
+        "grok": engines["grok"],
+        "alt": alt,
     }
 
 
@@ -6809,7 +6866,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui405-20260802-dga-analyst-rename"
+WEB_BUILD_VERSION = "ui406-20260802-compare-deepseek-edgar"
 
 
 @app.get("/api/build")
