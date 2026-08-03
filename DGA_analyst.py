@@ -3197,15 +3197,13 @@ Write your morning brief for the DGA Capital trading floor. Use EXACTLY this for
 """
 
 
-def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55) -> str:
-    """Live last/prior/% for book tickers + key ETFs — ground truth for Daily Pulse.
+def _fetch_daily_brief_quotes(tickers: list[str], *, limit: int = 55) -> tuple[list[str], dict]:
+    """Return (ordered_symbols, quotes) for book + key ETFs.
 
-    Without this block, the LLM invents stale training prices (wildly wrong).
-    Uses market_data.get_quotes (session-aware Yahoo) with a short wall clock.
+    quotes[SYM] = {price, prev_close, pct_change, source, ...} from session-aware Yahoo.
     """
     syms: list[str] = []
     seen: set[str] = set()
-    # Cross-asset references the brief often cites
     for t in list(tickers or []) + [
         "SPY", "QQQ", "IWM", "DIA", "TLT", "HYG", "GLD", "USO", "UUP", "VIXY",
     ]:
@@ -3217,7 +3215,7 @@ def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55) -> st
         if len(syms) >= limit:
             break
     if not syms:
-        return ""
+        return [], {}
 
     quotes: dict = {}
     try:
@@ -3225,7 +3223,6 @@ def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55) -> st
         quotes = _md.get_quotes(syms) or {}
     except Exception as e:
         print(f"[daily_brief] get_quotes failed: {e!s:.120}", flush=True)
-        # Fallback: per-ticker yfinance snapshot (slower, fewer names)
         for t in syms[:25]:
             try:
                 snap = fetch_market_snapshot(t)
@@ -3238,6 +3235,49 @@ def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55) -> st
                     }
             except Exception:
                 pass
+    # Normalize keys to upper
+    out: dict = {}
+    for k, v in (quotes or {}).items():
+        if isinstance(v, dict):
+            out[str(k).upper()] = v
+    return syms, out
+
+
+def _quote_fields(q: dict) -> tuple[float | None, float | None, float | None]:
+    """(last, prior, day_pct) from a market_data quote dict."""
+    if not q:
+        return None, None, None
+    px = q.get("price")
+    prev = q.get("prev_close") if q.get("prev_close") is not None else q.get("previous_close")
+    pct = q.get("pct_change")
+    try:
+        px_f = float(px) if px is not None else None
+    except (TypeError, ValueError):
+        px_f = None
+    try:
+        prev_f = float(prev) if prev is not None else None
+    except (TypeError, ValueError):
+        prev_f = None
+    try:
+        if pct is None and px_f is not None and prev_f and prev_f != 0:
+            pct = (px_f - prev_f) / prev_f * 100.0
+        pct_f = float(pct) if pct is not None else None
+    except (TypeError, ValueError):
+        pct_f = None
+    return px_f, prev_f, pct_f
+
+
+def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55,
+                                   quotes: dict | None = None,
+                                   syms: list[str] | None = None) -> str:
+    """Prompt block: live last/prior/% — ground truth so the model cannot invent $ levels.
+
+    Without this block, the LLM invents stale training prices (wildly wrong).
+    """
+    if syms is None or quotes is None:
+        syms, quotes = _fetch_daily_brief_quotes(tickers, limit=limit)
+    if not syms:
+        return ""
 
     lines = [
         "VERIFIED LIVE PRICES (session-aware Yahoo — NON-NEGOTIABLE for any "
@@ -3246,26 +3286,13 @@ def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55) -> st
     ]
     n_ok = 0
     for t in syms:
-        q = quotes.get(t) or quotes.get(t.upper()) or {}
-        px = q.get("price")
-        prev = q.get("prev_close") if q.get("prev_close") is not None else q.get("previous_close")
-        pct = q.get("pct_change")
+        q = quotes.get(t) or {}
+        px, prev, pct = _quote_fields(q)
         if px is None and prev is None:
             continue
-        try:
-            px_s = f"${float(px):.2f}" if px is not None else "—"
-        except (TypeError, ValueError):
-            px_s = "—"
-        try:
-            prev_s = f"${float(prev):.2f}" if prev is not None else "—"
-        except (TypeError, ValueError):
-            prev_s = "—"
-        try:
-            if pct is None and px is not None and prev and float(prev) != 0:
-                pct = (float(px) - float(prev)) / float(prev) * 100.0
-            pct_s = f"{float(pct):+.2f}%" if pct is not None else "—"
-        except (TypeError, ValueError):
-            pct_s = "—"
+        px_s = f"${px:.2f}" if px is not None else "—"
+        prev_s = f"${prev:.2f}" if prev is not None else "—"
+        pct_s = f"{pct:+.2f}%" if pct is not None else "—"
         src = str(q.get("source") or q.get("price_source") or "yahoo")[:24]
         lines.append(f"{t} | {px_s} | {prev_s} | {pct_s} | {src}")
         n_ok += 1
@@ -3277,6 +3304,94 @@ def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55) -> st
         )
     print(f"[daily_brief] injected live prices for {n_ok}/{len(syms)} symbols", flush=True)
     return "\n" + "\n".join(lines) + "\n"
+
+
+def _format_live_prices_md(syms: list[str], quotes: dict, *, book_only: bool = False,
+                           book: list[str] | None = None, max_rows: int = 40) -> str:
+    """User-visible markdown table of verified prices (appended to Daily Pulse body)."""
+    if not quotes:
+        return ""
+    book_set = {str(t).upper() for t in (book or [])}
+    rows: list[str] = []
+    for t in syms:
+        if book_only and book_set and t not in book_set:
+            continue
+        q = quotes.get(t) or {}
+        px, prev, pct = _quote_fields(q)
+        if px is None:
+            continue
+        prev_s = f"${prev:.2f}" if prev is not None else "—"
+        pct_s = f"{pct:+.2f}%" if pct is not None else "—"
+        rows.append(f"| **{t}** | ${px:.2f} | {prev_s} | {pct_s} |")
+        if len(rows) >= max_rows:
+            break
+    if not rows:
+        return ""
+    header = (
+        "\n\n---\n\n## 📊 VERIFIED LIVE PRICES\n\n"
+        "*Session-aware Yahoo quotes — these are ground truth. "
+        "Ignore any other dollar levels the narrative may have invented.*\n\n"
+        "| Ticker | Last | Prior close | Day % |\n"
+        "|---|---:|---:|---:|\n"
+    )
+    return header + "\n".join(rows) + "\n"
+
+
+def _rewrite_brief_prices(markdown: str, quotes: dict) -> str:
+    """Replace invented $LAST / (+/-X%) next to known tickers with live quotes.
+
+    Handles common Daily Pulse line shapes:
+      **TICKER** $180.00 (+2.1%) — …
+      **TICKER** $180 (+/-2%)
+      TICKER $180.00
+    Only rewrites when the quoted last differs from live by > 1.5% (or $0.50 min).
+    """
+    if not markdown or not quotes:
+        return markdown or ""
+    import re as _re
+
+    def _live(t: str):
+        q = quotes.get(t.upper()) or {}
+        return _quote_fields(q)
+
+    # **TICKER** $price optional (+/-pct%)
+    pat = _re.compile(
+        r"(\*\*([A-Z]{1,6})\*\*|\b([A-Z]{1,6})\b)"
+        r"(\s+)"
+        r"\$([0-9]+(?:\.[0-9]+)?)"
+        r"((?:\s*\([+\-±]?\s*[0-9]+(?:\.[0-9]+)?\s*%\))?)",
+    )
+
+    def _sub(m: _re.Match) -> str:
+        full_sym = m.group(1)
+        t = (m.group(2) or m.group(3) or "").upper()
+        px_live, _prev, pct_live = _live(t)
+        if px_live is None:
+            return m.group(0)
+        try:
+            px_old = float(m.group(5))
+        except (TypeError, ValueError):
+            return m.group(0)
+        # Only fix when inventively wrong
+        thresh = max(0.50, abs(px_live) * 0.015)
+        if abs(px_old - px_live) < thresh:
+            # Still normalize day-% if present and we have live pct
+            if m.group(6) and pct_live is not None:
+                return f"{full_sym}{m.group(4)}${px_live:.2f} ({pct_live:+.2f}%)"
+            return m.group(0)
+        pct_part = ""
+        if m.group(6) or pct_live is not None:
+            if pct_live is not None:
+                pct_part = f" ({pct_live:+.2f}%)"
+            else:
+                pct_part = m.group(6) or ""
+        return f"{full_sym}{m.group(4)}${px_live:.2f}{pct_part}"
+
+    try:
+        return pat.sub(_sub, markdown)
+    except Exception as e:
+        print(f"[daily_brief] price rewrite failed: {e!s:.120}", flush=True)
+        return markdown
 
 
 def run_daily_brief(book_tickers: list[str] | None = None,
@@ -3292,8 +3407,8 @@ def run_daily_brief(book_tickers: list[str] | None = None,
     evidence_context: optional free-data pack (Market Wire / Fund Filings text)
         injected when volume LLM has no live search.
 
-    Always injects a VERIFIED LIVE PRICES table so the model cannot invent
-    stale training prices for the book (the root cause of wrong Daily Pulse $).
+    Always injects a VERIFIED LIVE PRICES table (prompt + output rewrite + visible
+    markdown table) so the model cannot invent stale training prices for the book.
     """
     today = datetime.now().strftime("%A, %B %d, %Y")
     now_iso = datetime.utcnow().isoformat()
@@ -3305,7 +3420,10 @@ def run_daily_brief(book_tickers: list[str] | None = None,
             _book.append(_t)
     book_line = (f"\nDGA BOOK (positions + watchlist) — focus the YOUR BOOK section on these: "
                  f"{', '.join(_book[:60])}\n" if _book else "\nDGA BOOK: (none provided)\n")
-    price_block = _build_daily_brief_price_block(_book)
+    # Fetch once — feed prompt, post-rewrite, and user-visible table
+    _syms, _quotes = _fetch_daily_brief_quotes(_book)
+    price_block = _build_daily_brief_price_block(
+        _book, quotes=_quotes, syms=_syms)
     user_msg = _DAILY_BRIEF_USER_TEMPLATE.format(
         today=today, book=book_line, prices=price_block)
     if evidence_context:
@@ -3363,12 +3481,42 @@ def run_daily_brief(book_tickers: list[str] | None = None,
             "cost_usd": None,
         }
 
+    # Belt-and-suspenders: rewrite invented $ levels, then append verified table
+    # so the user always sees ground-truth prices even if the model ignored them.
+    if _quotes and markdown:
+        markdown = _rewrite_brief_prices(markdown, _quotes)
+        _price_md = _format_live_prices_md(
+            _syms, _quotes, book_only=bool(_book), book=_book, max_rows=45)
+        if _price_md and "VERIFIED LIVE PRICES" not in (markdown or ""):
+            # Prefer insert after YOUR BOOK header; else append
+            import re as _re_ins
+            _m = _re_ins.search(
+                r"(##\s*[^\n]*YOUR BOOK[^\n]*\n)", markdown, _re_ins.IGNORECASE)
+            if _m:
+                _ins = _m.end()
+                markdown = markdown[:_ins] + _price_md + "\n" + markdown[_ins:]
+            else:
+                markdown = (markdown or "") + _price_md
+
     # Parse out **TICKER** tokens so the UI can make them tappable.
     import re as _re
     tickers = list(dict.fromkeys(
         m.group(1).upper()
         for m in _re.finditer(r'^\*\*([A-Z]{1,6})\*\*\s*$', markdown, _re.MULTILINE)
     ))
+
+    # Compact quote snapshot for UI / debug (not full raw feed)
+    _live_snap = {}
+    for _t, _q in (_quotes or {}).items():
+        _px, _pr, _pc = _quote_fields(_q)
+        if _px is None:
+            continue
+        _live_snap[_t] = {
+            "last": round(_px, 4),
+            "prior": round(_pr, 4) if _pr is not None else None,
+            "day_pct": round(_pc, 4) if _pc is not None else None,
+            "source": str(_q.get("source") or "")[:32],
+        }
 
     payload = {
         "ok": True,
@@ -3391,6 +3539,7 @@ def run_daily_brief(book_tickers: list[str] | None = None,
         "output_tokens": _usage.get("output_tokens"),
         # True when we successfully attached the verified price table
         "live_prices_injected": bool(price_block and "LAST |" in price_block),
+        "live_quotes": _live_snap,
     }
 
     # Persist to disk so it survives restarts and can be hydrated.

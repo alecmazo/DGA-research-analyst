@@ -55,7 +55,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Nightly updated on store card** | **`ui412-20260802-nightly-updated-card`** | Financials store card lists tickers with new 10-Q/10-K from last nightly |
 | **GP change password Settings** | **`ui413-20260803-gp-change-password`** | Clear GP-only password change card on Settings → Security |
 | **Daily Pulse live prices** | **`ui414-20260803-daily-brief-live-prices`** | Inject verified Yahoo quotes into Daily Brief prompt — stop LLM inventing prices |
-| **Next deploy after this** | **`ui415-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Daily Pulse price enforce** | **`ui415-20260803-daily-brief-price-enforce`** | Prompt + rewrite invented $ + visible VERIFIED LIVE PRICES table in output |
+| **Next deploy after this** | **`ui416-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
