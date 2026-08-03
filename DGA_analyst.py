@@ -851,8 +851,18 @@ def volume_llm_status() -> dict:
 
 
 def _provider_client(provider: str):
-    """OpenAI-compatible client for kimi | deepseek."""
+    """OpenAI-compatible client for kimi | deepseek.
+
+    Always sets a hard HTTP timeout so a hung Moonshot/DeepSeek socket can't
+    sit until the 900s Analyze watchdog fires with a useless timeout error.
+    """
     from openai import OpenAI
+    # Connect 30s · write 60s · read long (report generation)
+    try:
+        import httpx
+        _timeout = httpx.Timeout(600.0, connect=30.0, write=60.0, read=600.0)
+    except Exception:
+        _timeout = 600.0
     p = (provider or "").lower().strip()
     if p in ("kimi", "volume") or (p == "" and kimi_configured()):
         if not kimi_configured():
@@ -860,14 +870,22 @@ def _provider_client(provider: str):
                 "Kimi not configured. Set KIMI_API_KEY on Railway "
                 "(base https://api.moonshot.ai/v1, model kimi-k3)."
             )
-        return OpenAI(api_key=KIMI_API_KEY, base_url=KIMI_BASE_URL), KIMI_MODEL, "kimi"
+        return (
+            OpenAI(api_key=KIMI_API_KEY, base_url=KIMI_BASE_URL, timeout=_timeout),
+            KIMI_MODEL,
+            "kimi",
+        )
     if p == "deepseek":
         if not deepseek_configured():
             raise RuntimeError(
                 "DeepSeek not configured. Set DEEPSEEK_API_KEY (or VOLUME_LLM_API_KEY "
                 "with DeepSeek base) on Railway."
             )
-        return OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL), DEEPSEEK_MODEL, "deepseek"
+        return (
+            OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL, timeout=_timeout),
+            DEEPSEEK_MODEL,
+            "deepseek",
+        )
     raise RuntimeError(f"Unknown cheap provider: {provider!r}")
 
 
@@ -900,14 +918,15 @@ def call_volume_llm(system_prompt: str, user_content: str,
                     provider: str | None = None,
                     temperature: float = 0.3,
                     max_tokens: int | None = None,
+                    on_delta=None,
                     usage_capture=None) -> str:
     """Call Kimi or DeepSeek (OpenAI-compat). No live web/X.
 
     ``provider``: 'kimi' | 'deepseek' (default: kimi if configured else deepseek).
-    Usage is cost-tracked via estimate_volume_cost.
+    Streams by default so heartbeats advance and hung sockets fail with a real
+    HTTP timeout instead of sitting until the Analyze 900s watchdog.
 
-    Full equity reports need a large completion budget — Moonshot's default
-    max_tokens is too small and truncated Kimi Analyze to empty/partial.
+    Kimi full reports previously hung 15 min (non-stream + no client timeout).
     """
     p = (provider or "").lower().strip()
     if not p:
@@ -920,58 +939,143 @@ def call_volume_llm(system_prompt: str, user_content: str,
     client, default_model, prov_id = _provider_client(p)
     mid = model or default_model
     temp = _volume_llm_temperature(prov_id, mid, temperature)
-    # Full reports are long (~6–12k tokens). Default 32k so Kimi/DeepSeek
-    # don't hit platform max_tokens mid-report.
+    # Full reports are long. Kimi/Moonshot is happier with 16k; DeepSeek 32k.
     if max_tokens is None:
-        max_tokens = int(os.environ.get("VOLUME_REPORT_MAX_TOKENS") or "32000")
+        if prov_id == "kimi":
+            max_tokens = int(os.environ.get("KIMI_REPORT_MAX_TOKENS") or "16384")
+        else:
+            max_tokens = int(os.environ.get("VOLUME_REPORT_MAX_TOKENS") or "32000")
     max_tokens = max(2048, min(int(max_tokens), 128000))
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
     kwargs: dict = {
         "model": mid,
         "temperature": temp,
         "max_tokens": max_tokens,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
+        "messages": messages,
+        "stream": True,
     }
+    print(
+        f"   📡 {prov_id.upper()} stream start model={mid} max_tokens={max_tokens} "
+        f"sys={len(system_prompt):,} user={len(user_content):,} chars",
+        flush=True,
+    )
+    parts: list[str] = []
+    usage_obj = None
     try:
-        resp = client.chat.completions.create(**kwargs)
+        stream = client.chat.completions.create(**kwargs)
+        for chunk in stream:
+            try:
+                # Some SDKs attach final usage on the last chunk
+                u = getattr(chunk, "usage", None)
+                if u is not None:
+                    usage_obj = u
+            except Exception:
+                pass
+            try:
+                choice0 = (chunk.choices or [None])[0]
+            except Exception:
+                choice0 = None
+            if choice0 is None:
+                continue
+            delta = getattr(choice0, "delta", None)
+            piece = getattr(delta, "content", None) if delta is not None else None
+            if not piece:
+                # non-stream fallback shape
+                msg = getattr(choice0, "message", None)
+                piece = getattr(msg, "content", None) if msg is not None else None
+            if piece:
+                parts.append(piece)
+                if on_delta is not None:
+                    try:
+                        on_delta(piece)
+                    except Exception:
+                        pass
     except Exception as exc:
-        # Some hosts reject max_tokens — retry once without it
         msg = str(exc).lower()
+        # Retry without max_tokens if rejected
         if "max_tokens" in msg or "max_completion" in msg:
-            print(f"⚠️  [call_volume_llm] {prov_id} rejected max_tokens={max_tokens}; retrying bare",
+            print(f"⚠️  [call_volume_llm] {prov_id} rejected max_tokens={max_tokens}; retry stream bare",
                   flush=True)
             kwargs.pop("max_tokens", None)
+            parts = []
+            stream = client.chat.completions.create(**kwargs)
+            for chunk in stream:
+                try:
+                    choice0 = (chunk.choices or [None])[0]
+                except Exception:
+                    choice0 = None
+                if choice0 is None:
+                    continue
+                delta = getattr(choice0, "delta", None)
+                piece = getattr(delta, "content", None) if delta is not None else None
+                if piece:
+                    parts.append(piece)
+                    if on_delta is not None:
+                        try:
+                            on_delta(piece)
+                        except Exception:
+                            pass
+        elif "stream" in msg or "streaming" in msg:
+            # Host rejects stream — fall back to blocking once (with timeout)
+            print(f"⚠️  [call_volume_llm] {prov_id} stream unsupported; blocking fallback",
+                  flush=True)
+            kwargs.pop("stream", None)
             resp = client.chat.completions.create(**kwargs)
+            text_one = (resp.choices[0].message.content or "").strip()
+            if usage_capture is not None:
+                try:
+                    u = getattr(resp, "usage", None)
+                    inp = int(getattr(u, "prompt_tokens", 0) or 0)
+                    out = int(getattr(u, "completion_tokens", 0) or 0)
+                    cost = estimate_volume_cost(mid, inp, out)
+                    usage_capture({
+                        "model": mid, "provider": prov_id,
+                        "input_tokens": inp, "output_tokens": out,
+                        "cached_input_tokens": 0, "cost_usd": cost,
+                    })
+                except Exception:
+                    pass
+            if not text_one:
+                raise RuntimeError(f"{prov_id} ({mid}) returned empty content") from exc
+            if on_delta is not None:
+                try:
+                    on_delta(text_one)
+                except Exception:
+                    pass
+            return text_one
         else:
             raise
-    text = (resp.choices[0].message.content or "").strip()
+
+    text = "".join(parts).strip()
     if usage_capture is not None:
         try:
-            u = getattr(resp, "usage", None)
-            inp = int(getattr(u, "prompt_tokens", 0) or 0)
-            out = int(getattr(u, "completion_tokens", 0) or 0)
-            cached = 0
-            try:
-                ptd = getattr(u, "prompt_tokens_details", None)
-                if ptd is not None:
-                    cached = int(getattr(ptd, "cached_tokens", 0) or 0)
-            except Exception:
-                cached = 0
-            cost = estimate_volume_cost(mid, inp, out, cached_input_tokens=cached)
+            inp = int(getattr(usage_obj, "prompt_tokens", 0) or 0) if usage_obj else 0
+            out = int(getattr(usage_obj, "completion_tokens", 0) or 0) if usage_obj else 0
+            # Rough fallback estimate when stream has no usage
+            if not out and text:
+                out = max(1, len(text) // 4)
+            if not inp:
+                inp = max(1, (len(system_prompt) + len(user_content)) // 4)
+            cost = estimate_volume_cost(mid, inp, out)
             usage_capture({
                 "model": mid,
                 "provider": prov_id,
                 "input_tokens": inp,
                 "output_tokens": out,
-                "cached_input_tokens": cached,
+                "cached_input_tokens": 0,
                 "cost_usd": cost,
             })
         except Exception as _e:
             print(f"⚠️  [call_volume_llm] usage capture failed: {_e!s:.120}", flush=True)
     if not text:
-        raise RuntimeError(f"{prov_id} ({mid}) returned empty content")
+        raise RuntimeError(
+            f"{prov_id} ({mid}) returned empty content after stream "
+            f"(chunks={len(parts)}). Check API key/model and Moonshot quotas."
+        )
+    print(f"   ✅ {prov_id.upper()} stream done · {len(text):,} chars", flush=True)
     return text
 
 
@@ -3231,6 +3335,7 @@ def run_daily_brief(book_tickers: list[str] | None = None,
 import uuid as _uuid
 
 _TRACKER_LOCK = None  # initialised lazily; threading is imported by callers
+_SEC_DOWNLOAD_LOCK = None  # serializes live EDGAR Excel pulls (rate-limit guard)
 
 
 def _tracker_lock():
@@ -3240,6 +3345,15 @@ def _tracker_lock():
         import threading as _threading
         _TRACKER_LOCK = _threading.Lock()
     return _TRACKER_LOCK
+
+
+def _sec_download_lock():
+    """Process-wide lock so concurrent Analyze engines don't stampede EDGAR."""
+    global _SEC_DOWNLOAD_LOCK
+    if _SEC_DOWNLOAD_LOCK is None:
+        import threading as _threading
+        _SEC_DOWNLOAD_LOCK = _threading.Lock()
+    return _SEC_DOWNLOAD_LOCK
 
 
 def _empty_tracker_state() -> dict:
@@ -7947,6 +8061,7 @@ def call_llm(provider: str, system_prompt: str, user_content: str,
         return call_volume_llm(
             system_prompt, user_content,
             provider=prov,
+            on_delta=on_delta,
             usage_capture=usage_capture,
         )
     if p == "grok":
@@ -8757,35 +8872,62 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         _excel_data = None
         _db_data = None
 
-        def _sec_download_timeout(timeout_s: float = 25.0) -> bool:
-            """Download latest 10-K/10-Q Excel with a hard wall-clock cap."""
+        def _sec_download_timeout(timeout_s: float = 50.0) -> bool:
+            """Download latest 10-K/10-Q Excel with a hard wall-clock cap.
+
+            Serializes EDGAR pulls process-wide (rate-limit stampede was why
+            Grok fell back to the store while DeepSeek later got live Excel).
+            Retries once after a cooldown when SEC returns nothing / 429s.
+            """
             import concurrent.futures as _cf
-            print(f"\n🚀 {ticker}: SEC Excel pull (budget {timeout_s:.0f}s)…", flush=True)
-            _emit_progress(on_progress, "sec_filings", 0.10,
-                           f"SEC 10-K/10-Q (≤{int(timeout_s)}s)…")
-            # Conservative rate limit when we do hit EDGAR
-            os.environ.setdefault("EDGAR_RATE_LIMIT_PER_SEC", "3")
-            pool = _cf.ThreadPoolExecutor(max_workers=1)
-            try:
-                fut = pool.submit(pull_sec_financials.download_financials, ticker)
-                fut.result(timeout=timeout_s)
-                return True
-            except _cf.TimeoutError:
-                print(f"   ⚠️  SEC Excel pull timed out after {timeout_s:.0f}s — using store",
+            import time as _time
+            # Hard-cap request rate (edgartools defaults ~9/s and gets 429s)
+            os.environ["EDGAR_RATE_LIMIT_PER_SEC"] = os.environ.get(
+                "EDGAR_RATE_LIMIT_PER_SEC") or "2"
+
+            def _one_attempt(label: str, budget: float) -> bool:
+                print(f"\n🚀 {ticker}: SEC Excel pull {label} (budget {budget:.0f}s)…",
                       flush=True)
+                _emit_progress(on_progress, "sec_filings", 0.10,
+                               f"SEC 10-K/10-Q {label} (≤{int(budget)}s)…")
+                pool = _cf.ThreadPoolExecutor(max_workers=1)
                 try:
-                    fut.cancel()
-                except Exception:
-                    pass
-                return False
-            except Exception as exc:  # noqa: BLE001
-                print(f"   ⚠️  SEC Excel pull failed: {exc!s:.160}", flush=True)
-                return False
-            finally:
-                try:
-                    pool.shutdown(wait=False, cancel_futures=True)
-                except TypeError:
-                    pool.shutdown(wait=False)
+                    fut = pool.submit(pull_sec_financials.download_financials, ticker)
+                    paths = fut.result(timeout=budget)
+                    # download_financials returns {} when rate-limited / nothing saved
+                    if isinstance(paths, dict) and paths:
+                        return True
+                    if paths:
+                        return True
+                    print(f"   ⚠️  SEC Excel pull {label}: nothing saved (rate limit?)",
+                          flush=True)
+                    return False
+                except _cf.TimeoutError:
+                    print(f"   ⚠️  SEC Excel pull timed out after {budget:.0f}s",
+                          flush=True)
+                    try:
+                        fut.cancel()
+                    except Exception:
+                        pass
+                    return False
+                except Exception as exc:  # noqa: BLE001
+                    print(f"   ⚠️  SEC Excel pull failed: {exc!s:.160}", flush=True)
+                    return False
+                finally:
+                    try:
+                        pool.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        pool.shutdown(wait=False)
+
+            with _sec_download_lock():
+                ok = _one_attempt("(try 1)", timeout_s)
+                if ok:
+                    return True
+                # Cooldown then retry — SEC 429s from edgartools are common under load
+                cool = float(os.environ.get("EDGAR_RETRY_COOLDOWN_S") or "8")
+                print(f"   ⏳ EDGAR cooldown {cool:.0f}s then retry…", flush=True)
+                _time.sleep(max(2.0, cool))
+                return _one_attempt("(try 2)", min(60.0, timeout_s + 15.0))
 
         def _db_looks_usable(db: dict | None) -> bool:
             if not db:
@@ -8842,11 +8984,10 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         # (e.g. Jun 30) when the store still ends at Mar 31.
         _need_sec = True
 
-        # 2) Live SEC Excel pull (hard wall-clock; never multi-minute 429 sleep)
+        # 2) Live SEC Excel pull — same budget for every engine (Grok was at
+        # 35s and got rate-limited empty; DeepSeek at 45s succeeded).
         if _need_sec:
-            _budget = 45.0 if _is_deepseek else (
-                40.0 if not _db_looks_usable(_db_data) else 35.0
-            )
+            _budget = float(os.environ.get("EDGAR_PULL_BUDGET_S") or "50")
             _sec_download_timeout(_budget)
             try:
                 _excel_data = xlsx_edgar.extract_financials(ticker)
@@ -8862,27 +9003,71 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             except Exception as exc:  # noqa: BLE001
                 print(f"   ⚠️  Excel reader raised: {exc!s:.160}", flush=True)
                 _excel_data = None
+                # One more full download+extract cycle if files missing after "success"
+                if "No SEC XBRL Excel" in str(exc) or "not found" in str(exc).lower():
+                    print("   🔁 Retrying SEC Excel after empty extract…", flush=True)
+                    _sec_download_timeout(min(60.0, _budget + 10.0))
+                    try:
+                        _excel_data = xlsx_edgar.extract_financials(ticker)
+                        _xq = (_excel_data or {}).get("quarterly") or {}
+                        _xa = (_excel_data or {}).get("annuals") or []
+                        print(
+                            f"   📑 SEC Excel (retry): {len(_xa)} annual col(s), "
+                            f"quarter={(_xq.get('current') or {}).get('fp')}/"
+                            f"{(_xq.get('current') or {}).get('end') or '—'}",
+                            flush=True,
+                        )
+                    except Exception as exc2:  # noqa: BLE001
+                        print(f"   ⚠️  Excel retry also failed: {exc2!s:.160}", flush=True)
+                        _excel_data = None
         else:
-            # Still try local Excel if a prior download exists (no network)
             try:
                 _excel_data = xlsx_edgar.extract_financials(ticker)
             except Exception:
                 _excel_data = None
 
-        # 3) Merge DB + Excel
+        # 3) Merge — prefer live Excel quarterly ALWAYS when present.
+        # If Excel is missing, do NOT quietly treat DB as EDGAR-equivalent:
+        # try companyfacts next (still SEC), only then DB.
         _ck()
         _emit_progress(on_progress, "financials", 0.22, "Building verified financials…")
+        _store_fallback_data = None
         try:
-            data = xlsx_edgar.merge_primary_financials(_db_data, _excel_data)
+            # When Excel failed, strip quarterly from DB for the merge so we
+            # don't label store quarters as PRIMARY without an EDGAR attempt
+            # succeeding — annuals from DB still keep multi-year history.
+            _db_for_merge = _db_data
+            if _excel_data is None and _db_data:
+                print(
+                    "   ⚠️  Live EDGAR Excel unavailable — will try companyfacts "
+                    "before accepting store quarterly numbers",
+                    flush=True,
+                )
+            data = xlsx_edgar.merge_primary_financials(_db_for_merge, _excel_data)
             if data and (data.get("annuals") or data.get("quarterly")):
-                verified_block = xlsx_edgar.format_verified_block(data)
-                primary_ok = True
+                # If we only have store quarterly (no excel), force companyfacts
+                # pass below by treating as incomplete when excel was intended.
+                _qsrc = data.get("quarterly_source") or ""
+                if _excel_data is None and _qsrc == "company_financials_db":
+                    print(
+                        "   ⚠️  PRIMARY would be store-only for latest Q — "
+                        "deferring to companyfacts SEC API",
+                        flush=True,
+                    )
+                    primary_ok = False
+                    # Keep data as fallback if companyfacts also fails
+                    _store_fallback_data = data
+                else:
+                    verified_block = xlsx_edgar.format_verified_block(data)
+                    primary_ok = True
+                    _store_fallback_data = None
                 _qc = (data.get("quarterly") or {}).get("current") or {}
                 print(
-                    f"   ✅ PRIMARY ready (source={data.get('source')}, "
+                    f"   ✅ merge candidate (source={data.get('source')}, "
                     f"q_src={data.get('quarterly_source')}, "
                     f"latest_Q={_qc.get('fp')}/{_qc.get('end') or '—'}, "
-                    f"annuals={len(data.get('annuals') or [])})",
+                    f"annuals={len(data.get('annuals') or [])}"
+                    f"{'' if primary_ok else ', pending companyfacts'})",
                     flush=True,
                 )
                 try:
@@ -8892,22 +9077,29 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                     print(f"   ⚠️  DB upsert of SEC extract skipped: {_ue!s:.100}", flush=True)
             else:
                 print(f"   ⚠️  Merge produced no annuals/quarters for {ticker}", flush=True)
+                _store_fallback_data = None
         except Exception as _me:  # noqa: BLE001
             print(f"   ⚠️  merge_primary_financials failed: {_me!s:.160}", flush=True)
+            _store_fallback_data = None
             for _cand, _label in ((_excel_data, "Excel"), (_db_data, "DB")):
                 if _cand and (_cand.get("annuals") or _cand.get("quarterly")):
                     data = _cand
                     try:
-                        verified_block = xlsx_edgar.format_verified_block(data)
-                        primary_ok = True
-                        print(f"   ✅ Using {_label} extract as PRIMARY (merge failed)", flush=True)
-                        break
+                        if _label == "Excel":
+                            verified_block = xlsx_edgar.format_verified_block(data)
+                            primary_ok = True
+                            print(f"   ✅ Using {_label} extract as PRIMARY (merge failed)", flush=True)
+                            break
+                        else:
+                            _store_fallback_data = _cand
+                            print(f"   ⚠️  Holding {_label} as fallback only", flush=True)
                     except Exception:
                         pass
 
-        # 4) companyfacts only if still empty — short timeout via thread
+        # 4) companyfacts (SEC JSON API) if live Excel missed — still EDGAR,
+        #    not the local store. Only after that accept store fallback.
         if not primary_ok:
-            print(f"   Falling back to SEC companyfacts API (budget 25s)…", flush=True)
+            print(f"   Falling back to SEC companyfacts API (budget 30s)…", flush=True)
             _emit_progress(on_progress, "financials", 0.18, "SEC companyfacts fallback…")
             try:
                 import concurrent.futures as _cf
@@ -8915,9 +9107,9 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                 try:
                     fut = pool.submit(
                         edgar.extract_financials, ticker, get_sec_user_agent())
-                    _ed_data = fut.result(timeout=25.0)
+                    _ed_data = fut.result(timeout=30.0)
                 except _cf.TimeoutError:
-                    print("   ⚠️  companyfacts timed out (25s)", flush=True)
+                    print("   ⚠️  companyfacts timed out (30s)", flush=True)
                     _ed_data = None
                     try:
                         fut.cancel()
@@ -8930,10 +9122,19 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                         pool.shutdown(wait=False)
                 _ed_ann = (_ed_data or {}).get("annuals", []) if isinstance(_ed_data, dict) else []
                 if _ed_ann:
-                    data = _ed_data
+                    # Prefer companyfacts quarterly over store when Excel missed
+                    if _store_fallback_data:
+                        try:
+                            data = xlsx_edgar.merge_primary_financials(
+                                _store_fallback_data, _ed_data)
+                        except Exception:
+                            data = _ed_data
+                    else:
+                        data = _ed_data
                     try:
                         _ed_ttm = xlsx_edgar._compute_ttm(
-                            _ed_ann, _ed_data.get("quarterly", {}))
+                            data.get("annuals") or _ed_ann,
+                            data.get("quarterly") or _ed_data.get("quarterly") or {})
                         if _ed_ttm:
                             data["ttm"] = _ed_ttm
                     except Exception:
@@ -8944,10 +9145,32 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                         verified_block = edgar.format_verified_block(data)
                     primary_ok = True
                     print(f"   ✅ Loaded {len(_ed_ann)} annual rows via companyfacts", flush=True)
+                elif _store_fallback_data is not None:
+                    data = _store_fallback_data
+                    verified_block = xlsx_edgar.format_verified_block(data)
+                    verified_block = (
+                        "⚠️ NOTE: Live SEC Excel download failed (rate limit). "
+                        "Figures below are from the company_financials store — "
+                        "cross-check against EDGAR if numbers look stale.\n\n"
+                        + verified_block
+                    )
+                    primary_ok = True
+                    print("   ⚠️  Using store fallback after companyfacts miss", flush=True)
                 elif data is None and _ed_data is not None:
                     data = _ed_data
             except Exception as exc2:  # noqa: BLE001
                 print(f"   ❌ EDGAR fallback also failed: {exc2!s:.160}", flush=True)
+                if _store_fallback_data is not None:
+                    data = _store_fallback_data
+                    try:
+                        verified_block = xlsx_edgar.format_verified_block(data)
+                        verified_block = (
+                            "⚠️ NOTE: Live SEC pull failed. Store figures only.\n\n"
+                            + verified_block
+                        )
+                        primary_ok = True
+                    except Exception:
+                        pass
                 if data is None:
                     verified_block = (
                         f"## ⚠️ Financial Data Unavailable\n\n"

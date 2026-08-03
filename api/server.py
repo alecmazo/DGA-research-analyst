@@ -6860,7 +6860,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui408-20260802-edgar-first-kimi-bs"
+WEB_BUILD_VERSION = "ui409-20260802-edgar-retry-kimi-stream"
 
 
 @app.get("/api/build")
