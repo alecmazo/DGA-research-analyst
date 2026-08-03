@@ -416,16 +416,27 @@ def _run_fin_nightly_followed(job_id: str | None = None) -> dict:
         return _fin_sync_jobs[jid]
     # skip_if_stored=False → re-hit SEC so NEW quarter/FY period_end can insert
     _run_financials_sync(jid, tickers, years, skip_if_stored=False)
+    job = _fin_sync_jobs.get(jid) or {}
+    result = job.get("result") or {}
     try:
+        updated = result.get("updated") or []
         _kv_put("fin_nightly.last", {
             "ts": datetime.utcnow().isoformat() + "Z",
             "count": len(tickers),
             "job_id": jid,
-            "label": (_fin_sync_jobs.get(jid) or {}).get("label"),
+            "label": job.get("label"),
+            "periods_stored": result.get("periods_stored") or 0,
+            "names_ok": result.get("names") or 0,
+            "names_fail": result.get("names_fail") or 0,
+            "names_skip": result.get("names_skip") or 0,
+            # Tickers that received new period rows and/or a fresh Excel 10-Q/10-K
+            "updated": updated[:80],
+            "updated_count": len(updated),
+            "updated_tickers": [u.get("ticker") for u in updated if u.get("ticker")][:80],
         })
     except Exception:
         pass
-    return _fin_sync_jobs.get(jid) or {}
+    return job
 
 
 def _run_fin_monthly_store(job_id: str | None = None) -> dict:
@@ -449,11 +460,17 @@ def _run_fin_monthly_store(job_id: str | None = None) -> dict:
         ok, info = _dropbox_backup_financials()
         note = f" · ☁️ {info}" if ok else f" · backup skipped ({str(info)[:60]})"
         job = _fin_sync_jobs.get(jid) or {}
+        result = job.get("result") or {}
+        updated = result.get("updated") or []
         _fin_job_set(jid, label=(job.get("label") or "Monthly done") + note)
         _kv_put("fin_monthly.last", {
             "ts": datetime.utcnow().isoformat() + "Z",
             "count": len(tickers),
             "job_id": jid,
+            "periods_stored": result.get("periods_stored") or 0,
+            "updated": updated[:80],
+            "updated_count": len(updated),
+            "updated_tickers": [u.get("ticker") for u in updated if u.get("ticker")][:80],
         })
     except Exception:
         pass
@@ -939,11 +956,14 @@ def _sync_one_ticker_financials(ticker: str, years_back: int = 10,
         return {"stored": 0, "periods": 0, "errors": [f"SEC_USER_AGENT not set: {e!s:.80}"]}
     waits = (30, 60, 120)
     last_err = None
-    total_stored = 0
+    facts_stored = 0
+    excel_upserted = 0
     entity = None
     all_errors: list[str] = []
     rate_limited = False
     periods_seen = 0
+    latest_before = _fin_latest_store_period(ticker)
+    before_end = ((latest_before or {}).get("period_end") or "")[:10]
 
     for attempt in range(max(1, max_rate_retries)):
         try:
@@ -953,10 +973,10 @@ def _sync_one_ticker_financials(ticker: str, years_back: int = 10,
             periods_seen = len(rows)
             entity = res.get("entity_name")
             try:
-                stored = _store_financials_rows(
+                # Insert-only — rowcount = truly new period_end rows
+                facts_stored = int(_store_financials_rows(
                     ticker, res.get("cik"), res.get("entity_name"), rows,
-                    overwrite=False)
-                total_stored += int(stored or 0)
+                    overwrite=False) or 0)
             except Exception as e:
                 all_errors.append(f"{ticker} store failed: {e!s:.120}")
             break
@@ -973,41 +993,55 @@ def _sync_one_ticker_financials(ticker: str, years_back: int = 10,
             rate_limited = _fin_is_rate_limit_error(msg)
             break
 
+    excel_q = None
     # Latest Excel pull on refresh paths only (nightly / monthly / manual)
     if not skip_if_stored:
         time.sleep(0.6)
         xl = _fin_excel_latest_upsert(ticker, budget_s=50.0)
-        if xl.get("upserted"):
-            total_stored += int(xl["upserted"])
+        excel_upserted = int(xl.get("upserted") or 0)
+        excel_q = (xl.get("quarter_end") or "")[:10] or None
         if xl.get("errors"):
             all_errors.extend(xl["errors"][:2])
         if xl.get("rate_limited"):
             rate_limited = True
-        store_latest = _fin_latest_store_period(ticker)
-        pend = _fin_recent_earnings_8k(
-            ticker, (store_latest or {}).get("period_end"))
+
+    store_latest = _fin_latest_store_period(ticker)
+    after_end = ((store_latest or {}).get("period_end") or "")[:10]
+    # New filing = store latest period advanced, or companyfacts inserted rows
+    new_filing = bool(
+        facts_stored > 0
+        or (after_end and before_end and after_end > before_end)
+        or (after_end and not before_end)
+        or (excel_q and before_end and excel_q > before_end)
+        or (excel_q and not before_end)
+    )
+    pend = None
+    if not skip_if_stored:
+        pend = _fin_recent_earnings_8k(ticker, after_end or before_end)
         if pend:
             print(f"[fin sync] {ticker}: earnings 8-K {pend.get('filed')} but "
-                  f"store latest period={(store_latest or {}).get('period_end')} "
+                  f"store latest period={after_end or '—'} "
                   f"— 10-Q may still be pending on EDGAR", flush=True)
-        return {
-            "stored": total_stored,
-            "periods": periods_seen,
-            "entity": entity,
-            "errors": all_errors,
-            "rate_limited": rate_limited,
-            "excel_quarter_end": xl.get("quarter_end"),
-            "latest_store": store_latest,
-            "earnings_8k_pending_10q": pend,
-        }
 
-    if last_err and not periods_seen and not total_stored:
+    total_stored = facts_stored + excel_upserted
+    if last_err and not periods_seen and not total_stored and skip_if_stored:
         return {"stored": 0, "periods": 0,
                 "errors": all_errors or [f"{ticker}: {str(last_err)[:140]}"],
                 "rate_limited": rate_limited}
-    return {"stored": total_stored, "periods": periods_seen,
-            "entity": entity, "errors": all_errors,
-            "rate_limited": rate_limited}
+    return {
+        "stored": total_stored,
+        "facts_stored": facts_stored,
+        "excel_upserted": excel_upserted,
+        "periods": periods_seen,
+        "entity": entity,
+        "errors": all_errors,
+        "rate_limited": rate_limited,
+        "excel_quarter_end": excel_q,
+        "latest_store": store_latest,
+        "latest_before": latest_before,
+        "new_filing": new_filing,
+        "earnings_8k_pending_10q": pend,
+    }
 
 
 def _fin_job_set(job_id: str, **kw) -> None:
@@ -1071,6 +1105,8 @@ def _run_financials_sync(job_id: str, tickers: list, years_back: int,
         names_fail = int(existing.get("names_fail") or 0)
         names_skip = int(existing.get("names_skip") or 0)
         all_errors = []
+        # Tickers that got new period rows and/or a fresh Excel filing this run
+        updated: list[dict] = list(existing.get("updated") or [])
         consecutive_rl = 0
         # Support resume: skip tickers already done this run if checkpoint has cursor
         start_i = int(existing.get("done") or 0)
@@ -1083,7 +1119,8 @@ def _run_financials_sync(job_id: str, tickers: list, years_back: int,
                  label=f"📊 Pulling {tk} ({i+1}/{len(tickers)}) · "
                        f"+{names_ok} new names this chunk…",
                  done=i, current=tk, names_ok=names_ok,
-                 names_fail=names_fail, names_skip=names_skip)
+                 names_fail=names_fail, names_skip=names_skip,
+                 updated=updated)
             advance_cursor = True  # set False only if we want to hard-retry same tk
             try:
                 r = _sync_one_ticker_financials(tk, years_back=years_back,
@@ -1093,19 +1130,32 @@ def _run_financials_sync(job_id: str, tickers: list, years_back: int,
                     consecutive_rl = 0
                     _set(stored=total_stored, done=i + 1, names_ok=names_ok,
                          names_skip=names_skip, names_fail=names_fail,
+                         updated=updated,
                          label=f"↷ Skip {tk} (already stored) ({i+1}/{len(tickers)}) "
                                f"· +{names_ok} new")
                     _fin_advance_cursor(tk)
                     continue
                 periods = int(r.get("stored") or 0)
                 total_stored += periods
-                # A name "lands" if we wrote ≥1 period OR SEC returned periods
-                # that were already present (DO NOTHING) but ticker is now known.
-                if periods > 0 or (r.get("periods") and not r.get("errors")):
-                    if periods > 0:
-                        names_ok += 1
-                    elif r.get("periods"):
-                        names_ok += 1
+                excel_q = (r.get("excel_quarter_end") or "")[:10] or None
+                store_latest = r.get("latest_store") or {}
+                store_end = (store_latest.get("period_end") or "")[:10] or None
+                # Record only when a *new* filing period landed (not every Excel re-upsert)
+                if r.get("new_filing"):
+                    names_ok += 1
+                    consecutive_rl = 0
+                    updated.append({
+                        "ticker": tk,
+                        "new_rows": int(r.get("facts_stored") or 0),
+                        "latest_period_end": store_end or excel_q,
+                        "fp": store_latest.get("fp") or r.get("fp"),
+                        "excel_quarter_end": excel_q,
+                        "prior_period_end": ((r.get("latest_before") or {}).get("period_end") or "")[:10] or None,
+                        "pending_8k": bool(r.get("earnings_8k_pending_10q")),
+                    })
+                elif r.get("periods") and not r.get("errors"):
+                    # SEC returned data but all periods already present
+                    names_ok += 1
                     consecutive_rl = 0
                 elif r.get("rate_limited"):
                     names_fail += 1
@@ -1134,7 +1184,8 @@ def _run_financials_sync(job_id: str, tickers: list, years_back: int,
                     consecutive_rl += 1
                     cool = min(120, 20 * consecutive_rl)
                     _set(label=f"⏳ Rate limited after {tk} — waiting {cool}s "
-                               f"({i+1}/{len(tickers)}) · +{names_ok} new…")
+                               f"({i+1}/{len(tickers)}) · +{names_ok} new…",
+                         updated=updated)
                     print(f"[fin sync] cool-down {cool}s after rate limit "
                           f"(streak={consecutive_rl})", flush=True)
                     time.sleep(cool)
@@ -1148,19 +1199,24 @@ def _run_financials_sync(job_id: str, tickers: list, years_back: int,
             if advance_cursor:
                 _fin_advance_cursor(tk)
             _set(stored=total_stored, done=i + 1, names_ok=names_ok,
-                 names_fail=names_fail, names_skip=names_skip,
+                 names_fail=names_fail, names_skip=names_skip, updated=updated,
                  label=f"📊 {tk} done ({i+1}/{len(tickers)}) · "
-                       f"+{names_ok} new · {names_fail} no-data/err")
+                       f"+{names_ok} new · {names_fail} no-data/err"
+                       + (f" · {len(updated)} updated" if updated else ""))
         if names_ok > 0 or total_stored > 0:
             label = (f"✓ +{names_ok} names / {total_stored} new periods "
-                     f"({names_fail} no-data, {names_skip} skipped)")
+                     f"({names_fail} no-data, {names_skip} skipped"
+                     f"{f', {len(updated)} with new filings' if updated else ''})")
         else:
             label = (f"⚠ 0 new names this chunk — "
                      f"{(all_errors[0] if all_errors else 'SEC returned no usable data')[:150]}")
         _set(stage="done", status="done", done=len(tickers), label=label,
              names_ok=names_ok, names_fail=names_fail, names_skip=names_skip,
+             updated=updated,
              result={"periods_stored": total_stored, "names": names_ok,
                      "names_fail": names_fail, "names_skip": names_skip,
+                     "updated": updated[:80],
+                     "updated_tickers": [u.get("ticker") for u in updated][:80],
                      "errors": all_errors[:20]})
     except Exception as e:
         print(f"❌ [fin sync {job_id}] {e!s:.300}", flush=True)

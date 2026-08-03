@@ -4185,7 +4185,7 @@
       // Keep VL company links in sync with store coverage
       try { _loadFinVlLinks(); } catch (_) {}
     } catch(_) {}
-    // Universe counts + automation status
+    // Universe counts + automation status + last nightly updated tickers
     try {
       const u = await (await window.dgaFetch('/api/financials/universes')).json();
       const meta = document.getElementById('fin-universe-meta');
@@ -4200,12 +4200,93 @@
           const last = u.nightly.last;
           if (last && (last.ts || last.at))
             bits.push('last nightly ' + String(last.ts || last.at).slice(0, 16).replace('T', ' '));
+          if (last && last.updated_count != null)
+            bits.push(last.updated_count + ' new filing' + (last.updated_count === 1 ? '' : 's'));
         }
         if (u.monthly) bits.push('Monthly ' + (u.monthly.enabled ? 'ON' : 'OFF'));
         if (u.us_backfill) bits.push('US backfill ' + (u.us_backfill.enabled ? 'ON' : 'OFF'));
         meta.textContent = bits.join(' · ') + ' · free SEC · zero LLM tokens · browse = free';
       }
+      _renderFinNightlyUpdated(
+        (u && u.nightly && u.nightly.last) || null,
+        (u && u.monthly && u.monthly.last) || null
+      );
     } catch(_) {}
+  }
+
+  /** Show which tickers got new 10-Q/10-K periods on the last nightly (and monthly) run. */
+  function _renderFinNightlyUpdated(nightlyLast, monthlyLast) {
+    const box = document.getElementById('fin-nightly-updated');
+    const title = document.getElementById('fin-nightly-updated-title');
+    const chips = document.getElementById('fin-nightly-updated-chips');
+    if (!box || !title || !chips) return;
+
+    const last = nightlyLast || {};
+    const updated = Array.isArray(last.updated) ? last.updated
+      : (Array.isArray(last.updated_tickers)
+        ? last.updated_tickers.map(function (t) { return { ticker: t }; })
+        : []);
+    const ts = last.ts || last.at || '';
+    const when = ts ? String(ts).slice(0, 16).replace('T', ' ') + ' UTC' : '';
+
+    if (!updated.length) {
+      // Still show "no new filings" when we have a recent run timestamp
+      if (ts) {
+        box.style.display = 'block';
+        box.style.borderColor = '#e2e8f0';
+        box.style.background = '#f8fafc';
+        title.style.color = '#475569';
+        title.textContent = 'Last nightly' + (when ? ' · ' + when : '')
+          + ' · no new 10-Q/10-K periods';
+        chips.innerHTML = '<span style="color:var(--text-tertiary);font-size:10.5px;">'
+          + 'All followed names were checked; store latest periods unchanged. '
+          + 'Earnings 8-Ks alone do not update the store until the 10-Q files.</span>';
+      } else {
+        box.style.display = 'none';
+        chips.innerHTML = '';
+      }
+      return;
+    }
+
+    box.style.display = 'block';
+    box.style.borderColor = '#bbf7d0';
+    box.style.background = '#f0fdf4';
+    title.style.color = '#166534';
+    title.textContent = 'Last nightly · new filings'
+      + (when ? ' · ' + when : '')
+      + ' · ' + updated.length + ' name' + (updated.length === 1 ? '' : 's');
+
+    chips.innerHTML = updated.map(function (u) {
+      const tk = (u && u.ticker) || u || '';
+      if (!tk) return '';
+      const pe = (u && (u.latest_period_end || u.excel_quarter_end)) || '';
+      const fp = (u && u.fp) || '';
+      const prior = (u && u.prior_period_end) || '';
+      const lbl = fp && pe ? (fp + ' ' + String(pe).slice(0, 10))
+        : (pe ? String(pe).slice(0, 10) : 'updated');
+      const tip = prior
+        ? (tk + ' latest ' + lbl + ' (was ' + String(prior).slice(0, 10) + ')')
+        : (tk + ' · ' + lbl);
+      return '<span title="' + _trEsc(tip) + '" data-fin-nightly-tk="' + _trEsc(tk) + '" '
+        + 'style="display:inline-block;margin:0 6px 5px 0;cursor:pointer;'
+        + 'font-family:\'SF Mono\',monospace;font-size:10.5px;font-weight:700;'
+        + 'background:#dcfce7;border:1px solid #86efac;color:#14532d;'
+        + 'padding:2px 8px;border-radius:9px;">'
+        + _trEsc(tk)
+        + (pe ? ' <span style="font-weight:600;color:#166534;">· ' + _trEsc(lbl) + '</span>' : '')
+        + '</span>';
+    }).join('');
+
+    chips.querySelectorAll('[data-fin-nightly-tk]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        const t = el.getAttribute('data-fin-nightly-tk');
+        const inp = document.getElementById('fin-dash-ticker');
+        if (inp && t) {
+          inp.value = t;
+          if (typeof _finDashLoad === 'function') _finDashLoad(t);
+        }
+      });
+    });
   }
 
   async function _loadFinSettings() {
@@ -4224,8 +4305,14 @@
         let t = n + ' followed names';
         if (s.fin_nightly && s.fin_nightly.last && s.fin_nightly.last.ts)
           t += ' · last nightly ' + String(s.fin_nightly.last.ts).slice(0, 16).replace('T', ' ');
+        const uc = s.fin_nightly && s.fin_nightly.last && s.fin_nightly.last.updated_count;
+        if (uc != null)
+          t += ' · ' + uc + ' new filing' + (uc === 1 ? '' : 's');
         hint.textContent = t;
       }
+      // Prefer settings payload if universes hasn't painted yet
+      if (s.fin_nightly && s.fin_nightly.last)
+        _renderFinNightlyUpdated(s.fin_nightly.last, s.fin_monthly && s.fin_monthly.last);
     } catch (_) {}
   }
 
