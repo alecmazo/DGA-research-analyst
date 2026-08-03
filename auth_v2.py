@@ -94,18 +94,21 @@ def _token_secret() -> bytes:
 #   must_change_password   – True until the LP changes their initial pw
 #   created_at             – ISO date string
 # ---------------------------------------------------------------------------
+# SECURITY (ui410): Never store or comment plaintext passwords in this file.
+# Hashes only. Rotate any password that was ever written in git history.
+# Known-weak passwords (detected at login) force must_change_password.
 LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
     {
         "lp_id":                "gp_alec",
         "email":                "alecmazo1@gmail.com",
         "name":                 "Alec Mazo",
         "role":                 "gp",
-        # plaintext: "genesis"
         "password_hash_hex":    "7e6555659cc7d4fec744d55623610e31897ea254d217d90f29860c288a6e53fe",
         "password_salt_hex":    "55124b6cd276470f1f5b120dcb33e896",
         "fund_memberships":     {},   # GP sees everything — empty = no filter
         "managed_account_ids":  [],   # GP sees all managed accounts
-        "must_change_password": False,
+        # Force change if still on a password that appeared in old git comments
+        "must_change_password": True,
         "created_at":           "2026-05-10",
     },
     {
@@ -113,7 +116,6 @@ LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
         "email":                "anatolymazo@gmail.com",
         "name":                 "Anatoly Mazo",
         "role":                 "lp",
-        # plaintext: "dgacapital"
         "password_hash_hex":    "4b279b1481df1e23375775d57e2bb7258150a9b586ebcac314a0cf16b90b1184",
         "password_salt_hex":    "1d9bfbcbf9013f444b60365aeb7c15e0",
         "fund_memberships":     {},
@@ -129,7 +131,6 @@ LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
         "email":                "e.mazo@outlook.com",
         "name":                 "Eugene Mazo",
         "role":                 "lp",
-        # plaintext: "dgacapital"
         "password_hash_hex":    "2de3b5c19e7845b00f3512c0a9758a837312c6ec53d9cff74377d673acad0670",
         "password_salt_hex":    "4a4795b89b150e2dab18a0292442fb2c",
         "fund_memberships":     {
@@ -145,7 +146,6 @@ LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
         "email":                "edytasliw@gmail.com",
         "name":                 "Edyta Sliwinska",
         "role":                 "lp",
-        # plaintext: "dgacapital"
         "password_hash_hex":    "a7cb3b575fb764c2d8f265a9c427f1a97002f10a45411dddadb3ea7be7548af6",
         "password_salt_hex":    "708474ec6382c4f01b6dcf89b8e4f775",
         "fund_memberships":     {},
@@ -154,6 +154,13 @@ LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
         "created_at":           "2026-05-10",
     },
 ]
+
+# Passwords that once appeared in source control comments — never log these.
+# On successful login with one of these, force a password change.
+_KNOWN_LEAKED_PASSWORDS = frozenset({
+    "genesis",
+    "dgacapital",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +367,10 @@ def login(email: str, password: str) -> Optional[dict]:
     Authentication is strictly per-user: each account logs in with its OWN
     password only. The former master-password ("god-mode") impersonation path —
     which let the FUND_PASSWORD holder log in as any LP — has been removed.
+
+    If the password matches a historically leaked seed password, login still
+    succeeds but ``must_change_password`` is forced True so the client shows
+    the change-password gate before any fund data is usable.
     """
     user = find_user_by_email(email)
     if not user:
@@ -367,6 +378,27 @@ def login(email: str, password: str) -> Optional[dict]:
 
     if not verify_password(password, user["password_hash_hex"], user["password_salt_hex"]):
         return None
+
+    # Force rotation when the account is still on a password that was ever
+    # written in git (hashes alone are not enough — salts+hashes were public).
+    if (password or "") in _KNOWN_LEAKED_PASSWORDS:
+        try:
+            user = dict(user)
+            user["must_change_password"] = True
+            try:
+                overlay = _load_overlay()
+                lp = user["lp_id"]
+                overlay[lp] = {**overlay.get(lp, {}), "must_change_password": True}
+                _save_overlay(overlay)
+            except Exception:
+                pass
+            print(
+                f"[auth] SECURITY: user {user.get('lp_id')} logged in with a "
+                f"historically-leaked seed password — must_change_password forced",
+                flush=True,
+            )
+        except Exception:
+            pass
 
     claims = {
         "lp_id":               user["lp_id"],

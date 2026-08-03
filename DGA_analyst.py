@@ -1649,7 +1649,9 @@ def send_portfolio_email(msg: EmailMessage) -> dict:
     if resend_result is not None:
         if resend_result.get("ok"):
             resend_result["fallback_path"] = str(fallback)
-            print(f"   📧 Email sent via Resend → {msg['To']} "
+            _to = msg["To"] or ""
+            _masked = (_to[0] + "***@" + _to.split("@", 1)[-1]) if "@" in _to else "***"
+            print(f"   📧 Email sent via Resend → {_masked} "
                   f"(id: {resend_result.get('resend_id','')})")
             return resend_result
         # Resend returned an error; remember it and try SMTP too.
@@ -1664,7 +1666,9 @@ def send_portfolio_email(msg: EmailMessage) -> dict:
             with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx, timeout=30) as smtp:
                 smtp.login(user, pwd)
                 smtp.send_message(msg)
-            print(f"   📧 Email sent via Gmail SMTP → {msg['To']}")
+            _to = msg["To"] or ""
+            _masked = (_to[0] + "***@" + _to.split("@", 1)[-1]) if "@" in _to else "***"
+            print(f"   📧 Email sent via Gmail SMTP → {_masked}")
             return {
                 "ok": True,
                 "transport": "gmail_smtp",

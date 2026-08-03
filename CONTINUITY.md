@@ -50,7 +50,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Settings drop both card** | **`ui407-20260802-settings-drop-both-card`** | Remove yellow Grok+Claude (both) provider card from Settings |
 | **EDGAR-first + Kimi + BS** | **`ui408-20260802-edgar-first-kimi-bs`** | All engines live SEC Excel primary; enable Kimi Analyze; mandatory §5C balance sheet structure |
 | **EDGAR retry + Kimi stream** | **`ui409-20260802-edgar-retry-kimi-stream`** | SEC lock+retry (Grok rate-limit miss); Kimi stream+HTTP timeout (was 900s hang) |
-| **Next deploy after this** | **`ui410-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Security: email + secrets** | **`ui410-20260802-security-email-auth`** | Strip seed plaintext pw comments; auth on YTD email; fail-closed weak secrets; mask emails/keys in logs/diag |
+| **Next deploy after this** | **`ui411-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

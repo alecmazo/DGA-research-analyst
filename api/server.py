@@ -1228,11 +1228,35 @@ _PUBLIC_PATHS = {
     "/api/v2/news/x-fin-feed",
 }
 
+# Fail-closed defaults: never accept public secrets that lived in git history.
+import secrets as _auth_secrets
+_UNSET_PORTFOLIO_PW = "unset-pf-" + _auth_secrets.token_urlsafe(24)
+_RUNTIME_TOKEN_SECRET: str | None = None
+_WEAK_PASSWORDS = frozenset({"dgacapital", "genesis", "password", "changeme", ""})
+
 def _portfolio_password() -> str:
-    return os.environ.get("PORTFOLIO_PASSWORD", "dgacapital").strip()
+    """Legacy v1 desk password. Refuse public defaults from git history."""
+    pw = os.environ.get("PORTFOLIO_PASSWORD", "").strip()
+    if not pw or pw.lower() in _WEAK_PASSWORDS:
+        # Per-process random — matches nothing until a strong PORTFOLIO_PASSWORD
+        # is set on Railway.
+        return _UNSET_PORTFOLIO_PW
+    return pw
 
 def _token_secret() -> str:
-    return os.environ.get("TOKEN_SECRET", "dga-capital-jwt-secret").strip()
+    """HMAC secret for v1 tokens. Refuse the public default baked into git."""
+    global _RUNTIME_TOKEN_SECRET
+    sec = os.environ.get("TOKEN_SECRET", "").strip()
+    if not sec or sec == "dga-capital-jwt-secret":
+        if _RUNTIME_TOKEN_SECRET is None:
+            _RUNTIME_TOKEN_SECRET = "runtime-" + _auth_secrets.token_urlsafe(32)
+            print(
+                "[auth] SECURITY: TOKEN_SECRET missing or is the public default — "
+                "using ephemeral secret (set a strong TOKEN_SECRET on Railway)",
+                flush=True,
+            )
+        return _RUNTIME_TOKEN_SECRET
+    return sec
 
 def _make_token(password: str) -> str:
     """Derive a deterministic token from password + secret (HMAC-SHA256)."""
@@ -6860,7 +6884,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui409-20260802-edgar-retry-kimi-stream"
+WEB_BUILD_VERSION = "ui410-20260802-security-email-auth"
 
 
 @app.get("/api/build")
@@ -14235,24 +14259,61 @@ class EmailYtdRequest(BaseModel):
     snapshot_id: str | None = None
 
 
+def _valid_email_addr(addr: str) -> bool:
+    """Strict-ish email check — blocks header injection (CR/LF) and junk."""
+    a = (addr or "").strip()
+    if not a or len(a) > 254:
+        return False
+    if any(c in a for c in ("\r", "\n", "\0", ",", ";")):
+        return False
+    # Simple RFC-ish: local@domain.tld
+    if not re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", a):
+        return False
+    return True
+
+
+def _mask_email(addr: str) -> str:
+    """Log-safe mask: a***@example.com"""
+    a = (addr or "").strip()
+    if "@" not in a:
+        return "***"
+    local, _, domain = a.partition("@")
+    if not local:
+        return "***@" + domain
+    return local[0] + "***@" + domain
+
+
 @app.post("/api/track/live/ytd/email")
-def email_live_ytd_report(body: EmailYtdRequest):
+def email_live_ytd_report(body: EmailYtdRequest, request: Request):
     """Email the YTD report (live benchmark + attribution) to the given address.
 
-    If snapshot_id is omitted, sends the most recent stored snapshot.
+    GP / authenticated session required — was previously unauthenticated
+    (open mail relay for portfolio data). If snapshot_id is omitted, sends
+    the most recent stored snapshot.
     """
-    if not body.email or "@" not in body.email:
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin") and not claims.get("legacy_v1"):
+        # LPs may only email reports to their own login address
+        own = (claims.get("email") or "").strip().lower()
+        if (body.email or "").strip().lower() != own:
+            raise HTTPException(status_code=403, detail="You may only email reports to your own address")
+    if not _valid_email_addr(body.email):
         raise HTTPException(status_code=422, detail="A valid email address is required.")
     try:
-        result = analyst.email_ytd_report(body.email, body.snapshot_id)
+        result = analyst.email_ytd_report(body.email.strip(), body.snapshot_id)
     except Exception as exc:
-        tb = traceback.format_exc()
+        # Never return full tracebacks to the client (path / stack leakage)
+        print(f"[email] ytd report failed for {_mask_email(body.email)}: {exc!s:.200}", flush=True)
         raise HTTPException(
             status_code=500,
-            detail=f"email_ytd_report raised: {exc}\n\nTraceback:\n{tb}",
+            detail="Failed to send YTD report email. Check server logs.",
         )
     if not result.get("ok"):
         raise HTTPException(status_code=422, detail=result.get("error", "Email failed"))
+    # Redact full address in API response if present
+    if isinstance(result, dict) and result.get("sent_to"):
+        result = dict(result)
+        result["sent_to"] = _mask_email(str(result["sent_to"]))
     return result
 
 
@@ -17241,10 +17302,14 @@ def email_diag(request: Request):
     gmail_pwd         = os.environ.get("GMAIL_APP_PASSWORD", "")
 
     result["env"] = {
-        "RESEND_API_KEY":       f"set ({resend_key[:6]}...)" if resend_key else "NOT SET",
+        # Never return key prefixes — length-only confirms presence
+        "RESEND_API_KEY":       ("set (len=%d)" % len(resend_key)) if resend_key else "NOT SET",
         "RESEND_FROM":          resend_from or "NOT SET (defaults to onboarding@resend.dev)",
-        "RESEND_ACCOUNT_EMAIL": resend_acct_email or "NOT SET — set this to your Resend signup email for test-mode sending",
-        "GMAIL_USER":           gmail_user or "NOT SET",
+        "RESEND_ACCOUNT_EMAIL": (
+            _mask_email(resend_acct_email) if resend_acct_email
+            else "NOT SET — set this to your Resend signup email for test-mode sending"
+        ),
+        "GMAIL_USER":           (_mask_email(gmail_user) if gmail_user else "NOT SET"),
         "GMAIL_APP_PASSWORD":   "set" if gmail_pwd else "NOT SET",
     }
 
@@ -17333,7 +17398,7 @@ def email_test_send(request: Request):
     except Exception:
         body_json = {}
     to_addr = (body_json.get("to") or "").strip()
-    if not to_addr or "@" not in to_addr:
+    if not _valid_email_addr(to_addr):
         raise HTTPException(status_code=422, detail="Provide a valid 'to' email address in the request body")
 
     resend_key  = os.environ.get("RESEND_API_KEY", "")
@@ -17578,7 +17643,7 @@ def email_account_rebalance(fund_id: str, request: Request):
     # Fall back to GP's auth email
     if not to_addr and claims:
         to_addr = claims.get("email", "")
-    if not to_addr or "@" not in to_addr:
+    if not _valid_email_addr(to_addr):
         raise HTTPException(status_code=422, detail="Provide a valid recipient email address")
 
     run_date = data.get("run_at", "")[:10] if data.get("run_at") else "—"
@@ -22939,6 +23004,11 @@ def email_memo(memo_id: str, request: Request):
     to_addr   = ((body or {}).get("to_addr") or "").strip()
     subject_in = ((body or {}).get("subject") or "").strip()
     body_html  = ((body or {}).get("body_html") or "").strip()
+    # Block header injection in subject
+    if any(c in subject_in for c in ("\r", "\n", "\0")):
+        raise HTTPException(400, "Invalid subject")
+    if mode == "ad_hoc" and to_addr and not _valid_email_addr(to_addr):
+        raise HTTPException(422, "A valid recipient email is required")
 
     # Load memo
     try:
@@ -26287,7 +26357,7 @@ def research_email_pdf(body: ResearchPdfRequest, request: Request):
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
     to_addr = (body.to or "").strip()
-    if not to_addr or "@" not in to_addr:
+    if not _valid_email_addr(to_addr):
         raise HTTPException(400, "A valid recipient email is required.")
     if not (body.answer_html or "").strip():
         raise HTTPException(400, "No content to render.")
