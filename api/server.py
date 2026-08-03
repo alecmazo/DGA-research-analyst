@@ -1754,7 +1754,12 @@ def auth_v2_me(request: Request):
 
 @app.post("/api/auth/v2/change-password")
 def auth_v2_change_password(request: Request, body: AuthV2ChangePasswordRequest):
-    """Change the current user's password. Requires a valid v2 token."""
+    """Change the current user's password. Requires a valid v2 token.
+
+    Used by GP Settings → Security and LP Account tab. Returns specific
+    error messages so the UI can guide the user (wrong current password vs
+    too-short new password).
+    """
     token = (request.headers.get("x-auth-v2-token")
              or request.headers.get("x-auth-token")
              or request.query_params.get("token")
@@ -1763,19 +1768,34 @@ def auth_v2_change_password(request: Request, body: AuthV2ChangePasswordRequest)
     if not claims:
         raise HTTPException(status_code=401, detail="Unauthorized")
     ip = (request.client.host if request.client else "unknown")
+    old_pw = (body.old_password or "")
+    new_pw = (body.new_password or "")
+    if len(new_pw) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    # Block historically leaked seed passwords
+    if new_pw.lower() in ("genesis", "dgacapital", "password", "changeme"):
+        raise HTTPException(
+            status_code=400,
+            detail="Choose a stronger password (not a default/shared phrase)",
+        )
+    user = auth_v2_mod.find_user_by_lp_id(claims.get("lp_id") or "")
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not auth_v2_mod.verify_password(
+        old_pw, user.get("password_hash_hex") or "", user.get("password_salt_hex") or ""
+    ):
+        _audit("change_password", claims.get("email", claims["lp_id"]), ip, False, "bad_old")
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
     ok = auth_v2_mod.change_password(
         lp_id=claims["lp_id"],
-        old_password=body.old_password,
-        new_password=body.new_password,
+        old_password=old_pw,
+        new_password=new_pw,
     )
     if not ok:
         _audit("change_password", claims.get("email", claims["lp_id"]), ip, False)
-        raise HTTPException(
-            status_code=400,
-            detail="Could not change password — check old password and ensure new is ≥ 8 chars",
-        )
+        raise HTTPException(status_code=400, detail="Could not change password — try again")
     _audit("change_password", claims.get("email", claims["lp_id"]), ip, True)
-    return {"ok": True}
+    return {"ok": True, "message": "Password updated"}
 
 
 # ---------------------------------------------------------------------------
@@ -6884,7 +6904,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui412-20260802-nightly-updated-card"
+WEB_BUILD_VERSION = "ui413-20260803-gp-change-password"
 
 
 @app.get("/api/build")

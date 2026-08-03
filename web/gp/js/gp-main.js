@@ -15635,6 +15635,8 @@
     _settingsPanel('mfa',         loadMfa);
     _settingsPanel('demo',        loadDemoSandbox);
     _settingsPanel('volume-llm',  loadVolumeLlmSettings);
+    // GP change-password form (Settings → Security)
+    try { _wireGpChangePassword(); } catch (_) {}
   }
 
   // ── Models · full task routing + provider catalog ───────────────────────
@@ -17365,31 +17367,110 @@
     } catch { el.innerHTML = '<div class="tab-error">Could not load user list.</div>'; }
   }
 
-  // Change own password
-  document.getElementById('pw-save-btn')?.addEventListener('click', async () => {
-    const old = document.getElementById('pw-old')?.value;
-    const nw  = document.getElementById('pw-new')?.value;
-    const cf  = document.getElementById('pw-confirm')?.value;
-    const msg = document.getElementById('pw-msg');
-    if (!old || !nw) { msg.style.color='var(--red)'; msg.textContent='Fill in all fields.'; return; }
-    if (nw !== cf)   { msg.style.color='var(--red)'; msg.textContent='Passwords do not match.'; return; }
-    if (nw.length < 8) { msg.style.color='var(--red)'; msg.textContent='New password must be ≥ 8 characters.'; return; }
+  // ── GP Settings → Change password (own account only) ───────────────────
+  function _wireGpChangePassword() {
     const btn = document.getElementById('pw-save-btn');
-    btn.disabled = true; btn.textContent = 'Saving…';
+    const panel = document.getElementById('gp-change-password-panel');
+    if (!btn || btn.dataset.wired === '1') return;
+    btn.dataset.wired = '1';
+
+    // Fill account identity from DGA_USER
     try {
-      const r = await window.dgaFetch('/api/auth/v2/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ old_password: old, new_password: nw }),
+      const u = window.DGA_USER || {};
+      const name = u.name || 'GP';
+      const email = u.email || '';
+      const nameEl = document.getElementById('gp-pw-name');
+      const emailEl = document.getElementById('gp-pw-email');
+      const initEl = document.getElementById('gp-pw-initials');
+      if (nameEl) nameEl.textContent = name;
+      if (emailEl) emailEl.textContent = email || 'Signed-in GP account';
+      if (initEl) {
+        const parts = String(name).trim().split(/\s+/).filter(Boolean);
+        initEl.textContent = ((parts[0] || 'G')[0] + (parts[1] ? parts[1][0] : (parts[0] || 'P')[1] || 'P')).toUpperCase();
+      }
+      // Hide for non-GP (shouldn't happen on /gp, but be safe)
+      if (panel && u.role && u.role !== 'gp' && u.role !== 'admin') {
+        panel.style.display = 'none';
+      }
+    } catch (_) {}
+
+    const run = async function () {
+      const oldEl = document.getElementById('pw-old');
+      const newEl = document.getElementById('pw-new');
+      const cfEl  = document.getElementById('pw-confirm');
+      const msg   = document.getElementById('pw-msg');
+      if (!msg) return;
+      const old = (oldEl && oldEl.value) || '';
+      const nw  = (newEl && newEl.value) || '';
+      const cf  = (cfEl && cfEl.value) || '';
+      if (!old || !nw || !cf) {
+        msg.style.color = 'var(--red,#dc2626)';
+        msg.textContent = 'Fill in all three fields.';
+        return;
+      }
+      if (nw !== cf) {
+        msg.style.color = 'var(--red,#dc2626)';
+        msg.textContent = 'New passwords do not match.';
+        return;
+      }
+      if (nw.length < 8) {
+        msg.style.color = 'var(--red,#dc2626)';
+        msg.textContent = 'New password must be at least 8 characters.';
+        return;
+      }
+      if (nw === old) {
+        msg.style.color = 'var(--red,#dc2626)';
+        msg.textContent = 'New password must be different from the current one.';
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      msg.textContent = '';
+      try {
+        const r = await window.dgaFetch('/api/auth/v2/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ old_password: old, new_password: nw }),
+        });
+        const body = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          let detail = body.detail || body.error || ('HTTP ' + r.status);
+          if (Array.isArray(detail))
+            detail = detail.map(function (x) { return x.msg || x; }).join('; ');
+          throw new Error(detail);
+        }
+        msg.style.color = 'var(--green,#16a34a)';
+        msg.textContent = '✓ Password updated — use it next time you sign in.';
+        if (oldEl) oldEl.value = '';
+        if (newEl) newEl.value = '';
+        if (cfEl)  cfEl.value = '';
+      } catch (e) {
+        msg.style.color = 'var(--red,#dc2626)';
+        msg.textContent = (e && e.message) ? e.message : 'Could not change password';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save password';
+      }
+    };
+
+    btn.addEventListener('click', run);
+    // Enter in any field submits
+    ['pw-old', 'pw-new', 'pw-confirm'].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.enterWired === '1') return;
+      el.dataset.enterWired = '1';
+      el.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); run(); }
       });
-      if (!r.ok) throw new Error((await r.json()).detail || r.status);
-      msg.style.color = 'var(--green)'; msg.textContent = '✅ Password updated.';
-      document.getElementById('pw-old').value = '';
-      document.getElementById('pw-new').value = '';
-      document.getElementById('pw-confirm').value = '';
-    } catch (e) { msg.style.color='var(--red)'; msg.textContent = 'Error: ' + e.message; }
-    btn.disabled = false; btn.textContent = 'Save Password';
-  });
+    });
+  }
+
+  // Wire early (DOM ready) and again when Settings tab opens
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _wireGpChangePassword);
+  } else {
+    _wireGpChangePassword();
+  }
 
   async function loadBuildInfo() {
     try {
