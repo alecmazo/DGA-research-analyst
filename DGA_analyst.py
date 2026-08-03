@@ -3103,6 +3103,7 @@ Also pull, via live web + X search:
 Hard rules:
 - NEVER hedge. Take a view. "Watch X — likely up 3% on the open" beats "X may move."
 - Cite SPECIFIC numbers, prices, and times whenever possible
+- **PRICES ARE GROUND TRUTH:** When a VERIFIED LIVE PRICES block is present, you MUST use those exact last/prior/change figures for every book ticker you mention. NEVER invent, round to a wrong level, or substitute training-memory prices (e.g. do not write "$180" if the table says "$47.22"). If a ticker is not in the price table, write "price n/a" rather than guessing.
 - Name SPECIFIC tickers using **TICKER** format (each on its own line in the names section) — these become tappable in the app
 - Skip generic risk disclaimers and "consult your advisor" language
 - If a section has nothing genuinely interesting, write "Nothing meaningful overnight" rather than padding with filler
@@ -3113,6 +3114,7 @@ _DAILY_BRIEF_USER_TEMPLATE = """\
 DATE: {today}
 TIME: Morning brief (pre-market US)
 {book}
+{prices}
 Write your morning brief for the DGA Capital trading floor. Use EXACTLY this format:
 
 ---
@@ -3125,7 +3127,7 @@ Write your morning brief for the DGA Capital trading floor. Use EXACTLY this for
 
 ## 💼 YOUR BOOK ON X
 
-*The live X read on DGA's ACTUAL positions and watchlist (the tickers listed above). For each name with anything moving — overnight news, an earnings reaction, a notable X post, unusual options, a catalyst today — give one tight line: **TICKER** — what's happening + the @handle or source. If a held name is quiet, say "quiet." If the book list is empty, write "No book provided — broad-market focus below." Lead with the names that matter most today.*
+*The live X read on DGA's ACTUAL positions and watchlist (the tickers listed above). For each name with anything moving — overnight news, an earnings reaction, a notable X post, unusual options, a catalyst today — give one tight line using the VERIFIED LIVE PRICES table: **TICKER** $LAST (+/-X.XX%) — what's happening + the @handle or source. Copy LAST and DAY_% from the price table exactly. If a held name is quiet, say "quiet" (still use the table price if you mention it). If the book list is empty, write "No book provided — broad-market focus below." Lead with the names that matter most today.*
 
 ---
 
@@ -3195,6 +3197,88 @@ Write your morning brief for the DGA Capital trading floor. Use EXACTLY this for
 """
 
 
+def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55) -> str:
+    """Live last/prior/% for book tickers + key ETFs — ground truth for Daily Pulse.
+
+    Without this block, the LLM invents stale training prices (wildly wrong).
+    Uses market_data.get_quotes (session-aware Yahoo) with a short wall clock.
+    """
+    syms: list[str] = []
+    seen: set[str] = set()
+    # Cross-asset references the brief often cites
+    for t in list(tickers or []) + [
+        "SPY", "QQQ", "IWM", "DIA", "TLT", "HYG", "GLD", "USO", "UUP", "VIXY",
+    ]:
+        t = str(t or "").strip().upper().rstrip("*")
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        syms.append(t)
+        if len(syms) >= limit:
+            break
+    if not syms:
+        return ""
+
+    quotes: dict = {}
+    try:
+        import market_data as _md  # type: ignore
+        quotes = _md.get_quotes(syms) or {}
+    except Exception as e:
+        print(f"[daily_brief] get_quotes failed: {e!s:.120}", flush=True)
+        # Fallback: per-ticker yfinance snapshot (slower, fewer names)
+        for t in syms[:25]:
+            try:
+                snap = fetch_market_snapshot(t)
+                if snap.get("price") is not None:
+                    quotes[t] = {
+                        "price": snap.get("price"),
+                        "prev_close": snap.get("previous_close"),
+                        "pct_change": snap.get("pct_change"),
+                        "source": snap.get("source") or "yfinance",
+                    }
+            except Exception:
+                pass
+
+    lines = [
+        "VERIFIED LIVE PRICES (session-aware Yahoo — NON-NEGOTIABLE for any "
+        "ticker in this table; do NOT invent or substitute other prices):",
+        "TICKER | LAST | PRIOR_CLOSE | DAY_% | SOURCE",
+    ]
+    n_ok = 0
+    for t in syms:
+        q = quotes.get(t) or quotes.get(t.upper()) or {}
+        px = q.get("price")
+        prev = q.get("prev_close") if q.get("prev_close") is not None else q.get("previous_close")
+        pct = q.get("pct_change")
+        if px is None and prev is None:
+            continue
+        try:
+            px_s = f"${float(px):.2f}" if px is not None else "—"
+        except (TypeError, ValueError):
+            px_s = "—"
+        try:
+            prev_s = f"${float(prev):.2f}" if prev is not None else "—"
+        except (TypeError, ValueError):
+            prev_s = "—"
+        try:
+            if pct is None and px is not None and prev and float(prev) != 0:
+                pct = (float(px) - float(prev)) / float(prev) * 100.0
+            pct_s = f"{float(pct):+.2f}%" if pct is not None else "—"
+        except (TypeError, ValueError):
+            pct_s = "—"
+        src = str(q.get("source") or q.get("price_source") or "yahoo")[:24]
+        lines.append(f"{t} | {px_s} | {prev_s} | {pct_s} | {src}")
+        n_ok += 1
+
+    if n_ok == 0:
+        return (
+            "\nVERIFIED LIVE PRICES: unavailable this run — write 'price n/a' "
+            "for equity levels; do NOT invent prices from training memory.\n"
+        )
+    print(f"[daily_brief] injected live prices for {n_ok}/{len(syms)} symbols", flush=True)
+    return "\n" + "\n".join(lines) + "\n"
+
+
 def run_daily_brief(book_tickers: list[str] | None = None,
                     evidence_context: str = "") -> dict:
     """Run a Goldman-style morning brief.
@@ -3207,6 +3291,9 @@ def run_daily_brief(book_tickers: list[str] | None = None,
     book_tickers: the PM's actual book — watchlist + open positions.
     evidence_context: optional free-data pack (Market Wire / Fund Filings text)
         injected when volume LLM has no live search.
+
+    Always injects a VERIFIED LIVE PRICES table so the model cannot invent
+    stale training prices for the book (the root cause of wrong Daily Pulse $).
     """
     today = datetime.now().strftime("%A, %B %d, %Y")
     now_iso = datetime.utcnow().isoformat()
@@ -3218,7 +3305,9 @@ def run_daily_brief(book_tickers: list[str] | None = None,
             _book.append(_t)
     book_line = (f"\nDGA BOOK (positions + watchlist) — focus the YOUR BOOK section on these: "
                  f"{', '.join(_book[:60])}\n" if _book else "\nDGA BOOK: (none provided)\n")
-    user_msg = _DAILY_BRIEF_USER_TEMPLATE.format(today=today, book=book_line)
+    price_block = _build_daily_brief_price_block(_book)
+    user_msg = _DAILY_BRIEF_USER_TEMPLATE.format(
+        today=today, book=book_line, prices=price_block)
     if evidence_context:
         user_msg += (
             "\n\n── FREE EVIDENCE PACK (ground truth — prefer these over training recall) ──\n"
@@ -3287,6 +3376,7 @@ def run_daily_brief(book_tickers: list[str] | None = None,
         "date_str": today,
         "markdown": markdown,
         "tickers": tickers,
+        "book_tickers": _book[:60],
         "error": None,
         "provider": provider,
         "model": (
@@ -3299,6 +3389,8 @@ def run_daily_brief(book_tickers: list[str] | None = None,
         "cost_usd": _usage.get("cost_usd"),
         "input_tokens": _usage.get("input_tokens"),
         "output_tokens": _usage.get("output_tokens"),
+        # True when we successfully attached the verified price table
+        "live_prices_injected": bool(price_block and "LAST |" in price_block),
     }
 
     # Persist to disk so it survives restarts and can be hydrated.
