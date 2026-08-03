@@ -3488,7 +3488,22 @@
         (d.rating ? ` <span style="font-size:10px;font-weight:800;letter-spacing:0.5px;color:${_GF.green};border:1px solid ${_GF.green};border-radius:4px;padding:1px 6px;vertical-align:middle;">${_gfEsc(d.rating).toUpperCase()}</span>` : '') + `</div>` +
         kmGrid +
         `<div style="font-size:11.5px;color:var(--text-tertiary);margin-top:8px;">Targets — Grok: ${tg.grok ? '$'+tg.grok : '—'} · Claude: ${tg.claude ? '$'+tg.claude : '—'}${tg.as_of ? '<br>as of ' + _gfEsc(String(tg.as_of).slice(0,10)) : ''}</div>` +
-        `<div style="font-size:10px;color:var(--text-tertiary);margin-top:8px;">SEC XBRL store · ${_gfEsc(d.period_type)} · zero LLM tokens</div>` +
+        (function () {
+          const lp = d.latest_period || {};
+          const pe = lp.period_end ? String(lp.period_end).slice(0, 10) : '';
+          const fp = lp.fp || '';
+          const pend = d.earnings_8k_pending_10q;
+          let html = `<div style="font-size:10px;color:var(--text-tertiary);margin-top:8px;">SEC 10-K/10-Q XBRL store · ${_gfEsc(d.period_type)} · zero LLM tokens`;
+          if (pe) html += `<br>Latest period in store: <strong style="color:var(--text-secondary);">${_gfEsc(fp ? fp + ' · ' : '')}${_gfEsc(pe)}</strong>`;
+          html += ` · <a href="#" id="fin-dash-refresh-sec" style="color:var(--blue,#3E9AB8);font-weight:700;text-decoration:none;">↻ Refresh from SEC</a></div>`;
+          if (pend && pend.filed) {
+            html += `<div style="margin-top:6px;padding:6px 8px;border-radius:6px;background:#fff7ed;border:1px solid #fed7aa;font-size:10.5px;color:#9a3412;line-height:1.4;">`
+              + `<strong>Earnings 8-K</strong> filed ${_gfEsc(String(pend.filed).slice(0,10))} (Item 2.02). `
+              + `Full 10-Q XBRL is not in the store yet — numbers stay at the last 10-Q until EDGAR posts the filing.`
+              + `</div>`;
+          }
+          return html;
+        })() +
       `</div>` +
       // DGA score
       `<div style="border:1px solid var(--border-subtle);border-radius:8px;padding:12px 14px;background:var(--bg-elevated);">` +
@@ -3510,6 +3525,30 @@
         (d.price ? `<div style="font-size:10.5px;color:var(--text-tertiary);margin-top:5px;">┆ dashed line = current price ($${d.price.toLocaleString('en-US',{maximumFractionDigits:2})})</div>` : '') +
       `</div></div>`;
     head.style.display = 'block';
+    // Wire one-ticker SEC refresh (companyfacts + latest Excel 10-K/10-Q)
+    const refBtn = document.getElementById('fin-dash-refresh-sec');
+    if (refBtn) {
+      refBtn.addEventListener('click', async function (ev) {
+        ev.preventDefault();
+        const tk = d.ticker;
+        if (!tk) return;
+        refBtn.textContent = '↻ Refreshing…';
+        refBtn.style.pointerEvents = 'none';
+        try {
+          const r = await window.dgaFetch('/api/financials/' + encodeURIComponent(tk) + '/refresh', { method: 'POST' });
+          const j = await r.json().catch(function () { return {}; });
+          if (!r.ok) throw new Error(j.detail || j.error || ('HTTP ' + r.status));
+          refBtn.textContent = '✓ Queued — reloading in 25s…';
+          setTimeout(function () {
+            if (typeof _finDashLoad === 'function') _finDashLoad(tk);
+          }, 25000);
+        } catch (e) {
+          refBtn.textContent = '↻ Refresh failed';
+          refBtn.title = (e && e.message) || 'error';
+          refBtn.style.pointerEvents = '';
+        }
+      });
+    }
 
     // ── TTM strip (PM desk snapshot) ──
     const ttmEl = document.getElementById('fin-dash-ttm');

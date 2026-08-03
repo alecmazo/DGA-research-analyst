@@ -768,17 +768,168 @@ def _fin_is_rate_limit_error(msg: str) -> bool:
                                 "throttle", "slow down"))
 
 
+def _fin_latest_store_period(ticker: str) -> dict | None:
+    """Newest quarter (else annual) already in company_financials for ticker."""
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT period_type, fy, fp, period_end::text AS period_end, filed::text AS filed
+                  FROM company_financials
+                 WHERE ticker=%s AND period_type='quarter'
+                 ORDER BY period_end DESC NULLS LAST
+                 LIMIT 1
+            """, (ticker.upper(),))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+            cur.execute("""
+                SELECT period_type, fy, fp, period_end::text AS period_end, filed::text AS filed
+                  FROM company_financials
+                 WHERE ticker=%s AND period_type='annual'
+                 ORDER BY period_end DESC NULLS LAST
+                 LIMIT 1
+            """, (ticker.upper(),))
+            row = cur.fetchone()
+            return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def _fin_recent_earnings_8k(ticker: str, after_period_end: str | None = None) -> dict | None:
+    """Recent Item 2.02 8-K (earnings) after our latest 10-Q period_end.
+
+    Returns filing meta so the UI can show 'earnings out, 10-Q not yet in XBRL store'.
+    Does not invent financial numbers.
+    """
+    try:
+        import sec_edgar_xbrl as _edgar
+        import requests as _req
+        ua = analyst.get_sec_user_agent()
+        cik = _edgar.resolve_cik(ticker, user_agent=ua)
+        if not cik:
+            return None
+        cik10 = str(cik).zfill(10)
+        url = f"https://data.sec.gov/submissions/CIK{cik10}.json"
+        r = _req.get(url, headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
+                     timeout=25)
+        if r.status_code != 200:
+            return None
+        recent = (r.json().get("filings") or {}).get("recent") or {}
+        forms = recent.get("form") or []
+        dates = recent.get("filingDate") or []
+        items = recent.get("items") or []
+        accs = recent.get("accessionNumber") or []
+        after = (after_period_end or "")[:10]
+        for i, form in enumerate(forms):
+            if form not in ("8-K", "8-K/A"):
+                continue
+            it = str(items[i] if i < len(items) else "") or ""
+            if "2.02" not in it:
+                continue
+            filed = str(dates[i] if i < len(dates) else "")[:10]
+            if not filed:
+                continue
+            if after and filed <= after:
+                continue
+            return {
+                "filed": filed,
+                "accession": accs[i] if i < len(accs) else None,
+                "items": it,
+                "note": "Earnings 8-K (Item 2.02) on file; full 10-Q/XBRL may not be filed yet",
+            }
+        return None
+    except Exception as e:
+        print(f"[fin] 8-K probe {ticker}: {e!s:.100}", flush=True)
+        return None
+
+
+def _fin_excel_latest_upsert(ticker: str, budget_s: float = 45.0) -> dict:
+    """Pull latest 10-K/10-Q Excel via edgartools and upsert into company_financials.
+
+    Nightly companyfacts-only misses just-filed 10-Qs that companyfacts lags on.
+    """
+    import concurrent.futures as _cf
+    out: dict = {"excel_ok": False, "upserted": 0, "quarter_end": None, "errors": []}
+    os.environ.setdefault("EDGAR_RATE_LIMIT_PER_SEC", "2")
+    try:
+        import pull_sec_financials as _pull
+        import excel_financials as _xlsx
+    except Exception as e:
+        out["errors"].append(f"excel imports: {e!s:.80}")
+        return out
+
+    def _dl():
+        return _pull.download_financials(ticker)
+
+    lock = None
+    try:
+        lock = analyst._sec_download_lock()
+    except Exception:
+        pass
+    try:
+        if lock is not None:
+            with lock:
+                pool = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
+                    fut = pool.submit(_dl)
+                    paths = fut.result(timeout=budget_s)
+                finally:
+                    try:
+                        pool.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:
+                        pool.shutdown(wait=False)
+        else:
+            pool = _cf.ThreadPoolExecutor(max_workers=1)
+            try:
+                fut = pool.submit(_dl)
+                paths = fut.result(timeout=budget_s)
+            finally:
+                try:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    pool.shutdown(wait=False)
+    except Exception as e:
+        msg = str(e)
+        out["errors"].append(f"excel download: {msg[:120]}")
+        out["rate_limited"] = _fin_is_rate_limit_error(msg)
+        return out
+
+    if not paths:
+        out["errors"].append("excel download returned nothing (rate limit or no filings)")
+        return out
+    try:
+        data = _xlsx.extract_financials(ticker)
+    except Exception as e:
+        out["errors"].append(f"excel extract: {e!s:.120}")
+        return out
+    if not data:
+        out["errors"].append("excel extract empty")
+        return out
+    qcur = (data.get("quarterly") or {}).get("current") or {}
+    out["quarter_end"] = str(qcur.get("end") or "")[:10] or None
+    out["fp"] = qcur.get("fp")
+    try:
+        n = _xlsx.upsert_extract_to_company_financials(data)
+        out["upserted"] = int(n or 0)
+        out["excel_ok"] = True
+    except Exception as e:
+        out["errors"].append(f"excel upsert: {e!s:.120}")
+    return out
+
+
 def _sync_one_ticker_financials(ticker: str, years_back: int = 10,
                                 max_rate_retries: int = 3,
                                 skip_if_stored: bool = True) -> dict:
-    """Pull SEC XBRL history for one ticker and persist it. Returns
-    {stored, periods, entity, errors, rate_limited?, skipped?}.
+    """Pull SEC data for one ticker and persist to company_financials.
 
-    skip_if_stored=True (default): if any rows already exist for this ticker,
-    do nothing — resume never re-hits or overwrites completed names.
+    Two sources (both free SEC):
+      1) companyfacts multi-year history (insert-only new period_end rows)
+      2) live edgartools 10-K/10-Q Excel for the *latest* filing (upsert) on
+         refresh paths — surfaces just-filed 10-Qs companyfacts still lags on.
 
-    Hard timeout per ticker (default 90s) so a hung SEC call cannot stall the
-    whole batch. Rate-limit waits capped at 2 min so progress keeps moving."""
+    skip_if_stored=True: bulk backfill resume (skip names already in store).
+    skip_if_stored=False: nightly/monthly — re-hit SEC for new periods.
+    """
     if skip_if_stored and _fin_ticker_already_stored(ticker):
         return {"stored": 0, "periods": 0, "skipped": True, "errors": []}
     import sec_edgar_xbrl as _edgar
@@ -786,40 +937,77 @@ def _sync_one_ticker_financials(ticker: str, years_back: int = 10,
         ua = analyst.get_sec_user_agent()
     except Exception as e:
         return {"stored": 0, "periods": 0, "errors": [f"SEC_USER_AGENT not set: {e!s:.80}"]}
-    waits = (30, 60, 120)   # keep bulk jobs moving — 10m freezes looked "stalled"
+    waits = (30, 60, 120)
     last_err = None
+    total_stored = 0
+    entity = None
+    all_errors: list[str] = []
+    rate_limited = False
+    periods_seen = 0
+
     for attempt in range(max(1, max_rate_retries)):
         try:
-            # requests timeouts inside sec_edgar_xbrl bound each HTTP call; keep
-            # outer retries short so a bad ticker cannot stall the chunk forever.
             res = _edgar.extract_financials_history(
                 ticker, years_back=years_back, user_agent=ua)
             rows = res.get("rows") or []
+            periods_seen = len(rows)
+            entity = res.get("entity_name")
             try:
-                # Insert-only — never clobber periods already in the store
                 stored = _store_financials_rows(
                     ticker, res.get("cik"), res.get("entity_name"), rows,
                     overwrite=False)
+                total_stored += int(stored or 0)
             except Exception as e:
-                return {"stored": 0, "periods": len(rows),
-                        "errors": [f"{ticker} store failed: {e!s:.120}"]}
-            return {"stored": stored, "periods": len(rows),
-                    "entity": res.get("entity_name"),
-                    "errors": res.get("errors") or []}
+                all_errors.append(f"{ticker} store failed: {e!s:.120}")
+            break
         except Exception as e:
             last_err = e
             msg = str(e)
             if _fin_is_rate_limit_error(msg) and attempt < max_rate_retries - 1:
                 wait = waits[min(attempt, len(waits) - 1)]
-                print(f"[fin sync] rate limited on {ticker} — waiting {wait}s "
+                print(f"[fin sync] rate limited on {ticker} (companyfacts) — waiting {wait}s "
                       f"(retry {attempt+1}/{max_rate_retries})", flush=True)
                 time.sleep(wait)
                 continue
-            return {"stored": 0, "periods": 0,
-                    "errors": [f"{ticker}: {msg[:140]}"],
-                    "rate_limited": _fin_is_rate_limit_error(msg)}
-    return {"stored": 0, "periods": 0,
-            "errors": [f"{ticker}: {str(last_err)[:140]}"], "rate_limited": True}
+            all_errors.append(f"{ticker}: {msg[:140]}")
+            rate_limited = _fin_is_rate_limit_error(msg)
+            break
+
+    # Latest Excel pull on refresh paths only (nightly / monthly / manual)
+    if not skip_if_stored:
+        time.sleep(0.6)
+        xl = _fin_excel_latest_upsert(ticker, budget_s=50.0)
+        if xl.get("upserted"):
+            total_stored += int(xl["upserted"])
+        if xl.get("errors"):
+            all_errors.extend(xl["errors"][:2])
+        if xl.get("rate_limited"):
+            rate_limited = True
+        store_latest = _fin_latest_store_period(ticker)
+        pend = _fin_recent_earnings_8k(
+            ticker, (store_latest or {}).get("period_end"))
+        if pend:
+            print(f"[fin sync] {ticker}: earnings 8-K {pend.get('filed')} but "
+                  f"store latest period={(store_latest or {}).get('period_end')} "
+                  f"— 10-Q may still be pending on EDGAR", flush=True)
+        return {
+            "stored": total_stored,
+            "periods": periods_seen,
+            "entity": entity,
+            "errors": all_errors,
+            "rate_limited": rate_limited,
+            "excel_quarter_end": xl.get("quarter_end"),
+            "latest_store": store_latest,
+            "earnings_8k_pending_10q": pend,
+        }
+
+    if last_err and not periods_seen and not total_stored:
+        return {"stored": 0, "periods": 0,
+                "errors": all_errors or [f"{ticker}: {str(last_err)[:140]}"],
+                "rate_limited": rate_limited}
+    return {"stored": total_stored, "periods": periods_seen,
+            "entity": entity, "errors": all_errors,
+            "rate_limited": rate_limited}
 
 
 def _fin_job_set(job_id: str, **kw) -> None:
@@ -2497,12 +2685,72 @@ def financials_ticker(ticker: str, request: Request, period_type: str = "all"):
         raise HTTPException(403, "GP only")
     _ensure_financials_table()
     try:
-        rows = _fin_rows_for_ticker(ticker, period_type)
-        return {"ok": True, "ticker": ticker.upper(),
-                "entity_name": (rows[0].get("entity_name") if rows else None),
-                "rows": rows}
+        tk = ticker.upper().strip()
+        rows = _fin_rows_for_ticker(tk, period_type)
+        latest = _fin_latest_store_period(tk)
+        # Best-effort: flag earnings 8-K without newer 10-Q (no extra if no rows)
+        pend = None
+        try:
+            if latest:
+                pend = _fin_recent_earnings_8k(tk, latest.get("period_end"))
+        except Exception:
+            pend = None
+        return {
+            "ok": True,
+            "ticker": tk,
+            "entity_name": (rows[0].get("entity_name") if rows else None),
+            "latest_period": latest,
+            "earnings_8k_pending_10q": pend,
+            "rows": rows,
+        }
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+
+
+@app.post("/api/financials/{ticker}/refresh")
+def financials_ticker_refresh(ticker: str, request: Request, background_tasks: BackgroundTasks):
+    """Force SEC refresh for one ticker into company_financials (GP only).
+
+    Re-hits companyfacts history + latest Excel 10-K/10-Q. Use when a new
+    10-Q just filed or the Financials tab looks stale. Runs in background;
+    poll GET /api/financials/{ticker} for updated latest_period.
+    """
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    tk = (ticker or "").strip().upper()
+    if not tk or not re.match(r"^[A-Z][A-Z0-9.\-]{0,11}$", tk):
+        raise HTTPException(422, "Invalid ticker")
+    try:
+        if not analyst.get_sec_user_agent():
+            raise ValueError("no UA")
+    except Exception:
+        raise HTTPException(400, "SEC_USER_AGENT not configured on server")
+
+    job_id = "FIN1_" + tk + "_" + datetime.utcnow().strftime("%H%M%S")
+
+    def _work():
+        _fin_job_set(job_id, stage="syncing", status="running",
+                     label=f"Refreshing {tk} from SEC…",
+                     started_at=time.time(), total=1, done=0, stored=0,
+                     universe="single")
+        try:
+            r = _sync_one_ticker_financials(tk, years_back=_FIN_OVERNIGHT_YEARS,
+                                            skip_if_stored=False)
+            _fin_job_set(
+                job_id, stage="done", status="done",
+                label=(f"✓ {tk}: +{r.get('stored') or 0} rows · "
+                       f"excel_Q={r.get('excel_quarter_end') or '—'} · "
+                       f"store={(r.get('latest_store') or {}).get('period_end') or '—'}"),
+                done=1, stored=int(r.get("stored") or 0),
+                result=r)
+        except Exception as e:
+            _fin_job_set(job_id, stage="error", status="error",
+                         label=f"✗ {tk}: {e!s:.120}", done=1)
+
+    background_tasks.add_task(_work)
+    return {"ok": True, "job_id": job_id, "ticker": tk,
+            "note": "SEC companyfacts + latest 10-K/10-Q Excel → company_financials"}
 
 
 # ── Company dashboard (GuruFocus-style) — 100% persisted data, ZERO LLM ───────
@@ -3761,6 +4009,14 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     except Exception:
         metric_history = {}
 
+    latest_period = _fin_latest_store_period(tk)
+    earnings_pending = None
+    try:
+        earnings_pending = _fin_recent_earnings_8k(
+            tk, (latest_period or {}).get("period_end"))
+    except Exception:
+        earnings_pending = None
+
     return {"ok": True, "ticker": tk,
             "entity_name": rows[-1].get("entity_name") or tk,
             "sector": meta.get("sector") or peers.get("sector"),
@@ -3777,6 +4033,9 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
                           "weights": weights},
             "valuation": valuation,
             "metric_history": metric_history,
+            # Filing freshness — store is 10-Q/10-K XBRL only (not earnings 8-Ks)
+            "latest_period": latest_period,
+            "earnings_8k_pending_10q": earnings_pending,
             "notes": {
                 "wacc": "WACC est.: 9% CoE / 4.3% after-tax CoD, book-equity weighted (no beta).",
                 "roic": "NOPAT (21% tax) / (debt + equity − cash). Quarterly NOPAT ×4.",
@@ -3786,6 +4045,15 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
                 "peers": "Sell-side style: industry group + market-cap band (not whole-sector dump).",
                 "tokens": "Dashboard is pure DB arithmetic — zero LLM tokens.",
                 "history": "metric_history tracks DGA score / Value Rank / DGA value over days you open this dashboard or re-run Analyze.",
+                "filings": (
+                    "Financials store uses SEC 10-K/10-Q XBRL only. An earnings "
+                    "8-K (Item 2.02) does not update quarters until the 10-Q is filed."
+                    + (f" Latest store period: {(latest_period or {}).get('period_end') or '—'}."
+                       if latest_period else "")
+                    + (f" Earnings 8-K filed {(earnings_pending or {}).get('filed')} — "
+                       f"10-Q not yet in store."
+                       if earnings_pending else "")
+                ),
             }}
 
 

@@ -51,7 +51,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **EDGAR-first + Kimi + BS** | **`ui408-20260802-edgar-first-kimi-bs`** | All engines live SEC Excel primary; enable Kimi Analyze; mandatory §5C balance sheet structure |
 | **EDGAR retry + Kimi stream** | **`ui409-20260802-edgar-retry-kimi-stream`** | SEC lock+retry (Grok rate-limit miss); Kimi stream+HTTP timeout (was 900s hang) |
 | **Security: email + secrets** | **`ui410-20260802-security-email-auth`** | Strip seed plaintext pw comments; auth on YTD email; fail-closed weak secrets; mask emails/keys in logs/diag |
-| **Next deploy after this** | **`ui411-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Fin nightly Excel + 8-K flag** | **`ui411-20260802-fin-nightly-excel`** | Nightly/monthly also pull latest 10-K/10-Q Excel; flag earnings 8-K pending 10-Q; per-ticker refresh |
+| **Next deploy after this** | **`ui412-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
