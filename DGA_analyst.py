@@ -3306,37 +3306,6 @@ def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55,
     return "\n" + "\n".join(lines) + "\n"
 
 
-def _format_live_prices_md(syms: list[str], quotes: dict, *, book_only: bool = False,
-                           book: list[str] | None = None, max_rows: int = 40) -> str:
-    """User-visible markdown table of verified prices (appended to Daily Pulse body)."""
-    if not quotes:
-        return ""
-    book_set = {str(t).upper() for t in (book or [])}
-    rows: list[str] = []
-    for t in syms:
-        if book_only and book_set and t not in book_set:
-            continue
-        q = quotes.get(t) or {}
-        px, prev, pct = _quote_fields(q)
-        if px is None:
-            continue
-        prev_s = f"${prev:.2f}" if prev is not None else "—"
-        pct_s = f"{pct:+.2f}%" if pct is not None else "—"
-        rows.append(f"| **{t}** | ${px:.2f} | {prev_s} | {pct_s} |")
-        if len(rows) >= max_rows:
-            break
-    if not rows:
-        return ""
-    header = (
-        "\n\n---\n\n## 📊 VERIFIED LIVE PRICES\n\n"
-        "*Session-aware Yahoo quotes — these are ground truth. "
-        "Ignore any other dollar levels the narrative may have invented.*\n\n"
-        "| Ticker | Last | Prior close | Day % |\n"
-        "|---|---:|---:|---:|\n"
-    )
-    return header + "\n".join(rows) + "\n"
-
-
 def _rewrite_brief_prices(markdown: str, quotes: dict) -> str:
     """Replace invented $LAST / (+/-X%) next to known tickers with live quotes.
 
@@ -3407,8 +3376,8 @@ def run_daily_brief(book_tickers: list[str] | None = None,
     evidence_context: optional free-data pack (Market Wire / Fund Filings text)
         injected when volume LLM has no live search.
 
-    Always injects a VERIFIED LIVE PRICES table (prompt + output rewrite + visible
-    markdown table) so the model cannot invent stale training prices for the book.
+    Injects live quotes into the prompt and rewrites invented $ levels in the
+    narrative so prices stay correct — without a duplicate visible price table.
     """
     today = datetime.now().strftime("%A, %B %d, %Y")
     now_iso = datetime.utcnow().isoformat()
@@ -3481,22 +3450,21 @@ def run_daily_brief(book_tickers: list[str] | None = None,
             "cost_usd": None,
         }
 
-    # Belt-and-suspenders: rewrite invented $ levels, then append verified table
-    # so the user always sees ground-truth prices even if the model ignored them.
+    # Correct invented $ levels in the narrative only — do NOT append a visible
+    # price table (watchlist / reports already show prices).
     if _quotes and markdown:
         markdown = _rewrite_brief_prices(markdown, _quotes)
-        _price_md = _format_live_prices_md(
-            _syms, _quotes, book_only=bool(_book), book=_book, max_rows=45)
-        if _price_md and "VERIFIED LIVE PRICES" not in (markdown or ""):
-            # Prefer insert after YOUR BOOK header; else append
-            import re as _re_ins
-            _m = _re_ins.search(
-                r"(##\s*[^\n]*YOUR BOOK[^\n]*\n)", markdown, _re_ins.IGNORECASE)
-            if _m:
-                _ins = _m.end()
-                markdown = markdown[:_ins] + _price_md + "\n" + markdown[_ins:]
-            else:
-                markdown = (markdown or "") + _price_md
+        # Drop any residual "VERIFIED LIVE PRICES" section the model (or an older
+        # build) may have echoed into the body.
+        import re as _re_strip
+        markdown = _re_strip.sub(
+            r"\n*---\s*\n+\s*##\s*[^\n]*VERIFIED LIVE PRICES[^\n]*\n"
+            r"(?:\*.*?\*\s*\n)?"
+            r"(?:\|[^\n]+\n)+",
+            "\n",
+            markdown,
+            flags=_re_strip.IGNORECASE,
+        )
 
     # Parse out **TICKER** tokens so the UI can make them tappable.
     import re as _re
