@@ -3105,6 +3105,7 @@ Hard rules:
 - Cite SPECIFIC numbers, prices, and times whenever possible
 - **PRICES ARE GROUND TRUTH:** When a VERIFIED LIVE PRICES block is present, you MUST use those exact last/prior/change figures for every book ticker you mention. NEVER invent, round to a wrong level, or substitute training-memory prices (e.g. do not write "$180" if the table says "$47.22"). If a ticker is not in the price table, write "price n/a" rather than guessing.
 - Name SPECIFIC tickers using **TICKER** format (each on its own line in the names section) — these become tappable in the app
+- **YOUR BOOK ON X FORMAT (NON-NEGOTIABLE):** Exactly one ticker per line for any name with news/catalyst. Never cram multiple tickers, preferred series, or parenthetical ticker dumps onto one line. Quiet names (no overnight news) go on a single final group line: **Quiet:** T1, T2, T3. No prose paragraphs of tickers.
 - Skip generic risk disclaimers and "consult your advisor" language
 - If a section has nothing genuinely interesting, write "Nothing meaningful overnight" rather than padding with filler
 - Total length target: ~700-900 words — dense but readable in under 2 minutes"""
@@ -3127,7 +3128,19 @@ Write your morning brief for the DGA Capital trading floor. Use EXACTLY this for
 
 ## 💼 YOUR BOOK ON X
 
-*The live X read on DGA's ACTUAL positions and watchlist (the tickers listed above). For each name with anything moving — overnight news, an earnings reaction, a notable X post, unusual options, a catalyst today — give one tight line using the VERIFIED LIVE PRICES table: **TICKER** $LAST (+/-X.XX%) — what's happening + the @handle or source. Copy LAST and DAY_% from the price table exactly. If a held name is quiet, say "quiet" (still use the table price if you mention it). If the book list is empty, write "No book provided — broad-market focus below." Lead with the names that matter most today.*
+*STRICT LAYOUT — the desk renders this as a scannable list. Do not write paragraphs.*
+
+For every book name with overnight news / catalyst / notable X, emit EXACTLY one line:
+**TICKER** $LAST (+/-X.XX%) — one tight sentence + @handle or source
+
+Rules:
+- ONE ticker per line. Never **A**, **B**, **C** on the same line. Never "FNMA / FMCC preferred (FNMAL, FNMFM, …)" dumps.
+- Prefer 5–12 news lines max; lead with the names that matter most today.
+- Copy LAST and DAY_% from the VERIFIED LIVE PRICES table exactly when present.
+- All remaining book names with nothing moving go on ONE final line only:
+**Quiet:** TICKER1, TICKER2, TICKER3
+- If the book list is empty: "No book provided — broad-market focus below."
+- No intro italic blurb, no trailing "everything else is flat" prose.
 
 ---
 
@@ -3306,6 +3319,233 @@ def _build_daily_brief_price_block(tickers: list[str], *, limit: int = 55,
     return "\n" + "\n".join(lines) + "\n"
 
 
+def _normalize_your_book_section(markdown: str, book: list[str] | None = None) -> str:
+    """Force YOUR BOOK ON X into one-line-per-news-ticker + Quiet group.
+
+    Models often dump preferred-share series or multi-ticker commas into one
+    garbled paragraph (ticket SUP_20260805). Rewrite that section only.
+    """
+    if not markdown:
+        return markdown or ""
+    import re as _re
+
+    m = _re.search(
+        r"(##\s*[^\n]*YOUR BOOK[^\n]*\n)([\s\S]*?)(?=\n---\s*\n|\n##\s|\Z)",
+        markdown,
+        _re.IGNORECASE,
+    )
+    if not m:
+        return markdown
+    header, body = m.group(1), m.group(2)
+
+    stop = {
+        "THE", "AND", "FOR", "WITH", "FROM", "THIS", "THAT", "PREFERRED",
+        "PREFS", "GSE", "GSES", "ETF", "REIT", "REITS", "BMO", "AMC", "USA",
+        "USD", "CEO", "CFO", "IPO", "SEC", "FDA", "FED", "QUIET", "NO", "NEWS",
+        "FLAT", "ELSE", "BOOK", "OVERNIGHT", "HOLD", "LONG", "SHORT",
+        "NOTHING", "MEANINGFUL", "MOVING", "REST", "ALL", "OTHER",
+        "EVERYTHING", "REMAINING", "UNTRADED", "SECTOR", "UTILITY", "BUT",
+        "ARE", "NOW", "IN", "A", "POST", "FOMC", "WORLD", "WHERE", "LOWER",
+        "RATES", "BOOST", "VALUE", "WAY", "TO", "PLAY", "RISK", "HAS", "BEEN",
+        "TABLE", "PREF", "YIELDS", "ABSURD", "RELATIVE", "WITHOUT", "HEADLINE",
+        "CLEANEST", "HOUSING", "RECOVERY", "POUNDING", "DROPPED", "MORNING",
+        "SURPRISE", "IMPLY", "RELEASE", "DEAL", "SUDDENLY", "POLITICAL",
+        "COVER", "CALLED", "BACKDOOR", "RECAP", "TRIGGER", "ON", "AS", "IS",
+        "OF", "OR", "IF", "IT", "BE", "BY", "AT", "AN", "VS", "INTO", "OVER",
+        "UNDER", "AFTER", "BEFORE", "STILL", "JUST", "VERY", "MORE", "MOST",
+        "THAN", "THEN", "WHEN", "WHAT", "WHO", "WHY", "HOW", "NOT", "YES",
+        "ALSO", "ONLY", "EVEN", "BOTH", "EACH", "SUCH", "THAN", "VIA",
+    }
+    book_set = {
+        str(t).strip().upper()
+        for t in (book or [])
+        if t and str(t).strip()
+    }
+
+    def _is_quiet_text(s: str) -> bool:
+        sl = (s or "").lower().strip()
+        if not sl:
+            return True
+        # First clause only — "Quiet. Utility sector is bid…" still quiet
+        first = _re.split(r"[.!;]\s+", sl, maxsplit=1)[0]
+        return bool(
+            _re.search(r"\bquiet\b", first)
+            or _re.search(r"\bno\s+(overnight\s+)?news\b", first)
+            or _re.search(r"\bnothing\s+(moving|meaningful)\b", first)
+            or first in ("flat", "hold", "untraded", "n/a", "—", "-")
+        )
+
+    def _has_catalyst(s: str) -> bool:
+        return bool(_re.search(
+            r"@\w+|8-K|10-Q|10-K|earnings|upgrade|downgrade|catalyst|"
+            r"ripping|gapping|breakout|forced|liquidation|filing",
+            s or "",
+            _re.I,
+        ))
+
+    def _looks_like_ticker(t: str) -> bool:
+        t = (t or "").upper()
+        if not t or t in stop:
+            return False
+        # Equity symbols: 1–5 letters, optional share-class digit/letter (FNMAH, FMCC5)
+        if not _re.fullmatch(r"[A-Z]{1,5}[A-Z0-9]{0,2}", t):
+            return False
+        # Single letter only if in book (rare: F, C, …)
+        if len(t) == 1 and t not in book_set:
+            return False
+        # Reject common English 2–3 letter words not in book
+        if t in stop:
+            return False
+        if book_set and t not in book_set and len(t) <= 2 and t not in {
+            "AI", "QQ", "SP", "UV", "GL",
+        }:
+            # short unknown tokens — skip unless clearly a pref series (has digit)
+            if not any(c.isdigit() for c in t):
+                return False
+        return True
+
+    def _extract_tickers_from_list_region(s: str) -> list[str]:
+        """Pull tickers only from slash heads + parenthetical laundry lists.
+
+        Order: leading FNMA/FMCC heads first (news anchor), then parenthetical series.
+        """
+        s = s or ""
+        regions: list[str] = []
+        head = _re.match(
+            r"^([A-Z0-9]{1,6}(?:\s*/\s*[A-Z0-9]{1,6}){0,6})\b",
+            s.strip(),
+        )
+        if head:
+            regions.append(head.group(1))
+        regions.extend(_re.findall(r"\(([^)]{3,400})\)", s))
+        out: list[str] = []
+        for region in regions:
+            for t in _re.findall(r"[A-Z]{1,5}[A-Z0-9]{0,2}", region.upper()):
+                if _looks_like_ticker(t) and t not in out:
+                    out.append(t)
+        return out
+
+    def _extract_tickers_listed(s: str) -> list[str]:
+        """Comma/space list after Quiet: — prefer book members."""
+        out: list[str] = []
+        for t in _re.findall(r"[A-Z]{1,5}[A-Z0-9]{0,2}", (s or "").upper()):
+            if not _looks_like_ticker(t):
+                continue
+            if book_set and t not in book_set:
+                # allow known-looking tickers of len>=3 even if not in book snapshot
+                if len(t) < 3:
+                    continue
+            if t not in out:
+                out.append(t)
+        return out
+
+    news_lines: list[str] = []
+    quiet: list[str] = []
+    seen: set[str] = set()
+
+    def _add_quiet(tickers: list[str]) -> None:
+        for t in tickers:
+            t = str(t).upper()
+            if not t or t in seen or not _looks_like_ticker(t):
+                continue
+            quiet.append(t)
+            seen.add(t)
+
+    def _add_news(ticker: str, rest: str) -> None:
+        ticker = ticker.upper()
+        if not ticker or ticker in seen:
+            return
+        seen.add(ticker)
+        rest = (rest or "").strip()
+        rest = rest.split("\n")[0].strip()
+        rest = _re.sub(r"^[\s—\-–:]+", "", rest).strip()
+        # Drop parenthetical ticker laundry lists on the same line
+        if rest.count(",") >= 4 and _re.search(
+            r"\([A-Z]{1,5}[A-Z0-9]{0,2},\s*[A-Z]", rest
+        ):
+            after = _re.sub(r"^.*\)\s*[—\-–:]?\s*", "", rest).strip()
+            rest = after or "related preferreds / series active"
+        if _is_quiet_text(rest) and not _has_catalyst(rest):
+            quiet.append(ticker)
+            return
+        if rest:
+            news_lines.append(f"**{ticker}** {rest}")
+        else:
+            quiet.append(ticker)
+
+    # Walk body line-by-line; also split lines that pack multiple **TICKER**s
+    for raw_line in (body or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        # Drop echoed italic instructions / trailing prose
+        if line.startswith("*") and line.endswith("*") and "**" not in line:
+            continue
+        if _re.match(r"^(Everything else|Rest of|All other|Remaining)\b", line, _re.I):
+            continue
+        # Explicit Quiet group
+        qm = _re.match(r"^\*?\*?Quiet\*?\*?\s*[:—\-]\s*(.+)$", line, _re.I)
+        if qm:
+            _add_quiet(_extract_tickers_listed(qm.group(1)))
+            continue
+        # One or more **TICKER** segments on this line
+        segs = _re.findall(
+            r"\*\*([A-Z]{1,5}[A-Z0-9]{0,2})\*\*\s*(.*?)(?=\s*\*\*[A-Z]{1,5}[A-Z0-9]{0,2}\*\*|$)",
+            line,
+        )
+        if segs:
+            for ticker, rest in segs:
+                rest = rest.rstrip(" ,;—\-–")
+                _add_news(ticker, rest)
+            continue
+        # Garbled dump line without leading **TICKER** (preferred series lists)
+        tickers_here = _extract_tickers_from_list_region(line)
+        if len(tickers_here) >= 2 or (
+            len(tickers_here) >= 1 and "(" in line and line.count(",") >= 3
+        ):
+            if _has_catalyst(line) and tickers_here:
+                after = _re.sub(r"^.*\)\s*[—\-–:]?\s*", "", line).strip()
+                if not after or after == line:
+                    after = _re.sub(
+                        r"^.{0,120}?[—\-–:]\s*", "", line
+                    ).strip()
+                # Keep note short
+                if len(after) > 280:
+                    after = after[:277].rstrip() + "…"
+                head, *tail = tickers_here
+                _add_news(head, after or "catalyst overnight")
+                _add_quiet(tail)
+            else:
+                _add_quiet(tickers_here)
+            continue
+        continue
+
+    # Any book tickers never mentioned → Quiet
+    for t in (book or []):
+        t = str(t or "").strip().upper()
+        if t and t not in seen:
+            quiet.append(t)
+            seen.add(t)
+
+    # Dedupe quiet preserving order
+    q2: list[str] = []
+    qseen: set[str] = set()
+    for t in quiet:
+        if t not in qseen and _looks_like_ticker(t):
+            q2.append(t)
+            qseen.add(t)
+    quiet = q2
+
+    out_lines = news_lines[:]
+    if quiet:
+        out_lines.append("**Quiet:** " + ", ".join(quiet))
+    if not out_lines:
+        out_lines = ["Nothing meaningful overnight on the book."]
+
+    new_body = "\n".join(out_lines) + "\n"
+    return markdown[: m.start(1)] + header + new_body + markdown[m.end(2) :]
+
+
 def _rewrite_brief_prices(markdown: str, quotes: dict) -> str:
     """Replace invented $LAST / (+/-X%) next to known tickers with live quotes.
 
@@ -3450,10 +3690,11 @@ def run_daily_brief(book_tickers: list[str] | None = None,
             "cost_usd": None,
         }
 
-    # Correct invented $ levels in the narrative only — do NOT append a visible
-    # price table (watchlist / reports already show prices).
-    if _quotes and markdown:
-        markdown = _rewrite_brief_prices(markdown, _quotes)
+    # Correct invented $ levels; normalize YOUR BOOK layout (one ticker / line).
+    if markdown:
+        if _quotes:
+            markdown = _rewrite_brief_prices(markdown, _quotes)
+        markdown = _normalize_your_book_section(markdown, book=_book)
         # Drop any residual "VERIFIED LIVE PRICES" section the model (or an older
         # build) may have echoed into the body.
         import re as _re_strip
