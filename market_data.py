@@ -1489,6 +1489,53 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                     (result_source or "") + "+yf_stmt" if result_source else "yf_stmt"
                 )
         rev_actual = actuals.get("revenue_actual")
+    # Yahoo quarterly income stmt often lags the print by days while Nasdaq/YF
+    # already have EPS (TREX ticket SUP_20260805). Pull revenue from the Item
+    # 2.02 8-K exhibit 99 press release when statement actuals are missing.
+    if (
+        rev_actual is None
+        and not event_still_future
+        and status in ("reported", "pending_update")
+    ):
+        try:
+            rd = (
+                (result or {}).get("date_reported")
+                or (upcoming or {}).get("date")
+                or ""
+            )
+            # Normalize m/d/Y → ISO when possible
+            try:
+                from datetime import datetime as _dt
+                if rd and "/" in str(rd):
+                    rd = _dt.strptime(str(rd)[:10], "%m/%d/%Y").date().isoformat()
+            except Exception:
+                pass
+            k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
+            if k8.get("revenue_actual") is not None:
+                rev_actual = k8["revenue_actual"]
+                result_source = (
+                    (result_source or "") + "+sec8k" if result_source else "sec8k"
+                )
+                if not actuals:
+                    actuals = {
+                        "revenue_actual": rev_actual,
+                        "period_label": (
+                            (upcoming or {}).get("fiscal_quarter")
+                            or (result or {}).get("fiscal_quarter")
+                            or ""
+                        ),
+                        "source": "sec_8k_ex99",
+                        "filed": k8.get("filed"),
+                    }
+                else:
+                    actuals = dict(actuals)
+                    actuals["revenue_actual"] = rev_actual
+                    actuals["source"] = (
+                        str(actuals.get("source") or "") + "+sec8k"
+                    ).strip("+")
+        except Exception as e:
+            print(f"[market_data] 8-K rev fill {sym}: {e!s:.120}", flush=True)
+
     rev_estimate = street_range.get("revenue_avg")
     rev_surprise_pct = None
     rev_beat = None
@@ -1703,6 +1750,329 @@ def yfinance_quarterly_actuals(symbol: str, fiscal_quarter_hint: str = "") -> di
         print(f"[market_data] yf quarterly actuals {sym}: {e!s:.120}", flush=True)
         out = {}
     _EARNINGS_DETAIL_CACHE[("yf_qact", sym, fiscal_quarter_hint or "")] = (_time.time(), out)
+    return out
+
+
+def _sec_ua() -> str:
+    """Identifying User-Agent for SEC EDGAR (required). Prefer env."""
+    ua = (os.environ.get("SEC_USER_AGENT") or "").strip()
+    if ua:
+        return ua
+    try:
+        import DGA_analyst as _a  # type: ignore
+        return _a.get_sec_user_agent()
+    except Exception:
+        # Last resort — still identify the app (anonymous UA is blocked)
+        return "DGA-Capital-Research contact@dgacapital.com"
+
+
+def _parse_money_phrase_to_float(num: str, unit: str) -> float | None:
+    """'$418' + 'million' → 418e6; '1.25' + 'billion' → 1.25e9; bare '418,019' thousands handled by caller."""
+    try:
+        n = float(str(num).replace(",", "").replace("$", "").strip())
+    except (TypeError, ValueError):
+        return None
+    u = (unit or "").strip().lower()
+    if u.startswith("b"):
+        return n * 1_000_000_000.0
+    if u.startswith("m"):
+        return n * 1_000_000.0
+    if u.startswith("k") or u.startswith("thousand"):
+        return n * 1_000.0
+    return n
+
+
+def _extract_revenue_from_earnings_text(text: str) -> dict:
+    """Pull quarterly revenue/net sales from an 8-K exhibit 99 press release.
+
+    Prefers explicit dollar+unit phrases over table cells in thousands.
+    Returns {revenue_actual, snippet, method} or {}.
+    """
+    import re as _re
+    if not text:
+        return {}
+    # Strip HTML / collapse whitespace
+    t = _re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
+    t = _re.sub(r"(?is)<style[^>]*>.*?</style>", " ", t)
+    t = _re.sub(r"(?is)<[^>]+>", " ", t)
+    t = _re.sub(r"&#\d+;|&[a-z]+;", " ", t, flags=_re.I)  # &#8226; bullets, etc.
+    t = _re.sub(r"\s+", " ", t)
+
+    # High-confidence prose patterns (quarter just reported)
+    # Note: "revenues" (plural) and "sales" used by many industrial filers (CMI).
+    rev_words = (
+        r"(?:net\s+sales|total\s+(?:net\s+)?sales|total\s+revenues?|net\s+revenues?|"
+        r"revenues?|sales)"
+    )
+    patterns = [
+        # Net sales of $418 million / revenues of $9.5 billion
+        rev_words
+        + r"\s+(?:of|were|was|reached|totaled|totalled)\s*\$?\s*"
+        + r"([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b",
+        # second-quarter revenues of $9.5 billion / Record … revenues of …
+        r"(?:first|second|third|fourth|1st|2nd|3rd|4th)?\s*-?\s*"
+        r"(?:quarter|qtr)?\s*" + rev_words
+        + r"\s+(?:of|were|was)\s*\$?\s*"
+        + r"([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b",
+        # increased X% to $418 million
+        rev_words + r"\s+"
+        r"(?:increased|decreased|rose|fell|grew|declined)[^\.]{0,80}?\s+to\s+"
+        r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b",
+        # reported revenue/net sales of $…
+        r"reported\s+" + rev_words + r"\s+of\s+"
+        r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b",
+    ]
+    hits: list[tuple[float, str, str]] = []
+    for pat in patterns:
+        for m in _re.finditer(pat, t, _re.I):
+            val = _parse_money_phrase_to_float(m.group(1), m.group(2))
+            if val is None or val < 50_000:  # ignore tiny / parse noise
+                continue
+            # Skip obvious full-year guidance bands when "full year" nearby
+            ctx = t[max(0, m.start() - 80): m.end() + 40].lower()
+            if any(x in ctx for x in (
+                "full year", "full-year", "fy 20", "guidance ranging",
+                "guidance of", "outlook of", "for the year",
+            )) and "quarter" not in ctx and "second quarter" not in ctx \
+                    and "first quarter" not in ctx and "third quarter" not in ctx \
+                    and "fourth quarter" not in ctx:
+                continue
+            hits.append((val, m.group(0)[:160], "prose"))
+
+    if hits:
+        # Prefer company-level quarterly print over segment lines / FY guidance
+        def _score(item):
+            val, snip, _ = item
+            s = snip.lower()
+            sc = 0
+            if "net sales" in s:
+                sc += 4
+            if "revenues of" in s or "revenue of" in s or "sales of" in s:
+                sc += 3
+            if any(q in s for q in (
+                "quarter", "q1", "q2", "q3", "q4", "second-quarter",
+                "first-quarter", "third-quarter", "fourth-quarter",
+            )):
+                sc += 4
+            if "record" in s:
+                sc += 1
+            if "segment" in s or "engine segment" in s or "components" in s:
+                sc -= 6
+            if any(x in s for x in ("full year", "full-year", "fy ", "guidance")):
+                sc -= 8
+            # Prefer mid/large company totals over tiny segment noise
+            if val >= 1_000_000_000:
+                sc += 1
+            return sc
+        hits.sort(key=_score, reverse=True)
+        val, snip, method = hits[0]
+        return {
+            "revenue_actual": float(val),
+            "snippet": snip,
+            "method": method,
+        }
+
+    # Fallback: income statement table row "Net sales $418,019 $387,801" (thousands)
+    m = _re.search(
+        r"(?:net\s+sales|total\s+revenue|revenue)\s+\$?\s*([0-9]{2,3}(?:,[0-9]{3})+)"
+        r"(?:\s+\$?\s*[0-9,]+)?",
+        t,
+        _re.I,
+    )
+    if m:
+        try:
+            raw = float(m.group(1).replace(",", ""))
+            # SEC press tables for mid/large caps are almost always $000s
+            if 100 <= raw <= 50_000_000:
+                val = raw * 1000.0
+                return {
+                    "revenue_actual": val,
+                    "snippet": m.group(0)[:160],
+                    "method": "table_thousands",
+                }
+        except (TypeError, ValueError):
+            pass
+    return {}
+
+
+def sec_8k_earnings_release_actuals(
+    symbol: str,
+    report_date: str | None = None,
+    *,
+    max_age_days: int = 21,
+) -> dict:
+    """Actual revenue (and optional EPS hint) from the latest Item 2.02 8-K exhibit 99.
+
+    Free SEC EDGAR only. Used when Yahoo quarterly income stmt still lags the print
+    (ticket SUP_20260805 — TREX etc. showed EPS from Nasdaq but Actual Revenue blank).
+    """
+    import time as _time
+    import re as _re
+    from datetime import date, datetime, timedelta
+    import requests as _req
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {}
+    cache_key = ("sec8k_rev", sym, (report_date or "")[:10])
+    hit = _EARNINGS_DETAIL_CACHE.get(cache_key)
+    if hit and _time.time() - hit[0] < 1800:
+        return hit[1]
+
+    out: dict = {}
+    try:
+        import sec_edgar_xbrl as _edgar
+        ua = _sec_ua()
+        try:
+            cik = _edgar.resolve_cik(sym, user_agent=ua)
+        except Exception as e:
+            print(f"[market_data] 8-K CIK {sym}: {e!s:.100}", flush=True)
+            _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), {})
+            return {}
+        cik10 = str(cik).zfill(10)
+        cik_int = str(int(cik10))
+        r = _req.get(
+            f"https://data.sec.gov/submissions/CIK{cik10}.json",
+            headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
+            timeout=25,
+        )
+        if r.status_code != 200:
+            _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), {})
+            return {}
+        recent = (r.json().get("filings") or {}).get("recent") or {}
+        forms = recent.get("form") or []
+        dates = recent.get("filingDate") or []
+        items = recent.get("items") or []
+        accs = recent.get("accessionNumber") or []
+        primaries = recent.get("primaryDocument") or []
+
+        target: date | None = None
+        if report_date:
+            try:
+                target = date.fromisoformat(str(report_date)[:10])
+            except Exception:
+                try:
+                    target = datetime.strptime(str(report_date)[:10], "%m/%d/%Y").date()
+                except Exception:
+                    target = None
+        today = date.today()
+        floor = today - timedelta(days=max_age_days)
+
+        chosen = None
+        for i, form in enumerate(forms[:80]):
+            if form not in ("8-K", "8-K/A"):
+                continue
+            it = str(items[i] if i < len(items) else "") or ""
+            if "2.02" not in it:
+                continue
+            filed_s = str(dates[i] if i < len(dates) else "")[:10]
+            if not filed_s:
+                continue
+            try:
+                filed_d = date.fromisoformat(filed_s)
+            except Exception:
+                continue
+            if filed_d < floor:
+                continue
+            if target is not None and abs((filed_d - target).days) > 5:
+                continue
+            chosen = {
+                "filed": filed_s,
+                "accession": accs[i] if i < len(accs) else None,
+                "primary": primaries[i] if i < len(primaries) else None,
+                "items": it,
+            }
+            break
+        if not chosen or not chosen.get("accession"):
+            _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), {})
+            return {}
+
+        acc = str(chosen["accession"]).replace("-", "")
+        # Filing index for exhibit list
+        idx_url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/index.json"
+        idx = _req.get(
+            idx_url,
+            headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
+            timeout=20,
+        )
+        docs: list[str] = []
+        if idx.status_code == 200:
+            try:
+                items_d = ((idx.json().get("directory") or {}).get("item")) or []
+                for it in items_d:
+                    name = str(it.get("name") or "")
+                    if not name:
+                        continue
+                    low = name.lower()
+                    if not (low.endswith(".htm") or low.endswith(".html") or low.endswith(".txt")):
+                        continue
+                    docs.append(name)
+            except Exception:
+                pass
+        if chosen.get("primary"):
+            docs.insert(0, str(chosen["primary"]))
+
+        def _doc_score(name: str) -> int:
+            low = name.lower()
+            sc = 0
+            if "ex99" in low or "ex-99" in low or "exhibit99" in low or "ex99" in low.replace("-", ""):
+                sc += 50
+            if "ex99_1" in low or "ex-99.1" in low or "ex991" in low:
+                sc += 20
+            if any(x in low for x in ("earn", "release", "press", "news", "results")):
+                sc += 15
+            if low.endswith(".htm") or low.endswith(".html"):
+                sc += 5
+            # Prefer larger narrative exhibits over thin cover 8-K shells
+            if low.endswith(".txt"):
+                sc += 8  # full submission text usually includes ex99
+            if "8-k" in low or (low.startswith("form") and "ex" not in low):
+                sc -= 5
+            if "graph" in low or "image" in low or low.endswith(".jpg") or low.endswith(".png"):
+                sc -= 30
+            if "index" in low or "header" in low:
+                sc -= 40
+            return sc
+
+        docs = sorted(set(docs), key=_doc_score, reverse=True)
+        # Cap downloads (prefer ex99 / earnings release first)
+        for name in docs[:8]:
+            url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/{name}"
+            try:
+                pr = _req.get(
+                    url,
+                    headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
+                    timeout=25,
+                )
+            except Exception:
+                continue
+            if pr.status_code != 200 or len(pr.text or "") < 400:
+                continue
+            parsed = _extract_revenue_from_earnings_text(pr.text)
+            if parsed.get("revenue_actual"):
+                out = {
+                    "revenue_actual": parsed["revenue_actual"],
+                    "source": "sec_8k_ex99",
+                    "filed": chosen.get("filed"),
+                    "accession": chosen.get("accession"),
+                    "document": name,
+                    "snippet": parsed.get("snippet"),
+                    "method": parsed.get("method"),
+                }
+                break
+            # tiny pause between SEC hits
+            _time.sleep(0.12)
+    except Exception as e:
+        print(f"[market_data] 8-K earnings release {sym}: {e!s:.140}", flush=True)
+        out = {}
+
+    _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), out)
+    if out:
+        print(
+            f"[market_data] 8-K rev {sym}: ${out.get('revenue_actual'):,.0f} "
+            f"from {out.get('document')} filed {out.get('filed')}",
+            flush=True,
+        )
     return out
 
 

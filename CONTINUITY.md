@@ -58,7 +58,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Daily Pulse price enforce** | **`ui415-20260803-daily-brief-price-enforce`** | Prompt + rewrite invented $ + visible VERIFIED LIVE PRICES table in output |
 | **Daily Pulse hide price table** | **`ui416-20260803-daily-brief-no-price-table`** | Keep live-price correctness; stop showing duplicate VERIFIED LIVE PRICES table |
 | **Daily Pulse YOUR BOOK format** | **`ui417-20260805-daily-book-format`** | One ticker per line + Quiet group; post-normalize garbled preferred dumps (SUP_20260805) |
-| **Next deploy after this** | **`ui418-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Earnings actual revenue 8-K** | **`ui418-20260805-earnings-rev-8k`** | Fill Actual Revenue from Item 2.02 ex99 when Yahoo income stmt lags (TREX etc.) |
+| **Next deploy after this** | **`ui419-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
