@@ -1895,6 +1895,14 @@ def _extract_revenue_from_earnings_text(text: str) -> dict:
     return {}
 
 
+# Serialize SEC 8-K revenue pulls — concurrent card opens must not stampede EDGAR.
+_SEC8K_FETCH_LOCK = __import__("threading").Semaphore(2)
+
+
+class _Sec8kDone(Exception):
+    """Internal control-flow for early exit while still releasing the semaphore."""
+
+
 def sec_8k_earnings_release_actuals(
     symbol: str,
     report_date: str | None = None,
@@ -1905,6 +1913,10 @@ def sec_8k_earnings_release_actuals(
 
     Free SEC EDGAR only. Used when Yahoo quarterly income stmt still lags the print
     (ticket SUP_20260805 — TREX etc. showed EPS from Nasdaq but Actual Revenue blank).
+
+    Hardened after ui418 deploy: company_tickers map is process-cached (see
+    sec_edgar_xbrl.resolve_cik) and 8-K fetches are concurrency-limited so a
+    multi-name desk open cannot 429-storm SEC and starve the worker pool.
     """
     import time as _time
     import re as _re
@@ -1920,160 +1932,169 @@ def sec_8k_earnings_release_actuals(
         return hit[1]
 
     out: dict = {}
+    # Non-blocking: if two 8-K pulls already in flight, skip rather than queue
+    # (card can retry; avoids deploy-time worker exhaustion under SEC 429).
+    if not _SEC8K_FETCH_LOCK.acquire(blocking=False):
+        print(f"[market_data] 8-K rev {sym}: skipped (concurrency cap)", flush=True)
+        return {}
     try:
-        import sec_edgar_xbrl as _edgar
-        ua = _sec_ua()
         try:
-            cik = _edgar.resolve_cik(sym, user_agent=ua)
-        except Exception as e:
-            print(f"[market_data] 8-K CIK {sym}: {e!s:.100}", flush=True)
-            _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), {})
-            return {}
-        cik10 = str(cik).zfill(10)
-        cik_int = str(int(cik10))
-        r = _req.get(
-            f"https://data.sec.gov/submissions/CIK{cik10}.json",
-            headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
-            timeout=25,
-        )
-        if r.status_code != 200:
-            _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), {})
-            return {}
-        recent = (r.json().get("filings") or {}).get("recent") or {}
-        forms = recent.get("form") or []
-        dates = recent.get("filingDate") or []
-        items = recent.get("items") or []
-        accs = recent.get("accessionNumber") or []
-        primaries = recent.get("primaryDocument") or []
-
-        target: date | None = None
-        if report_date:
+            import sec_edgar_xbrl as _edgar
+            ua = _sec_ua()
             try:
-                target = date.fromisoformat(str(report_date)[:10])
-            except Exception:
+                cik = _edgar.resolve_cik(sym, user_agent=ua)
+            except Exception as e:
+                print(f"[market_data] 8-K CIK {sym}: {e!s:.100}", flush=True)
+                out = {}
+                raise _Sec8kDone()
+            cik10 = str(cik).zfill(10)
+            cik_int = str(int(cik10))
+            r = _req.get(
+                f"https://data.sec.gov/submissions/CIK{cik10}.json",
+                headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
+                timeout=25,
+            )
+            if r.status_code != 200:
+                out = {}
+                raise _Sec8kDone()
+            recent = (r.json().get("filings") or {}).get("recent") or {}
+            forms = recent.get("form") or []
+            dates = recent.get("filingDate") or []
+            items = recent.get("items") or []
+            accs = recent.get("accessionNumber") or []
+            primaries = recent.get("primaryDocument") or []
+
+            target: date | None = None
+            if report_date:
                 try:
-                    target = datetime.strptime(str(report_date)[:10], "%m/%d/%Y").date()
+                    target = date.fromisoformat(str(report_date)[:10])
                 except Exception:
-                    target = None
-        today = date.today()
-        floor = today - timedelta(days=max_age_days)
+                    try:
+                        target = datetime.strptime(str(report_date)[:10], "%m/%d/%Y").date()
+                    except Exception:
+                        target = None
+            today = date.today()
+            floor = today - timedelta(days=max_age_days)
 
-        chosen = None
-        for i, form in enumerate(forms[:80]):
-            if form not in ("8-K", "8-K/A"):
-                continue
-            it = str(items[i] if i < len(items) else "") or ""
-            if "2.02" not in it:
-                continue
-            filed_s = str(dates[i] if i < len(dates) else "")[:10]
-            if not filed_s:
-                continue
-            try:
-                filed_d = date.fromisoformat(filed_s)
-            except Exception:
-                continue
-            if filed_d < floor:
-                continue
-            if target is not None and abs((filed_d - target).days) > 5:
-                continue
-            chosen = {
-                "filed": filed_s,
-                "accession": accs[i] if i < len(accs) else None,
-                "primary": primaries[i] if i < len(primaries) else None,
-                "items": it,
-            }
-            break
-        if not chosen or not chosen.get("accession"):
-            _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), {})
-            return {}
-
-        acc = str(chosen["accession"]).replace("-", "")
-        # Filing index for exhibit list
-        idx_url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/index.json"
-        idx = _req.get(
-            idx_url,
-            headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
-            timeout=20,
-        )
-        docs: list[str] = []
-        if idx.status_code == 200:
-            try:
-                items_d = ((idx.json().get("directory") or {}).get("item")) or []
-                for it in items_d:
-                    name = str(it.get("name") or "")
-                    if not name:
-                        continue
-                    low = name.lower()
-                    if not (low.endswith(".htm") or low.endswith(".html") or low.endswith(".txt")):
-                        continue
-                    docs.append(name)
-            except Exception:
-                pass
-        if chosen.get("primary"):
-            docs.insert(0, str(chosen["primary"]))
-
-        def _doc_score(name: str) -> int:
-            low = name.lower()
-            sc = 0
-            if "ex99" in low or "ex-99" in low or "exhibit99" in low or "ex99" in low.replace("-", ""):
-                sc += 50
-            if "ex99_1" in low or "ex-99.1" in low or "ex991" in low:
-                sc += 20
-            if any(x in low for x in ("earn", "release", "press", "news", "results")):
-                sc += 15
-            if low.endswith(".htm") or low.endswith(".html"):
-                sc += 5
-            # Prefer larger narrative exhibits over thin cover 8-K shells
-            if low.endswith(".txt"):
-                sc += 8  # full submission text usually includes ex99
-            if "8-k" in low or (low.startswith("form") and "ex" not in low):
-                sc -= 5
-            if "graph" in low or "image" in low or low.endswith(".jpg") or low.endswith(".png"):
-                sc -= 30
-            if "index" in low or "header" in low:
-                sc -= 40
-            return sc
-
-        docs = sorted(set(docs), key=_doc_score, reverse=True)
-        # Cap downloads (prefer ex99 / earnings release first)
-        for name in docs[:8]:
-            url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/{name}"
-            try:
-                pr = _req.get(
-                    url,
-                    headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
-                    timeout=25,
-                )
-            except Exception:
-                continue
-            if pr.status_code != 200 or len(pr.text or "") < 400:
-                continue
-            parsed = _extract_revenue_from_earnings_text(pr.text)
-            if parsed.get("revenue_actual"):
-                out = {
-                    "revenue_actual": parsed["revenue_actual"],
-                    "source": "sec_8k_ex99",
-                    "filed": chosen.get("filed"),
-                    "accession": chosen.get("accession"),
-                    "document": name,
-                    "snippet": parsed.get("snippet"),
-                    "method": parsed.get("method"),
+            chosen = None
+            for i, form in enumerate(forms[:80]):
+                if form not in ("8-K", "8-K/A"):
+                    continue
+                it = str(items[i] if i < len(items) else "") or ""
+                if "2.02" not in it:
+                    continue
+                filed_s = str(dates[i] if i < len(dates) else "")[:10]
+                if not filed_s:
+                    continue
+                try:
+                    filed_d = date.fromisoformat(filed_s)
+                except Exception:
+                    continue
+                if filed_d < floor:
+                    continue
+                if target is not None and abs((filed_d - target).days) > 5:
+                    continue
+                chosen = {
+                    "filed": filed_s,
+                    "accession": accs[i] if i < len(accs) else None,
+                    "primary": primaries[i] if i < len(primaries) else None,
+                    "items": it,
                 }
                 break
-            # tiny pause between SEC hits
-            _time.sleep(0.12)
-    except Exception as e:
-        print(f"[market_data] 8-K earnings release {sym}: {e!s:.140}", flush=True)
-        out = {}
+            if not chosen or not chosen.get("accession"):
+                out = {}
+                raise _Sec8kDone()
 
-    _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), out)
-    if out:
-        print(
-            f"[market_data] 8-K rev {sym}: ${out.get('revenue_actual'):,.0f} "
-            f"from {out.get('document')} filed {out.get('filed')}",
-            flush=True,
-        )
-    return out
+            acc = str(chosen["accession"]).replace("-", "")
+            # Filing index for exhibit list
+            idx_url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/index.json"
+            idx = _req.get(
+                idx_url,
+                headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
+                timeout=20,
+            )
+            docs: list[str] = []
+            if idx.status_code == 200:
+                try:
+                    items_d = ((idx.json().get("directory") or {}).get("item")) or []
+                    for it in items_d:
+                        name = str(it.get("name") or "")
+                        if not name:
+                            continue
+                        low = name.lower()
+                        if not (low.endswith(".htm") or low.endswith(".html") or low.endswith(".txt")):
+                            continue
+                        docs.append(name)
+                except Exception:
+                    pass
+            if chosen.get("primary"):
+                docs.insert(0, str(chosen["primary"]))
+
+            def _doc_score(name: str) -> int:
+                low = name.lower()
+                sc = 0
+                if "ex99" in low or "ex-99" in low or "exhibit99" in low or "ex99" in low.replace("-", ""):
+                    sc += 50
+                if "ex99_1" in low or "ex-99.1" in low or "ex991" in low:
+                    sc += 20
+                if any(x in low for x in ("earn", "release", "press", "news", "results")):
+                    sc += 15
+                if low.endswith(".htm") or low.endswith(".html"):
+                    sc += 5
+                # Prefer larger narrative exhibits over thin cover 8-K shells
+                if low.endswith(".txt"):
+                    sc += 8  # full submission text usually includes ex99
+                if "8-k" in low or (low.startswith("form") and "ex" not in low):
+                    sc -= 5
+                if "graph" in low or "image" in low or low.endswith(".jpg") or low.endswith(".png"):
+                    sc -= 30
+                if "index" in low or "header" in low:
+                    sc -= 40
+                return sc
+
+            docs = sorted(set(docs), key=_doc_score, reverse=True)
+            # Cap downloads (prefer ex99 / earnings release first)
+            for name in docs[:8]:
+                url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/{name}"
+                try:
+                    pr = _req.get(
+                        url,
+                        headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
+                        timeout=25,
+                    )
+                except Exception:
+                    continue
+                if pr.status_code != 200 or len(pr.text or "") < 400:
+                    continue
+                parsed = _extract_revenue_from_earnings_text(pr.text)
+                if parsed.get("revenue_actual"):
+                    out = {
+                        "revenue_actual": parsed["revenue_actual"],
+                        "source": "sec_8k_ex99",
+                        "filed": chosen.get("filed"),
+                        "accession": chosen.get("accession"),
+                        "document": name,
+                        "snippet": parsed.get("snippet"),
+                        "method": parsed.get("method"),
+                    }
+                    break
+                # tiny pause between SEC hits
+                _time.sleep(0.12)
+        except _Sec8kDone:
+            pass
+        except Exception as e:
+            print(f"[market_data] 8-K earnings release {sym}: {e!s:.140}", flush=True)
+            out = {}
+        _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), out)
+        if out:
+            print(
+                f"[market_data] 8-K rev {sym}: ${out.get('revenue_actual'):,.0f} "
+                f"from {out.get('document')} filed {out.get('filed')}",
+                flush=True,
+            )
+        return out
+    finally:
+        _SEC8K_FETCH_LOCK.release()
 
 
 def yfinance_earnings_calendar_context(symbol: str) -> dict:

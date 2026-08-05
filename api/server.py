@@ -6904,7 +6904,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui420-20260805-options-held-first"
+WEB_BUILD_VERSION = "ui421-20260805-sec-ticker-map-cache"
 
 
 @app.get("/api/build")
@@ -21936,7 +21936,7 @@ def _render_quarterly_report_html(
             _tk_ret = a.get("ticker_return_pct")
             _tk_str = (f"{'+' if _tk_ret>=0 else ''}{_tk_ret:.1f}%") if _tk_ret is not None else "—"
             _dg     = float(a.get("dollar_gain") or 0)
-            _dg_str = f"{'+'if _dg>=0 else ''}\${abs(_dg):,.0f}"
+            _dg_str = f"{'+' if _dg >= 0 else ''}${abs(_dg):,.0f}"
             _sold   = a.get("sold", False)
             _sold_badge = "<span style='font-size:8px;font-weight:700;background:#f1f5f9;color:#94a3b8;border:1px solid #e2e8f0;border-radius:3px;padding:1px 4px;margin-left:4px;'>SOLD</span>" if _sold else ""
             _attr_rows += f"""

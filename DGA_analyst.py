@@ -3495,7 +3495,7 @@ def _normalize_your_book_section(markdown: str, book: list[str] | None = None) -
         )
         if segs:
             for ticker, rest in segs:
-                rest = rest.rstrip(" ,;—\-–")
+                rest = rest.rstrip(" ,;—–-")
                 _add_news(ticker, rest)
             continue
         # Garbled dump line without leading **TICKER** (preferred series lists)

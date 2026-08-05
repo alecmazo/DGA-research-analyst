@@ -245,23 +245,65 @@ def _get_json(sess: requests.Session, url: str, *, retries: int = 8) -> dict:
 # ---------------------------------------------------------------------------
 # Ticker -> CIK resolver
 # ---------------------------------------------------------------------------
+# CRITICAL (ui418 deploy logs): concurrent resolve_cik used to download
+# company_tickers.json once *per uncached ticker*, stampeding SEC into 429s
+# (each retry sleeps 5–20s × 8). One process-wide map load fills the cache.
 _TICKER_CACHE: dict[str, str] = {}
+_TICKER_MAP_LOADED_AT: float = 0.0
+_TICKER_MAP_LOCK = __import__("threading").Lock()
+_TICKER_MAP_TTL_S = 6 * 3600  # refresh every 6h
+_TICKER_NEGATIVE = object()  # sentinel: known-unknown (don't re-fetch map)
+
+
+def _ensure_ticker_map(user_agent: str | None = None) -> None:
+    """Load SEC company_tickers.json once and populate _TICKER_CACHE."""
+    global _TICKER_MAP_LOADED_AT
+    import time as _time
+    now = _time.time()
+    if _TICKER_MAP_LOADED_AT and (now - _TICKER_MAP_LOADED_AT) < _TICKER_MAP_TTL_S and _TICKER_CACHE:
+        return
+    with _TICKER_MAP_LOCK:
+        now = _time.time()
+        if _TICKER_MAP_LOADED_AT and (now - _TICKER_MAP_LOADED_AT) < _TICKER_MAP_TTL_S and _TICKER_CACHE:
+            return
+        sess = _session(user_agent)
+        data = _get_json(sess, TICKER_MAP_URL)
+        # data is {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}, ...}
+        n = 0
+        for entry in (data or {}).values():
+            if not isinstance(entry, dict):
+                continue
+            tk = str(entry.get("ticker") or "").strip().upper()
+            if not tk:
+                continue
+            try:
+                cik = f"{int(entry['cik_str']):010d}"
+            except Exception:
+                continue
+            _TICKER_CACHE[tk] = cik
+            n += 1
+        _TICKER_MAP_LOADED_AT = _time.time()
+        print(f"[sec] ticker map loaded: {n} symbols", flush=True)
 
 
 def resolve_cik(ticker: str, user_agent: str | None = None) -> str:
     """Return the 10-digit zero-padded CIK for a ticker (e.g. 'AAPL' -> '0000320193')."""
     t = ticker.strip().upper()
-    if t in _TICKER_CACHE:
-        return _TICKER_CACHE[t]
+    hit = _TICKER_CACHE.get(t)
+    if hit is _TICKER_NEGATIVE:
+        raise ValueError(
+            f"Ticker '{ticker}' not found in SEC ticker map. "
+            "Foreign issuers (ADRs) may not file XBRL; try the underlying CIK."
+        )
+    if isinstance(hit, str) and hit:
+        return hit
 
-    sess = _session(user_agent)
-    data = _get_json(sess, TICKER_MAP_URL)
-    # data is {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}, ...}
-    for entry in data.values():
-        if entry.get("ticker", "").upper() == t:
-            cik = f"{int(entry['cik_str']):010d}"
-            _TICKER_CACHE[t] = cik
-            return cik
+    _ensure_ticker_map(user_agent)
+    hit = _TICKER_CACHE.get(t)
+    if isinstance(hit, str) and hit:
+        return hit
+    # Remember misses so we don't re-download the map for preferreds/ETFs
+    _TICKER_CACHE[t] = _TICKER_NEGATIVE  # type: ignore[assignment]
     raise ValueError(
         f"Ticker '{ticker}' not found in SEC ticker map. "
         "Foreign issuers (ADRs) may not file XBRL; try the underlying CIK."
