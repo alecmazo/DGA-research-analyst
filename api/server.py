@@ -6904,7 +6904,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui418-20260805-earnings-rev-8k"
+WEB_BUILD_VERSION = "ui419-20260805-builder-since-add"
 
 
 @app.get("/api/build")
@@ -10017,11 +10017,88 @@ def _builder_list_tickers(list_id: str, lp_id: str) -> list[str]:
     return [r["ticker"] for r in _builder_list_ticker_rows(list_id, lp_id)]
 
 
+def _builder_close_on_or_before(ticker: str, day_iso: str) -> float | None:
+    """Session close on `day_iso` (YYYY-MM-DD), or last prior session if holiday/weekend.
+
+    Used as cost basis for Builder boards so 'since add %' tracks from initiation
+    day — never overwrite with today's live quote when the add date is historical.
+    """
+    import market_data as _md  # type: ignore
+    import time as _time
+    from datetime import date as _date
+    tku = (ticker or "").strip().upper()
+    day = str(day_iso or "")[:10]
+    if not tku or not day:
+        return None
+    try:
+        target = _date.fromisoformat(day)
+    except Exception:
+        return None
+    # Cache per process on market_data style dict if available
+    cache = getattr(_md, "_EARNINGS_DETAIL_CACHE", None)
+    ckey = ("bld_close", tku, day)
+    if isinstance(cache, dict):
+        hit = cache.get(ckey)
+        if hit and (_time.time() - hit[0]) < 3600:
+            return hit[1]
+    px = None
+    try:
+        # Prefer 1y of daily bars (enough for any board age in this product)
+        hist = _md.yahoo_history(tku, "1y") or _md.yahoo_history(tku, "2y") or []
+        prev = None
+        for row in hist:
+            d = str(row.get("date") or "")[:10]
+            if not d:
+                continue
+            try:
+                rd = _date.fromisoformat(d)
+            except Exception:
+                continue
+            if rd > target:
+                break
+            c = row.get("close")
+            if c is None:
+                continue
+            try:
+                prev = float(c)
+            except (TypeError, ValueError):
+                continue
+            if rd == target:
+                px = prev
+                break
+        if px is None:
+            px = prev
+    except Exception as e:
+        print(f"[builder-lists] hist close {tku} {day}: {e!s:.100}", flush=True)
+        px = None
+    if isinstance(cache, dict):
+        cache[ckey] = (_time.time(), px)
+    return px
+
+
+def _builder_anchor_date(aa, ed, today: str) -> str:
+    """Pick initiation date: existing entry_date, else added_at day, else today."""
+    if ed is not None:
+        try:
+            if hasattr(ed, "isoformat"):
+                return ed.isoformat()[:10]
+            return str(ed)[:10]
+        except Exception:
+            pass
+    if aa is not None:
+        try:
+            return aa.date().isoformat() if hasattr(aa, "date") else str(aa)[:10]
+        except Exception:
+            pass
+    return today
+
+
 def _builder_anchor_missing(list_id: str, quotes: dict) -> None:
     """Stamp entry_date / entry_price for rows still missing an anchor.
 
-    Used when opening a board or after seed/add so tracking starts from
-    today's initiation price (or the first quote we can get).
+    Cost basis must be the close on the initiation day (added_at / entry_date),
+    NOT today's live quote. Using live price made every 'since add %' show 0%
+    (ticket SUP_20260805_f76e3b87 — Consumer Cyclical etc.).
     """
     if not list_id:
         return
@@ -10037,32 +10114,36 @@ def _builder_anchor_missing(list_id: str, quotes: dict) -> None:
                 tku = (tk or "").upper()
                 if not tku:
                     continue
-                price = (quotes.get(tku) or {}).get("price")
-                need_price = ep is None and price is not None
+                live = (quotes.get(tku) or {}).get("price")
+                need_price = ep is None
                 need_date = ed is None
                 if not need_price and not need_date:
                     continue
-                # Prefer added_at date if present; else today
-                date_val = today
-                if aa is not None:
-                    try:
-                        date_val = aa.date().isoformat() if hasattr(aa, "date") else str(aa)[:10]
-                    except Exception:
-                        date_val = today
-                if need_price and need_date:
+                date_val = _builder_anchor_date(aa, ed, today)
+                # Resolve cost basis: historical close on initiation day when past;
+                # live quote only when anchoring same-day adds.
+                price = None
+                if need_price:
+                    if date_val < today:
+                        price = _builder_close_on_or_before(tku, date_val)
+                    if price is None and live is not None:
+                        # Same-day add, or hist unavailable — use live as best effort
+                        price = float(live)
+                if need_price and price is None and not need_date:
+                    continue
+                if need_price and need_date and price is not None:
                     cur.execute("""
                         UPDATE builder_list_tickers
                            SET entry_price = %s, entry_date = %s::date
                          WHERE list_id = %s AND ticker = %s
                            AND entry_price IS NULL
                     """, (float(price), date_val, list_id, tku))
-                    # If price write failed race, still set date
                     cur.execute("""
                         UPDATE builder_list_tickers
                            SET entry_date = COALESCE(entry_date, %s::date)
                          WHERE list_id = %s AND ticker = %s
                     """, (date_val, list_id, tku))
-                elif need_price:
+                elif need_price and price is not None:
                     cur.execute("""
                         UPDATE builder_list_tickers
                            SET entry_price = %s
@@ -10077,6 +10158,64 @@ def _builder_anchor_missing(list_id: str, quotes: dict) -> None:
             conn.commit()
     except Exception as e:
         print(f"[builder-lists] anchor: {e!s:.120}", flush=True)
+
+
+def _builder_repair_wrong_anchors(list_id: str, quotes: dict) -> int:
+    """Fix rows whose cost basis was wrongly stamped as today's live price.
+
+    Detects entry_date/added_at in the past where |entry - live| / live < 0.35%
+    (effectively 0% since-add) and rewrites entry_price from Yahoo daily close
+    on the initiation day. Does not touch manual fair_value or notes.
+    Returns number of rows repaired.
+    """
+    if not list_id:
+        return 0
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    n = 0
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT ticker, entry_price, entry_date, added_at
+                  FROM builder_list_tickers WHERE list_id = %s
+            """, (list_id,))
+            rows = cur.fetchall() or []
+            for tk, ep, ed, aa in rows:
+                tku = (tk or "").upper()
+                if not tku or ep is None:
+                    continue
+                date_val = _builder_anchor_date(aa, ed, today)
+                if not date_val or date_val >= today:
+                    continue  # same-day anchor is allowed to equal live
+                live = (quotes.get(tku) or {}).get("price")
+                try:
+                    ef = float(ep)
+                    lf = float(live) if live is not None else None
+                except (TypeError, ValueError):
+                    continue
+                # Only auto-repair the "stuck at 0%" pattern: entry ≈ live
+                if lf is None or lf == 0:
+                    continue
+                if abs(ef - lf) / abs(lf) > 0.0035:
+                    continue  # already diverged — user/manual or correct hist
+                hist = _builder_close_on_or_before(tku, date_val)
+                if hist is None or hist <= 0:
+                    continue
+                if abs(hist - ef) / max(abs(ef), 1e-9) < 0.001:
+                    continue  # hist equals wrong entry? skip noop
+                cur.execute("""
+                    UPDATE builder_list_tickers
+                       SET entry_price = %s,
+                           entry_date = COALESCE(entry_date, %s::date)
+                     WHERE list_id = %s AND ticker = %s
+                """, (float(hist), date_val, list_id, tku))
+                n += 1
+            if n:
+                conn.commit()
+                print(f"[builder-lists] repaired {n} wrong anchors on {list_id}", flush=True)
+    except Exception as e:
+        print(f"[builder-lists] repair anchors: {e!s:.120}", flush=True)
+    return n
 
 
 def _builder_list_board(list_id: str, lp_id: str) -> dict:
@@ -10098,8 +10237,10 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
                 "pct": q.get("pct_change"),
                 "as_of": q.get("as_of"),
             }
-        # Anchor any pre-ui383 rows (or just-seeded) with today's price/date
+        # Stamp missing anchors from initiation-day close (not live)
         _builder_anchor_missing(list_id, quotes)
+        # Fix boards previously stamped with live ≈ entry (0% since add)
+        _builder_repair_wrong_anchors(list_id, quotes)
         # Re-read after anchor so response has stamped values
         rows_meta = _builder_list_ticker_rows(list_id, lp_id)
         tickers = [r["ticker"] for r in rows_meta]
