@@ -1427,7 +1427,9 @@
     if (kind === 'cc' && sharesHeld && sharesHeld >= 100 && c.premium) {
       const contracts = Math.floor(sharesHeld / 100);
       const income = contracts * c.premium * 100;
-      incomeLine = `<div class="opt-cell-income" title="${contracts} contracts (${(contracts*100).toLocaleString()} shares) × $${c.premium} premium">${fmtUSDFull(income, 0)} · ${contracts} ct</div>`;
+      incomeLine = `<div class="opt-cell-income" title="${contracts} contracts (${(contracts*100).toLocaleString()} shares) × $${c.premium} premium">You can write: ${fmtUSDFull(income, 0)} · ${contracts} ct</div>`;
+    } else if (kind === 'cc' && sharesHeld && sharesHeld > 0 && sharesHeld < 100) {
+      incomeLine = `<div class="opt-cell-meta" title="Need 100 shares per contract">Need ${100 - Math.floor(sharesHeld)} more sh for 1 ct</div>`;
     }
     return `<td class="num">
       <div class="opt-cell-main">$${c.strike} · ${dateLbl} <span class="opt-dte">${c.dte}d</span></div>
@@ -1436,29 +1438,78 @@
       ${incomeLine}
     </td>`;
   }
+  function _optSortHeldFirst(rows, kind) {
+    // Held (and not fully covered) → held fully covered → not held.
+    // Within group keep weekly yield ranking (rows already sorted from API).
+    const key = kind === 'cc' ? 'covered_calls' : 'cash_secured_puts';
+    const yldField = kind === 'cc' ? 'static_return_annualized' : 'yield_on_cash_annualized';
+    function weeklyYld(r) {
+      const m = r[key] || {};
+      for (const b of ['weekly', 'monthly', 'quarterly']) {
+        if (m[b] && m[b][yldField] != null) return Number(m[b][yldField]) || 0;
+      }
+      return 0;
+    }
+    return (rows || []).slice().sort((a, b) => {
+      const ga = a.held ? (a.fully_covered && kind === 'cc' ? 1 : 0) : 2;
+      const gb = b.held ? (b.fully_covered && kind === 'cc' ? 1 : 0) : 2;
+      if (ga !== gb) return ga - gb;
+      return weeklyYld(b) - weeklyYld(a);
+    });
+  }
   function _optTable(rows, kind) {
     const key = kind === 'cc' ? 'covered_calls' : 'cash_secured_puts';
-    const ok = (rows || []).filter(r => r.ok && r[key]);
+    let ok = (rows || []).filter(r => r.ok && r[key]);
+    // Always surface held names first (covered calls = no naked writing; CSP = book first)
+    ok = _optSortHeldFirst(ok, kind);
     if (!ok.length) {
       return '<div class="term-empty"><div class="term-empty-title">No candidates</div><div class="term-empty-sub">No liquid strikes within your Δ cap for this universe, or no eligible positions.</div></div>';
     }
-    let html = `<div class="term-table-wrap"><table class="term-table"><thead><tr>
+    const heldN = ok.filter(r => r.held).length;
+    const heldCt = ok.filter(r => r.held && (r.shares_held || 0) >= 100).length;
+    let banner = '';
+    if (kind === 'cc' && heldN) {
+      banner = `<div class="opt-held-banner">Your holdings first · ${heldN} held name${heldN === 1 ? '' : 's'}${heldCt ? ` · ${heldCt} with ≥100 shares (can write covered calls)` : ''} · not held listed below for reference only</div>`;
+    } else if (kind === 'csp' && heldN) {
+      banner = `<div class="opt-held-banner">Held names first · ${heldN} already in your book · then watchlist / reports</div>`;
+    }
+    let html = `${banner}<div class="term-table-wrap"><table class="term-table"><thead><tr>
       <th>Ticker</th><th class="num">Spot</th><th class="num">IV/HV</th>
       <th class="tenor">Weekly</th><th class="tenor">Monthly</th><th class="tenor">Quarterly</th>
     </tr></thead><tbody>`;
+    let sawNonHeld = false;
     for (const r of ok) {
+      if (!r.held && !sawNonHeld) {
+        sawNonHeld = true;
+        if (heldN) {
+          const label = kind === 'cc'
+            ? 'Not held — would need shares first (no naked calls)'
+            : 'Not held — watchlist / saved reports';
+          html += `<tr class="opt-section-row"><td colspan="6">${label}</td></tr>`;
+        }
+      }
       const m = r[key];
       const rich = (r.iv_hv_ratio != null && r.iv_hv_ratio >= 1);
-      const held = r.held
-        ? ' <span class="term-badge term-badge-held" title="You hold this — covered call is actionable">Held</span>'
-        : '';
-      html += `<tr>
-        <td><span class="tk">${r.ticker}</span>${held}</td>
+      const sh = Number(r.shares_held) || 0;
+      const ct = sh >= 100 ? Math.floor(sh / 100) : 0;
+      let heldBits = '';
+      if (r.held) {
+        heldBits = ' <span class="term-badge term-badge-held" title="In your SnapTrade / broker holdings">Held</span>';
+        if (sh > 0) {
+          heldBits += ` <span class="opt-shares-held" title="Shares held across accounts">${sh.toLocaleString()} sh${ct ? ` · ${ct} ct` : ''}</span>`;
+        }
+        if (r.fully_covered && kind === 'cc') {
+          heldBits += ' <span class="term-badge" title="Short calls already cover these shares">Covered</span>';
+        }
+      }
+      const rowCls = r.held ? 'opt-row-held' : 'opt-row-unheld';
+      html += `<tr class="${rowCls}">
+        <td><span class="tk">${r.ticker}</span>${heldBits}</td>
         <td class="num">$${r.spot}</td>
         <td class="num ${rich ? 'term-iv-rich' : 'term-iv-fair'}">${r.iv_hv_ratio != null ? r.iv_hv_ratio : '—'}</td>
-        ${_optBucketCell(m.weekly, kind, r.shares_held)}
-        ${_optBucketCell(m.monthly, kind, r.shares_held)}
-        ${_optBucketCell(m.quarterly, kind, r.shares_held)}
+        ${_optBucketCell(m.weekly, kind, sh)}
+        ${_optBucketCell(m.monthly, kind, sh)}
+        ${_optBucketCell(m.quarterly, kind, sh)}
       </tr>`;
     }
     return html + '</tbody></table></div>';
@@ -1501,10 +1552,16 @@
     if (meta) meta.textContent = `Δ ≤ ${res.delta_max} · ranked weekly yield`;
     const ccN = _optCountOk(res.covered_calls, 'cc');
     const cspN = _optCountOk(res.cash_secured_puts, 'csp');
+    const ccHeld = (res.covered_calls || []).filter(r => r.ok && r.held && r.covered_calls).length;
+    const cspHeld = (res.cash_secured_puts || []).filter(r => r.ok && r.held && r.cash_secured_puts).length;
     const ccBadge = document.getElementById('opt-cc-count');
     const cspBadge = document.getElementById('opt-csp-count');
-    if (ccBadge) ccBadge.textContent = ccN + ' name' + (ccN === 1 ? '' : 's');
-    if (cspBadge) cspBadge.textContent = cspN + ' name' + (cspN === 1 ? '' : 's');
+    if (ccBadge) {
+      ccBadge.textContent = (ccHeld ? (ccHeld + ' held · ') : '') + ccN + ' name' + (ccN === 1 ? '' : 's');
+    }
+    if (cspBadge) {
+      cspBadge.textContent = (cspHeld ? (cspHeld + ' held · ') : '') + cspN + ' name' + (cspN === 1 ? '' : 's');
+    }
 
     document.getElementById('opt-cc').innerHTML = _optTable(res.covered_calls, 'cc');
     document.getElementById('opt-csp').innerHTML = _optTable(res.cash_secured_puts, 'csp');

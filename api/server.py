@@ -6904,7 +6904,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui419-20260805-builder-since-add"
+WEB_BUILD_VERSION = "ui420-20260805-options-held-first"
 
 
 @app.get("/api/build")
@@ -29543,19 +29543,29 @@ def _run_options_scan(job_id: str, universe: list, held_set: list,
         def _has(r, k):
             m = r.get(k) or {}
             return any(m.get(b) for b in ("weekly", "monthly", "quarterly"))
-        # Covered calls span the WHOLE universe (not just holdings) so the table
-        # isn't sparse — names you HOLD are badged + ranked first (actionable
-        # now), the rest are forward-looking (a call you'd sell once you own it).
+        # Covered calls span the WHOLE universe so the table isn't sparse —
+        # names you HOLD are badged + ranked first (actionable covered calls;
+        # no naked writing). CSP also lists held first so the desk sees names
+        # already in the book before pure watchlist/idea puts.
         cc_rows = [r for r in rows if _has(r, "covered_calls")]
         csp_rows = [r for r in rows if _has(r, "cash_secured_puts")]
-        # Held-and-uncovered first (actionable now); names whose shares are
-        # already fully covered by written calls rank below them.
-        cc_rows.sort(key=lambda r: (1 if r.get("held") else 0,
-                                    0 if r.get("fully_covered") else 1,
-                                    _wheel_rank_key(r, "covered_calls",
-                                                    "static_return_annualized")), reverse=True)
-        csp_rows.sort(key=lambda r: _wheel_rank_key(r, "cash_secured_puts",
-                                                    "yield_on_cash_annualized"), reverse=True)
+
+        def _held_first_key(r, side_key, yld_field):
+            # Sort ascending: held uncovered (0), held covered (1), not held (2);
+            # within group, weekly yield ranks first via negated tier/yield.
+            held = 1 if r.get("held") else 0
+            fully = 1 if r.get("fully_covered") else 0
+            # For CSP, "fully_covered" is irrelevant — treat as 0
+            if side_key == "cash_secured_puts":
+                fully = 0
+            tier, yld = _wheel_rank_key(r, side_key, yld_field)
+            group = (0 if held and not fully else (1 if held else 2))
+            return (group, -tier, -(yld or 0))
+
+        cc_rows.sort(key=lambda r: _held_first_key(
+            r, "covered_calls", "static_return_annualized"))
+        csp_rows.sort(key=lambda r: _held_first_key(
+            r, "cash_secured_puts", "yield_on_cash_annualized"))
         ok_n = sum(1 for r in rows if r.get("ok"))
         _set(stage="done", status="done", done=total,
              label=f"✓ Scanned {ok_n}/{total} names · {len(cc_rows)} call / {len(csp_rows)} put setups",

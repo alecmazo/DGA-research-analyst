@@ -1847,6 +1847,41 @@
   font-size: 13px;
   padding-top: 14px;
 }
+.opt-held-banner {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success-700);
+  background: var(--success-50);
+  border: 1px solid rgba(22, 163, 74, 0.2);
+  border-radius: 8px;
+}
+.opt-shares-held {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.opt-section-row td {
+  padding: 8px 12px !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  background: var(--surface-2, #f8fafc);
+  border-top: 1px solid var(--border, #e2e8f0);
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+tr.opt-row-held td {
+  background: rgba(22, 163, 74, 0.03);
+}
+tr.opt-row-unheld td {
+  opacity: 0.92;
+}
 
 /* ── Desk density polish (shared) ─────────────────────────────── */
 #tab-research .panel-head {
