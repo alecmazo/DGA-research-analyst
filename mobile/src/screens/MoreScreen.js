@@ -11,8 +11,9 @@ import AppHeader from '../components/AppHeader';
 import { spacing, radius, shadow, fontSize, useTheme } from '../design';
 
 const ITEMS = [
-  { route: 'Podcast',  icon: 'microphone', title: 'DGA HiTech Podcast', sub: 'AI-narrated episodes' },
-  { route: 'Settings', icon: 'tune',       title: 'Settings',           sub: 'Server, security, automation' },
+  { route: 'Podcast',      icon: 'microphone', title: 'DGA HiTech Podcast', sub: 'AI-narrated episodes' },
+  { route: 'PaperTracker', icon: 'chart-timeline-variant', title: 'Paper Tracker', sub: 'Paper portfolios vs SPY + live book' },
+  { route: 'Settings',     icon: 'tune',       title: 'Settings',           sub: 'Server, security, automation' },
 ];
 const MODES = [
   { key: 'system', label: 'System', icon: 'cellphone' },
@@ -63,7 +64,9 @@ export default function MoreScreen({ navigation }) {
             );
           })}
         </View>
-        <Text style={s.note}>Dark mode is rolling out — Markets, Financials, and this hub are themed; other screens follow.</Text>
+        <Text style={s.note}>
+          Dark mode: Markets, Financials, Research agents, and this hub are themed. Options / Builder / Memos stay desktop-only.
+        </Text>
 
         <Text style={s.footnote}>DGA Capital Research</Text>
       </ScrollView>

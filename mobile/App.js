@@ -9,6 +9,7 @@ import * as Updates from 'expo-updates';
 import MarketsScreen          from './src/screens/MarketsScreen';
 import HomeScreen             from './src/screens/HomeScreen';
 import AnalystScreen          from './src/screens/AnalystScreen';
+import StrategistScreen       from './src/screens/StrategistScreen';
 import AnalysisScreen         from './src/screens/AnalysisScreen';
 import ReportScreen           from './src/screens/ReportScreen';
 import PortfolioSummaryScreen from './src/screens/PortfolioSummaryScreen';
@@ -34,18 +35,11 @@ const Tab   = createBottomTabNavigator();
 function HomeStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Home"     component={HomeScreen} />
-      <Stack.Screen name="Analyst"  component={AnalystScreen} />
-      <Stack.Screen name="Analysis" component={AnalysisScreen} />
-      <Stack.Screen name="Report"   component={ReportScreen} />
-    </Stack.Navigator>
-  );
-}
-
-function TrackerStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="TrackerHome" component={PaperTrackerScreen} />
+      <Stack.Screen name="Home"        component={HomeScreen} />
+      <Stack.Screen name="Analyst"     component={AnalystScreen} />
+      <Stack.Screen name="Strategist"  component={StrategistScreen} />
+      <Stack.Screen name="Analysis"    component={AnalysisScreen} />
+      <Stack.Screen name="Report"      component={ReportScreen} />
     </Stack.Navigator>
   );
 }
@@ -63,8 +57,9 @@ function FundStack() {
 function MoreStack({ onLogout, isDemo, onSwitchToLP }) {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="MoreHome" component={MoreScreen} />
-      <Stack.Screen name="Podcast"  component={PodcastScreen} />
+      <Stack.Screen name="MoreHome"      component={MoreScreen} />
+      <Stack.Screen name="Podcast"       component={PodcastScreen} />
+      <Stack.Screen name="PaperTracker"  component={PaperTrackerScreen} />
       <Stack.Screen name="Settings">
         {() => <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={onSwitchToLP} isLpMode={false} />}
       </Stack.Screen>

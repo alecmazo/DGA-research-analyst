@@ -335,6 +335,23 @@ export const api = {
   deleteAnalystReview: (id) =>
     request(`/api/research/analyst/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  // Portfolio Strategist (whole-book IC review — same job poller as agentic)
+  startPortfolioStrategist: (body = {}) =>
+    request('/api/research/portfolio-strategist', {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    }),
+  listStrategistReviews: () =>
+    request('/api/research/strategist/reviews'),
+  getStrategistReview: (id) =>
+    request(`/api/research/strategist/reviews/${encodeURIComponent(id)}`),
+  deleteStrategistReview: (id) =>
+    request(`/api/research/strategist/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // Free earnings card (EPS + revenue actual/consensus) — zero LLM
+  getEarnings: (ticker) =>
+    request(`/api/earnings/${encodeURIComponent(String(ticker || '').toUpperCase())}`),
+
   // Email a DGA-branded PDF of an analysis (same endpoint as the web desk)
   emailResearchPdf: ({ title, question, answerHtml, stamp, to, subject } = {}) =>
     request('/api/research/email-pdf', {

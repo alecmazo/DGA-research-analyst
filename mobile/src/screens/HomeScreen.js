@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, ActivityIndicator, RefreshControl, Alert, Switch,
-  Linking, Platform,
+  Linking, Platform, Modal, ScrollView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +20,22 @@ function _wireRelAge(pubTs) {
   if (sec < 3600) return Math.max(1, Math.floor(sec / 60)) + 'm';
   if (sec < 86400) return Math.floor(sec / 3600) + 'h';
   return Math.floor(sec / 86400) + 'd';
+}
+
+function _fmtRevShort(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Math.abs(Number(v));
+  const sign = Number(v) < 0 ? '-' : '';
+  if (n >= 1e9) return sign + (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return sign + (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return sign + (n / 1e3).toFixed(0) + 'K';
+  return sign + String(Math.round(n));
+}
+
+function _fmtEps(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
 }
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
@@ -47,6 +63,10 @@ export default function HomeScreen({ navigation, route }) {
   const [wireAsOf, setWireAsOf]         = useState('');
   const [wireLoading, setWireLoading]   = useState(true);
   const [wireError, setWireError]       = useState('');
+  // Earnings strip — free Nasdaq card per watchlist name (EPS + revenue)
+  const [earnItems, setEarnItems]       = useState([]);
+  const [earnLoading, setEarnLoading]   = useState(false);
+  const [earnOpen, setEarnOpen]         = useState(null); // ticker modal detail
 
   const checkServer = async () => {
     const t0 = Date.now();
@@ -113,11 +133,70 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
+  // Compact earnings for watchlist names (desktop EarningsCard parity, strip form)
+  const loadEarnings = async () => {
+    setEarnLoading(true);
+    try {
+      const wl = await api.getWatchlist().catch(() => null);
+      const tickers = (wl?.tickers || Object.keys(wl?.quotes || {}) || [])
+        .map((t) => String(t || '').toUpperCase())
+        .filter(Boolean)
+        .slice(0, 14);
+      if (!tickers.length) { setEarnItems([]); return; }
+      const results = await Promise.all(
+        tickers.map(async (tk) => {
+          try {
+            const d = await api.getEarnings(tk);
+            if (!d || d.ok === false) return null;
+            const ev = d.event || {};
+            const res = d.result || {};
+            const status = d.status || 'unknown';
+            // Only surface names with a schedule or print in the ±14d window
+            if (!ev.date && res.eps_actual == null && res.revenue_actual == null) return null;
+            return {
+              ticker: tk,
+              status,
+              date: ev.date || null,
+              days_until: ev.days_until,
+              session: ev.session || null,
+              fiscal_quarter: ev.fiscal_quarter || null,
+              name: ev.name || null,
+              eps_actual: res.eps_actual,
+              eps_estimate: res.eps_estimate,
+              surprise_pct: res.surprise_pct,
+              beat: res.beat || null,
+              revenue_actual: res.revenue_actual,
+              revenue_estimate: res.revenue_estimate,
+              revenue_surprise_pct: res.revenue_surprise_pct,
+              revenue_beat: res.revenue_beat || null,
+              raw: d,
+            };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const items = results.filter(Boolean);
+      // Sort: most recent/upcoming first (reported yesterday → today → soon)
+      items.sort((a, b) => {
+        const da = a.days_until != null ? a.days_until : 99;
+        const db = b.days_until != null ? b.days_until : 99;
+        return Math.abs(da) - Math.abs(db);
+      });
+      setEarnItems(items.slice(0, 10));
+    } catch (e) {
+      console.warn('loadEarnings:', e?.message || e);
+    } finally {
+      setEarnLoading(false);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       checkServer();
       loadReports();
       loadMarketWire();
+      loadEarnings();
       getGammaEnabled().then(setGammaEnabled);
       // Pre-fill ticker if navigated here from Intelligence/other screen
       const prefill = route?.params?.prefillTicker || route?.params?.ticker;
@@ -131,7 +210,7 @@ export default function HomeScreen({ navigation, route }) {
   const onRefresh = async () => {
     setRefreshing(true);
     haptics.onPressTab();
-    await Promise.all([checkServer(), loadReports(), loadMarketWire()]);
+    await Promise.all([checkServer(), loadReports(), loadMarketWire(), loadEarnings()]);
     setRefreshing(false);
   };
 
@@ -621,6 +700,91 @@ export default function HomeScreen({ navigation, route }) {
                 </Text>
                 <Text style={s.analystRowArrow}>›</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={s.analystRow}
+                onPress={() => { haptics.onPressPrimary(); navigation.navigate('Strategist'); }}
+                activeOpacity={0.7}
+              >
+                <Text style={s.analystRowEmoji}>🧭</Text>
+                <Text style={s.analystRowText} numberOfLines={1}>
+                  <Text style={s.analystRowTitle}>Portfolio Strategist</Text> — IC review of a live book
+                </Text>
+                <Text style={s.analystRowArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Earnings strip — watchlist prints (EPS + revenue) */}
+            <View style={s.wireCard}>
+              <View style={s.wireHead}>
+                <Text style={s.wireTitle}>📊 EARNINGS</Text>
+                <Text style={s.wireBadge}>FREE · NO AI</Text>
+                <View style={{ flex: 1 }} />
+                {earnLoading ? (
+                  <ActivityIndicator size="small" color={t.primary} />
+                ) : (
+                  <TouchableOpacity onPress={loadEarnings} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={s.wireRefresh}>↻</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {!earnLoading && earnItems.length === 0 ? (
+                <Text style={s.wireEmpty}>
+                  No watchlist earnings in the ±14 day window. Add names on Positions or wait for next prints.
+                </Text>
+              ) : (
+                earnItems.map((it, i) => {
+                  const when =
+                    it.days_until === 0 ? 'Today'
+                      : it.days_until === -1 ? 'Yesterday'
+                        : it.days_until != null && it.days_until > 0
+                          ? `In ${it.days_until}d`
+                          : it.days_until != null && it.days_until < 0
+                            ? `${Math.abs(it.days_until)}d ago`
+                            : (it.date || '—');
+                  const epsStr = it.eps_actual != null
+                    ? `A $${Number(it.eps_actual).toFixed(2)}`
+                    : it.eps_estimate != null
+                      ? `E $${Number(it.eps_estimate).toFixed(2)}`
+                      : 'EPS —';
+                  const revStr = it.revenue_actual != null
+                    ? `Rev $${_fmtRevShort(it.revenue_actual)}`
+                    : it.revenue_estimate != null
+                      ? `Rev E $${_fmtRevShort(it.revenue_estimate)}`
+                      : '';
+                  const beat = it.beat || it.revenue_beat;
+                  const beatClr = beat === 'beat' ? t.green : beat === 'miss' ? t.red : t.textDim;
+                  return (
+                    <TouchableOpacity
+                      key={it.ticker + i}
+                      style={[s.wireRow, i === 0 && s.wireRowFirst]}
+                      activeOpacity={0.75}
+                      onPress={() => setEarnOpen(it)}
+                    >
+                      <View style={s.earnRowTop}>
+                        <Text style={s.earnTk}>{it.ticker}</Text>
+                        {beat ? (
+                          <Text style={[s.earnBadge, { color: beatClr }]}>
+                            {String(beat).toUpperCase()}
+                            {it.surprise_pct != null
+                              ? ` ${it.surprise_pct >= 0 ? '+' : ''}${Number(it.surprise_pct).toFixed(1)}%`
+                              : ''}
+                          </Text>
+                        ) : (
+                          <Text style={[s.earnBadge, { color: t.textDim }]}>
+                            {(it.status || 'scheduled').replace(/_/g, ' ').toUpperCase()}
+                          </Text>
+                        )}
+                        <Text style={s.earnWhen}>{when}</Text>
+                      </View>
+                      <Text style={s.earnLine} numberOfLines={1}>
+                        {epsStr}{revStr ? `  ·  ${revStr}` : ''}
+                        {it.fiscal_quarter ? `  ·  FQ ${it.fiscal_quarter}` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+              <Text style={s.wireFoot}>Watchlist ±14d · tap a row for full card</Text>
             </View>
 
             {/* Market Wire — always visible under Analyze */}
@@ -752,6 +916,94 @@ export default function HomeScreen({ navigation, route }) {
         // on phones with no saved reports.
         contentContainerStyle={{ paddingBottom: 24, flexGrow: 1 }}
       />
+
+      {/* Earnings detail modal */}
+      <Modal
+        visible={!!earnOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEarnOpen(null)}
+      >
+        <TouchableOpacity
+          style={s.earnModalBg}
+          activeOpacity={1}
+          onPress={() => setEarnOpen(null)}
+        >
+          <TouchableOpacity activeOpacity={1} style={s.earnModalCard} onPress={(e) => e.stopPropagation?.()}>
+            {earnOpen && (
+              <ScrollView>
+                <View style={s.earnModalHead}>
+                  <Text style={s.earnModalTk}>{earnOpen.ticker}</Text>
+                  <Text style={s.earnModalTag}>EARNINGS</Text>
+                  <TouchableOpacity onPress={() => setEarnOpen(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={s.earnModalClose}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                {earnOpen.name ? <Text style={s.earnModalName}>{earnOpen.name}</Text> : null}
+                <Text style={s.earnModalWhen}>
+                  {earnOpen.date || '—'}
+                  {earnOpen.session ? ` · ${earnOpen.session}` : ''}
+                  {earnOpen.fiscal_quarter ? ` · FQ ${earnOpen.fiscal_quarter}` : ''}
+                </Text>
+                <View style={s.earnMetricGrid}>
+                  <View style={s.earnMetric}>
+                    <Text style={s.earnMetricLbl}>Actual EPS</Text>
+                    <Text style={s.earnMetricVal}>{_fmtEps(earnOpen.eps_actual)}</Text>
+                  </View>
+                  <View style={s.earnMetric}>
+                    <Text style={s.earnMetricLbl}>Consensus EPS</Text>
+                    <Text style={s.earnMetricVal}>{_fmtEps(earnOpen.eps_estimate)}</Text>
+                  </View>
+                  <View style={s.earnMetric}>
+                    <Text style={s.earnMetricLbl}>EPS Surprise</Text>
+                    <Text style={[s.earnMetricVal, {
+                      color: earnOpen.beat === 'beat' ? t.green
+                        : earnOpen.beat === 'miss' ? t.red : t.textPrimary,
+                    }]}>
+                      {earnOpen.surprise_pct != null
+                        ? `${earnOpen.surprise_pct >= 0 ? '+' : ''}${Number(earnOpen.surprise_pct).toFixed(1)}%`
+                        : '—'}
+                    </Text>
+                  </View>
+                  <View style={s.earnMetric}>
+                    <Text style={s.earnMetricLbl}>Actual Revenue</Text>
+                    <Text style={s.earnMetricVal}>
+                      {earnOpen.revenue_actual != null ? '$' + _fmtRevShort(earnOpen.revenue_actual) : '—'}
+                    </Text>
+                  </View>
+                  <View style={s.earnMetric}>
+                    <Text style={s.earnMetricLbl}>Consensus Revenue</Text>
+                    <Text style={s.earnMetricVal}>
+                      {earnOpen.revenue_estimate != null ? '$' + _fmtRevShort(earnOpen.revenue_estimate) : '—'}
+                    </Text>
+                  </View>
+                  <View style={s.earnMetric}>
+                    <Text style={s.earnMetricLbl}>Rev Surprise</Text>
+                    <Text style={[s.earnMetricVal, {
+                      color: earnOpen.revenue_beat === 'beat' ? t.green
+                        : earnOpen.revenue_beat === 'miss' ? t.red : t.textPrimary,
+                    }]}>
+                      {earnOpen.revenue_surprise_pct != null
+                        ? `${earnOpen.revenue_surprise_pct >= 0 ? '+' : ''}${Number(earnOpen.revenue_surprise_pct).toFixed(1)}%`
+                        : '—'}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={s.earnAnalyzeBtn}
+                  onPress={() => {
+                    const tk = earnOpen.ticker;
+                    setEarnOpen(null);
+                    setTicker(tk);
+                  }}
+                >
+                  <Text style={s.earnAnalyzeBtnTxt}>Use {earnOpen.ticker} in Analyze</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -906,6 +1158,53 @@ function makeStyles(t) {
     fontSize: 9, color: t.textDim, marginTop: 4, paddingTop: 4,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border,
   },
+
+  // Earnings strip rows
+  earnRowTop: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2,
+  },
+  earnTk: {
+    fontSize: 12, fontWeight: '800', color: t.textPrimary, letterSpacing: 0.3,
+    fontVariant: ['tabular-nums'], minWidth: 44,
+  },
+  earnBadge: { fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
+  earnWhen: { marginLeft: 'auto', fontSize: 10, fontWeight: '600', color: t.textDim },
+  earnLine: { fontSize: 11, color: t.textSecondary, fontVariant: ['tabular-nums'] },
+
+  earnModalBg: {
+    flex: 1, backgroundColor: 'rgba(10,22,40,0.55)',
+    justifyContent: 'center', padding: 20,
+  },
+  earnModalCard: {
+    backgroundColor: t.surface, borderRadius: 14, padding: 16,
+    borderWidth: 1, borderColor: t.border, maxHeight: '80%',
+  },
+  earnModalHead: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6,
+  },
+  earnModalTk: { fontSize: 18, fontWeight: '800', color: t.textPrimary },
+  earnModalTag: {
+    fontSize: 9, fontWeight: '800', letterSpacing: 0.6, color: t.primary,
+    backgroundColor: t.surfaceTint, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+  },
+  earnModalClose: { marginLeft: 'auto', fontSize: 18, color: t.textDim, fontWeight: '600' },
+  earnModalName: { fontSize: 13, color: t.textSecondary, marginBottom: 2 },
+  earnModalWhen: { fontSize: 12, color: t.textDim, marginBottom: 12 },
+  earnMetricGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  earnMetric: { width: '33.33%', paddingVertical: 8, paddingRight: 6 },
+  earnMetricLbl: {
+    fontSize: 9, fontWeight: '700', letterSpacing: 0.3, color: t.textDim,
+    textTransform: 'uppercase',
+  },
+  earnMetricVal: {
+    fontSize: 14, fontWeight: '800', color: t.textPrimary, marginTop: 2,
+    fontVariant: ['tabular-nums'],
+  },
+  earnAnalyzeBtn: {
+    marginTop: 12, backgroundColor: t.primary, borderRadius: 8,
+    paddingVertical: 10, alignItems: 'center',
+  },
+  earnAnalyzeBtnTxt: { color: t.onAccent, fontWeight: '800', fontSize: 13 },
 
   // Per-report provider badges (GROK / CLAUDE) — tappable
   llmPill: {
