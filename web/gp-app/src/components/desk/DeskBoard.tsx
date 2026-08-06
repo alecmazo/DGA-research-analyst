@@ -13,6 +13,8 @@ export type CardId =
   | 'watchlist'
   | 'pulse'
   | 'reports'
+  | 'analyst'
+  | 'strategist'
   | 'markets'
   | 'ideas'
   | 'analyze'
@@ -28,16 +30,19 @@ export type CardLayout = {
 
 export type DeskLayoutMap = Record<CardId, CardLayout>
 
-const STORAGE_KEY = 'dga.desk.layout.v2'
+/** Bumped when new desk cards ship so defaults merge cleanly. */
+const STORAGE_KEY = 'dga.desk.layout.v3'
 
 const DEFAULT_LAYOUT: DeskLayoutMap = {
   watchlist: { x: 0, y: 0, w: 340, h: 420 },
   pulse: { x: 0, y: 436, w: 340, h: 280 },
-  reports: { x: 356, y: 0, w: 400, h: 560 },
-  markets: { x: 772, y: 0, w: 400, h: 420 },
-  ideas: { x: 772, y: 436, w: 400, h: 320 },
-  analyze: { x: 772, y: 772, w: 400, h: 220 },
-  health: { x: 356, y: 576, w: 400, h: 200 },
+  reports: { x: 356, y: 0, w: 400, h: 420 },
+  analyst: { x: 356, y: 436, w: 400, h: 420 },
+  strategist: { x: 356, y: 872, w: 400, h: 380 },
+  markets: { x: 772, y: 0, w: 400, h: 360 },
+  ideas: { x: 772, y: 376, w: 400, h: 300 },
+  analyze: { x: 772, y: 692, w: 400, h: 220 },
+  health: { x: 0, y: 732, w: 340, h: 180 },
 }
 
 const MIN_W = 260

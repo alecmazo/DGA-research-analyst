@@ -44,9 +44,6 @@ export function HandoffSection() {
   const copy = async () => {
     let text = pack?.paste_markdown || ''
     if (!text) {
-      await load()
-      text = pack?.paste_markdown || ''
-      // re-fetch for fresh pack after load
       try {
         const d = await api<HandoffPack>('/api/continuity/handoff')
         setPack(d)

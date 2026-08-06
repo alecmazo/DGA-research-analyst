@@ -815,3 +815,373 @@
 [data-theme='dark'] .prioReason {
   color: #fde68a;
 }
+
+/* ── Agentic Analyst / Strategist ── */
+.agentBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.agentHint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.agentToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.metaLabel {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.seg {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.segBtn {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.segBtn:hover {
+  border-color: var(--brand-400);
+  color: var(--text-primary);
+}
+
+.segActive {
+  background: var(--brand-50, #e0f2fe);
+  border-color: var(--brand-400);
+  color: var(--brand-700, #0369a1);
+}
+
+.engineTag {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+
+.costHint {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+.compose {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.composeTa {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  box-sizing: border-box;
+}
+
+.composeTa:focus {
+  outline: none;
+  border-color: var(--brand-400);
+  box-shadow: 0 0 0 3px rgba(91, 184, 212, 0.15);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  font-size: 10.5px;
+  background: var(--bg-subtle, #f1f5f9);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  padding: 3px 9px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.chip:hover {
+  border-color: var(--brand-400);
+  color: var(--text-primary);
+}
+
+.presetPrimary {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(91, 184, 212, 0.4);
+  background: var(--brand-50, #e0f2fe);
+  color: var(--brand-700);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.progress {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.progressHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.spinDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9333ea;
+  animation: pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.progressLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.progressMeta {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  font-family: ui-monospace, monospace;
+}
+
+.toolLine {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+
+.toolLine code {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.result {
+  background: var(--bg-elevated, #fff);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.md :global(.md-h) {
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 10px 0 6px;
+  line-height: 1.3;
+}
+.md :global(.md-h1) {
+  font-size: 15px;
+  border-bottom: 2px solid var(--brand-400);
+  padding-bottom: 4px;
+}
+.md :global(.md-h2) {
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 3px;
+}
+.md :global(.md-h3),
+.md :global(.md-h4) {
+  font-size: 12.5px;
+}
+.md :global(p) {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.md :global(.md-li) {
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 1px 0 1px 4px;
+}
+.md :global(code) {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--bg-subtle);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.md :global(.md-pre) {
+  background: var(--bg-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow: auto;
+  font-size: 11px;
+  margin: 8px 0;
+}
+
+.verifyOk {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: var(--success-50, #dcfce7);
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--success-700, #166534);
+}
+
+.verifyWarn {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--warn-50, #fffbeb);
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--warn-700, #92400e);
+}
+
+.resultActions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.resultCost {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  font-family: ui-monospace, monospace;
+}
+
+.err {
+  color: #dc2626;
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+.reviews {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+
+.reviewsHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.reviewsHint {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+.revRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11.5px;
+}
+
+.revTitle {
+  flex: 1;
+  min-width: 0;
+}
+
+.revQ {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.revMeta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+.fundSelect {
+  min-width: 220px;
+  min-height: 88px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 6px;
+  font-size: 12px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.stratRow {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.fieldCol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldLbl {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.fileInput {
+  font-size: 11px;
+  max-width: 200px;
+}
+
+.muted {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}

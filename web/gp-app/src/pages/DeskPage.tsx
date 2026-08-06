@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { LiveMarkets } from '@/components/desk/LiveMarkets'
 import { AnalyzeCard } from '@/components/desk/AnalyzeCard'
+import { AnalystCard } from '@/components/desk/AnalystCard'
+import { StrategistCard } from '@/components/desk/StrategistCard'
 import { IdeaGenerator } from '@/components/desk/IdeaGenerator'
 import { SavedReports } from '@/components/desk/SavedReports'
 import { DeskBoard } from '@/components/desk/DeskBoard'
@@ -338,6 +340,24 @@ export function DeskPage() {
           embed
         />
       ),
+    },
+    {
+      id: 'analyst' as const,
+      title: 'Analyst',
+      badge: 'Agentic',
+      action: <span className={styles.meta}>Live quotes · reports · news</span>,
+      flush: true,
+      children: <AnalystCard bare />,
+    },
+    {
+      id: 'strategist' as const,
+      title: 'Portfolio Strategist',
+      badge: 'Agentic · EV',
+      action: (
+        <span className={styles.meta}>whole-book → roundup / memo</span>
+      ),
+      flush: true,
+      children: <StrategistCard bare />,
     },
     {
       id: 'markets' as const,
