@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { SupportFab } from '@/components/support/SupportFab'
 import { api, type Quote, type ReportDetail } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
+import { renderMd, reportMarkdown } from '@/lib/md'
 import styles from './ReportPage.module.css'
 
 export function ReportPage() {
@@ -52,22 +53,25 @@ export function ReportPage() {
     }
   }, [ticker, provider])
 
-  const md = data?.markdown || data?.content || ''
+  const md = reportMarkdown(data)
+  const html = useMemo(() => (md ? renderMd(md) : ''), [md])
   const pct = quote?.pct ?? quote?.pct_change ?? null
+  const shownProvider = (data?.provider || provider).toLowerCase()
 
   return (
     <div className={styles.page}>
       <header className={styles.head}>
         <div className={styles.title}>
           <strong>{ticker || '—'}</strong>
-          <span className={styles.prov} data-p={provider}>
-            {provider.toUpperCase()}
+          <span className={styles.prov} data-p={shownProvider}>
+            {shownProvider.toUpperCase()}
           </span>
           {(data?.generated_at || data?.report_date) && (
             <span className={styles.meta}>
               {relativeTime(data.generated_at || data.report_date)}
             </span>
           )}
+          {data?.note && <span className={styles.note}>{data.note}</span>}
         </div>
         <div className={styles.actions}>
           {data?.gamma_url && (
@@ -122,9 +126,16 @@ export function ReportPage() {
       <div className={styles.body}>
         {loading && <div className={styles.empty}>Loading report…</div>}
         {err && <div className={styles.err}>{err}</div>}
-        {!loading && !err && md && <pre className={styles.md}>{md}</pre>}
-        {!loading && !err && !md && (
-          <div className={styles.empty}>No markdown content for this report.</div>
+        {!loading && !err && html && (
+          <article
+            className={styles.md}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        )}
+        {!loading && !err && !html && (
+          <div className={styles.empty}>
+            Report loaded but has no text content. Try another engine or re-run Analyze.
+          </div>
         )}
       </div>
       <SupportFab />
@@ -139,9 +150,15 @@ export function openReportWindow(ticker: string, provider = 'grok') {
   const pv = (provider || 'grok').toLowerCase()
   const url = `/gp/report?ticker=${encodeURIComponent(tk)}&provider=${encodeURIComponent(pv)}`
   const name = `dga-report-${tk}-${pv}`
-  window.open(
+  // Do not use noopener alone in a way that breaks same-origin localStorage —
+  // omit noreferrer so the session token still works; popup is same-origin SPA.
+  const win = window.open(
     url,
     name,
-    'noopener,noreferrer,width=1040,height=900,menubar=no,toolbar=no,location=no,status=no',
+    'width=1040,height=900,menubar=no,toolbar=no,location=no,status=no',
   )
+  if (!win) {
+    // Popup blocked — navigate in-place as fallback
+    window.location.assign(url)
+  }
 }

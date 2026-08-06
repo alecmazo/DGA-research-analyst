@@ -770,12 +770,73 @@
 
 .reportMd {
   margin: 0;
-  white-space: pre-wrap;
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-secondary, #334155);
+  white-space: normal;
   word-break: break-word;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--text-secondary);
+}
+
+.reportMd :global(.md-h) {
+  font-weight: 800;
+  color: var(--text-primary, #0a1628);
+  line-height: 1.3;
+  margin: 14px 0 6px;
+}
+.reportMd :global(.md-h1) {
+  font-size: 18px;
+  border-bottom: 2px solid #5bb8d4;
+  padding-bottom: 4px;
+}
+.reportMd :global(.md-h2) {
+  font-size: 15px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 3px;
+}
+.reportMd :global(.md-h3),
+.reportMd :global(.md-h4) {
+  font-size: 13.5px;
+}
+.reportMd :global(p) {
+  margin: 0 0 9px;
+}
+.reportMd :global(.md-li) {
+  padding: 2px 0 2px 4px;
+}
+.reportMd :global(strong) {
+  color: var(--text-primary);
+}
+.reportMd :global(.md-table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0 14px;
+  font-size: 12px;
+  border: 1px solid #cbd5e1;
+}
+.reportMd :global(.md-table th) {
+  background: #0a1628;
+  color: #fff;
+  text-align: left;
+  padding: 6px 9px;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.reportMd :global(.md-table td) {
+  padding: 5px 9px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.reportMd :global(.md-pre) {
+  background: #0a1628;
+  color: #e8eef7;
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 11px;
+  margin: 10px 0;
+}
+.reportMd :global(a) {
+  color: #0a6b8a;
 }
 
 @media (max-width: 720px) {

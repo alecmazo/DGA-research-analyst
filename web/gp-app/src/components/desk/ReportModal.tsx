@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { api, type Quote, type ReportDetail } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
+import { renderMd, reportMarkdown } from '@/lib/md'
 import styles from './deskWidgets.module.css'
 
 type Props = {
@@ -55,8 +56,10 @@ export function ReportModal({ ticker, provider = 'grok', onClose }: Props) {
     }
   }, [onClose])
 
-  const md = data?.markdown || data?.content || ''
+  const md = reportMarkdown(data)
+  const html = useMemo(() => (md ? renderMd(md) : ''), [md])
   const pct = quote?.pct ?? quote?.pct_change ?? null
+  const shownProvider = (data?.provider || provider).toLowerCase()
 
   return (
     <div
@@ -70,8 +73,8 @@ export function ReportModal({ ticker, provider = 'grok', onClose }: Props) {
         <header className={styles.modalHead}>
           <div className={styles.modalTitle}>
             <strong>{ticker}</strong>
-            <span className={styles.provBadge} data-p={provider}>
-              {provider.toUpperCase()}
+            <span className={styles.provBadge} data-p={shownProvider}>
+              {shownProvider.toUpperCase()}
             </span>
             {(data?.generated_at || data?.report_date) && (
               <span className={styles.metaDim}>
@@ -130,9 +133,16 @@ export function ReportModal({ ticker, provider = 'grok', onClose }: Props) {
         <div className={styles.modalBody}>
           {loading && <div className={styles.ideaEmpty}>Loading report…</div>}
           {err && <div className={styles.bannerErr}>{err}</div>}
-          {!loading && !err && md && <pre className={styles.reportMd}>{md}</pre>}
-          {!loading && !err && !md && (
-            <div className={styles.ideaEmpty}>No markdown content for this report.</div>
+          {!loading && !err && html && (
+            <article
+              className={styles.reportMd}
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          )}
+          {!loading && !err && !html && (
+            <div className={styles.ideaEmpty}>
+              Report loaded but has no text content.
+            </div>
           )}
         </div>
       </div>

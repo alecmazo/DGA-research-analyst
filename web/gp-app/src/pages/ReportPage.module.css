@@ -58,6 +58,15 @@
   color: var(--text-tertiary, #64748b);
 }
 
+.note {
+  font-size: 11px;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -121,13 +130,130 @@
 }
 
 .md {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
   font-family: var(--font-sans, Inter, system-ui, sans-serif);
   font-size: 13.5px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--text-secondary, #334155);
+}
+
+.md :global(.md-h) {
+  font-weight: 800;
+  color: var(--text-primary, #0a1628);
+  line-height: 1.3;
+  margin: 18px 0 8px;
+}
+
+.md :global(.md-h1) {
+  font-size: 20px;
+  margin-top: 8px;
+  padding-bottom: 6px;
+  border-bottom: 2.5px solid #5bb8d4;
+}
+
+.md :global(.md-h2) {
+  font-size: 16px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.md :global(.md-h3),
+.md :global(.md-h4) {
+  font-size: 14px;
+  color: #1e3a5f;
+}
+
+.md :global(p) {
+  margin: 0 0 10px;
+}
+
+.md :global(.md-li) {
+  padding: 2px 0 2px 4px;
+  line-height: 1.55;
+}
+
+.md :global(.md-ol) {
+  list-style: decimal;
+}
+
+.md :global(strong) {
+  color: var(--text-primary, #0a1628);
+  font-weight: 700;
+}
+
+.md :global(code) {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.88em;
+  background: #eef2f7;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #0f2744;
+}
+
+.md :global(.md-pre) {
+  background: #0a1628;
+  color: #e8eef7;
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+  font-size: 11.5px;
+  line-height: 1.45;
+  margin: 12px 0;
+}
+
+.md :global(.md-pre code) {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.md :global(a) {
+  color: #0a6b8a;
+  text-decoration: underline;
+}
+
+.md :global(.md-hr) {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 16px 0;
+}
+
+.md :global(.md-bq) {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid #5bb8d4;
+  background: #f0f9fc;
+  color: #334155;
+}
+
+.md :global(.md-table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0 16px;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid #cbd5e1;
+}
+
+.md :global(.md-table th) {
+  background: #0a1628;
+  color: #fff;
+  text-align: left;
+  padding: 7px 10px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.md :global(.md-table td) {
+  padding: 6px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+  color: #0a1628;
+}
+
+.md :global(.md-table tr:nth-child(even) td) {
+  background: #f8fafc;
 }
 
 .empty {

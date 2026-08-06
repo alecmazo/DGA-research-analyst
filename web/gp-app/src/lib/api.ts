@@ -290,8 +290,11 @@ export type PrioritizeResult = {
 
 export type ReportDetail = {
   ticker?: string
+  /** Primary field from GET /api/report/{ticker} */
+  report_md?: string
   markdown?: string
   content?: string
+  body_md?: string
   report_date?: string
   generated_at?: string
   price_target?: number | null
@@ -301,4 +304,6 @@ export type ReportDetail = {
   gamma_url?: string | null
   has_docx?: boolean
   has_pptx?: boolean
+  note?: string
+  version_count?: number
 }
