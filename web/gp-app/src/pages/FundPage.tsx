@@ -332,30 +332,33 @@ function FundRow(props: {
         </div>
         <div className={styles.rowMetrics}>
           <div className={styles.rowStat}>
-            <div className={styles.rowStatLabel}>NAV</div>
-            <div className={styles.rowStatVal}>{fmtUsd(props.nav)}</div>
-            <div className={styles.rowStatSub}>{props.navSub}</div>
+            <span className={styles.rowStatLabel}>NAV</span>
+            <span className={styles.rowStatVal}>{fmtUsd(props.nav)}</span>
+            {props.navSub && props.navSub !== 'no snapshot' && (
+              <span className={styles.rowStatSub}>{props.navSub}</span>
+            )}
           </div>
           {props.isAcct && props.ytd != null && (
             <div className={styles.rowStat}>
-              <div className={styles.rowStatLabel}>{props.ytdLabel || 'YTD'}</div>
-              <div className={`${styles.rowStatVal} ${pctClass(props.ytd)}`}>
+              <span className={styles.rowStatLabel}>
+                {props.ytdLabel || 'YTD'}
+              </span>
+              <span className={`${styles.rowStatVal} ${pctClass(props.ytd)}`}>
                 {fmtPct(props.ytd)}
-              </div>
-              <div className={styles.rowStatSub}>&nbsp;</div>
+              </span>
             </div>
           )}
           {!props.isAcct && (
             <>
               <div className={styles.rowStat}>
-                <div className={styles.rowStatLabel}>LPs</div>
-                <div className={styles.rowStatVal}>{props.lpCount ?? '—'}</div>
-                <div className={styles.rowStatSub}>&nbsp;</div>
+                <span className={styles.rowStatLabel}>LPs</span>
+                <span className={styles.rowStatVal}>{props.lpCount ?? '—'}</span>
               </div>
               <div className={styles.rowStat}>
-                <div className={styles.rowStatLabel}>Committed</div>
-                <div className={styles.rowStatVal}>{fmtUsd(props.committed)}</div>
-                <div className={styles.rowStatSub}>&nbsp;</div>
+                <span className={styles.rowStatLabel}>Committed</span>
+                <span className={styles.rowStatVal}>
+                  {fmtUsd(props.committed)}
+                </span>
               </div>
             </>
           )}
