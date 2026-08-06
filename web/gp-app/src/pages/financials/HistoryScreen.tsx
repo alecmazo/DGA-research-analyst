@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -27,11 +27,10 @@ export function HistoryScreen({ ticker, onSelectTicker }: Props) {
   const [scrMsg, setScrMsg] = useState('Run a screen across your covered names.')
   const [scrBusy, setScrBusy] = useState(false)
 
-  // Keep history ticker in soft sync when dashboard ticker changes
-  // (don't auto-fetch — user hits View)
-  if (ticker && !histTk) {
-    // no-op; controlled via parent updates below
-  }
+  // Prefill history box when dashboard ticker changes (user still hits View)
+  useEffect(() => {
+    if (ticker) setHistTk(ticker)
+  }, [ticker])
 
   const viewHistory = async (tkOverride?: string) => {
     const tk = (tkOverride || histTk).trim().toUpperCase()

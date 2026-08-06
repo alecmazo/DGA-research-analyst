@@ -34,17 +34,26 @@ export function FinancialsPage() {
     setReloadKey((k) => k + 1)
   }, [])
 
+  // When dashboard views a name, keep parent ticker in sync without double-fetch
+  // (CompanyDashboard already loads; parent only needs id for sheet/history).
+  const onViewed = useCallback((tk: string) => {
+    const t = tk.trim().toUpperCase()
+    if (!t) return
+    setTicker(t)
+  }, [])
+
   return (
     <div className={`${page.page} ${styles.shell}`}>
       <header className={page.hero}>
         <div>
-          <p className={page.kicker}>Research</p>
+          <p className={page.kicker}>Research · SEC store</p>
           <h1 className={page.h1}>Financials</h1>
           <p className={page.sub}>
-            PM desk for any covered name: TTM multiples, peer comps, margin/ROIC
-            trends, DGA Score &amp; Value. Numbers from{' '}
-            <strong>SEC EDGAR XBRL</strong> + free market quotes — no LLM tokens.
-            Store coverage{' '}
+            Full PM desk: company dashboard (DGA Score &amp; Value, ranks, peers,
+            TTM), Value Line sheet, SEC store pull/settings, company history, and
+            cross-name screen. Data from{' '}
+            <strong>Postgres company_financials</strong> (EDGAR XBRL) + free
+            quotes — no LLM. Coverage:{' '}
             {coverage.length ? (
               <strong>{coverage.length.toLocaleString()}</strong>
             ) : (
@@ -61,7 +70,7 @@ export function FinancialsPage() {
         period={period}
         setPeriod={setPeriod}
         coverage={coverage}
-        onViewed={(tk) => setTicker(tk)}
+        onViewed={onViewed}
         reloadKey={reloadKey}
       />
 

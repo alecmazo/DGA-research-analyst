@@ -126,7 +126,11 @@ export function CompanyDashboard({
   const price =
     typeof dash?.price === 'number'
       ? dash.price
-      : null
+      : dash?.price &&
+          typeof dash.price === 'object' &&
+          typeof (dash.price as { last?: number }).last === 'number'
+        ? (dash.price as { last: number }).last
+        : null
 
   const km = dash?.key_metrics || {}
   const sc = dash?.dga_score || {}
