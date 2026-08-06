@@ -20,6 +20,26 @@ export function fmtUsd(v: number | null | undefined, digits = 0): string {
   }).format(Number(v))
 }
 
+/** Signed currency: +$1,234 / −$56 */
+export function fmtUsdSigned(v: number | null | undefined, digits = 0): string {
+  if (v == null || Number.isNaN(Number(v))) return '—'
+  const n = Number(v)
+  const body = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  }).format(Math.abs(n))
+  if (n > 0) return `+${body}`
+  if (n < 0) return `−${body}`
+  return body
+}
+
+export function fmtQty(v: number | null | undefined, digits = 3): string {
+  if (v == null || Number.isNaN(Number(v))) return '—'
+  return Number(v).toLocaleString(undefined, { maximumFractionDigits: digits })
+}
+
 export function pctClass(v: number | null | undefined): string {
   if (v == null || Number.isNaN(Number(v))) return ''
   if (Number(v) > 0) return 'pos'

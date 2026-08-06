@@ -17,7 +17,7 @@ export async function api<T = unknown>(
   const headers = new Headers(opts.headers || {})
   const token = getToken()
   if (token) headers.set('x-auth-v2-token', token)
-  if (opts.body && !headers.has('Content-Type')) {
+  if (opts.body && !(opts.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   const res = await fetch(path, { ...opts, headers })
@@ -45,6 +45,32 @@ export async function api<T = unknown>(
     throw new ApiError(res.status, msg, data)
   }
   return data as T
+}
+
+/** Authenticated blob download (Excel/PDF exports). */
+export async function downloadAuth(path: string, fallbackName = 'download') {
+  const headers = new Headers()
+  const token = getToken()
+  if (token) headers.set('x-auth-v2-token', token)
+  const res = await fetch(path, { headers })
+  if (res.status === 401) {
+    clearSession()
+    window.location.replace('/')
+    throw new ApiError(401, 'Unauthorized')
+  }
+  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`)
+  const blob = await res.blob()
+  const cd = res.headers.get('content-disposition') || ''
+  const m = /filename\*?=(?:UTF-8''|")?([^\";]+)/i.exec(cd)
+  const name = m ? decodeURIComponent(m[1].replace(/"/g, '')) : fallbackName
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 export type Quote = {
