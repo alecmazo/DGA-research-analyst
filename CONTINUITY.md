@@ -62,7 +62,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Builder since-add %** | **`ui419-20260805-builder-since-add`** | Cost basis = initiation-day close (not live); repair 0% boards (SUP_20260805) |
 | **Options held first** | **`ui420-20260805-options-held-first`** | Wheel: held names first; show shares/contracts + premium you can write (SUP_20260805) |
 | **SEC ticker map cache** | **`ui421-20260805-sec-ticker-map-cache`** | Fix ui418-era SEC 429 stampede: load company_tickers once; cap 8-K concurrency |
-| **Next deploy after this** | **`ui422-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Watchlist morning day %** | **`ui422-20260806-watchlist-morning-pct`** | Closed/pre-market: prior = bar before session close (not same bar → fake 0%) |
+| **Next deploy after this** | **`ui423-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

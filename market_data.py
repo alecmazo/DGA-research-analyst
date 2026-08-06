@@ -511,10 +511,59 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
             # SUP_20260727: Yahoo meta previousClose was Thursday (319.69) while
             # Friday close was 313.03 → day-% used a multi-session base.
             # Never use meta previousClose / regularMarketChangePercent.
-            prev = _session_prior_close(
-                bars, live_px if rth_open else px, rth_open, symbol=sym)
+            #
+            # Morning / pre-market / weekend: when we PIN price to the last
+            # completed session close, prior MUST be the bar before THAT session.
+            # Using "last bar before calendar today" made prev == price → 0% on
+            # every name until the open (finicky morning watchlist).
+            prev = None
+            if not rth_open and price_source == "session_close":
+                sess_d = str(as_of or bar_last_date or "")[:10]
+                if sess_d and bars:
+                    prior_to_sess = [
+                        (d, c) for d, c in bars if d and d < sess_d
+                    ]
+                    if prior_to_sess:
+                        prev = float(prior_to_sess[-1][1])
+                    # Gap-fill if the bar immediately before sess looks too old
+                    expected_before = None
+                    try:
+                        from datetime import date as _date, timedelta as _td
+                        sd = _date.fromisoformat(sess_d)
+                        d = sd - _td(days=1)
+                        while d.weekday() >= 5:
+                            d -= _td(days=1)
+                        expected_before = d.isoformat()
+                    except Exception:
+                        expected_before = None
+                    if (expected_before and prior_to_sess
+                            and prior_to_sess[-1][0] < expected_before):
+                        ndq = _nasdaq_daily_bars(sym)
+                        if ndq:
+                            filled = [
+                                (d, c) for d, c in ndq
+                                if d and d < sess_d
+                            ]
+                            if filled and filled[-1][0] > prior_to_sess[-1][0]:
+                                prev = float(filled[-1][1])
+                        if prev is not None and prior_to_sess and abs(
+                                float(prev) - float(prior_to_sess[-1][1])) < 1e-9:
+                            yf_p = _yf_prior_close(sym)
+                            # Only if yfinance disagrees with the pinned close
+                            if (yf_p is not None and px is not None
+                                    and abs(float(yf_p) - float(px)) > 1e-4):
+                                prev = float(yf_p)
+            if prev is None:
+                # RTH open path (and any closed-market fallback): last bar
+                # strictly before *calendar today* ET.
+                prev = _session_prior_close(
+                    bars, live_px if rth_open else px, rth_open, symbol=sym)
             if prev is None:
                 prev = _yf_prior_close(sym)
+            # Hard guard: closed market must never emit last==prior (fake 0%).
+            if (not rth_open and prev is not None and px is not None
+                    and abs(float(prev) - float(px)) < 1e-9):
+                prev = None
 
             pct = None
             if prev not in (None, 0):
