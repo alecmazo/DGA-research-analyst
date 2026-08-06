@@ -1,0 +1,244 @@
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+[data-theme='dark'] .topbar {
+  background: rgba(17, 26, 38, 0.88);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  color: inherit;
+  text-decoration: none;
+  min-width: 148px;
+}
+
+.logo {
+  height: 28px;
+  width: auto;
+  display: block;
+}
+
+.brandText {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.brandName {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.03em;
+  color: var(--navy-900);
+}
+
+[data-theme='dark'] .brandName {
+  color: var(--text-primary);
+}
+
+.brandSub {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.search {
+  position: relative;
+  flex: 0 1 280px;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  height: 34px;
+  padding: 0 42px 0 30px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  background: var(--bg-subtle);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease);
+}
+
+.searchInput:focus {
+  outline: none;
+  background: var(--bg-surface);
+  border-color: var(--brand-400);
+  box-shadow: var(--shadow-focus);
+}
+
+.kbd {
+  position: absolute;
+  right: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--bg-surface);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 0 4px;
+}
+
+.nav::-webkit-scrollbar {
+  display: none;
+}
+
+.link {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: var(--r-pill);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.link:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.linkActive {
+  color: var(--navy-900);
+  background: var(--brand-50);
+  box-shadow: inset 0 0 0 1px rgba(91, 184, 212, 0.35);
+}
+
+[data-theme='dark'] .linkActive {
+  color: var(--brand-200);
+  background: rgba(91, 184, 212, 0.12);
+}
+
+.divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--border-default);
+  flex-shrink: 0;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.iconBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+
+.iconBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success-500);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+}
+
+.user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 2px;
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(145deg, var(--navy-700), var(--brand-500));
+}
+
+.userMeta {
+  display: none;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+@media (min-width: 1200px) {
+  .userMeta {
+    display: flex;
+  }
+}
+
+.userName {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.userRole {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+
+.logout {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.logout:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}

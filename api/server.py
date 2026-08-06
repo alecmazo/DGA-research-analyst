@@ -6812,16 +6812,65 @@ def root(request: Request):
     return RedirectResponse(url="/app/")
 
 
+def _gp_react_index() -> Path:
+    """React + TypeScript GP shell (Vite dist)."""
+    return WEB_DIR / "gp-app" / "dist" / "index.html"
+
+
 @app.get("/gp")
+@app.get("/gp/")
 def serve_gp_dashboard(request: Request):
-    """GP dashboard (Terminal Pro). Client-side auth-guard.js redirects
-    unauthenticated requests to /. Server doesn't enforce here — the
-    page is just static HTML; all sensitive data goes through /api/*
-    which has its own token check."""
+    """GP dashboard — React+TS shell when built; falls back to legacy HTML.
+
+    Auth is client-side (token in localStorage). All sensitive data goes
+    through /api/* which enforces JWT. Legacy full terminal: /gp-legacy.
+    """
+    react = _gp_react_index()
+    if react.exists():
+        return _shell_response(react, request)
+    path = WEB_DIR / "portfolio-gp.html"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="GP dashboard not found")
+    return _shell_response(path, request)
+
+
+@app.get("/gp-legacy")
+def serve_gp_legacy(request: Request):
+    """Vanilla HTML GP terminal — kept during React cutover."""
     path = WEB_DIR / "portfolio-gp.html"
     if not path.exists():
         raise HTTPException(status_code=404, detail="portfolio-gp.html not found")
     return _shell_response(path, request)
+
+
+@app.get("/gp/{spa_path:path}")
+def serve_gp_spa(spa_path: str, request: Request):
+    """SPA asset or client-route fallback for React Router (basename /gp)."""
+    # Never shadow API
+    if spa_path.startswith("api/") or spa_path == "api":
+        raise HTTPException(404, "Not found")
+    dist = WEB_DIR / "gp-app" / "dist"
+    # Static file from Vite build (assets/*, favicon, etc.)
+    candidate = (dist / spa_path).resolve()
+    try:
+        candidate.relative_to(dist.resolve())
+    except ValueError:
+        raise HTTPException(404, "Not found")
+    if candidate.is_file():
+        # Cache hashed assets aggressively; HTML still via _shell_response
+        if spa_path.startswith("assets/"):
+            return FileResponse(
+                str(candidate),
+                headers={
+                    "Cache-Control": "public, max-age=31536000, immutable",
+                },
+            )
+        return FileResponse(str(candidate))
+    # Client-side route → index.html
+    react = _gp_react_index()
+    if react.exists():
+        return _shell_response(react, request)
+    raise HTTPException(404, "GP React shell not built")
 
 
 @app.get("/lp")
@@ -6904,7 +6953,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui422-20260806-watchlist-morning-pct"
+WEB_BUILD_VERSION = "ui423-20260806-gp-react-shell"
 
 
 @app.get("/api/build")

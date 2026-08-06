@@ -3,6 +3,9 @@
 # We need ffmpeg system-wide for the DGA HiTech Podcast pipeline
 # (TTS chunk stitching + intro/outro music + MP3 export via pydub).
 # Without this, pydub raises "Couldn't find ffprobe or ffmpeg" at runtime.
+#
+# GP React shell (web/gp-app/dist) is committed so /gp works without a Node
+# build step. Rebuild locally with: npm run build --prefix web/gp-app
 
 [phases.setup]
 # python312: keep prod's parser in step with local dev (a 3.12-only

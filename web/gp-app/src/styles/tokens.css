@@ -1,0 +1,115 @@
+/* DGA Capital — Editorial design tokens (Carta / Linear inspired) */
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Inter Tight', 'Inter', -apple-system, sans-serif;
+  --font-mono: 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13.5px;
+  --text-md: 14.5px;
+  --text-lg: 16px;
+  --text-xl: 19px;
+  --text-2xl: 24px;
+  --text-3xl: 30px;
+
+  --brand-50: #eff8fb;
+  --brand-100: #d6eef5;
+  --brand-200: #b3e0ec;
+  --brand-300: #84cce3;
+  --brand-400: #5bb8d4;
+  --brand-500: #3e9ab8;
+  --brand-600: #2d7d99;
+  --brand-700: #225f76;
+
+  --navy-50: #f3f6fa;
+  --navy-100: #e2e9f1;
+  --navy-200: #c4d2e2;
+  --navy-500: #3d5371;
+  --navy-600: #2a3e57;
+  --navy-700: #1c2b40;
+  --navy-800: #0f1d30;
+  --navy-900: #0a1628;
+
+  --gray-50: #fafbfc;
+  --gray-100: #f4f6f8;
+  --gray-200: #e6eaf0;
+  --gray-300: #d3d9e1;
+  --gray-400: #aab3bf;
+  --gray-500: #7a8493;
+  --gray-600: #58616f;
+  --gray-700: #3d4654;
+
+  --text-primary: var(--navy-900);
+  --text-secondary: var(--gray-600);
+  --text-tertiary: var(--gray-500);
+  --text-muted: var(--gray-400);
+  --text-on-brand: #fff;
+
+  --bg-canvas: #f4f7fb;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-subtle: var(--gray-50);
+  --bg-hover: rgba(10, 22, 40, 0.035);
+
+  --border-subtle: var(--gray-200);
+  --border-default: var(--gray-300);
+  --border-strong: var(--gray-400);
+
+  --success-50: #ecfdf5;
+  --success-500: #16a34a;
+  --success-700: #047857;
+  --danger-50: #fef2f2;
+  --danger-500: #dc2626;
+  --danger-700: #b91c1c;
+  --warn-50: #fffbeb;
+  --warn-500: #d97706;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-pill: 999px;
+
+  --shadow-xs: 0 1px 2px rgba(15, 29, 48, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 29, 48, 0.06), 0 1px 2px rgba(15, 29, 48, 0.04);
+  --shadow-md: 0 4px 14px -2px rgba(15, 29, 48, 0.08), 0 2px 4px rgba(15, 29, 48, 0.04);
+  --shadow-lg: 0 16px 32px -8px rgba(15, 29, 48, 0.14);
+  --shadow-focus: 0 0 0 3px rgba(91, 184, 212, 0.28);
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --t-fast: 120ms;
+  --t-base: 200ms;
+
+  --topbar-h: 56px;
+  --ribbon-h: 36px;
+  --content-max: 1480px;
+}
+
+[data-theme='dark'] {
+  --text-primary: #e8eef6;
+  --text-secondary: #a8b4c4;
+  --text-tertiary: #7d8a9c;
+  --text-muted: #5c6a7c;
+  --bg-canvas: #0a1018;
+  --bg-surface: #111a26;
+  --bg-elevated: #172231;
+  --bg-subtle: #0e1620;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-default: rgba(255, 255, 255, 0.11);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+}

@@ -59,3 +59,8 @@ apps/sliw-agent/data/wedding_briefs/
 apps/sliw-agent/docs/node_modules/
 apps/sliw-agent/data/master_packages.pdf
 apps/sliw-agent/data/master_deck.json
+
+# React GP shell
+web/gp-app/node_modules/
+web/gp-app/dist/*.map
+

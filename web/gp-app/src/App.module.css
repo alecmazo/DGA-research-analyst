@@ -1,0 +1,64 @@
+.boot {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(800px 320px at 50% 0%, rgba(91, 184, 212, 0.14), transparent 60%),
+    var(--bg-canvas);
+}
+
+.bootCard {
+  width: min(400px, 100%);
+  padding: 32px 28px;
+  border-radius: var(--r-xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.mark {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: -0.04em;
+  color: var(--brand-300);
+  background: var(--navy-900);
+}
+
+.bootCard h1 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: -0.03em;
+}
+
+.bootCard p {
+  margin: 0 0 20px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.bar {
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--brand-200), var(--brand-500), var(--brand-200));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s var(--ease) infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}

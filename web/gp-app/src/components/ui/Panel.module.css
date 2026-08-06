@@ -1,0 +1,73 @@
+.panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-subtle) 100%);
+}
+
+.titleWrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.badge {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brand-700);
+  background: var(--brand-50);
+  border: 1px solid rgba(91, 184, 212, 0.28);
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+}
+
+.action {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.body {
+  padding: 14px 16px 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+.bodyFlush {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+[data-theme='dark'] .badge {
+  color: var(--brand-300);
+  background: rgba(91, 184, 212, 0.12);
+  border-color: rgba(91, 184, 212, 0.22);
+}

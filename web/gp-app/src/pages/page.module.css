@@ -1,0 +1,76 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.kicker {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand-600);
+}
+
+.h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(26px, 3vw, 32px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+.sub {
+  margin: 6px 0 0;
+  max-width: 52ch;
+  font-size: var(--text-md);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.heroActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bannerErr {
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--danger-50);
+  color: var(--danger-700);
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.placeholder {
+  display: grid;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.placeholder p {
+  margin: 0;
+  color: var(--text-secondary);
+  max-width: 60ch;
+}
+
+.placeholderList {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
