@@ -18,6 +18,7 @@ import {
 } from './format'
 import { RankCardsView } from './RankCards'
 import { SeriesPanel } from './SeriesTable'
+import { FundCharts } from './FundCharts'
 import { PriceChart } from './PriceChart'
 import styles from '../FinancialsPage.module.css'
 
@@ -511,7 +512,12 @@ export function CompanyDashboard({
             </div>
           )}
 
-          {/* Series sparklines + table */}
+          {/* Pre-React multi-card fundamentals charts */}
+          {Array.isArray(dash.series) && dash.series.length > 0 && (
+            <FundCharts series={dash.series} />
+          )}
+
+          {/* Compact series table under charts */}
           {Array.isArray(dash.series) && dash.series.length > 0 && (
             <SeriesPanel series={dash.series} />
           )}
