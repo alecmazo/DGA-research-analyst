@@ -12,6 +12,7 @@ import { TranscriptsPage } from '@/pages/TranscriptsPage'
 import { MemosPage } from '@/pages/MemosPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { ReportPage } from '@/pages/ReportPage'
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import {
   clearSession,
@@ -94,16 +95,86 @@ export default function App() {
             {/* Standalone report window (no chrome) */}
             <Route path="report" element={<ReportPage />} />
             <Route element={<Shell user={user} build={build} />}>
-              <Route index element={<DeskPage />} />
-              <Route path="financials" element={<FinancialsPage />} />
-              <Route path="options" element={<OptionsPage />} />
-              <Route path="builder" element={<BuilderPage />} />
-              <Route path="podcasts" element={<PodcastsPage />} />
-              <Route path="transcripts" element={<TranscriptsPage />} />
-              <Route path="positions" element={<PositionsPage />} />
-              <Route path="fund" element={<FundPage />} />
-              <Route path="memos" element={<MemosPage />} />
-              <Route path="settings" element={<SettingsPage />} />
+              <Route
+                index
+                element={
+                  <ErrorBoundary label="Desk">
+                    <DeskPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="financials"
+                element={
+                  <ErrorBoundary label="Financials">
+                    <FinancialsPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="options"
+                element={
+                  <ErrorBoundary label="Options">
+                    <OptionsPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="builder"
+                element={
+                  <ErrorBoundary label="Builder">
+                    <BuilderPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="podcasts"
+                element={
+                  <ErrorBoundary label="Podcasts">
+                    <PodcastsPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="transcripts"
+                element={
+                  <ErrorBoundary label="Transcripts">
+                    <TranscriptsPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="positions"
+                element={
+                  <ErrorBoundary label="Positions">
+                    <PositionsPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="fund"
+                element={
+                  <ErrorBoundary label="Fund">
+                    <FundPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="memos"
+                element={
+                  <ErrorBoundary label="Memos">
+                    <MemosPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="settings"
+                element={
+                  <ErrorBoundary label="Settings">
+                    <SettingsPage />
+                  </ErrorBoundary>
+                }
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

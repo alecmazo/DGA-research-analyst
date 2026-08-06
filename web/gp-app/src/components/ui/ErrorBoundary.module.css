@@ -1,0 +1,35 @@
+.box {
+  padding: 28px 24px;
+  border-radius: var(--r-lg);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  background: var(--danger-50, #fef2f2);
+  max-width: 520px;
+  margin: 24px auto;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--danger-700, #b91c1c);
+}
+
+.msg {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  word-break: break-word;
+  font-family: var(--font-mono);
+}
+
+.btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: none;
+  background: #0a1628;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
