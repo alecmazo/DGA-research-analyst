@@ -1,0 +1,308 @@
+import { useCallback, useEffect, useState } from 'react'
+import { Button } from '@/components/ui/Button'
+import { api, type JobStatus, type LlmProvider } from '@/lib/api'
+import { pollJob } from '@/lib/jobs'
+import styles from './deskWidgets.module.css'
+
+const ENGINES: { id: LlmProvider; label: string }[] = [
+  { id: 'grok', label: 'Grok' },
+  { id: 'claude', label: 'Claude' },
+  { id: 'deepseek', label: 'DeepSeek' },
+  { id: 'kimi', label: 'Kimi' },
+]
+
+const STORAGE_KEY = 'dga.hero.engines.v3'
+
+function loadEngines(): LlmProvider[] {
+  try {
+    for (const k of [STORAGE_KEY, 'dga.hero.engines.v2', 'dga.hero.engines.v1']) {
+      const raw = localStorage.getItem(k)
+      if (!raw) continue
+      const arr = JSON.parse(raw) as unknown
+      if (Array.isArray(arr) && arr.length) {
+        const ok = arr.filter((e): e is LlmProvider =>
+          ENGINES.some((x) => x.id === e),
+        )
+        if (ok.length) return ok
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return ['grok']
+}
+
+type Props = {
+  /** Prefill / external control of ticker (e.g. Idea Generator → Report). */
+  ticker?: string
+  onTickerChange?: (t: string) => void
+  onComplete?: () => void
+  /** Increment to auto-run with current ticker (optional). */
+  runToken?: number
+}
+
+export function AnalyzeCard({
+  ticker: controlled,
+  onTickerChange,
+  onComplete,
+  runToken,
+}: Props) {
+  const [localTicker, setLocalTicker] = useState(controlled || '')
+  const ticker = controlled !== undefined ? controlled : localTicker
+  const setTicker = (t: string) => {
+    if (onTickerChange) onTickerChange(t)
+    else setLocalTicker(t)
+  }
+
+  const [engines, setEngines] = useState<LlmProvider[]>(() => loadEngines())
+  const [gamma, setGamma] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [hint, setHint] = useState('')
+  const [hintTone, setHintTone] = useState<'ok' | 'err' | 'mid'>('mid')
+  const [progPct, setProgPct] = useState<number | null>(null)
+  const [progLbl, setProgLbl] = useState('')
+  const [showProg, setShowProg] = useState(false)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [canceling, setCanceling] = useState(false)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(engines))
+    } catch {
+      /* ignore */
+    }
+  }, [engines])
+
+  const toggleEngine = (id: LlmProvider) => {
+    setEngines((prev) => {
+      if (prev.includes(id)) {
+        const next = prev.filter((e) => e !== id)
+        return next.length ? next : prev // keep at least one
+      }
+      return [...prev, id]
+    })
+  }
+
+  const runAnalysis = useCallback(async () => {
+    const tk = ticker.trim().toUpperCase().replace(/[^A-Z.]/g, '')
+    if (!tk) {
+      setHintTone('err')
+      setHint('Enter a ticker first.')
+      return
+    }
+    if (!engines.length) {
+      setHintTone('err')
+      setHint('Select at least one engine.')
+      return
+    }
+
+    setRunning(true)
+    setShowProg(true)
+    setProgPct(null)
+    setProgLbl(`${engines[0]} · 1/${engines.length} queued…`)
+    setHintTone('mid')
+    setHint(
+      `Running ${engines.length} engine${engines.length > 1 ? 's' : ''} · ${engines.join(' + ')}${
+        gamma ? ' · Gamma on first (Grok only)' : ''
+      } · each saved separately`,
+    )
+
+    const results: Array<{ eng: string; ok?: boolean; failed?: boolean; canceled?: boolean; cost?: number }> =
+      []
+    let aborted = false
+    let totalCost = 0
+
+    try {
+      for (let i = 0; i < engines.length; i++) {
+        if (aborted) break
+        const eng = engines[i]
+        const n = i + 1
+        const label = `${eng} · ${n}/${engines.length}`
+        setProgPct(null)
+        setProgLbl(`${label} · queued…`)
+        setHintTone('mid')
+        setHint(`Running ${label}${engines.length > 1 ? ' (each engine → own Saved Report)' : ''}`)
+
+        const wantGamma = gamma && eng === 'grok'
+        const job = await api<JobStatus>('/api/analyze', {
+          method: 'POST',
+          body: JSON.stringify({
+            ticker: tk,
+            generate_gamma: wantGamma,
+            llm_provider: eng,
+          }),
+        })
+        const jobId = job.job_id
+        if (!jobId) throw new Error(`No job_id from analyze (${eng})`)
+        setActiveJobId(jobId)
+
+        const outcome = await pollJob(jobId, {
+          onProgress: (pctInt, lbl) => {
+            const base = Math.round((i / engines.length) * 100)
+            const slice = Math.round((pctInt == null ? 0 : pctInt) / engines.length)
+            setProgPct(pctInt == null ? null : Math.min(99, base + slice))
+            setProgLbl(`${lbl || '…'} · ${label}`)
+          },
+        })
+        setActiveJobId(null)
+
+        if (outcome.status === 'canceled' || outcome.status === 'cancelled') {
+          aborted = true
+          results.push({ eng, canceled: true })
+          break
+        }
+        if (outcome.status !== 'done') {
+          const errMsg = outcome.error || outcome.detail || `${eng} failed`
+          results.push({ eng, failed: true })
+          setHintTone('err')
+          setHint(String(errMsg).slice(0, 220))
+          continue
+        }
+        const c = outcome.result?.cost_usd
+        if (c != null && !Number.isNaN(Number(c))) totalCost += Number(c)
+        results.push({ eng, ok: true, cost: c })
+        onComplete?.()
+      }
+
+      setProgPct(100)
+      setProgLbl('Complete')
+      setTimeout(() => setShowProg(false), 650)
+      onComplete?.()
+
+      if (aborted) {
+        setHintTone('mid')
+        setHint(
+          `Canceled after ${results.filter((x) => x.ok).length} of ${engines.length} — completed engines were saved.`,
+        )
+      } else {
+        const okN = results.filter((x) => x.ok).length
+        const failN = results.filter((x) => x.failed).length
+        setHintTone(failN && !okN ? 'err' : 'ok')
+        setHint(
+          `${okN ? `✅ ${okN} report${okN > 1 ? 's' : ''} saved` : '❌ none saved'}${
+            failN ? ` · ${failN} failed` : ''
+          }${totalCost > 0 ? ` · $${totalCost.toFixed(2)}` : ''} — see Saved Reports`,
+        )
+      }
+    } catch (e) {
+      setShowProg(false)
+      setActiveJobId(null)
+      setHintTone('err')
+      setHint(`Error: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally {
+      setRunning(false)
+      setCanceling(false)
+    }
+  }, [ticker, engines, gamma, onComplete])
+
+  // External run trigger (Idea Generator / Prioritize → Report)
+  useEffect(() => {
+    if (runToken && runToken > 0 && ticker.trim()) {
+      void runAnalysis()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only fire on runToken
+  }, [runToken])
+
+  const cancel = async () => {
+    if (!activeJobId) return
+    setCanceling(true)
+    setProgLbl('Canceling…')
+    try {
+      await api(`/api/jobs/${encodeURIComponent(activeJobId)}/cancel`, { method: 'POST' })
+    } catch {
+      setCanceling(false)
+    }
+  }
+
+  return (
+    <div className={styles.heroCard}>
+      <div className={styles.heroLabel}>Analyze Ticker</div>
+      <div className={styles.heroRow}>
+        <input
+          className={styles.heroInput}
+          placeholder="e.g. AAPL"
+          autoCapitalize="characters"
+          autoComplete="off"
+          value={ticker}
+          onChange={(e) => setTicker(e.target.value.toUpperCase())}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void runAnalysis()
+          }}
+          disabled={running}
+        />
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => void runAnalysis()}
+          disabled={running}
+          className={styles.heroRun}
+        >
+          {running ? '…' : '⚡ RUN'}
+        </Button>
+        {running && activeJobId && (
+          <Button variant="ghost" size="sm" onClick={() => void cancel()} disabled={canceling}>
+            {canceling ? 'Canceling…' : '✕ Cancel'}
+          </Button>
+        )}
+      </div>
+
+      {showProg && (
+        <div className={styles.heroProg}>
+          <div className={styles.heroProgHead}>
+            <span className={styles.heroProgDot} />
+            <span className={styles.heroProgLbl}>{progLbl || 'Queued…'}</span>
+            <span className={styles.heroProgPct}>
+              {progPct == null ? '' : `${progPct}%`}
+            </span>
+          </div>
+          <div className={styles.heroProgTrack}>
+            <div
+              className={styles.heroProgFill}
+              style={{ width: `${progPct == null ? 6 : Math.max(4, Math.min(100, progPct))}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {hint && (
+        <div
+          className={`${styles.heroHint} ${
+            hintTone === 'err' ? styles.hintErr : hintTone === 'ok' ? styles.hintOk : ''
+          }`}
+        >
+          {hint}
+        </div>
+      )}
+
+      <div className={styles.heroMeta}>
+        <span className={styles.enginesLbl}>Engines:</span>
+        <span className={styles.chips} role="group" aria-label="Select analysis engines">
+          {ENGINES.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              className={`${styles.chip} ${engines.includes(e.id) ? styles.chipOn : ''}`}
+              onClick={() => toggleEngine(e.id)}
+              disabled={running}
+              title={`${e.label} · toggle on/off`}
+            >
+              {e.label}
+            </button>
+          ))}
+        </span>
+        <span className={styles.costEst} title="Estimated LLM cost per selected engine">
+          ≈ $0.30–0.60 / report
+        </span>
+        <label className={styles.gammaLabel}>
+          <input
+            type="checkbox"
+            checked={gamma}
+            onChange={(e) => setGamma(e.target.checked)}
+            disabled={running}
+          />
+          Gamma deck
+        </label>
+      </div>
+    </div>
+  )
+}

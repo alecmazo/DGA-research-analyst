@@ -91,3 +91,110 @@ export type MeResponse = {
   must_change_password?: boolean
   demo_mode?: boolean
 }
+
+export type LlmProvider = 'grok' | 'claude' | 'deepseek' | 'kimi'
+
+export type SavedReport = {
+  ticker: string
+  price_target?: number | null
+  upside_pct?: number | null
+  current_price?: number | null
+  pct_change?: number | null
+  generated_at?: string | null
+  report_date?: string | null
+  claude_generated_at?: string | null
+  kimi_generated_at?: string | null
+  deepseek_generated_at?: string | null
+  last_attempt_at?: string | null
+  last_attempt_status?: string | null
+  last_attempt_error?: string | null
+  has_docx?: boolean
+  has_pptx?: boolean
+  pptx_stale?: boolean
+  providers?: string[]
+  grok_price_target?: number | null
+  claude_price_target?: number | null
+  grok_upside_pct?: number | null
+  claude_upside_pct?: number | null
+  version_count?: number
+  rating?: string | null
+}
+
+export type JobStatus = {
+  job_id?: string
+  status?: string
+  progress?: { pct?: number | null; label?: string | null }
+  result?: {
+    cost_usd?: number
+    model?: string
+    provider?: string
+    price_target?: number | null
+    markdown?: string
+  }
+  error?: string
+  detail?: string
+  model?: string
+  provider?: string
+}
+
+export type IdeaMover = {
+  ticker: string
+  pct_change?: number | null
+  price?: number | null
+  reason_class?: string
+  reason_text?: string
+  sources?: string[]
+  sector?: string
+  sector_etf?: string
+  sector_pct_change?: number | null
+  news?: Array<{
+    title?: string
+    url?: string
+    publisher?: string
+    pub_ts?: number
+  }>
+}
+
+export type IdeaFeed = {
+  movers?: IdeaMover[]
+  as_of?: string
+  session_date?: string
+  threshold?: number
+  note?: string
+  error?: string
+}
+
+export type PrioritizePick = {
+  ticker?: string
+  priority?: string
+  score?: number | null
+  reason?: string
+  bucket?: string
+}
+
+export type PrioritizeResult = {
+  ok?: boolean
+  error?: string
+  note?: string
+  picks?: PrioritizePick[]
+  considered?: number
+  skipped?: Array<{ ticker?: string; reason?: string }>
+  bucket_counts?: { active?: number; stale?: number; fresh?: number }
+  model?: string
+  provider?: string
+}
+
+export type ReportDetail = {
+  ticker?: string
+  markdown?: string
+  content?: string
+  report_date?: string
+  generated_at?: string
+  price_target?: number | null
+  upside_pct?: number | null
+  rating?: string | null
+  provider?: string
+  gamma_url?: string | null
+  has_docx?: boolean
+  has_pptx?: boolean
+}

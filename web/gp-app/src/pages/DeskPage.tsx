@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
+import { LiveMarkets } from '@/components/desk/LiveMarkets'
+import { AnalyzeCard } from '@/components/desk/AnalyzeCard'
+import { IdeaGenerator } from '@/components/desk/IdeaGenerator'
+import { SavedReports } from '@/components/desk/SavedReports'
 import {
   api,
   type DailyBrief,
@@ -24,6 +28,12 @@ export function DeskPage() {
   const [loading, setLoading] = useState(true)
   const [tickerIn, setTickerIn] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // Analyze card control (Idea Generator / Saved Reports can prefill + run)
+  const [analyzeTk, setAnalyzeTk] = useState('')
+  const [runToken, setRunToken] = useState(0)
+  const [reportsKey, setReportsKey] = useState(0)
+  const analyzeAnchor = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -94,7 +104,6 @@ export function DeskPage() {
     setErr(null)
     try {
       await api('/api/daily-brief', { method: 'POST', body: '{}' })
-      // poll latest briefly
       for (let i = 0; i < 40; i++) {
         await new Promise((r) => setTimeout(r, 3000))
         const b = await api<DailyBrief>('/api/daily-brief/latest')
@@ -111,6 +120,12 @@ export function DeskPage() {
     }
   }
 
+  const focusAnalyze = (tk: string, autoRun = false) => {
+    setAnalyzeTk(tk.toUpperCase())
+    analyzeAnchor.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (autoRun) setRunToken((n) => n + 1)
+  }
+
   return (
     <div className={page.page}>
       <header className={page.hero}>
@@ -118,7 +133,8 @@ export function DeskPage() {
           <p className={page.kicker}>Work surface</p>
           <h1 className={page.h1}>Desk</h1>
           <p className={page.sub}>
-            Watchlist, live tape, and Daily Pulse — the morning control surface.
+            Watchlist, saved reports, multi-engine analyze, idea feed, and live
+            markets — the morning control surface.
           </p>
         </div>
         <div className={page.heroActions}>
@@ -133,89 +149,108 @@ export function DeskPage() {
 
       {err && <div className={page.bannerErr}>{err}</div>}
 
-      <div className={styles.grid}>
-        <Panel
-          title="Watchlist"
-          badge={rows.length || '0'}
-          action={
-            <span className={styles.meta}>
-              {wl?.timing_ms != null ? `${wl.timing_ms}ms` : loading ? 'Loading…' : 'Live'}
-            </span>
-          }
-          flush
-          className={styles.watchPanel}
-        >
-          <div className={styles.addRow}>
-            <input
-              className={styles.addInput}
-              placeholder="Add ticker…"
-              value={tickerIn}
-              onChange={(e) => setTickerIn(e.target.value.toUpperCase())}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void addTicker()
-              }}
-            />
-            <Button size="sm" variant="primary" onClick={() => void addTicker()} disabled={busy}>
-              Add
-            </Button>
-          </div>
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th className="tabular">Last</th>
-                  <th className="tabular">Day %</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {loading && !rows.length && (
+      <div className={styles.deskGrid}>
+        {/* ── Left: Watchlist + Pulse ── */}
+        <div className={styles.colLeft}>
+          <Panel
+            title="Watchlist"
+            badge={rows.length || '0'}
+            action={
+              <span className={styles.meta}>
+                {wl?.timing_ms != null
+                  ? `${wl.timing_ms}ms`
+                  : loading
+                    ? 'Loading…'
+                    : 'Live'}
+              </span>
+            }
+            flush
+            className={styles.watchPanel}
+          >
+            <div className={styles.addRow}>
+              <input
+                className={styles.addInput}
+                placeholder="Add ticker…"
+                value={tickerIn}
+                onChange={(e) => setTickerIn(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void addTicker()
+                }}
+              />
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => void addTicker()}
+                disabled={busy}
+              >
+                Add
+              </Button>
+            </div>
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead>
                   <tr>
-                    <td colSpan={4} className={styles.empty}>
-                      Loading quotes…
-                    </td>
+                    <th>Ticker</th>
+                    <th className="tabular">Last</th>
+                    <th className="tabular">Day %</th>
+                    <th />
                   </tr>
-                )}
-                {!loading && !rows.length && (
-                  <tr>
-                    <td colSpan={4} className={styles.empty}>
-                      No tickers yet — add a name above.
-                    </td>
-                  </tr>
-                )}
-                {rows.map(({ tk, q, pct }) => (
-                  <tr key={tk}>
-                    <td>
-                      <span className={styles.tk}>{tk}</span>
-                      {wl?.reports?.[tk] && <span className={styles.chip}>RPT</span>}
-                    </td>
-                    <td className="tabular">{fmtPx(q.price)}</td>
-                    <td className={`tabular ${pctClass(pct)}`}>{fmtPct(pct)}</td>
-                    <td className={styles.actions}>
-                      <button
-                        type="button"
-                        className={styles.rm}
-                        onClick={() => void removeTicker(tk)}
-                        title="Remove"
-                      >
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
+                </thead>
+                <tbody>
+                  {loading && !rows.length && (
+                    <tr>
+                      <td colSpan={4} className={styles.empty}>
+                        Loading quotes…
+                      </td>
+                    </tr>
+                  )}
+                  {!loading && !rows.length && (
+                    <tr>
+                      <td colSpan={4} className={styles.empty}>
+                        No tickers yet — add a name above.
+                      </td>
+                    </tr>
+                  )}
+                  {rows.map(({ tk, q, pct }) => (
+                    <tr key={tk}>
+                      <td>
+                        <button
+                          type="button"
+                          className={styles.tkBtn}
+                          title="Analyze this ticker"
+                          onClick={() => focusAnalyze(tk, false)}
+                        >
+                          <span className={styles.tk}>{tk}</span>
+                        </button>
+                        {wl?.reports?.[tk] && <span className={styles.chip}>RPT</span>}
+                      </td>
+                      <td className="tabular">{fmtPx(q.price)}</td>
+                      <td className={`tabular ${pctClass(pct)}`}>{fmtPct(pct)}</td>
+                      <td className={styles.actions}>
+                        <button
+                          type="button"
+                          className={styles.rm}
+                          onClick={() => void removeTicker(tk)}
+                          title="Remove"
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
 
-        <div className={styles.side}>
           <Panel
             title="Daily Pulse"
             badge={brief?.provider || '—'}
             action={
               <span className={styles.meta}>
-                {brief?.generated_at ? relativeTime(brief.generated_at) : 'No pulse yet'}
+                {brief?.generated_at
+                  ? relativeTime(brief.generated_at)
+                  : 'No pulse yet'}
               </span>
             }
           >
@@ -229,7 +264,28 @@ export function DeskPage() {
               </div>
             )}
           </Panel>
+        </div>
 
+        {/* ── Center: Saved Reports ── */}
+        <div className={styles.colCenter}>
+          <SavedReports
+            refreshKey={reportsKey}
+            onAnalyze={(tk) => focusAnalyze(tk, false)}
+          />
+        </div>
+
+        {/* ── Right: Live Markets + Idea Gen + Analyze ── */}
+        <div className={styles.colRight}>
+          <LiveMarkets />
+          <IdeaGenerator onAnalyze={focusAnalyze} />
+          <div ref={analyzeAnchor}>
+            <AnalyzeCard
+              ticker={analyzeTk}
+              onTickerChange={setAnalyzeTk}
+              runToken={runToken}
+              onComplete={() => setReportsKey((k) => k + 1)}
+            />
+          </div>
           <Panel title="Desk health" badge="OK">
             <ul className={styles.health}>
               <li>
