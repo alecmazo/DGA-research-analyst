@@ -6953,7 +6953,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui436-20260806-desk-layout-persist"
+WEB_BUILD_VERSION = "ui437-20260806-builder-high-conviction"
 
 
 @app.get("/api/build")
@@ -11205,16 +11205,33 @@ def builder_scenario_to_watchlist(scenario_id: str, request: Request):
     if scenario is None:
         raise HTTPException(404, "Scenario not found")
 
-    # Walk the scenario's result.sectors → positions → ticker
-    sectors = ((scenario.get("result") or {}).get("sectors") or [])
+    # Support both shapes:
+    #  • construct: result.rows[{ticker, weight_pct, ...}]
+    #  • allocate:  result.sectors[{positions:[{ticker,...}]}]
+    result = scenario.get("result") or {}
     tickers: list[str] = []
-    for s in sectors:
-        for p in (s.get("positions") or []):
+    rows = result.get("rows") or []
+    if isinstance(rows, list) and rows:
+        # Prefer higher-weight first for construct baskets
+        try:
+            rows = sorted(
+                rows,
+                key=lambda r: float(r.get("weight_pct") or 0),
+                reverse=True,
+            )
+        except Exception:
+            pass
+        for p in rows:
             tk = (p.get("ticker") or "").strip().upper()
             if tk:
                 tickers.append(tk)
-    # Dedup while preserving order (largest-weight first, since sectors are
-    # already weight-sorted and positions are EV-sorted within sector)
+    else:
+        for s in (result.get("sectors") or []):
+            for p in (s.get("positions") or []):
+                tk = (p.get("ticker") or "").strip().upper()
+                if tk:
+                    tickers.append(tk)
+    # Dedup while preserving order
     seen, ordered = set(), []
     for tk in tickers:
         if tk not in seen:
