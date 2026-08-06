@@ -6953,7 +6953,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui423-20260806-gp-react-shell"
+WEB_BUILD_VERSION = "ui424-20260806-gp-react-all-tabs"
 
 
 @app.get("/api/build")

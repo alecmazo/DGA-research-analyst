@@ -64,7 +64,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **SEC ticker map cache** | **`ui421-20260805-sec-ticker-map-cache`** | Fix ui418-era SEC 429 stampede: load company_tickers once; cap 8-K concurrency |
 | **Watchlist morning day %** | **`ui422-20260806-watchlist-morning-pct`** | Closed/pre-market: prior = bar before session close (not same bar → fake 0%) |
 | **GP React+TS shell** | **`ui423-20260806-gp-react-shell`** | Replace /gp with Vite React TypeScript shell; legacy at /gp-legacy |
-| **Next deploy after this** | **`ui424-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **GP React all tabs** | **`ui424-20260806-gp-react-all-tabs`** | Port Desk/Options/Builder/Financials/Positions/Fund/Memos/Podcasts/Transcripts/Settings |
+| **Next deploy after this** | **`ui425-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

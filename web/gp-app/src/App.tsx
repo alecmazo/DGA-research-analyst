@@ -3,7 +3,14 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Shell } from '@/components/layout/Shell'
 import { DeskPage } from '@/pages/DeskPage'
 import { OptionsPage } from '@/pages/OptionsPage'
-import { PlaceholderPage } from '@/pages/PlaceholderPage'
+import { PositionsPage } from '@/pages/PositionsPage'
+import { FundPage } from '@/pages/FundPage'
+import { BuilderPage } from '@/pages/BuilderPage'
+import { FinancialsPage } from '@/pages/FinancialsPage'
+import { PodcastsPage } from '@/pages/PodcastsPage'
+import { TranscriptsPage } from '@/pages/TranscriptsPage'
+import { MemosPage } from '@/pages/MemosPage'
+import { SettingsPage } from '@/pages/SettingsPage'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import {
   clearSession,
@@ -13,7 +20,11 @@ import {
 } from '@/lib/auth'
 import styles from './App.module.css'
 
-function AuthBoot({ children }: { children: (user: GpUser, build?: string) => ReactNode }) {
+function AuthBoot({
+  children,
+}: {
+  children: (user: GpUser, build?: string) => ReactNode
+}) {
   const [user, setUser] = useState<GpUser | null>(getCachedUser())
   const [build, setBuild] = useState<string>()
   const [state, setState] = useState<'loading' | 'ok' | 'fail'>('loading')
@@ -81,98 +92,15 @@ export default function App() {
           <Routes>
             <Route element={<Shell user={user} build={build} />}>
               <Route index element={<DeskPage />} />
+              <Route path="financials" element={<FinancialsPage />} />
               <Route path="options" element={<OptionsPage />} />
-              <Route
-                path="financials"
-                element={
-                  <PlaceholderPage
-                    kicker="Research"
-                    title="Financials"
-                    sub="Company dashboards, store coverage, and peer comps — API-backed."
-                    bullets={[
-                      'Dashboard & sheet views',
-                      'Nightly EDGAR store card',
-                      'Peer comps (Tesla-class fixes apply here)',
-                    ]}
-                  />
-                }
-              />
-              <Route
-                path="builder"
-                element={
-                  <PlaceholderPage
-                    kicker="Sectors"
-                    title="Builder"
-                    sub="Named sector boards with cost basis from first add and since-add tracking."
-                    bullets={['Sector boards', 'Since-add % (ui419/ui422)', 'Basket constructor']}
-                  />
-                }
-              />
-              <Route
-                path="podcasts"
-                element={
-                  <PlaceholderPage
-                    kicker="Studio"
-                    title="Podcasts"
-                    sub="DGA HiTech podcast pipeline — script, TTS, and export."
-                  />
-                }
-              />
-              <Route
-                path="transcripts"
-                element={
-                  <PlaceholderPage
-                    kicker="Research"
-                    title="Transcripts"
-                    sub="YouTube ingest and earnings-call index with AI ask."
-                  />
-                }
-              />
-              <Route
-                path="positions"
-                element={
-                  <PlaceholderPage
-                    kicker="Brokerage"
-                    title="Positions"
-                    sub="SnapTrade multi-account holdings with day P&amp;L."
-                  />
-                }
-              />
-              <Route
-                path="fund"
-                element={
-                  <PlaceholderPage
-                    kicker="Firm ops"
-                    title="Fund"
-                    sub="Fund detail, rebalance, YTD, and LP-facing ops."
-                  />
-                }
-              />
-              <Route
-                path="memos"
-                element={
-                  <PlaceholderPage
-                    kicker="Firm ops"
-                    title="Memos"
-                    sub="Compose and archive investment memos."
-                  />
-                }
-              />
-              <Route
-                path="settings"
-                element={
-                  <PlaceholderPage
-                    kicker="Admin"
-                    title="Settings"
-                    sub="Models, security, support tickets, and continuity handoff."
-                    bullets={[
-                      'Model routing & volume LLM',
-                      'Password change',
-                      'Support inbox trail',
-                    ]}
-                  />
-                }
-              />
+              <Route path="builder" element={<BuilderPage />} />
+              <Route path="podcasts" element={<PodcastsPage />} />
+              <Route path="transcripts" element={<TranscriptsPage />} />
+              <Route path="positions" element={<PositionsPage />} />
+              <Route path="fund" element={<FundPage />} />
+              <Route path="memos" element={<MemosPage />} />
+              <Route path="settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

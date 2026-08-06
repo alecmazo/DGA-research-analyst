@@ -27,39 +27,121 @@
   font-weight: 600;
 }
 
-[data-theme='dark'] .status {
-  background: rgba(91, 184, 212, 0.1);
-  color: var(--brand-200);
-}
-
-.grid {
+.kpiRow {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-4);
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
 }
 
-@media (max-width: 900px) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
+.kpi {
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-xs);
 }
 
-.hint {
-  margin: 0 0 10px;
-  font-size: var(--text-xs);
+.kpiLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-tertiary);
 }
 
-.pre {
-  margin: 0;
-  max-height: 420px;
+.kpiVal {
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.tableWrap {
   overflow: auto;
-  padding: 12px;
-  border-radius: var(--r-md);
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-subtle);
-  font-family: var(--font-mono);
+  max-height: 520px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-surface);
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  z-index: 1;
+}
+
+.table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+.held td {
+  background: rgba(22, 163, 74, 0.04);
+}
+
+.tk {
+  font-weight: 800;
+  font-family: var(--font-display);
+}
+
+.badge {
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--success-700);
+  background: var(--success-50);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.shares {
+  display: block;
+  margin-top: 2px;
   font-size: 11px;
-  line-height: 1.45;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.cell {
+  min-width: 140px;
+}
+
+.cellMain {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cellSub {
+  margin-top: 2px;
+  font-size: 11px;
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.income {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--success-700);
+}
+
+.empty {
+  color: var(--text-muted);
+  text-align: center;
 }
