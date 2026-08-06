@@ -1,0 +1,452 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toolbarSpacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.select {
+  height: 32px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  min-width: 140px;
+}
+
+.yearInput {
+  width: 78px;
+  height: 30px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.freshWarn {
+  margin-bottom: 14px;
+  background: var(--warn-50, #fffbeb);
+  border: 1px solid var(--warn-500, #d97706);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 11.5px;
+  color: var(--warn-700, #92400e);
+  line-height: 1.5;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.fieldLabelRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.textarea {
+  width: 100%;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--brand-400);
+  box-shadow: 0 0 0 3px rgba(91, 184, 212, 0.15);
+}
+
+.fundCard {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--bg-surface);
+}
+
+.fundHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.fundName {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.fundMeta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.fundWarn {
+  color: #d97706;
+}
+
+.pubTag {
+  font-size: 10px;
+  color: #16a34a;
+  font-weight: 800;
+}
+
+.fundHeadSpacer {
+  flex: 1;
+}
+
+.fundTa {
+  margin-bottom: 0;
+  font-size: 12.5px;
+  min-height: 96px;
+}
+
+.draftsHead {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  margin: 16px 0 6px;
+}
+
+.draftRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle, #f1f5f9);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.draftRow:hover {
+  color: var(--brand-600);
+}
+
+.draftMeta {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.muted {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* Memo list rows */
+.memoRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-default);
+  align-items: start;
+}
+
+.memoTitle {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.memoMeta {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+.sentOk {
+  font-size: 9.5px;
+  color: #22c55e;
+  font-weight: 700;
+}
+
+.sentNo {
+  font-size: 9.5px;
+  color: #94a3b8;
+}
+
+.memoNote {
+  font-size: 10.5px;
+  color: #92400e;
+  font-style: italic;
+  margin-top: 5px;
+  background: #fff8e1;
+  padding: 6px 10px;
+  border-left: 2px solid #f59e0b;
+  border-radius: 3px;
+}
+
+.memoActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.emptyWrap {
+  padding: 32px 18px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.emptyHint {
+  margin-top: 14px;
+}
+
+.diagPre {
+  padding: 18px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  background: var(--bg-subtle, #f8fafc);
+  border-radius: 6px;
+  margin: 12px;
+  overflow: auto;
+}
+
+.errorBox {
+  padding: 24px 18px;
+  color: #dc2626;
+  font-size: 12px;
+}
+
+.errorSub {
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+/* Modals */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 22, 40, 0.65);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--bg-surface, #fff);
+  border-radius: 10px;
+  max-width: 520px;
+  width: 100%;
+  padding: 24px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.3);
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.modalWide {
+  max-width: 720px;
+}
+
+.modalHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.modalHead h3 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.modalClose {
+  background: none;
+  border: 0;
+  font-size: 18px;
+  color: #94a3b8;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.modalClose:hover {
+  color: var(--text-primary);
+}
+
+.modeToggle {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 4px;
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+
+.modeLbl {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.modeLblDisabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 11px;
+  font-size: 12.5px;
+  color: #1e293b;
+  background: #fff;
+  box-sizing: border-box;
+  margin-bottom: 14px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--brand-400);
+}
+
+.lpBanner {
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: #475569;
+  background: #fff8e1;
+  border: 1px solid #fde68a;
+  padding: 10px 12px;
+  border-radius: 6px;
+}
+
+.modalActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* QL preview body */
+.previewKicker {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #5bb8d4;
+}
+
+.previewTitle {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0a1628;
+  margin: 2px 0 14px;
+}
+
+.previewNote {
+  background: #f8fafc;
+  border-left: 3px solid #5bb8d4;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1e293b;
+  font-style: italic;
+}
+
+.previewBody {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #1e293b;
+}
+
+.previewSection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.previewSectionName {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #5bb8d4;
+  margin-bottom: 6px;
+}
+
+.previewFoot {
+  margin-top: 18px;
+  font-size: 11px;
+  color: #94a3b8;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+}
+
+.qlHeadActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.yearLabel {
+  font-size: 11px;
+  color: #64748b;
+  margin-right: 2px;
+}
+
+.composerBody {
+  padding: 4px 0;
+}
+
+.loadingPad {
+  padding: 24px;
+  text-align: center;
+}
