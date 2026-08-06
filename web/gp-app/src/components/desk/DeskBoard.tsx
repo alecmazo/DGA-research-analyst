@@ -30,9 +30,18 @@ export type CardLayout = {
 
 export type DeskLayoutMap = Record<CardId, CardLayout>
 
-/** Bumped when new desk cards ship so defaults merge cleanly. */
-const STORAGE_KEY = 'dga.desk.layout.v3'
+/**
+ * Stable storage key — never bump this for new cards.
+ * Versioned legacy keys are read once and migrated so user layouts survive deploys.
+ */
+const STORAGE_KEY = 'dga.desk.layout'
+const LEGACY_KEYS = [
+  'dga.desk.layout.v3',
+  'dga.desk.layout.v2',
+  'dga.desk.layout.v1',
+]
 
+/** Defaults only for first visit or brand-new cards the user never placed. */
 const DEFAULT_LAYOUT: DeskLayoutMap = {
   watchlist: { x: 0, y: 0, w: 340, h: 420 },
   pulse: { x: 0, y: 436, w: 340, h: 280 },
@@ -45,25 +54,110 @@ const DEFAULT_LAYOUT: DeskLayoutMap = {
   health: { x: 0, y: 732, w: 340, h: 180 },
 }
 
+const ALL_IDS = Object.keys(DEFAULT_LAYOUT) as CardId[]
+
 const MIN_W = 260
 const MIN_H = 120
 const COLLAPSED_H = 44
 
-function loadLayout(): DeskLayoutMap {
+function isLayout(v: unknown): v is CardLayout {
+  if (!v || typeof v !== 'object') return false
+  const o = v as CardLayout
+  return (
+    typeof o.x === 'number' &&
+    typeof o.y === 'number' &&
+    typeof o.w === 'number' &&
+    typeof o.h === 'number'
+  )
+}
+
+function readRawLayout(): Partial<DeskLayoutMap> | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...DEFAULT_LAYOUT }
-    const parsed = JSON.parse(raw) as Partial<DeskLayoutMap>
-    const out = { ...DEFAULT_LAYOUT }
-    for (const id of Object.keys(DEFAULT_LAYOUT) as CardId[]) {
-      if (parsed[id] && typeof parsed[id]!.x === 'number') {
-        out[id] = { ...DEFAULT_LAYOUT[id], ...parsed[id] }
-      }
+    for (const key of [STORAGE_KEY, ...LEGACY_KEYS]) {
+      const raw = localStorage.getItem(key)
+      if (!raw) continue
+      const parsed = JSON.parse(raw) as Partial<DeskLayoutMap>
+      if (parsed && typeof parsed === 'object') return parsed
     }
-    return out
   } catch {
-    return { ...DEFAULT_LAYOUT }
+    /* ignore */
   }
+  return null
+}
+
+function maxBottom(map: Partial<DeskLayoutMap>): number {
+  let max = 0
+  for (const id of ALL_IDS) {
+    const L = map[id]
+    if (!isLayout(L)) continue
+    const h = L.collapsed ? COLLAPSED_H : L.h
+    max = Math.max(max, L.y + h)
+  }
+  return max
+}
+
+/**
+ * Merge saved user positions onto defaults.
+ * - Existing cards keep the user's x/y/w/h/collapsed forever.
+ * - New cards (not in saved map) get defaults, or stack below the board if
+ *   the default would sit on top of an empty area after a sparse layout.
+ */
+function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
+  if (!saved) return { ...DEFAULT_LAYOUT }
+
+  const out: DeskLayoutMap = { ...DEFAULT_LAYOUT }
+  const kept: CardId[] = []
+  const missing: CardId[] = []
+
+  for (const id of ALL_IDS) {
+    if (isLayout(saved[id])) {
+      // User placement always wins — never re-apply DEFAULT positions for known cards.
+      out[id] = {
+        x: Math.max(0, Number(saved[id]!.x)),
+        y: Math.max(0, Number(saved[id]!.y)),
+        w: Math.max(MIN_W, Number(saved[id]!.w)),
+        h: Math.max(MIN_H, Number(saved[id]!.h)),
+        collapsed: !!saved[id]!.collapsed,
+      }
+      kept.push(id)
+    } else {
+      missing.push(id)
+    }
+  }
+
+  // Place brand-new cards in a free strip below whatever the user already has,
+  // so an update that adds "analyst" never shoves it on top of their layout.
+  if (kept.length && missing.length) {
+    let y = maxBottom(out) + 16
+    for (const id of missing) {
+      const def = DEFAULT_LAYOUT[id]
+      out[id] = { ...def, x: def.x, y, w: def.w, h: def.h }
+      y += def.h + 16
+    }
+  }
+
+  return out
+}
+
+function loadLayout(): DeskLayoutMap {
+  const saved = readRawLayout()
+  const merged = mergeLayout(saved)
+  // Migrate legacy keys → stable key so later deploys never "lose" the layout.
+  if (saved) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+      for (const k of LEGACY_KEYS) {
+        try {
+          localStorage.removeItem(k)
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return merged
 }
 
 function saveLayout(m: DeskLayoutMap) {
@@ -189,15 +283,39 @@ export function DeskBoard({ cards }: Props) {
   }, [layout])
 
   const reset = () => {
+    if (
+      !window.confirm(
+        'Reset desk layout to defaults? Your current card positions will be replaced.',
+      )
+    )
+      return
     persist({ ...DEFAULT_LAYOUT })
   }
+
+  // Re-merge if product ships new card ids while the tab is open (hot reload).
+  useEffect(() => {
+    setLayout((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const id of ALL_IDS) {
+        if (!isLayout(next[id])) {
+          changed = true
+          break
+        }
+      }
+      if (!changed) return prev
+      const merged = mergeLayout(prev)
+      saveLayout(merged)
+      return merged
+    })
+  }, [])
 
   return (
     <div className={styles.wrap}>
       <div className={styles.hintBar}>
         <span>
           Drag card headers to move · bottom-right corner to resize · ▾ to
-          collapse
+          collapse · layout is saved automatically
         </span>
         <button type="button" className={styles.resetBtn} onClick={reset}>
           Reset layout
