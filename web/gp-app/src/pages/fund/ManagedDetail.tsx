@@ -5,9 +5,14 @@ import { Empty, Spinner } from '@/components/ui/Empty'
 import { api, downloadAuth } from '@/lib/api'
 import { fmtPct, fmtUsd, pctClass } from '@/lib/format'
 import { FundPositionsTable } from './FundPositionsTable'
+import { AllTimePerfChart, MonthlyBarChart } from './perfCharts'
 import type {
+  BalanceHistory,
+  BalanceHistoryAnnual,
+  BalanceHistoryPoint,
   FundDetail,
   FundPosition,
+  MonthlyChartPoint,
   RebalanceResult,
   YtdCache,
   YtdResult,
@@ -58,11 +63,23 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
   const [runStatus, setRunStatus] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
 
+  // YTD monthly: chart | table
+  const [ytdView, setYtdView] = useState<'chart' | 'table'>('chart')
+  // All-time
+  const [allTime, setAllTime] = useState<BalanceHistory | null>(null)
+  const [atView, setAtView] = useState<'monthly' | 'quarterly' | 'annual'>('monthly')
+  const [atPeriod, setAtPeriod] = useState<'all' | '5yr' | '3yr'>('all')
+  const [atMode, setAtMode] = useState<'annual' | 'cumulative' | 'cagr'>('annual')
+  const [atBench, setAtBench] = useState('sp500')
+  const [atBenchReturns, setAtBenchReturns] = useState<Record<number, number>>({})
+  // alternate-bench YTD series for monthly chart (when not SPY)
+  const [altBenchYtd, setAltBenchYtd] = useState<(number | null)[] | null>(null)
+
   const load = useCallback(async () => {
     setErr(null)
     setLoading(true)
     try {
-      const [pos, cache, rebData] = await Promise.all([
+      const [pos, cache, rebData, hist] = await Promise.all([
         api<FundPosition[]>(`/api/fund/positions?fund_id=${encodeURIComponent(fundId)}`).catch(
           () => [],
         ),
@@ -71,6 +88,9 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
         ).catch(() => ({}) as YtdCache),
         api<RebalanceResult>(
           `/api/v2/gp/fund/${encodeURIComponent(fundId)}/rebalance`,
+        ).catch(() => null),
+        api<BalanceHistory>(
+          `/api/fund/${encodeURIComponent(fundId)}/balance-history`,
         ).catch(() => null),
       ])
       setPositions(Array.isArray(pos) ? pos : [])
@@ -83,6 +103,21 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
       const spyPts = parsed?.spy_monthly?.points || []
       const spyPct = spyPts.length ? spyPts[spyPts.length - 1].ytd_pct ?? null : null
       setBenchYtd(spyPct ?? null)
+
+      if (hist?.ok && (hist.monthly?.length || hist.annual?.length)) {
+        setAllTime(hist)
+        setAtBench(hist.benchmark_key || 'sp500')
+        setAtPeriod((hist.period as 'all' | '5yr' | '3yr') || 'all')
+        const seed: Record<number, number> = {}
+        for (const a of hist.annual || []) {
+          if (a.year != null && a.benchmark_return_pct != null) {
+            seed[a.year] = a.benchmark_return_pct
+          }
+        }
+        setAtBenchReturns(seed)
+      } else {
+        setAllTime(null)
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load account')
     } finally {
@@ -94,11 +129,12 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
     void load()
   }, [load])
 
-  // Alternate benchmark
+  // Alternate benchmark for YTD tile + monthly chart overlay
   useEffect(() => {
     if (bench === 'SPY') {
       const spyPts = ytd?.spy_monthly?.points || []
       setBenchYtd(spyPts.length ? spyPts[spyPts.length - 1].ytd_pct ?? null : null)
+      setAltBenchYtd(null)
       return
     }
     let alive = true
@@ -110,8 +146,19 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
         if (!alive) return
         const pts = d.points || []
         setBenchYtd(pts.length ? pts[pts.length - 1].ytd_pct ?? null : null)
+        // Align to YTD monthly chart length (take last N)
+        const n = (ytd?.monthly_chart?.monthly || []).length
+        if (n && pts.length) {
+          const slice = pts.slice(-n).map((p) => p.ytd_pct ?? null)
+          // pad if shorter
+          while (slice.length < n) slice.unshift(null)
+          setAltBenchYtd(slice.slice(-n))
+        } else setAltBenchYtd(null)
       } catch {
-        if (alive) setBenchYtd(null)
+        if (alive) {
+          setBenchYtd(null)
+          setAltBenchYtd(null)
+        }
       }
     })()
     return () => {
@@ -137,12 +184,68 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
   const alpha =
     twrr != null && benchYtd != null ? twrr - benchYtd : null
 
-  const monthly = ytd?.monthly_chart?.monthly || []
+  const monthlyRaw = ytd?.monthly_chart?.monthly || []
+  // Chart points: inject alternate-bench ytd when user picks non-SPY
+  const monthlyChartPts: MonthlyChartPoint[] = useMemo(() => {
+    if (!altBenchYtd || bench === 'SPY') return monthlyRaw
+    return monthlyRaw.map((m, i) => ({
+      ...m,
+      spy_ytd_pct: altBenchYtd[i] ?? m.spy_ytd_pct,
+    }))
+  }, [monthlyRaw, altBenchYtd, bench])
+
   const attr = [...(ytd?.attribution || [])].sort(
     (a, b) => (b.contribution_pct || 0) - (a.contribution_pct || 0),
   )
   const flows = ytd?.flows || []
   const maxContrib = Math.max(...attr.map((r) => Math.abs(r.contribution_pct || 0)), 0.01)
+
+  const atChartPts: BalanceHistoryPoint[] = useMemo(() => {
+    if (!allTime) return []
+    if (atView === 'quarterly') return allTime.quarterly || []
+    if (atView === 'annual') return allTime.annual || []
+    return allTime.monthly || []
+  }, [allTime, atView])
+
+  const atAnnualFiltered: BalanceHistoryAnnual[] = useMemo(() => {
+    const ann = allTime?.annual || []
+    if (atPeriod === '3yr') return ann.slice(-3)
+    if (atPeriod === '5yr') return ann.slice(-5)
+    return ann
+  }, [allTime, atPeriod])
+
+  const atActiveMonths = useMemo(() => {
+    return (allTime?.monthly || []).filter(
+      (m) => (m.end_balance || 0) > 0 || (m.deposits || 0) > 0,
+    ).length
+  }, [allTime])
+
+  const atCagr = useMemo(() => {
+    const ann = allTime?.annual || []
+    if (!ann.length) return null
+    const product = ann.reduce((a, b) => a * (1 + (b.return_pct || 0) / 100), 1)
+    const months = ann.reduce((s, a) => s + (a.data_months || 12), 0)
+    const years = Math.max(months / 12, 1 / 12)
+    return (Math.pow(product, 1 / years) - 1) * 100
+  }, [allTime])
+
+  const fetchAtBench = async (key: string) => {
+    setAtBench(key)
+    const years = (allTime?.annual || []).map((a) => a.year).filter(Boolean) as number[]
+    if (!years.length) return
+    try {
+      const d = await api<{ ok?: boolean; returns?: Record<string, number> }>(
+        `/api/benchmark-annual?key=${encodeURIComponent(key)}&years=${years.join(',')}`,
+      )
+      if (d.ok && d.returns) {
+        const next: Record<number, number> = {}
+        for (const [k, v] of Object.entries(d.returns)) next[parseInt(k, 10)] = v
+        setAtBenchReturns(next)
+      }
+    } catch {
+      /* keep seeded */
+    }
+  }
 
   const runRebalance = async () => {
     setRebBusy(true)
@@ -332,12 +435,41 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             )}
           </div>
 
-          {/* Monthly balance */}
-          <Panel title="Monthly Investment Balance vs Benchmark" badge="YTD">
-            {!monthly.length ? (
+          {/* Monthly YTD — chart or table */}
+          <Panel
+            title="Monthly Performance YTD"
+            badge={monthlyRaw.length ? `${monthlyRaw.length} mo` : 'YTD'}
+            action={
+              monthlyRaw.length ? (
+                <div className={styles.viewToggle}>
+                  <button
+                    type="button"
+                    className={ytdView === 'chart' ? styles.viewOn : styles.viewBtn}
+                    onClick={() => setYtdView('chart')}
+                  >
+                    Chart
+                  </button>
+                  <button
+                    type="button"
+                    className={ytdView === 'table' ? styles.viewOn : styles.viewBtn}
+                    onClick={() => setYtdView('table')}
+                  >
+                    Table
+                  </button>
+                </div>
+              ) : undefined
+            }
+          >
+            {!monthlyRaw.length ? (
               <Empty
                 title="No performance data yet"
                 sub='Upload the Fidelity "Investment Income & Balance Detail" CSV (or wait for SnapTrade sync) to populate returns and attribution.'
+              />
+            ) : ytdView === 'chart' ? (
+              <MonthlyBarChart
+                points={monthlyChartPts}
+                benchLabel={bench}
+                height={220}
               />
             ) : (
               <div className={styles.tableWrap}>
@@ -346,24 +478,244 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                     <tr>
                       <th>Month</th>
                       <th className="tabular">End balance</th>
-                      <th className="tabular">Return</th>
+                      <th className="tabular">Portfolio</th>
+                      <th className="tabular">{bench}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {monthly.map((m, i) => (
-                      <tr key={i}>
-                        <td>{m.label || m.month || '—'}</td>
-                        <td className="tabular">{fmtUsd(m.end_balance)}</td>
-                        <td className={`tabular ${pctClass(m.return_pct)}`}>
-                          {fmtPct(m.return_pct)}
-                        </td>
-                      </tr>
-                    ))}
+                    {monthlyChartPts.map((m, i) => {
+                      // monthly bench return from ytd series
+                      const curr = m.spy_ytd_pct
+                      const prev =
+                        i > 0 ? monthlyChartPts[i - 1].spy_ytd_pct : null
+                      const bRet =
+                        curr == null
+                          ? null
+                          : i === 0
+                            ? curr
+                            : prev != null
+                              ? curr - prev
+                              : curr
+                      return (
+                        <tr key={i}>
+                          <td>{m.label || m.month || '—'}</td>
+                          <td className="tabular">{fmtUsd(m.end_balance)}</td>
+                          <td className={`tabular ${pctClass(m.return_pct)}`}>
+                            {m.skip ? 'N/A' : fmtPct(m.return_pct)}
+                          </td>
+                          <td className={`tabular ${pctClass(bRet)}`}>
+                            {fmtPct(bRet)}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
           </Panel>
+
+          {/* All-time performance */}
+          <Panel
+            title="All-Time Performance"
+            badge={
+              allTime
+                ? `${atActiveMonths} mo${atCagr != null ? ` · ${atCagr >= 0 ? '+' : ''}${atCagr.toFixed(1)}% CAGR` : ''}`
+                : undefined
+            }
+            action={
+              allTime ? (
+                <div className={styles.viewToggle}>
+                  {(['monthly', 'quarterly', 'annual'] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={atView === v ? styles.viewOn : styles.viewBtn}
+                      onClick={() => setAtView(v)}
+                    >
+                      {v[0].toUpperCase() + v.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              ) : undefined
+            }
+          >
+            {!allTime || !atChartPts.length ? (
+              <Empty
+                title="No all-time history yet"
+                sub="Upload a Balance & Income Detail CSV (full history) in Manual Data Uploads below."
+              />
+            ) : (
+              <AllTimePerfChart points={atChartPts} height={260} />
+            )}
+          </Panel>
+
+          {allTime && (allTime.annual || []).length > 0 && (
+            <Panel
+              title="Annual Performance"
+              badge={`${atAnnualFiltered.length} yr · ${allTime.benchmark_label || 'S&P 500'}`}
+            >
+              <div className={styles.atpToolbar}>
+                <div className={styles.atpGroup}>
+                  <span className={styles.atpLbl}>Period</span>
+                  {(['all', '5yr', '3yr'] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className={atPeriod === p ? styles.viewOn : styles.viewBtn}
+                      onClick={() => setAtPeriod(p)}
+                    >
+                      {p === 'all' ? 'All-Time' : p === '5yr' ? '5-Year' : '3-Year'}
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.atpGroup}>
+                  <span className={styles.atpLbl}>Return</span>
+                  {(['annual', 'cumulative', 'cagr'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={atMode === m ? styles.viewOn : styles.viewBtn}
+                      onClick={() => setAtMode(m)}
+                    >
+                      {m === 'annual' ? 'Annual' : m === 'cumulative' ? 'Cumulative' : 'CAGR'}
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.atpGroup}>
+                  <span className={styles.atpLbl}>Benchmark</span>
+                  <select
+                    className={styles.benchSelect}
+                    value={atBench}
+                    onChange={(e) => void fetchAtBench(e.target.value)}
+                  >
+                    <option value="sp500">S&P 500</option>
+                    <option value="nasdaq100">Nasdaq 100</option>
+                    <option value="dow">Dow Jones</option>
+                    <option value="russell2000">Russell 2000</option>
+                    <option value="msci_world">MSCI World</option>
+                    <option value="agg">US Bonds (AGG)</option>
+                  </select>
+                </div>
+              </div>
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Year</th>
+                      <th className="tabular">Beg. value</th>
+                      <th className="tabular">End value</th>
+                      <th className="tabular">
+                        {atMode === 'annual'
+                          ? 'Annual'
+                          : atMode === 'cumulative'
+                            ? 'Cumul.'
+                            : 'CAGR'}
+                      </th>
+                      <th className="tabular">Benchmark</th>
+                      <th className="tabular">Alpha</th>
+                      <th className="tabular">Net flows</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      let cumPort = 1
+                      let cumBmark = 1
+                      const rows = atAnnualFiltered.map((a, idx) => {
+                        const bRet =
+                          a.year != null && atBenchReturns[a.year] !== undefined
+                            ? atBenchReturns[a.year]
+                            : a.benchmark_return_pct
+                        cumPort *= 1 + (a.return_pct || 0) / 100
+                        cumBmark *= 1 + (bRet || 0) / 100
+                        const yrs = idx + 1
+                        const cumPortPct = (cumPort - 1) * 100
+                        const cumBmarkPct = (cumBmark - 1) * 100
+                        const cagrPort = (Math.pow(cumPort, 1 / yrs) - 1) * 100
+                        const cagrBmark = (Math.pow(cumBmark, 1 / yrs) - 1) * 100
+                        let retVal: number | null
+                        let bmarkVal: number | null
+                        let alphaVal: number | null
+                        if (atMode === 'cumulative') {
+                          retVal = cumPortPct
+                          bmarkVal = bRet != null ? cumBmarkPct : null
+                          alphaVal = bRet != null ? cumPortPct - cumBmarkPct : null
+                        } else if (atMode === 'cagr') {
+                          retVal = cagrPort
+                          bmarkVal = bRet != null ? cagrBmark : null
+                          alphaVal = bRet != null ? cagrPort - cagrBmark : null
+                        } else {
+                          retVal = a.return_pct ?? null
+                          bmarkVal = bRet ?? null
+                          alphaVal =
+                            bRet != null && a.return_pct != null
+                              ? a.return_pct - bRet
+                              : null
+                        }
+                        const net = (a.deposits || 0) - (a.withdrawals || 0)
+                        return (
+                          <tr key={a.year ?? idx}>
+                            <td>
+                              <strong>{a.label || a.year}</strong>
+                              {a.return_source === 'manual' ? ' ✎' : ''}
+                            </td>
+                            <td className="tabular">{fmtUsd(a.beg_balance)}</td>
+                            <td className="tabular">{fmtUsd(a.end_balance)}</td>
+                            <td className={`tabular ${pctClass(retVal)}`}>
+                              {fmtPct(retVal)}
+                            </td>
+                            <td className={`tabular ${pctClass(bmarkVal)}`}>
+                              {fmtPct(bmarkVal)}
+                            </td>
+                            <td className={`tabular ${pctClass(alphaVal)}`}>
+                              {fmtPct(alphaVal)}
+                            </td>
+                            <td className="tabular">
+                              {net === 0
+                                ? '—'
+                                : `${net > 0 ? '+' : '−'}${fmtUsd(Math.abs(net))}${net < 0 ? ' out' : ''}`}
+                            </td>
+                          </tr>
+                        )
+                      })
+                      // summary
+                      if (atAnnualFiltered.length) {
+                        const product = atAnnualFiltered.reduce(
+                          (a, b) => a * (1 + (b.return_pct || 0) / 100),
+                          1,
+                        )
+                        const months = atAnnualFiltered.reduce(
+                          (s, a) => s + (a.data_months || 12),
+                          0,
+                        )
+                        const years = Math.max(months / 12, 1 / 12)
+                        const totalCum = (product - 1) * 100
+                        const totalCagr = (Math.pow(product, 1 / years) - 1) * 100
+                        const periodLabel =
+                          months % 12 === 0
+                            ? `${Math.round(months / 12)}YR TOTAL`
+                            : `${months}MO TOTAL`
+                        rows.push(
+                          <tr key="total" className={styles.totalRow}>
+                            <td>
+                              <strong>{periodLabel}</strong>
+                            </td>
+                            <td />
+                            <td />
+                            <td className={`tabular ${pctClass(totalCum)}`}>
+                              {fmtPct(totalCum)} cumul. / {fmtPct(totalCagr)} CAGR
+                            </td>
+                            <td colSpan={3} />
+                          </tr>,
+                        )
+                      }
+                      return rows
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          )}
 
           <div className={styles.sideBySide}>
             <FundPositionsTable rows={positions} />

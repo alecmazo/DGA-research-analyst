@@ -1,0 +1,71 @@
+.chartWrap {
+  position: relative;
+  width: 100%;
+  padding: 4px 4px 0;
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  cursor: crosshair;
+}
+
+.legend {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  padding: 6px 0 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legGain {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  background: #1a7f40;
+  border-radius: 2px;
+}
+
+.legLoss {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  background: #cc3333;
+  border-radius: 2px;
+}
+
+.legBench {
+  display: inline-block;
+  width: 24px;
+  height: 2px;
+  background: #c9a84c;
+}
+
+.tip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: #fff;
+  border: 1px solid rgba(91, 184, 212, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 11px;
+  color: #1e293b;
+  max-width: 260px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  line-height: 1.45;
+}
+
+[data-theme='dark'] .tip {
+  background: #1a2436;
+  color: #e2e8f0;
+  border-color: rgba(91, 184, 212, 0.35);
+}

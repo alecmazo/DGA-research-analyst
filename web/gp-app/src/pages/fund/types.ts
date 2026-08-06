@@ -115,6 +115,22 @@ export type CashFlow = {
   amount?: number | null
 }
 
+export type MonthlyChartPoint = {
+  label?: string
+  month?: string | number
+  end_balance?: number | null
+  return_pct?: number | null
+  beg_balance?: number | null
+  spy_ytd_pct?: number | null
+  skip?: boolean
+  deposits?: number
+  withdrawals?: number
+  dividends?: number
+  cash_only_balance?: number | null
+  movers?: Array<{ ticker?: string; contrib?: number }>
+  perf_detail?: Record<string, number>
+}
+
 export type YtdResult = {
   twrr_return_pct?: number | null
   md_return_pct?: number | null
@@ -124,20 +140,54 @@ export type YtdResult = {
   attribution_contrib_sum?: number | null
   attribution_estimated?: boolean
   flows?: CashFlow[]
-  spy_monthly?: { points?: Array<{ ytd_pct?: number }> }
+  spy_monthly?: { points?: Array<{ ytd_pct?: number; month?: string }> }
   monthly_chart?: {
-    monthly?: Array<{
-      label?: string
-      month?: string
-      end_balance?: number
-      return_pct?: number
-      beg_balance?: number
-    }>
+    monthly?: MonthlyChartPoint[]
   }
   ytd_beg_balance?: number
   begin_value?: number
   ytd_total_deposits?: number
   ytd_total_withdrawals?: number
+}
+
+export type BalanceHistoryAnnual = {
+  year?: number
+  label?: string
+  return_pct?: number | null
+  beg_balance?: number | null
+  end_balance?: number | null
+  deposits?: number
+  withdrawals?: number
+  data_months?: number
+  benchmark_return_pct?: number | null
+  return_source?: string
+  inception_month?: number
+  cash_only_balance?: number | null
+}
+
+export type BalanceHistoryPoint = {
+  label?: string
+  year?: number
+  return_pct?: number | null
+  end_balance?: number | null
+  beg_balance?: number | null
+  cash_only_balance?: number | null
+  deposits?: number
+  withdrawals?: number
+  dividends?: number
+  skip?: boolean
+  data_months?: number
+  benchmark_return_pct?: number | null
+}
+
+export type BalanceHistory = {
+  ok?: boolean
+  monthly?: BalanceHistoryPoint[]
+  quarterly?: BalanceHistoryPoint[]
+  annual?: BalanceHistoryAnnual[]
+  benchmark_key?: string
+  benchmark_label?: string
+  period?: string
 }
 
 export type YtdCache = {
