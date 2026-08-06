@@ -18,7 +18,7 @@ const TV_SYMBOLS: [string, string][] = [
 ]
 
 /** TradingView Symbol Overview — same free embed as legacy Desk Live Markets. */
-export function LiveMarkets() {
+export function LiveMarkets({ bare = false }: { bare?: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const { theme } = useTheme()
 
@@ -91,6 +91,8 @@ export function LiveMarkets() {
     }
   }, [theme])
 
+  const host = <div ref={hostRef} className={styles.tvHost} />
+  if (bare) return host
   return (
     <Panel
       title="Live Markets"
@@ -98,7 +100,7 @@ export function LiveMarkets() {
       action={<span className={styles.metaDim}>via TradingView</span>}
       flush
     >
-      <div ref={hostRef} className={styles.tvHost} />
+      {host}
     </Panel>
   )
 }

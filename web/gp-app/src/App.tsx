@@ -11,6 +11,7 @@ import { PodcastsPage } from '@/pages/PodcastsPage'
 import { TranscriptsPage } from '@/pages/TranscriptsPage'
 import { MemosPage } from '@/pages/MemosPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { ReportPage } from '@/pages/ReportPage'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import {
   clearSession,
@@ -90,6 +91,8 @@ export default function App() {
       {(user, build) => (
         <BrowserRouter basename="/gp">
           <Routes>
+            {/* Standalone report window (no chrome) */}
+            <Route path="report" element={<ReportPage />} />
             <Route element={<Shell user={user} build={build} />}>
               <Route index element={<DeskPage />} />
               <Route path="financials" element={<FinancialsPage />} />

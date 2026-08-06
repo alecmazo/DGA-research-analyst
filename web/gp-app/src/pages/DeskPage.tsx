@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Panel } from '@/components/ui/Panel'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { LiveMarkets } from '@/components/desk/LiveMarkets'
 import { AnalyzeCard } from '@/components/desk/AnalyzeCard'
 import { IdeaGenerator } from '@/components/desk/IdeaGenerator'
 import { SavedReports } from '@/components/desk/SavedReports'
+import { DeskBoard } from '@/components/desk/DeskBoard'
 import {
   api,
   type DailyBrief,
@@ -13,7 +13,6 @@ import {
 } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import styles from './DeskPage.module.css'
-import page from './page.module.css'
 
 function quotePct(q?: Quote | null): number | null {
   if (!q) return null
@@ -29,11 +28,9 @@ export function DeskPage() {
   const [tickerIn, setTickerIn] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // Analyze card control (Idea Generator / Saved Reports can prefill + run)
   const [analyzeTk, setAnalyzeTk] = useState('')
   const [runToken, setRunToken] = useState(0)
   const [reportsKey, setReportsKey] = useState(0)
-  const analyzeAnchor = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -122,22 +119,201 @@ export function DeskPage() {
 
   const focusAnalyze = (tk: string, autoRun = false) => {
     setAnalyzeTk(tk.toUpperCase())
-    analyzeAnchor.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     if (autoRun) setRunToken((n) => n + 1)
   }
 
-  return (
-    <div className={page.page}>
-      <header className={page.hero}>
-        <div>
-          <p className={page.kicker}>Work surface</p>
-          <h1 className={page.h1}>Desk</h1>
-          <p className={page.sub}>
-            Watchlist, saved reports, multi-engine analyze, idea feed, and live
-            markets — the morning control surface.
-          </p>
+  const cards = [
+    {
+      id: 'watchlist' as const,
+      title: 'Watchlist',
+      badge: rows.length || '0',
+      flush: true,
+      action: (
+        <span className={styles.meta}>
+          {wl?.timing_ms != null
+            ? `${wl.timing_ms}ms`
+            : loading
+              ? '…'
+              : 'Live'}
+        </span>
+      ),
+      children: (
+        <div className={styles.fillCol}>
+          <div className={styles.addRow}>
+            <input
+              className={styles.addInput}
+              placeholder="Add ticker…"
+              value={tickerIn}
+              onChange={(e) => setTickerIn(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void addTicker()
+              }}
+            />
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => void addTicker()}
+              disabled={busy}
+            >
+              Add
+            </Button>
+          </div>
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th className="tabular">Last</th>
+                  <th className="tabular">Day %</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {loading && !rows.length && (
+                  <tr>
+                    <td colSpan={4} className={styles.empty}>
+                      Loading quotes…
+                    </td>
+                  </tr>
+                )}
+                {!loading && !rows.length && (
+                  <tr>
+                    <td colSpan={4} className={styles.empty}>
+                      No tickers yet — add a name above.
+                    </td>
+                  </tr>
+                )}
+                {rows.map(({ tk, q, pct }) => (
+                  <tr key={tk}>
+                    <td>
+                      <button
+                        type="button"
+                        className={styles.tkBtn}
+                        title="Analyze this ticker"
+                        onClick={() => focusAnalyze(tk, false)}
+                      >
+                        <span className={styles.tk}>{tk}</span>
+                      </button>
+                      {wl?.reports?.[tk] && <span className={styles.chip}>RPT</span>}
+                    </td>
+                    <td className="tabular">{fmtPx(q.price)}</td>
+                    <td className={`tabular ${pctClass(pct)}`}>{fmtPct(pct)}</td>
+                    <td className={styles.actions}>
+                      <button
+                        type="button"
+                        className={styles.rm}
+                        onClick={() => void removeTicker(tk)}
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className={page.heroActions}>
+      ),
+    },
+    {
+      id: 'pulse' as const,
+      title: 'Daily Pulse',
+      badge: brief?.provider || '—',
+      action: (
+        <span className={styles.meta}>
+          {brief?.generated_at ? relativeTime(brief.generated_at) : '—'}
+        </span>
+      ),
+      children: brief?.markdown ? (
+        <div className={styles.pulse}>
+          <pre className={styles.pulsePre}>{brief.markdown.slice(0, 6000)}</pre>
+        </div>
+      ) : (
+        <div className={styles.emptyBlock}>
+          <p>No pulse yet. Run Daily Pulse for a morning read on your book.</p>
+        </div>
+      ),
+    },
+    {
+      id: 'reports' as const,
+      title: 'Saved Reports',
+      flush: true,
+      children: (
+        <SavedReports
+          refreshKey={reportsKey}
+          onAnalyze={(tk) => focusAnalyze(tk, false)}
+          embed
+        />
+      ),
+    },
+    {
+      id: 'markets' as const,
+      title: 'Live Markets',
+      badge: 'Real-time',
+      flush: true,
+      action: <span className={styles.meta}>TradingView</span>,
+      children: <LiveMarkets bare />,
+    },
+    {
+      id: 'ideas' as const,
+      title: 'Idea Generator',
+      flush: true,
+      children: <IdeaGenerator onAnalyze={focusAnalyze} bare />,
+    },
+    {
+      id: 'analyze' as const,
+      title: 'Analyze Ticker',
+      flush: true,
+      children: (
+        <AnalyzeCard
+          ticker={analyzeTk}
+          onTickerChange={setAnalyzeTk}
+          runToken={runToken}
+          onComplete={() => setReportsKey((k) => k + 1)}
+          bare
+        />
+      ),
+    },
+    {
+      id: 'health' as const,
+      title: 'Desk health',
+      badge: 'OK',
+      children: (
+        <ul className={styles.health}>
+          <li>
+            <span>Watchlist</span>
+            <strong>{rows.length} names</strong>
+          </li>
+          <li>
+            <span>Quotes</span>
+            <strong>
+              {rows.filter((r) => r.q.price != null).length}/{rows.length || 0}
+            </strong>
+          </li>
+          <li>
+            <span>Saved reports</span>
+            <strong>{Object.keys(wl?.reports || {}).length}</strong>
+          </li>
+          <li>
+            <span>Pulse</span>
+            <strong>{brief?.markdown ? 'Ready' : 'Idle'}</strong>
+          </li>
+        </ul>
+      ),
+    },
+  ]
+
+  return (
+    <div className={styles.desk} data-desk-board>
+      <div className={styles.toolbar}>
+        <div className={styles.toolbarLeft}>
+          <strong className={styles.toolbarTitle}>Desk</strong>
+          <span className={styles.toolbarMeta}>
+            {rows.length} watch · {Object.keys(wl?.reports || {}).length} reports
+          </span>
+        </div>
+        <div className={styles.toolbarActions}>
           <Button variant="secondary" size="sm" onClick={() => void load()} disabled={busy}>
             Refresh
           </Button>
@@ -145,171 +321,11 @@ export function DeskPage() {
             Run Daily Pulse
           </Button>
         </div>
-      </header>
-
-      {err && <div className={page.bannerErr}>{err}</div>}
-
-      <div className={styles.deskGrid}>
-        {/* ── Left: Watchlist + Pulse ── */}
-        <div className={styles.colLeft}>
-          <Panel
-            title="Watchlist"
-            badge={rows.length || '0'}
-            action={
-              <span className={styles.meta}>
-                {wl?.timing_ms != null
-                  ? `${wl.timing_ms}ms`
-                  : loading
-                    ? 'Loading…'
-                    : 'Live'}
-              </span>
-            }
-            flush
-            className={styles.watchPanel}
-          >
-            <div className={styles.addRow}>
-              <input
-                className={styles.addInput}
-                placeholder="Add ticker…"
-                value={tickerIn}
-                onChange={(e) => setTickerIn(e.target.value.toUpperCase())}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void addTicker()
-                }}
-              />
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => void addTicker()}
-                disabled={busy}
-              >
-                Add
-              </Button>
-            </div>
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Ticker</th>
-                    <th className="tabular">Last</th>
-                    <th className="tabular">Day %</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading && !rows.length && (
-                    <tr>
-                      <td colSpan={4} className={styles.empty}>
-                        Loading quotes…
-                      </td>
-                    </tr>
-                  )}
-                  {!loading && !rows.length && (
-                    <tr>
-                      <td colSpan={4} className={styles.empty}>
-                        No tickers yet — add a name above.
-                      </td>
-                    </tr>
-                  )}
-                  {rows.map(({ tk, q, pct }) => (
-                    <tr key={tk}>
-                      <td>
-                        <button
-                          type="button"
-                          className={styles.tkBtn}
-                          title="Analyze this ticker"
-                          onClick={() => focusAnalyze(tk, false)}
-                        >
-                          <span className={styles.tk}>{tk}</span>
-                        </button>
-                        {wl?.reports?.[tk] && <span className={styles.chip}>RPT</span>}
-                      </td>
-                      <td className="tabular">{fmtPx(q.price)}</td>
-                      <td className={`tabular ${pctClass(pct)}`}>{fmtPct(pct)}</td>
-                      <td className={styles.actions}>
-                        <button
-                          type="button"
-                          className={styles.rm}
-                          onClick={() => void removeTicker(tk)}
-                          title="Remove"
-                        >
-                          ×
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-
-          <Panel
-            title="Daily Pulse"
-            badge={brief?.provider || '—'}
-            action={
-              <span className={styles.meta}>
-                {brief?.generated_at
-                  ? relativeTime(brief.generated_at)
-                  : 'No pulse yet'}
-              </span>
-            }
-          >
-            {brief?.markdown ? (
-              <div className={styles.pulse}>
-                <pre className={styles.pulsePre}>{brief.markdown.slice(0, 4000)}</pre>
-              </div>
-            ) : (
-              <div className={styles.emptyBlock}>
-                <p>No pulse yet. Run Daily Pulse for a morning read on your book.</p>
-              </div>
-            )}
-          </Panel>
-        </div>
-
-        {/* ── Center: Saved Reports ── */}
-        <div className={styles.colCenter}>
-          <SavedReports
-            refreshKey={reportsKey}
-            onAnalyze={(tk) => focusAnalyze(tk, false)}
-          />
-        </div>
-
-        {/* ── Right: Live Markets + Idea Gen + Analyze ── */}
-        <div className={styles.colRight}>
-          <LiveMarkets />
-          <IdeaGenerator onAnalyze={focusAnalyze} />
-          <div ref={analyzeAnchor}>
-            <AnalyzeCard
-              ticker={analyzeTk}
-              onTickerChange={setAnalyzeTk}
-              runToken={runToken}
-              onComplete={() => setReportsKey((k) => k + 1)}
-            />
-          </div>
-          <Panel title="Desk health" badge="OK">
-            <ul className={styles.health}>
-              <li>
-                <span>Watchlist</span>
-                <strong>{rows.length} names</strong>
-              </li>
-              <li>
-                <span>Quotes</span>
-                <strong>
-                  {rows.filter((r) => r.q.price != null).length}/{rows.length || 0}
-                </strong>
-              </li>
-              <li>
-                <span>Saved reports</span>
-                <strong>{Object.keys(wl?.reports || {}).length}</strong>
-              </li>
-              <li>
-                <span>Pulse</span>
-                <strong>{brief?.markdown ? 'Ready' : 'Idle'}</strong>
-              </li>
-            </ul>
-          </Panel>
-        </div>
       </div>
+
+      {err && <div className={styles.bannerErr}>{err}</div>}
+
+      <DeskBoard cards={cards} />
     </div>
   )
 }

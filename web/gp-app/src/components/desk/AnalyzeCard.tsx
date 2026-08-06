@@ -39,6 +39,8 @@ type Props = {
   onComplete?: () => void
   /** Increment to auto-run with current ticker (optional). */
   runToken?: number
+  /** When true, omit the outer label chrome (Desk board supplies the header). */
+  bare?: boolean
 }
 
 export function AnalyzeCard({
@@ -46,6 +48,7 @@ export function AnalyzeCard({
   onTickerChange,
   onComplete,
   runToken,
+  bare = false,
 }: Props) {
   const [localTicker, setLocalTicker] = useState(controlled || '')
   const ticker = controlled !== undefined ? controlled : localTicker
@@ -215,8 +218,8 @@ export function AnalyzeCard({
   }
 
   return (
-    <div className={styles.heroCard}>
-      <div className={styles.heroLabel}>Analyze Ticker</div>
+    <div className={`${styles.heroCard} ${bare ? styles.heroBare : ''}`}>
+      {!bare && <div className={styles.heroLabel}>Analyze Ticker</div>}
       <div className={styles.heroRow}>
         <input
           className={styles.heroInput}

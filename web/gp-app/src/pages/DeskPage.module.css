@@ -1,46 +1,58 @@
-/* Desk — 3-column research shell (legacy parity) */
-.deskGrid {
-  display: grid;
-  grid-template-columns: minmax(240px, 0.85fr) minmax(280px, 1.1fr) minmax(300px, 1fr);
-  gap: var(--space-4);
-  align-items: start;
-}
-
-@media (max-width: 1200px) {
-  .deskGrid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .colRight {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-4);
-    align-items: start;
-  }
-}
-
-@media (max-width: 780px) {
-  .deskGrid {
-    grid-template-columns: 1fr;
-  }
-  .colRight {
-    grid-column: auto;
-    display: flex;
-    flex-direction: column;
-  }
-}
-
-.colLeft,
-.colCenter,
-.colRight {
+/* Compact desk — free-form cards */
+.desk {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 8px;
   min-width: 0;
 }
 
-.watchPanel {
-  min-height: 280px;
+.fillCol {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 0 2px;
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.toolbarTitle {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.toolbarMeta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.toolbarActions {
+  display: flex;
+  gap: 6px;
+}
+
+.bannerErr {
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--danger-50);
+  color: var(--danger-700);
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .meta {
@@ -51,18 +63,20 @@
 .addRow {
   display: flex;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-subtle);
+  flex-shrink: 0;
 }
 
 .addInput {
   flex: 1;
-  height: 34px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--border-default);
   border-radius: var(--r-md);
   background: var(--bg-surface);
+  font-size: 13px;
 }
 
 .addInput:focus {
@@ -73,7 +87,8 @@
 
 .tableWrap {
   overflow: auto;
-  max-height: min(42vh, 420px);
+  flex: 1;
+  min-height: 0;
 }
 
 .table {
@@ -87,7 +102,7 @@
   top: 0;
   z-index: 1;
   text-align: left;
-  padding: 8px 14px;
+  padding: 7px 12px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -98,7 +113,7 @@
 }
 
 .table td {
-  padding: 9px 14px;
+  padding: 7px 12px;
   border-bottom: 1px solid var(--border-subtle);
   vertical-align: middle;
 }
@@ -167,7 +182,7 @@
 }
 
 .pulse {
-  max-height: 320px;
+  height: 100%;
   overflow: auto;
 }
 

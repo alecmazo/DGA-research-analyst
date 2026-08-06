@@ -15,6 +15,8 @@ const THRESHOLD = 4.0
 
 type Props = {
   onAnalyze: (ticker: string, autoRun?: boolean) => void
+  /** When true, render without outer Panel (Desk board header). */
+  bare?: boolean
 }
 
 function newsAge(ts?: number): string {
@@ -25,7 +27,7 @@ function newsAge(ts?: number): string {
   return `${Math.round(ageMin / 1440)}d ago`
 }
 
-export function IdeaGenerator({ onAnalyze }: Props) {
+export function IdeaGenerator({ onAnalyze, bare = false }: Props) {
   const [feed, setFeed] = useState<IdeaFeed | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -134,29 +136,26 @@ export function IdeaGenerator({ onAnalyze }: Props) {
       ? `${String(feed.session_date).slice(5)} · ${feed.as_of}`
       : feed?.as_of || '—'
 
-  return (
-    <Panel
-      title="Idea Generator"
-      badge={loading && !movers.length ? '…' : String(movers.length)}
-      action={
-        <div className={styles.ideaActions}>
-          <span className={styles.metaDim}>{asof}</span>
-          <Button size="sm" variant="ghost" onClick={() => void load(true)} title="Refresh">
-            ↻
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => void prioritize()}
-            disabled={prioBusy}
-            title="Pre-screen idea feed"
-          >
-            {prioBusy ? '…' : '🎯 Prioritize'}
-          </Button>
-        </div>
-      }
-      flush
-    >
+  const body = (
+    <>
+      <div className={styles.ideaToolbar}>
+        <span className={styles.metaDim}>{asof}</span>
+        <span className={styles.metaDim}>
+          {loading && !movers.length ? '…' : `${movers.length} movers`}
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => void load(true)} title="Refresh">
+          ↻
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => void prioritize()}
+          disabled={prioBusy}
+          title="Pre-screen idea feed"
+        >
+          {prioBusy ? '…' : '🎯 Prioritize'}
+        </Button>
+      </div>
       {prioHtml && (
         <div className={styles.prioBox}>
           <div className={styles.prioHead}>{prioHtml.header}</div>
@@ -290,6 +289,17 @@ export function IdeaGenerator({ onAnalyze }: Props) {
           )
         })}
       </div>
+    </>
+  )
+
+  if (bare) return <div className={styles.ideaEmbed}>{body}</div>
+  return (
+    <Panel
+      title="Idea Generator"
+      badge={loading && !movers.length ? '…' : String(movers.length)}
+      flush
+    >
+      {body}
     </Panel>
   )
 }

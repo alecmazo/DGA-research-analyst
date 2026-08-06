@@ -1,0 +1,197 @@
+.wrap {
+  min-width: 0;
+}
+
+.hintBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.resetBtn {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.resetBtn:hover {
+  border-color: var(--brand-400);
+  color: var(--brand-700);
+}
+
+.board {
+  position: relative;
+  width: 100%;
+  min-height: 640px;
+}
+
+.card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm, 0 2px 8px rgba(10, 22, 40, 0.06));
+  overflow: hidden;
+  min-width: 260px;
+}
+
+.card:hover {
+  border-color: var(--brand-300);
+  box-shadow: 0 4px 16px rgba(10, 22, 40, 0.1);
+}
+
+.collapsed {
+  min-height: 44px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-subtle) 100%);
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.head:active {
+  cursor: grabbing;
+}
+
+.collapse {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0;
+}
+
+.collapse:hover {
+  background: var(--bg-hover);
+  color: var(--brand-600);
+}
+
+.titleWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brand-700);
+  background: var(--brand-50);
+  border: 1px solid rgba(91, 184, 212, 0.28);
+  border-radius: 999px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+}
+
+.action {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+}
+
+.dragHint {
+  color: var(--text-muted);
+  font-size: 12px;
+  opacity: 0.55;
+  flex-shrink: 0;
+  letter-spacing: -1px;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 14px;
+}
+
+.bodyFlush {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* nested tables fill the stretchable card */
+.bodyFlush > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(
+      135deg,
+      transparent 50%,
+      var(--border-default) 50%,
+      var(--border-default) 60%,
+      transparent 60%
+    ),
+    linear-gradient(
+      135deg,
+      transparent 70%,
+      var(--border-default) 70%,
+      var(--border-default) 80%,
+      transparent 80%
+    );
+  opacity: 0.7;
+}
+
+.resize:hover {
+  opacity: 1;
+}
+
+[data-theme='dark'] .badge {
+  color: var(--brand-300);
+  background: rgba(91, 184, 212, 0.12);
+}

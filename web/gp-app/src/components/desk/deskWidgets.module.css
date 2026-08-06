@@ -8,10 +8,39 @@
 
 /* ── Live Markets ── */
 .tvHost {
-  height: 420px;
+  height: 100%;
+  min-height: 200px;
   width: 100%;
   background: transparent;
-  min-height: 320px;
+  flex: 1;
+}
+
+.heroBare {
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  height: 100%;
+  min-height: 0;
+}
+
+.ideaEmbed,
+.reportsEmbed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ideaToolbar,
+.reportsToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  flex-shrink: 0;
 }
 
 /* ── Analyze hero ── */
@@ -224,8 +253,10 @@
 }
 
 .ideaList {
-  max-height: min(42vh, 420px);
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  max-height: none;
 }
 
 .ideaRow {
@@ -429,7 +460,13 @@
 
 .reportsScroll {
   overflow: auto;
-  max-height: min(55vh, 560px);
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.reportsEmbed .reportsScroll {
+  max-height: none;
 }
 
 .repTable {

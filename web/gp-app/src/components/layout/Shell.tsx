@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import type { GpUser } from '@/lib/auth'
 import { Topbar } from './Topbar'
 import { MarketRibbon } from './MarketRibbon'
+import { SupportFab } from '@/components/support/SupportFab'
 import styles from './Shell.module.css'
 
 type Props = {
@@ -23,6 +24,7 @@ export function Shell({ user, build }: Props) {
         <span>DGA Capital · GP Terminal (React)</span>
         {build && <span className={styles.build}>{build}</span>}
       </footer>
+      <SupportFab />
     </div>
   )
 }

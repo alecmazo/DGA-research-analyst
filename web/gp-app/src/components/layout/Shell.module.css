@@ -10,12 +10,18 @@
 
 .main {
   flex: 1;
-  padding: var(--space-5) var(--space-4) var(--space-8);
+  padding: var(--space-3) var(--space-4) var(--space-8);
 }
 
 .inner {
   max-width: var(--content-max);
   margin: 0 auto;
+  width: 100%;
+}
+
+/* Desk free-form board needs the full width */
+.inner:has([data-desk-board]) {
+  max-width: none;
 }
 
 .footer {

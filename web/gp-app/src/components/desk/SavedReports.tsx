@@ -3,7 +3,7 @@ import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { api, type Quote, type SavedReport } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
-import { ReportModal } from './ReportModal'
+import { openReportWindow } from '@/pages/ReportPage'
 import styles from './deskWidgets.module.css'
 
 function freshnessMs(rep: SavedReport): number {
@@ -25,15 +25,20 @@ function freshnessMs(rep: SavedReport): number {
 type Props = {
   refreshKey?: number
   onAnalyze?: (ticker: string) => void
+  /** When true, omit outer Panel (Desk board supplies chrome). */
+  embed?: boolean
 }
 
-export function SavedReports({ refreshKey = 0, onAnalyze }: Props) {
+export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props) {
   const [reports, setReports] = useState<SavedReport[]>([])
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
-  const [open, setOpen] = useState<{ ticker: string; provider: string } | null>(null)
   const [busyTk, setBusyTk] = useState<string | null>(null)
+
+  const openRep = (ticker: string, provider?: string) => {
+    openReportWindow(ticker, provider || 'grok')
+  }
 
   const load = useCallback(async () => {
     setErr(null)
@@ -87,86 +92,76 @@ export function SavedReports({ refreshKey = 0, onAnalyze }: Props) {
     }
   }
 
-  return (
+  const table = (
     <>
-      <Panel
-        title="Saved Reports"
-        badge={loading ? '…' : String(sorted.length)}
-        action={
-          <div className={styles.ideaActions}>
-            <Button size="sm" variant="ghost" onClick={() => void load()}>
-              Refresh
-            </Button>
-          </div>
-        }
-        flush
-        className={styles.reportsPanel}
-      >
-        {err && <div className={styles.bannerErr}>{err}</div>}
-        <div className={styles.reportsScroll}>
-          <table className={styles.repTable}>
-            <thead>
+      <div className={styles.reportsToolbar}>
+        <span className={styles.metaDim}>
+          {loading ? '…' : `${sorted.length} reports`} · click opens new window
+        </span>
+        <Button size="sm" variant="ghost" onClick={() => void load()}>
+          Refresh
+        </Button>
+      </div>
+      {err && <div className={styles.bannerErr}>{err}</div>}
+      <div className={styles.reportsScroll}>
+        <table className={styles.repTable}>
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th className={styles.num}>Price</th>
+              <th className={styles.num}>TGT / Upside</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && !sorted.length && (
               <tr>
-                <th>Ticker</th>
-                <th className={styles.num}>Price</th>
-                <th className={styles.num}>TGT / Upside</th>
+                <td colSpan={3} className={styles.emptyCell}>
+                  Loading saved reports…
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {loading && !sorted.length && (
-                <tr>
-                  <td colSpan={3} className={styles.emptyCell}>
-                    Loading saved reports…
-                  </td>
-                </tr>
-              )}
-              {!loading && !sorted.length && (
-                <tr>
-                  <td colSpan={3} className={styles.emptyCell}>
-                    No saved reports yet — run Analyze on a ticker.
-                  </td>
-                </tr>
-              )}
-              {sorted.map((rep) => {
-                const q = quotes[rep.ticker] || {}
-                const price =
-                  q.price != null
-                    ? Number(q.price)
-                    : rep.current_price != null
-                      ? Number(rep.current_price)
+            )}
+            {!loading && !sorted.length && (
+              <tr>
+                <td colSpan={3} className={styles.emptyCell}>
+                  No saved reports yet — run Analyze on a ticker.
+                </td>
+              </tr>
+            )}
+            {sorted.map((rep) => {
+              const q = quotes[rep.ticker] || {}
+              const price =
+                q.price != null
+                  ? Number(q.price)
+                  : rep.current_price != null
+                    ? Number(rep.current_price)
+                    : null
+              const pct =
+                q.pct != null
+                  ? Number(q.pct)
+                  : q.pct_change != null
+                    ? Number(q.pct_change)
+                    : rep.pct_change != null
+                      ? Number(rep.pct_change)
                       : null
-                const pct =
-                  q.pct != null
-                    ? Number(q.pct)
-                    : q.pct_change != null
-                      ? Number(q.pct_change)
-                      : rep.pct_change != null
-                        ? Number(rep.pct_change)
-                        : null
-                const target =
-                  rep.price_target != null ? Number(rep.price_target) : null
-                const upside =
-                  target != null && price != null && price > 0
-                    ? ((target - price) / price) * 100
-                    : rep.upside_pct != null
-                      ? Number(rep.upside_pct)
-                      : null
-                const runMs = freshnessMs(rep)
-                const runIso = runMs ? new Date(runMs).toISOString() : rep.last_attempt_at
-                const providers = rep.providers || []
-                const failed = rep.last_attempt_status === 'failed'
+              const target =
+                rep.price_target != null ? Number(rep.price_target) : null
+              const upside =
+                target != null && price != null && price > 0
+                  ? ((target - price) / price) * 100
+                  : rep.upside_pct != null
+                    ? Number(rep.upside_pct)
+                    : null
+              const runMs = freshnessMs(rep)
+              const runIso = runMs ? new Date(runMs).toISOString() : rep.last_attempt_at
+              const providers = rep.providers || []
+              const failed = rep.last_attempt_status === 'failed'
 
-                return (
-                  <tr
-                    key={rep.ticker}
-                    className={styles.repRow}
-                    onClick={() =>
-                      setOpen({
-                        ticker: rep.ticker,
-                        provider: providers[0] || 'grok',
-                      })
-                    }
-                  >
+              return (
+                <tr
+                  key={rep.ticker}
+                  className={styles.repRow}
+                  onClick={() => openRep(rep.ticker, providers[0] || 'grok')}
+                >
                     <td>
                       <div className={styles.repTkRow}>
                         {failed ? (
@@ -204,7 +199,7 @@ export function SavedReports({ refreshKey = 0, onAnalyze }: Props) {
                             className={`${styles.pill} ${styles.pillGrok}`}
                             onClick={(e) => {
                               e.stopPropagation()
-                              setOpen({ ticker: rep.ticker, provider: 'grok' })
+                              openRep(rep.ticker, 'grok')
                             }}
                           >
                             GROK
@@ -216,7 +211,7 @@ export function SavedReports({ refreshKey = 0, onAnalyze }: Props) {
                             className={`${styles.pill} ${styles.pillClaude}`}
                             onClick={(e) => {
                               e.stopPropagation()
-                              setOpen({ ticker: rep.ticker, provider: 'claude' })
+                              openRep(rep.ticker, 'claude')
                             }}
                           >
                             CLAUDE
@@ -228,7 +223,7 @@ export function SavedReports({ refreshKey = 0, onAnalyze }: Props) {
                             className={`${styles.pill} ${styles.pillKimi}`}
                             onClick={(e) => {
                               e.stopPropagation()
-                              setOpen({ ticker: rep.ticker, provider: 'kimi' })
+                              openRep(rep.ticker, 'kimi')
                             }}
                           >
                             KIMI
@@ -240,7 +235,7 @@ export function SavedReports({ refreshKey = 0, onAnalyze }: Props) {
                             className={`${styles.pill} ${styles.pillDeep}`}
                             onClick={(e) => {
                               e.stopPropagation()
-                              setOpen({ ticker: rep.ticker, provider: 'deepseek' })
+                              openRep(rep.ticker, 'deepseek')
                             }}
                           >
                             DEEPSEEK
@@ -298,15 +293,18 @@ export function SavedReports({ refreshKey = 0, onAnalyze }: Props) {
             </tbody>
           </table>
         </div>
-      </Panel>
-
-      {open && (
-        <ReportModal
-          ticker={open.ticker}
-          provider={open.provider}
-          onClose={() => setOpen(null)}
-        />
-      )}
     </>
+  )
+
+  if (embed) return <div className={styles.reportsEmbed}>{table}</div>
+  return (
+    <Panel
+      title="Saved Reports"
+      badge={loading ? '…' : String(sorted.length)}
+      flush
+      className={styles.reportsPanel}
+    >
+      {table}
+    </Panel>
   )
 }
