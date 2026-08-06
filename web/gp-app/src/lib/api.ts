@@ -47,6 +47,21 @@ export async function api<T = unknown>(
   return data as T
 }
 
+/** Authenticated blob fetch (audio samples, etc.). */
+export async function apiBlob(path: string): Promise<Blob> {
+  const headers = new Headers()
+  const token = getToken()
+  if (token) headers.set('x-auth-v2-token', token)
+  const res = await fetch(path, { headers })
+  if (res.status === 401) {
+    clearSession()
+    window.location.replace('/')
+    throw new ApiError(401, 'Unauthorized')
+  }
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`)
+  return res.blob()
+}
+
 /** Authenticated blob download (Excel/PDF exports). */
 export async function downloadAuth(path: string, fallbackName = 'download') {
   const headers = new Headers()
