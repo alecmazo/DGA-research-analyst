@@ -5,14 +5,55 @@ import { AnalyzeCard } from '@/components/desk/AnalyzeCard'
 import { IdeaGenerator } from '@/components/desk/IdeaGenerator'
 import { SavedReports } from '@/components/desk/SavedReports'
 import { DeskBoard } from '@/components/desk/DeskBoard'
+import { EarningsCard } from '@/components/desk/EarningsCard'
 import {
   api,
   type DailyBrief,
   type Quote,
+  type WatchlistEarning,
   type WatchlistResponse,
 } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
+import { openReportWindow } from '@/pages/ReportPage'
 import styles from './DeskPage.module.css'
+
+function earnChipClass(earn: WatchlistEarning): string {
+  const du = earn.days_until
+  if (du === 0) return `${styles.earn} ${styles.earnToday}`
+  if (du != null && du < 0) return `${styles.earn} ${styles.earnPast}`
+  if (du != null && du <= 2) return `${styles.earn} ${styles.earnSoon}`
+  return styles.earn
+}
+
+function earnLabel(earn: WatchlistEarning): string {
+  const du = earn.days_until
+  const label =
+    earn.label ||
+    (du === 0 ? 'TODAY' : du != null ? `${du}d` : 'EARN')
+  const sess = earn.session ? ` ${earn.session}` : ''
+  return `EARN ${label}${sess}`
+}
+
+function earnTitle(tk: string, earn: WatchlistEarning): string {
+  const du = earn.days_until
+  const when =
+    du === 0
+      ? 'TODAY'
+      : du === -1
+        ? 'yesterday'
+        : du != null && du > 0
+          ? `in ${du}d`
+          : ''
+  const bits = [
+    `Earnings ${when}`,
+    earn.date ? `(${earn.date})` : '',
+    earn.session || '',
+    earn.fiscal_quarter ? `· ${earn.fiscal_quarter}` : '',
+    earn.eps_forecast != null ? `· est ${earn.eps_forecast}` : '',
+    '· click for results / beat-miss card',
+  ]
+  return bits.filter(Boolean).join(' ')
+}
 
 function quotePct(q?: Quote | null): number | null {
   if (!q) return null
@@ -31,6 +72,7 @@ export function DeskPage() {
   const [analyzeTk, setAnalyzeTk] = useState('')
   const [runToken, setRunToken] = useState(0)
   const [reportsKey, setReportsKey] = useState(0)
+  const [earningsTk, setEarningsTk] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -57,11 +99,13 @@ export function DeskPage() {
   const rows = useMemo(() => {
     const tickers = wl?.tickers || []
     const quotes = wl?.quotes || {}
+    const earnings = wl?.earnings || {}
     return [...tickers]
       .map((tk) => {
         const q = quotes[tk] || {}
         const pct = quotePct(q)
-        return { tk, q, pct, abs: pct == null ? -1 : Math.abs(pct) }
+        const earn = earnings[tk] || null
+        return { tk, q, pct, earn, abs: pct == null ? -1 : Math.abs(pct) }
       })
       .sort((a, b) => b.abs - a.abs)
   }, [wl])
@@ -183,18 +227,48 @@ export function DeskPage() {
                     </td>
                   </tr>
                 )}
-                {rows.map(({ tk, q, pct }) => (
-                  <tr key={tk}>
+                {rows.map(({ tk, q, pct, earn }) => (
+                  <tr
+                    key={tk}
+                    className={earn ? styles.rowEarn : undefined}
+                  >
                     <td>
-                      <button
-                        type="button"
-                        className={styles.tkBtn}
-                        title="Analyze this ticker"
-                        onClick={() => focusAnalyze(tk, false)}
-                      >
-                        <span className={styles.tk}>{tk}</span>
-                      </button>
-                      {wl?.reports?.[tk] && <span className={styles.chip}>RPT</span>}
+                      <div className={styles.tkCell}>
+                        <button
+                          type="button"
+                          className={styles.tkBtn}
+                          title="Analyze this ticker"
+                          onClick={() => focusAnalyze(tk, false)}
+                        >
+                          <span className={styles.tk}>{tk}</span>
+                        </button>
+                        {earn && (
+                          <button
+                            type="button"
+                            className={earnChipClass(earn)}
+                            title={earnTitle(tk, earn)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setEarningsTk(tk)
+                            }}
+                          >
+                            {earnLabel(earn)}
+                          </button>
+                        )}
+                        {(wl?.reports?.[tk] || earn?.has_report) && (
+                          <button
+                            type="button"
+                            className={styles.rptBtn}
+                            title={`Open saved report for ${tk}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openReportWindow(tk, 'grok')
+                            }}
+                          >
+                            Rpt
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="tabular">{fmtPx(q.price)}</td>
                     <td className={`tabular ${pctClass(pct)}`}>{fmtPct(pct)}</td>
@@ -326,6 +400,13 @@ export function DeskPage() {
       {err && <div className={styles.bannerErr}>{err}</div>}
 
       <DeskBoard cards={cards} />
+
+      {earningsTk && (
+        <EarningsCard
+          ticker={earningsTk}
+          onClose={() => setEarningsTk(null)}
+        />
+      )}
     </div>
   )
 }

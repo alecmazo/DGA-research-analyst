@@ -141,6 +141,90 @@
   font-family: var(--font-display);
 }
 
+.tkCell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.rowEarn td {
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.rowEarn:hover td {
+  background: rgba(245, 158, 11, 0.09) !important;
+}
+
+.earn {
+  display: inline-block;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fdba74;
+  vertical-align: middle;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.earn:hover {
+  filter: brightness(0.97);
+}
+
+.earnToday {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+  animation: earnPulse 1.6s ease-in-out infinite;
+}
+
+.earnSoon {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fb923c;
+}
+
+.earnPast {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+@keyframes earnPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.12);
+  }
+}
+
+.rptBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 3px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--brand-700);
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.rptBtn:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .chip {
   margin-left: 6px;
   font-size: 9px;

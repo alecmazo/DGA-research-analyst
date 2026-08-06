@@ -96,12 +96,75 @@ export type Quote = {
   prev?: number | null
 }
 
+/** Per-ticker earnings highlight from GET /api/watchlist */
+export type WatchlistEarning = {
+  days_until?: number | null
+  session?: string | null
+  label?: string | null
+  date?: string | null
+  fiscal_quarter?: string | null
+  eps_forecast?: string | number | null
+  has_report?: boolean
+}
+
 export type WatchlistResponse = {
   tickers: string[]
   quotes: Record<string, Quote>
-  earnings?: Record<string, unknown>
+  earnings?: Record<string, WatchlistEarning>
   reports?: Record<string, boolean>
   timing_ms?: number
+}
+
+export type EarningsCardPayload = {
+  ok?: boolean
+  error?: string
+  status?: string
+  source?: string
+  has_report?: boolean
+  event?: {
+    name?: string
+    date?: string
+    days_until?: number | null
+    session?: string
+    fiscal_quarter?: string
+  }
+  result?: {
+    beat?: string | null
+    eps_actual?: number | null
+    eps_estimate?: number | null
+    surprise_pct?: number | null
+    revenue_actual?: number | null
+    revenue_estimate?: number | null
+    revenue_surprise_pct?: number | null
+    revenue_beat?: string | null
+  }
+  quote?: Quote & { pct_change?: number | null }
+  history?: Array<{
+    fiscal_quarter?: string
+    date_reported?: string
+    eps_actual?: number | null
+    eps_estimate?: number | null
+    surprise_pct?: number | null
+    beat?: string | null
+  }>
+  notes?: {
+    tone?: string
+    vs_analysts?: string
+    bullets?: string[]
+  }
+  call_highlights?: {
+    quarter?: string
+    call_date?: string
+    stale?: boolean
+    note?: string
+    highlights?: Array<{
+      theme?: string
+      themes?: string[]
+      quote?: string
+      quarter?: string
+      call_date?: string
+    }>
+  }
 }
 
 export type IndexRow = {
