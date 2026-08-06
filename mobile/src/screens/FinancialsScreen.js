@@ -5,6 +5,10 @@
  * so it costs ~nothing on Railway — zero LLM, zero live pulls. Charts are drawn
  * with plain Views (rotated segments) so the whole screen ships via OTA with no
  * native dependency. Theme-aware (light/dark) via useTheme().
+ *
+ * Parity with desktop FundCharts (ui441+): P&L, margins, cash/debt, cash flow
+ * (OCF/FCF/NI/div/buybacks), ROIC/WACC/spread, shares + share Δ, equity/assets,
+ * plus TTM strip, Annual/Quarterly toggle, and peer comps.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -19,7 +23,16 @@ import { api } from '../api/client';
 import { spacing, radius, fontSize, useTheme } from '../design';
 
 const LAST_KEY = '@dga_fin_last';
+const PERIOD_KEY = '@dga_fin_period';
 const RANGES = ['1M', '3M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'All'];
+const PERIODS = [
+  { id: 'annual', label: 'Annual' },
+  { id: 'quarter', label: 'Quarterly' },
+];
+// Extra series colors (desktop FundCharts palette; not all on theme)
+const CHART_PURPLE = '#8b5cf6';
+const CHART_PINK = '#ec4899';
+const CHART_BLUE = '#3b82f6';
 
 // Plain-language explanations of the scores/graphics (tap ⓘ to reveal).
 const EXPL_DGA_SCORE =
@@ -243,12 +256,15 @@ export default function FinancialsScreen() {
   const [data, setData] = useState(null);
   const [hist, setHist] = useState(null);
   const [range, setRange] = useState('YTD');
+  const [periodType, setPeriodType] = useState('annual');
   const [loading, setLoading] = useState(false);
   const [histLoading, setHistLoading] = useState(false);
   const [error, setError] = useState(null);
   const [chartW, setChartW] = useState(300);
   const [scoreInfo, setScoreInfo] = useState(false);
   const reqId = useRef(0);
+  const periodRef = useRef(periodType);
+  periodRef.current = periodType;
 
   const loadHistory = useCallback(async (tk, rng) => {
     if (!tk) return;
@@ -260,17 +276,22 @@ export default function FinancialsScreen() {
     finally { setHistLoading(false); }
   }, []);
 
-  const loadTicker = useCallback(async (tk, rng) => {
+  const loadTicker = useCallback(async (tk, rng, pt) => {
     const sym = (tk || '').trim().toUpperCase();
     if (!sym) return;
     Keyboard.dismiss();
+    const period = pt || periodRef.current || 'annual';
     const myReq = ++reqId.current;
     setLoading(true); setError(null); setTicker(sym);
     try {
-      const d = await api.getFinancialsDashboard(sym);
+      const d = await api.getFinancialsDashboard(sym, period);
       if (myReq !== reqId.current) return;
       if (!d || !d.ok) { setData(null); setError(d?.error || `No financials stored for ${sym}.`); }
-      else { setData(d); AsyncStorage.setItem(LAST_KEY, sym).catch(() => {}); }
+      else {
+        setData(d);
+        AsyncStorage.setItem(LAST_KEY, sym).catch(() => {});
+        AsyncStorage.setItem(PERIOD_KEY, period).catch(() => {});
+      }
     } catch (e) {
       if (myReq === reqId.current) { setData(null); setError(String(e.message || e)); }
     } finally {
@@ -281,22 +302,49 @@ export default function FinancialsScreen() {
 
   useEffect(() => {
     (async () => {
-      const last = await AsyncStorage.getItem(LAST_KEY);
-      if (last) { setInput(last); loadTicker(last, 'YTD'); }
+      const [last, savedPt] = await Promise.all([
+        AsyncStorage.getItem(LAST_KEY),
+        AsyncStorage.getItem(PERIOD_KEY),
+      ]);
+      if (savedPt === 'annual' || savedPt === 'quarter') setPeriodType(savedPt);
+      if (last) {
+        setInput(last);
+        loadTicker(last, 'YTD', savedPt === 'quarter' ? 'quarter' : 'annual');
+      }
     })();
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const onRange = (rng) => { setRange(rng); loadHistory(ticker, rng); };
+
+  const onPeriod = (pt) => {
+    if (pt === periodType) return;
+    setPeriodType(pt);
+    if (ticker) loadTicker(ticker, range, pt);
+  };
 
   const km = data?.key_metrics || {};
   const sc = data?.dga_score || {};
   const comps = sc.components || {};
   const rc = data?.rank_cards || {};
   const anchors = data?.valuation || [];
+  const ttm = data?.ttm || {};
+  const peerBlock = data?.peers || {};
+  const peers = Array.isArray(peerBlock.peers) ? peerBlock.peers
+    : Array.isArray(peerBlock) ? peerBlock : [];
   const S = data?.series || [];
   const col = (k) => S.map((x) => x[k]);
+  const labels = S.map((x) => x.label || '—');
+  const isAnnual = (data?.period_type || periodType) !== 'quarter';
+  const shareDeltaName = isAnnual ? 'Share Δ % YoY' : 'Share Δ % QoQ';
   const stats = hist?.stats || {};
   const lineColor = (stats.change_pct != null && stats.change_pct < 0) ? t.red : t.green;
+  const fmtMgn = (v) => {
+    if (v == null) return '—';
+    // API may send fraction (0.15) or already percent (15)
+    const p = Math.abs(v) <= 2 ? v * 100 : v;
+    return p.toFixed(1) + '%';
+  };
+  const fmtMoneyTtm = (n) => (n == null ? '—' : '$' + fmtNum(n));
 
   const compRow = (label, v) => (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginVertical: 3 }}>
@@ -327,18 +375,34 @@ export default function FinancialsScreen() {
           autoCorrect={false}
           value={input}
           onChangeText={setInput}
-          onSubmitEditing={() => loadTicker(input)}
+          onSubmitEditing={() => loadTicker(input, range, periodType)}
           returnKeyType="search"
         />
-        <TouchableOpacity style={s.goBtn} onPress={() => loadTicker(input)} activeOpacity={0.8}>
+        <TouchableOpacity style={s.goBtn} onPress={() => loadTicker(input, range, periodType)} activeOpacity={0.8}>
           <Text style={s.goTxt}>View</Text>
         </TouchableOpacity>
+      </View>
+
+      <View style={s.periodRow}>
+        {PERIODS.map((p) => {
+          const on = p.id === periodType;
+          return (
+            <TouchableOpacity
+              key={p.id}
+              onPress={() => onPeriod(p.id)}
+              activeOpacity={0.8}
+              style={[s.periodPill, on && { backgroundColor: t.primary }]}
+            >
+              <Text style={[s.periodTxt, on && { color: t.onAccent }]}>{p.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 28 }}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => ticker && loadTicker(ticker)} tintColor={t.primary} />}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => ticker && loadTicker(ticker, range, periodType)} tintColor={t.primary} />}
       >
         {!ticker && !loading && (
           <Text style={s.hint}>Search a ticker to see its SEC fundamentals, DGA Score, and ranking cards.</Text>
@@ -431,22 +495,149 @@ export default function FinancialsScreen() {
               )}
             </View>
 
-            {/* Fundamentals — the six desktop charts, condensed for mobile */}
+            {/* TTM snapshot — same strip as desktop Company Dashboard */}
+            {ttm && ttm.periods ? (
+              <View style={s.card}>
+                <Text style={[s.sectionLabel, { marginBottom: 8 }]}>
+                  TTM SNAPSHOT · last {ttm.periods} quarters
+                  {ttm.period_end ? ` through ${String(ttm.period_end).slice(0, 10)}` : ''}
+                </Text>
+                <View style={s.ttmGrid}>
+                  <View style={s.ttmCell}>
+                    <Text style={s.ttmLbl}>Revenue</Text>
+                    <Text style={s.ttmVal}>{fmtMoneyTtm(ttm.revenue)}</Text>
+                  </View>
+                  <View style={s.ttmCell}>
+                    <Text style={s.ttmLbl}>Net Income</Text>
+                    <Text style={s.ttmVal}>{fmtMoneyTtm(ttm.net_income)}</Text>
+                  </View>
+                  <View style={s.ttmCell}>
+                    <Text style={s.ttmLbl}>FCF</Text>
+                    <Text style={s.ttmVal}>{fmtMoneyTtm(ttm.free_cash_flow)}</Text>
+                  </View>
+                  <View style={s.ttmCell}>
+                    <Text style={s.ttmLbl}>EPS</Text>
+                    <Text style={s.ttmVal}>
+                      {ttm.eps != null ? `$${Number(ttm.eps).toFixed(2)}` : '—'}
+                    </Text>
+                  </View>
+                  <View style={s.ttmCell}>
+                    <Text style={s.ttmLbl}>Net Margin</Text>
+                    <Text style={s.ttmVal}>{fmtMgn(ttm.net_margin)}</Text>
+                  </View>
+                  <View style={s.ttmCell}>
+                    <Text style={s.ttmLbl}>FCF Margin</Text>
+                    <Text style={s.ttmVal}>{fmtMgn(ttm.fcf_margin)}</Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            {/* Fundamentals — full desktop 7-panel set, condensed for mobile */}
             {S.length > 1 && (
               <View style={s.card} onLayout={(e) => setChartW(Math.round(e.nativeEvent.layout.width - spacing.lg * 2))}>
-                <Text style={[s.sectionLabel, { marginBottom: 10 }]}>FUNDAMENTALS · {data.period_type === 'quarter' ? 'QUARTERLY' : 'ANNUAL'}</Text>
+                <Text style={[s.sectionLabel, { marginBottom: 4 }]}>
+                  FUNDAMENTALS · {isAnnual ? 'ANNUAL' : 'QUARTERLY'}
+                </Text>
+                {labels.length > 0 && (
+                  <Text style={s.periodHint} numberOfLines={1}>
+                    {labels[0]} → {labels[labels.length - 1]} · {labels.length} periods
+                  </Text>
+                )}
                 <FundChart title="Revenue · Net income · EBITDA" fmt={fmtMoney} width={chartW} t={t}
-                  series={[{ name: 'Rev', color: t.primary, values: col('revenue') }, { name: 'NI', color: t.green, values: col('net_income') }, { name: 'EBITDA', color: t.amber, values: col('ebitda') }]} />
+                  series={[
+                    { name: 'Rev', color: t.primary, values: col('revenue') },
+                    { name: 'NI', color: t.green, values: col('net_income') },
+                    { name: 'EBITDA', color: t.amber, values: col('ebitda') },
+                  ]} />
+                <FundChart title="Margins %" fmt={fmtPctS} width={chartW} t={t}
+                  series={[
+                    { name: 'Gross', color: CHART_BLUE, values: col('gross_margin_pct') },
+                    { name: 'Op', color: t.amber, values: col('operating_margin_pct') },
+                    { name: 'Net', color: t.green, values: col('net_margin_pct') },
+                  ]} />
                 <FundChart title="Cash vs Debt" fmt={fmtMoney} width={chartW} t={t}
-                  series={[{ name: 'Cash', color: t.green, values: col('cash') }, { name: 'Debt', color: t.red, values: col('debt') }]} />
-                <FundChart title="Operating & Free cash flow" fmt={fmtMoney} width={chartW} t={t}
-                  series={[{ name: 'OCF', color: t.amber, values: col('ocf') }, { name: 'FCF', color: t.primary, values: col('fcf') }]} />
+                  series={[
+                    { name: 'Cash', color: t.green, values: col('cash') },
+                    { name: 'Debt', color: t.red, values: col('debt') },
+                  ]} />
+                <FundChart title="Cash flow" fmt={fmtMoney} width={chartW} t={t}
+                  series={[
+                    { name: 'OCF', color: t.amber, values: col('ocf') },
+                    { name: 'FCF', color: t.primary, values: col('fcf') },
+                    { name: 'NI', color: t.green, values: col('net_income') },
+                    { name: 'Div', color: CHART_PURPLE, values: col('dividends') },
+                    { name: 'BB', color: CHART_PINK, values: col('buybacks') },
+                  ]} />
                 <FundChart title="ROIC vs WACC" fmt={fmtPctS} width={chartW} t={t}
-                  series={[{ name: 'ROIC', color: t.green, values: col('roic_pct') }, { name: 'WACC', color: t.red, values: col('wacc_pct') }]} />
+                  series={[
+                    { name: 'ROIC', color: t.green, values: col('roic_pct') },
+                    { name: 'WACC', color: t.red, values: col('wacc_pct') },
+                    {
+                      name: 'Spread',
+                      color: t.textPrimary,
+                      values: S.map((x) =>
+                        x.roic_pct != null && x.wacc_pct != null
+                          ? x.roic_pct - x.wacc_pct
+                          : null,
+                      ),
+                    },
+                  ]} />
                 <FundChart title="Shares outstanding" fmt={fmtNum} width={chartW} t={t}
                   series={[{ name: 'Shares', color: t.primary, values: col('shares') }]} />
+                <FundChart title={shareDeltaName} fmt={fmtPctS} width={chartW} t={t}
+                  series={[
+                    { name: 'Shrink', color: t.green, values: col('buyback_ratio_pct').map((v) => (v != null && v > 0 ? v : null)) },
+                    { name: 'Dilute', color: t.red, values: col('buyback_ratio_pct').map((v) => (v != null && v < 0 ? v : null)) },
+                  ]} />
                 <FundChart title="Equity vs Assets" fmt={fmtMoney} width={chartW} t={t}
-                  series={[{ name: 'Equity', color: t.green, values: col('equity') }, { name: 'Assets', color: t.primary, values: col('assets') }]} />
+                  series={[
+                    { name: 'Equity', color: t.green, values: col('equity') },
+                    { name: 'Assets', color: t.primary, values: col('assets') },
+                  ]} />
+              </View>
+            )}
+
+            {/* Peer comps */}
+            {peers.length > 0 && (
+              <View style={s.card}>
+                <Text style={[s.sectionLabel, { marginBottom: 8 }]}>
+                  COMPARABLE COMPANIES
+                  {(peerBlock.industry || peerBlock.sector || data.industry || data.sector)
+                    ? ` · ${peerBlock.industry || data.industry || peerBlock.sector || data.sector}`
+                    : ''}
+                </Text>
+                <View style={s.peerHead}>
+                  <Text style={[s.peerTk, { color: t.textDim }]}>Ticker</Text>
+                  <Text style={s.peerCol}>Price</Text>
+                  <Text style={s.peerCol}>Mkt Cap</Text>
+                  <Text style={s.peerCol}>P/E</Text>
+                  <Text style={s.peerCol}>EV/EBITDA</Text>
+                </View>
+                {peers.map((p, i) => (
+                  <TouchableOpacity
+                    key={p.ticker || i}
+                    style={[s.peerRow, p.is_subject && { backgroundColor: t.surfaceTint }]}
+                    activeOpacity={p.is_subject || !p.ticker ? 1 : 0.7}
+                    onPress={() => {
+                      if (p.is_subject || !p.ticker) return;
+                      setInput(p.ticker);
+                      loadTicker(p.ticker, range, periodType);
+                    }}
+                  >
+                    <Text style={[s.peerTk, p.is_subject && { fontWeight: '800', color: t.textPrimary }]} numberOfLines={1}>
+                      {p.ticker || '—'}
+                    </Text>
+                    <Text style={s.peerVal}>{fmtPrice(p.price)}</Text>
+                    <Text style={s.peerVal}>{fmtCap(p.market_cap)}</Text>
+                    <Text style={s.peerVal}>
+                      {p.pe != null ? Number(p.pe).toFixed(1) + '×' : (p.pe_nm ? 'n/m' : '—')}
+                    </Text>
+                    <Text style={s.peerVal}>
+                      {p.ev_ebitda != null ? Number(p.ev_ebitda).toFixed(1) + '×' : '—'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             )}
 
@@ -503,6 +694,49 @@ function makeStyles(t) {
       backgroundColor: t.primary, alignItems: 'center', justifyContent: 'center',
     },
     goTxt: { color: t.onAccent, fontWeight: '800', fontSize: fontSize.bodyLg },
+    periodRow: {
+      flexDirection: 'row', gap: 6, paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm, backgroundColor: t.bg,
+    },
+    periodPill: {
+      paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.md,
+      backgroundColor: t.surfaceAlt, borderWidth: 1, borderColor: t.border,
+    },
+    periodTxt: { fontSize: fontSize.caption, fontWeight: '700', color: t.textSecondary },
+    periodHint: {
+      fontSize: fontSize.micro, color: t.textDim, marginBottom: 10,
+    },
+    ttmGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+    ttmCell: { width: '33.33%', paddingVertical: 6, paddingRight: 6 },
+    ttmLbl: {
+      fontSize: fontSize.micro, fontWeight: '700', letterSpacing: 0.4,
+      textTransform: 'uppercase', color: t.textDim,
+    },
+    ttmVal: {
+      fontSize: fontSize.bodyLg, fontWeight: '800', color: t.textPrimary,
+      fontVariant: ['tabular-nums'], marginTop: 2,
+    },
+    peerHead: {
+      flexDirection: 'row', alignItems: 'center', paddingBottom: 4,
+      borderBottomWidth: 1, borderBottomColor: t.borderSubtle,
+    },
+    peerRow: {
+      flexDirection: 'row', alignItems: 'center', paddingVertical: 7,
+      borderBottomWidth: 1, borderBottomColor: t.borderSubtle,
+      borderRadius: radius.sm, marginHorizontal: -4, paddingHorizontal: 4,
+    },
+    peerTk: {
+      flex: 1.1, fontSize: fontSize.small, fontWeight: '700',
+      color: t.primary, fontVariant: ['tabular-nums'],
+    },
+    peerCol: {
+      flex: 1, textAlign: 'right', fontSize: 9, fontWeight: '800',
+      letterSpacing: 0.3, color: t.textDim, textTransform: 'uppercase',
+    },
+    peerVal: {
+      flex: 1, textAlign: 'right', fontSize: fontSize.caption, fontWeight: '700',
+      color: t.textPrimary, fontVariant: ['tabular-nums'],
+    },
     hint: { color: t.textSecondary, fontSize: fontSize.body, lineHeight: 20, paddingTop: 20, textAlign: 'center' },
 
     card: {

@@ -20,7 +20,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // (development → localhost:8000 for the simulator), but if it's missing
 // (e.g. an OTA bundle published from a shell without that env var set)
 // we default to Railway so the iPhone can still reach the API.
-const PROD_API_BASE_URL  = 'https://dga-portfolio.up.railway.app';
+// Canonical public host (custom domain → same Railway service).
+// Keep railway.app as a silent fallback if DNS ever hiccups.
+const PROD_API_BASE_URL  = 'https://portfolio.dgacapital.com';
 const DEFAULT_BASE_URL   = process.env.EXPO_PUBLIC_API_BASE_URL || PROD_API_BASE_URL;
 const DEFAULT_PASSWORD   = 'dgacapital';           // server default
 
