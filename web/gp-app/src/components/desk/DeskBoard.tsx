@@ -210,6 +210,7 @@ export function DeskBoard({ cards }: Props) {
           return (
             <section
               key={card.id}
+              data-desk-widget={card.id}
               className={`${styles.card} ${collapsed ? styles.collapsed : ''}`}
               style={{
                 left: L.x,

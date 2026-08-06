@@ -137,11 +137,22 @@ export function SupportFab() {
     }
   }, [])
 
-  const openModal = () => {
+  const openModal = useCallback(() => {
     setStatus(null)
     setOpen(true)
     window.setTimeout(() => void capture(), 80)
-  }
+  }, [capture])
+
+  // Settings "File ticket" and other UI can open the same modal.
+  useEffect(() => {
+    const onOpen = () => openModal()
+    window.addEventListener('dga-open-support', onOpen)
+    ;(window as unknown as { openDGASupport?: () => void }).openDGASupport = openModal
+    return () => {
+      window.removeEventListener('dga-open-support', onOpen)
+      delete (window as unknown as { openDGASupport?: () => void }).openDGASupport
+    }
+  }, [openModal])
 
   const submit = async () => {
     const text = desc.trim()

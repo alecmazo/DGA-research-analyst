@@ -166,6 +166,24 @@ export function DeskPage() {
     if (autoRun) setRunToken((n) => n + 1)
   }
 
+  // Topbar stock peek → “Run AI analysis” dispatches this event.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const d = (e as CustomEvent<{ ticker?: string; autoRun?: boolean }>).detail
+      const tk = (d?.ticker || '').trim().toUpperCase()
+      if (!tk) return
+      focusAnalyze(tk, !!d?.autoRun)
+      // Scroll analyze card into view if present
+      window.setTimeout(() => {
+        document
+          .querySelector('[data-desk-widget="analyze"]')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 80)
+    }
+    window.addEventListener('dga-focus-analyze', onFocus)
+    return () => window.removeEventListener('dga-focus-analyze', onFocus)
+  }, [])
+
   const cards = [
     {
       id: 'watchlist' as const,
