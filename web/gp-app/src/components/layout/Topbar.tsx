@@ -24,6 +24,20 @@ const OPS: { to: string; label: string }[] = [
   { to: '/settings', label: 'Settings' },
 ]
 
+/** Sliw Agent — Edyta corporate desk. Same allowlist as pre-React topbar
+ *  and apps/sliw-agent/server.py (override via SLIW_ALLOWED_EMAILS on API). */
+const SLIW_ALLOWED = new Set([
+  'alecmazo1@gmail.com',
+  'edytasliw@gmail.com',
+])
+
+function canAccessSliw(user: GpUser | null): boolean {
+  const email = String(user?.email || '')
+    .toLowerCase()
+    .trim()
+  return !!email && SLIW_ALLOWED.has(email)
+}
+
 type SearchHit = {
   ticker?: string
   name?: string
@@ -264,6 +278,15 @@ export function Topbar({ user, build }: Props) {
               {l.label}
             </NavLink>
           ))}
+          {canAccessSliw(user) && (
+            <a
+              className={styles.link}
+              href="/sliw/"
+              title="Sliw Agent — Edyta corporate desk"
+            >
+              Sliw
+            </a>
+          )}
         </nav>
 
         <div className={styles.right}>
