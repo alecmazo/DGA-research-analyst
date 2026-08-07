@@ -355,6 +355,46 @@ export function EarningsCard({ ticker, onClose }: Props) {
                 </>
               )}
 
+              {/* IR / press-release deep links */}
+              {(data.investor_relations_url ||
+                data.press_release_url ||
+                data.website_url) && (
+                <div className={styles.irLinks}>
+                  {data.investor_relations_url && (
+                    <a
+                      className={styles.irLink}
+                      href={data.investor_relations_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      ↗ Investor relations
+                      <span className={styles.irSub}>full earnings release</span>
+                    </a>
+                  )}
+                  {data.press_release_url && (
+                    <a
+                      className={styles.irLink}
+                      href={data.press_release_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      ↗ SEC press release
+                      <span className={styles.irSub}>8-K Item 2.02</span>
+                    </a>
+                  )}
+                  {!data.investor_relations_url && data.website_url && (
+                    <a
+                      className={styles.irLink}
+                      href={data.website_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      ↗ Company website
+                    </a>
+                  )}
+                </div>
+              )}
+
               <div className={styles.disclaimer}>
                 Not investment advice. EPS from Nasdaq/Yahoo · notes free · call Q&amp;A
                 from indexed transcripts
@@ -366,6 +406,28 @@ export function EarningsCard({ ticker, onClose }: Props) {
 
         <footer className={styles.foot}>
           <span className={styles.footHint}>EPS free · call Q&amp;A from indexed transcripts</span>
+          {data?.investor_relations_url && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                window.open(data.investor_relations_url!, '_blank', 'noopener,noreferrer')
+              }}
+            >
+              IR site
+            </Button>
+          )}
+          {data?.press_release_url && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                window.open(data.press_release_url!, '_blank', 'noopener,noreferrer')
+              }}
+            >
+              SEC release
+            </Button>
+          )}
           {data?.has_report && (
             <Button
               size="sm"

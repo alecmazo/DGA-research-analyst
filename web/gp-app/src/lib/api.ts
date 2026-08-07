@@ -165,6 +165,12 @@ export type EarningsCardPayload = {
       call_date?: string
     }>
   }
+  /** Company IR site (Yahoo free profile) — open for full earnings release. */
+  investor_relations_url?: string | null
+  website_url?: string | null
+  /** Latest Item 2.02 8-K exhibit when available (SEC EDGAR). */
+  press_release_url?: string | null
+  filing_url?: string | null
 }
 
 export type IndexRow = {

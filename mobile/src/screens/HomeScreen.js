@@ -989,6 +989,44 @@ export default function HomeScreen({ navigation, route }) {
                     </Text>
                   </View>
                 </View>
+                {(earnOpen.raw?.investor_relations_url ||
+                  earnOpen.raw?.press_release_url ||
+                  earnOpen.raw?.website_url) ? (
+                  <View style={{ gap: 6, marginTop: 10 }}>
+                    {!!earnOpen.raw?.investor_relations_url && (
+                      <TouchableOpacity
+                        style={s.earnExtBtn}
+                        onPress={() => {
+                          Linking.openURL(earnOpen.raw.investor_relations_url).catch(() => {});
+                        }}
+                      >
+                        <Text style={s.earnExtBtnTxt}>↗ Investor relations</Text>
+                        <Text style={s.earnExtBtnSub}>full earnings release</Text>
+                      </TouchableOpacity>
+                    )}
+                    {!!earnOpen.raw?.press_release_url && (
+                      <TouchableOpacity
+                        style={s.earnExtBtn}
+                        onPress={() => {
+                          Linking.openURL(earnOpen.raw.press_release_url).catch(() => {});
+                        }}
+                      >
+                        <Text style={s.earnExtBtnTxt}>↗ SEC press release</Text>
+                        <Text style={s.earnExtBtnSub}>8-K Item 2.02</Text>
+                      </TouchableOpacity>
+                    )}
+                    {!earnOpen.raw?.investor_relations_url && !!earnOpen.raw?.website_url && (
+                      <TouchableOpacity
+                        style={s.earnExtBtn}
+                        onPress={() => {
+                          Linking.openURL(earnOpen.raw.website_url).catch(() => {});
+                        }}
+                      >
+                        <Text style={s.earnExtBtnTxt}>↗ Company website</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : null}
                 <TouchableOpacity
                   style={s.earnAnalyzeBtn}
                   onPress={() => {
@@ -1205,6 +1243,12 @@ function makeStyles(t) {
     paddingVertical: 10, alignItems: 'center',
   },
   earnAnalyzeBtnTxt: { color: t.onAccent, fontWeight: '800', fontSize: 13 },
+  earnExtBtn: {
+    paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8,
+    borderWidth: 1, borderColor: t.border, backgroundColor: t.surfaceAlt,
+  },
+  earnExtBtnTxt: { fontSize: 13, fontWeight: '700', color: t.primary },
+  earnExtBtnSub: { fontSize: 10, fontWeight: '600', color: t.textDim, marginTop: 2 },
 
   // Per-report provider badges (GROK / CLAUDE) — tappable
   llmPill: {

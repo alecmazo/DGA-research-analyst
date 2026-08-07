@@ -2010,6 +2010,30 @@
           '</div>';
       }
 
+      // IR / SEC press-release deep links (free Yahoo profile + EDGAR 8-K)
+      const irUrl = d.investor_relations_url || '';
+      const prUrl = d.press_release_url || '';
+      const webUrl = d.website_url || '';
+      let irHtml = '';
+      if (irUrl || prUrl || webUrl) {
+        const mk = function (href, label, sub) {
+          return '<a href="' + _cfEsc(href) + '" target="_blank" rel="noopener noreferrer" ' +
+            'style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;' +
+            'padding:9px 12px;border-radius:8px;border:1px solid var(--panel-edge);' +
+            'background:var(--bg-elevated,#f8fafc);color:var(--blue,#3E9AB8);' +
+            'font-size:12.5px;font-weight:700;text-decoration:none;line-height:1.3;">' +
+            _cfEsc(label) +
+            (sub ? '<span style="font-size:10px;font-weight:600;color:var(--dim);">' +
+              _cfEsc(sub) + '</span>' : '') +
+            '</a>';
+        };
+        irHtml = '<div style="display:flex;flex-direction:column;gap:6px;margin-top:14px;">';
+        if (irUrl) irHtml += mk(irUrl, '↗ Investor relations', 'full earnings release');
+        if (prUrl) irHtml += mk(prUrl, '↗ SEC press release', '8-K Item 2.02');
+        if (!irUrl && webUrl) irHtml += mk(webUrl, '↗ Company website', '');
+        irHtml += '</div>';
+      }
+
       body.innerHTML =
         (ev.name ? '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;">' + _cfEsc(ev.name) + '</div>' : '') +
         '<div style="font-size:12px;font-weight:600;margin-bottom:4px;">' + _cfEsc(whenLine) + '</div>' +
@@ -2018,6 +2042,7 @@
         notesHtml +
         qaHtml +
         histHtml +
+        irHtml +
         '<div style="margin-top:12px;font-size:10px;color:var(--dim);">Not investment advice. EPS from Nasdaq/Yahoo · notes free · call Q&amp;A from indexed transcripts'
           + (d.source ? (' · EPS source ' + _cfEsc(d.source)) : '') + '.</div>';
 

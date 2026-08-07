@@ -1123,6 +1123,70 @@ _EARNINGS_DETAIL_CACHE: dict = {}  # symbol -> (epoch, payload)
 _EARNINGS_DETAIL_TTL_S = 30 * 60
 
 
+def company_ir_links(symbol: str) -> dict:
+    """Company website + investor-relations URL (Yahoo/yfinance free profile).
+
+    Used by the watchlist earnings card so GPs can open the IR site (or the
+    SEC 8-K press release when we already pulled it) without an LLM call.
+    Cached 6h — IR URLs almost never change.
+    """
+    import time as _time
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {}
+    cache_key = ("ir_links", sym)
+    hit = _EARNINGS_DETAIL_CACHE.get(cache_key)
+    if hit and _time.time() - hit[0] < 6 * 3600:
+        return dict(hit[1] or {})
+
+    out: dict = {"website": None, "ir_url": None, "source": None}
+    try:
+        import yfinance as yf
+        info = {}
+        try:
+            info = yf.Ticker(sym).info or {}
+        except Exception:
+            # Older yfinance: get_info()
+            try:
+                t = yf.Ticker(sym)
+                info = (getattr(t, "get_info", None) or (lambda: {}))() or {}
+            except Exception:
+                info = {}
+        website = (info.get("website") or info.get("homepage") or "").strip() or None
+        ir = (
+            info.get("irWebsite")
+            or info.get("investorRelationsWebsite")
+            or info.get("ir_website")
+            or ""
+        ).strip() or None
+        # Normalize scheme
+        def _http(u: str | None) -> str | None:
+            if not u:
+                return None
+            u = str(u).strip()
+            if u.startswith("//"):
+                u = "https:" + u
+            if not u.startswith("http"):
+                u = "https://" + u.lstrip("/")
+            return u
+        website = _http(website)
+        ir = _http(ir)
+        # Fallback: common IR path on corporate homepage when Yahoo omits irWebsite
+        if not ir and website:
+            base = website.rstrip("/")
+            # Prefer explicit investor subdomains when website is the marketing domain
+            ir = base + "/investors"
+        out = {
+            "website": website,
+            "ir_url": ir,
+            "source": "yfinance" if (website or ir) else None,
+        }
+    except Exception as e:
+        print(f"[market_data] ir_links {sym}: {e!s:.120}", flush=True)
+    _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), out)
+    return dict(out)
+
+
 def _parse_money_num(v):
     """Parse '$5.59' / '5.59' / 5.59 → float or None."""
     if v is None or v == "":
@@ -1541,49 +1605,63 @@ def earnings_card(symbol: str, horizon_days: int = 5,
     # Yahoo quarterly income stmt often lags the print by days while Nasdaq/YF
     # already have EPS (TREX ticket SUP_20260805). Pull revenue from the Item
     # 2.02 8-K exhibit 99 press release when statement actuals are missing.
-    if (
-        rev_actual is None
-        and not event_still_future
-        and status in ("reported", "pending_update")
-    ):
+    # Always keep press_release_url when an 8-K is found (IR deep-link).
+    press_release_url = None
+    filing_url = None
+    if not event_still_future and status in ("reported", "pending_update", "scheduled"):
+        # For scheduled (today) we still try IR/SEC links after window; for past
+        # prints we also want the 8-K URL even when Yahoo already has revenue.
         try:
             rd = (
                 (result or {}).get("date_reported")
                 or (upcoming or {}).get("date")
                 or ""
             )
-            # Normalize m/d/Y → ISO when possible
             try:
                 from datetime import datetime as _dt
                 if rd and "/" in str(rd):
                     rd = _dt.strptime(str(rd)[:10], "%m/%d/%Y").date().isoformat()
             except Exception:
                 pass
-            k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
-            if k8.get("revenue_actual") is not None:
-                rev_actual = k8["revenue_actual"]
-                result_source = (
-                    (result_source or "") + "+sec8k" if result_source else "sec8k"
-                )
-                if not actuals:
-                    actuals = {
-                        "revenue_actual": rev_actual,
-                        "period_label": (
-                            (upcoming or {}).get("fiscal_quarter")
-                            or (result or {}).get("fiscal_quarter")
-                            or ""
-                        ),
-                        "source": "sec_8k_ex99",
-                        "filed": k8.get("filed"),
-                    }
-                else:
-                    actuals = dict(actuals)
-                    actuals["revenue_actual"] = rev_actual
-                    actuals["source"] = (
-                        str(actuals.get("source") or "") + "+sec8k"
-                    ).strip("+")
+            # Only hit SEC when print window is open/past (not pure future).
+            if status in ("reported", "pending_update") or (
+                upcoming and (upcoming.get("days_until") is not None)
+                and int(upcoming.get("days_until") or 0) <= 0
+            ):
+                k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
+                press_release_url = k8.get("press_release_url") or None
+                filing_url = k8.get("filing_url") or None
+                if rev_actual is None and k8.get("revenue_actual") is not None:
+                    rev_actual = k8["revenue_actual"]
+                    result_source = (
+                        (result_source or "") + "+sec8k" if result_source else "sec8k"
+                    )
+                    if not actuals:
+                        actuals = {
+                            "revenue_actual": rev_actual,
+                            "period_label": (
+                                (upcoming or {}).get("fiscal_quarter")
+                                or (result or {}).get("fiscal_quarter")
+                                or ""
+                            ),
+                            "source": "sec_8k_ex99",
+                            "filed": k8.get("filed"),
+                        }
+                    else:
+                        actuals = dict(actuals)
+                        actuals["revenue_actual"] = rev_actual
+                        actuals["source"] = (
+                            str(actuals.get("source") or "") + "+sec8k"
+                        ).strip("+")
         except Exception as e:
             print(f"[market_data] 8-K rev fill {sym}: {e!s:.120}", flush=True)
+
+    # Company IR site (Yahoo free profile) — always try for the earnings card link.
+    ir_links: dict = {}
+    try:
+        ir_links = company_ir_links(sym) or {}
+    except Exception as e:
+        print(f"[market_data] ir_links card {sym}: {e!s:.100}", flush=True)
 
     rev_estimate = street_range.get("revenue_avg")
     rev_surprise_pct = None
@@ -1670,6 +1748,11 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         } if (result or eps_est is not None or street_range or actuals) else None,
         "history": history[:8],
         "notes": notes,
+        # External deep-links (free): company IR site + latest SEC press release
+        "investor_relations_url": ir_links.get("ir_url") or None,
+        "website_url": ir_links.get("website") or None,
+        "press_release_url": press_release_url or None,
+        "filing_url": filing_url or None,
         "cost": "free · no LLM",
     }
 
@@ -2102,6 +2185,18 @@ def sec_8k_earnings_release_actuals(
                 return sc
 
             docs = sorted(set(docs), key=_doc_score, reverse=True)
+            filing_base = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/"
+            # Always expose the filing folder (and best exhibit guess) so the
+            # earnings card can deep-link the IR / press-release PDF or HTML.
+            best_doc = docs[0] if docs else (chosen.get("primary") or "")
+            out = {
+                "filed": chosen.get("filed"),
+                "accession": chosen.get("accession"),
+                "document": best_doc or None,
+                "filing_url": filing_base,
+                "press_release_url": (filing_base + str(best_doc)) if best_doc else filing_base,
+                "source": "sec_8k",
+            }
             # Cap downloads (prefer ex99 / earnings release first)
             for name in docs[:8]:
                 url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/{name}"
@@ -2125,6 +2220,8 @@ def sec_8k_earnings_release_actuals(
                         "document": name,
                         "snippet": parsed.get("snippet"),
                         "method": parsed.get("method"),
+                        "filing_url": filing_base,
+                        "press_release_url": url,
                     }
                     break
                 # tiny pause between SEC hits
