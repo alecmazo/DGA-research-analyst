@@ -6953,7 +6953,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui443-20260807-earnings-ir-link"
+WEB_BUILD_VERSION = "ui444-20260807-strategist-pdf-cols"
 
 
 @app.get("/api/build")
@@ -22539,6 +22539,80 @@ def _content_disposition(disposition: str, filename: str) -> str:
             f"filename*=UTF-8''{utf8_name}")
 
 
+def _table_col_kind(header: str) -> str:
+    """Classify a markdown table header for PDF column sizing.
+
+    Returns one of: 'wide' (prose — Rationale/Thesis), 'narrow' (delta / from→to /
+    ticker / action chips), 'medium' (name/position label), 'medium_num' (weights),
+    or 'default'.
+    """
+    h = (header or "").strip().lower()
+    # Normalize unicode arrows / dashes used in strategist tables
+    h = (h.replace("→", "->").replace("⇒", "->").replace("—", "-")
+           .replace("–", "-").replace("Δ", "delta").replace("δ", "delta"))
+    h = re.sub(r"\s+", " ", h)
+    # Wide prose columns — need ~2× equal width
+    if re.search(r"\b(rationale|thesis|reason|reasons|notes?|comment|"
+                 r"commentary|description|detail|details|why|assumption|"
+                 r"key assumption|narrative|justification|evidence)\b", h):
+        return "wide"
+    # Compact numeric / path columns (≈½× equal width)
+    if re.search(
+        r"^(from|to|from\s*->\s*to|from\s*to|delta|delta\s*%|delta\s*wt|"
+        r"change|chg|wt\s*delta|action|view|rank|tier|score|beat|status|"
+        r"side|dir|ticker|symbol|code|id|name|names|position|company|"
+        r"security|asset|holding)$", h
+    ) or re.search(
+        r"\b(from\s*->\s*to|delta\s*%|weight\s*delta|delta\s*weight)\b", h
+    ) or h in ("from", "to", "%", "wt", "w", "n", "tk"):
+        return "narrow"
+    # Weights / numeric sizing (a bit wider than pure delta, still compact)
+    if re.search(r"\b(weight|wt|wtd|alloc|allocation|%\s*of\s*book|"
+                 r"target|current|suggested|prob|probability|upside|"
+                 r"shares|qty|price|pe|ev|mcap)\b", h):
+        return "medium_num"
+    return "default"
+
+
+def _table_col_weight(header: str) -> float:
+    """Relative width weight for a column header (equal baseline = 1.0).
+
+    User request for Portfolio Strategist PDFs: Rationale twice as wide as
+    equal-size columns; delta / name / from→to twice as small (0.5×).
+    """
+    kind = _table_col_kind(header)
+    if kind == "wide":
+        return 2.0
+    if kind == "narrow":
+        return 0.5
+    if kind == "medium":
+        return 0.85
+    if kind == "medium_num":
+        return 0.65
+    return 1.0
+
+
+def _table_col_widths_pts(headers: list, total_width: float) -> list:
+    """Absolute point widths that sum to total_width, biased by header kind."""
+    hs = list(headers or []) or ["col"]
+    n = len(hs)
+    if n <= 0:
+        return []
+    tw = float(total_width or 460)
+    if n == 1:
+        return [tw]
+    weights = [_table_col_weight(h) for h in hs]
+    s = sum(weights) or float(n)
+    widths = [tw * w / s for w in weights]
+    # Floor/ceiling so tiny columns stay readable and prose never starves
+    min_pt = max(28.0, tw * 0.06)
+    max_pt = tw * 0.62
+    widths = [min(max_pt, max(min_pt, w)) for w in widths]
+    # Renormalize after clamps
+    s2 = sum(widths) or 1.0
+    return [tw * w / s2 for w in widths]
+
+
 def _memo_md_inline(text: str) -> str:
     """Convert inline markdown in a memo line to reportlab markup. Escapes HTML
     first, then applies bold/italic/code/links so `**x**`, `*x*`, `` `x` `` and
@@ -22610,20 +22684,25 @@ def _memo_md_flowables(md_text: str, S: dict) -> list:
             for r in rows:
                 data.append([Paragraph(_memo_md_inline(c), S["tcell"]) for c in r])
             width = float(S.get("width") or 460)
-            col_w = [width / ncol] * ncol
-            tbl = Table(data, colWidths=col_w, repeatRows=1)
-            tbl.setStyle(TableStyle([
+            # Smart widths: Rationale/thesis ≈2× equal; delta / from→to / ticker ≈½×
+            col_w = _table_col_widths_pts(heads, width)
+            style_cmds = [
                 ("BACKGROUND", (0, 0), (-1, 0), NAVY),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
                 ("TOPPADDING", (0, 0), (-1, -1), 5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [_c.white, ZEBRA]),
                 ("LINEBELOW", (0, 0), (-1, -1), 0.4, GRID),
                 ("LINEAFTER", (0, 0), (-2, -1), 0.4, GRID),
                 ("BOX", (0, 0), (-1, -1), 0.5, GRID),
-            ]))
+            ]
+            for ci, h in enumerate(heads):
+                if _table_col_kind(h) in ("narrow", "medium_num"):
+                    style_cmds.append(("ALIGN", (ci, 0), (ci, -1), "RIGHT"))
+            tbl = Table(data, colWidths=col_w, repeatRows=1)
+            tbl.setStyle(TableStyle(style_cmds))
             out.append(tbl)
             from reportlab.platypus import Spacer as _Sp
             out.append(_Sp(1, 8))
@@ -26233,21 +26312,28 @@ def strategist_review_pdf(review_id: str, request: Request):
 # exact markup shown on screen. It POSTs that HTML here; we wrap it in the DGA
 # Capital letterhead and render with xhtml2pdf. Shared by the AI Analyst, the
 # Portfolio Strategist, and the Transcripts Q&A.
-def _md_table_colgroup(ncols: int) -> str:
-    """Explicit column widths (first column a bit wider for labels). Widths are
-    ABSOLUTE points, not percentages: with the embedded DejaVu Sans font,
-    xhtml2pdf miscomputes percentage column widths and the columns overlap, but
-    absolute widths render cleanly. Sized to the Letter content width (612pt −
-    ~1.5cm margins each side ≈ 524pt)."""
+def _md_table_colgroup(ncols: int, headers: list | None = None) -> str:
+    """Explicit column widths as ABSOLUTE points (xhtml2pdf mishandles %).
+
+    When *headers* are available (Portfolio Strategist / IC tables), size by
+    kind: Rationale/thesis ≈2× equal, delta / from→to / ticker ≈½×. Falls back
+    to a mild first-column bias when headers are missing.
+    Content width ≈ Letter 612pt − ~1.45cm margins each side ≈ 524pt.
+    """
     if ncols <= 1:
         return ""
-    content_w  = 524.0
-    first_frac = 0.40 if ncols >= 3 else 0.50
-    first_w    = first_frac * content_w
-    rest_w     = (content_w - first_w) / (ncols - 1)
-    cols = ['<col width="%dpt"/>' % round(first_w)] + \
-           ['<col width="%dpt"/>' % round(rest_w)] * (ncols - 1)
-    return "<colgroup>" + "".join(cols) + "</colgroup>"
+    content_w = 524.0
+    if headers and len(headers) == ncols:
+        widths = _table_col_widths_pts(headers, content_w)
+    else:
+        # Legacy fallback: first column a bit wider for labels
+        first_frac = 0.40 if ncols >= 3 else 0.50
+        first_w = first_frac * content_w
+        rest_w = (content_w - first_w) / (ncols - 1)
+        widths = [first_w] + [rest_w] * (ncols - 1)
+    return "<colgroup>" + "".join(
+        f'<col width="{round(w)}pt"/>' for w in widths
+    ) + "</colgroup>"
 
 
 def _fix_md_table_widths(html: str) -> str:
@@ -26257,7 +26343,14 @@ def _fix_md_table_widths(html: str) -> str:
          fill empties with &nbsp; so every cell has width.
       2. xhtml2pdf's auto column-sizing hogs column 1 and overlaps the rest —
          strip <thead>/<tbody> (they block colgroup widths) and inject an
-         explicit <colgroup> with absolute point widths."""
+         explicit <colgroup> with absolute point widths sized by header kind
+         (Rationale wide; delta / from→to / name compact)."""
+    def _cell_text(cell_html: str) -> str:
+        t = re.sub(r"<[^>]+>", " ", cell_html or "")
+        t = re.sub(r"&nbsp;|&#160;", " ", t, flags=re.IGNORECASE)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
     def _repl(m):
         table = m.group(0)
         # 1. fill empty cells
@@ -26266,15 +26359,47 @@ def _fix_md_table_widths(html: str) -> str:
         fr = re.search(r"<tr\b[^>]*>(.*?)</tr>", table, re.DOTALL | re.IGNORECASE)
         if not fr:
             return table
-        ncols = len(re.findall(r"<t[hd]\b", fr.group(1), re.IGNORECASE))
+        cells = re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", fr.group(1),
+                           flags=re.DOTALL | re.IGNORECASE)
+        ncols = len(cells)
         if ncols < 2:
             return table
-        # 2. strip thead/tbody + inject colgroup
+        headers = [_cell_text(c) for c in cells]
+        # 2. strip thead/tbody + inject (or replace) colgroup
         table = re.sub(r"</?(thead|tbody)\b[^>]*>", "", table, flags=re.IGNORECASE)
-        if "<colgroup" not in table.lower():
-            table = re.sub(r"(<table\b[^>]*>)",
-                           lambda mm: mm.group(1) + _md_table_colgroup(ncols),
-                           table, count=1)
+        table = re.sub(r"<colgroup\b[^>]*>.*?</colgroup>", "", table,
+                       flags=re.DOTALL | re.IGNORECASE)
+        cg = _md_table_colgroup(ncols, headers)
+        table = re.sub(r"(<table\b[^>]*>)",
+                       lambda mm: mm.group(1) + cg,
+                       table, count=1)
+        # Right-align compact numeric headers via inline style (xhtml2pdf-safe)
+        def _style_th(mm, _headers=headers):
+            full, attrs, inner = mm.group(0), mm.group(1) or "", mm.group(2)
+            # Find which th this is among the first row only — approximate by text
+            label = _cell_text(inner)
+            kind = _table_col_kind(label)
+            if kind not in ("narrow", "medium_num"):
+                return full
+            if re.search(r"text-align\s*:", attrs, re.I):
+                return full
+            if "style=" in attrs.lower():
+                attrs2 = re.sub(
+                    r'style=(["\'])(.*?)\1',
+                    lambda sm: f'style={sm.group(1)}{sm.group(2)};text-align:right{sm.group(1)}',
+                    attrs, count=1, flags=re.I,
+                )
+            else:
+                attrs2 = attrs + ' style="text-align:right"'
+            return f"<th{attrs2}>{inner}</th>"
+
+        # Only restyle header cells (first row already identified)
+        first_tr = re.search(r"<tr\b[^>]*>.*?</tr>", table, re.DOTALL | re.IGNORECASE)
+        if first_tr:
+            old_tr = first_tr.group(0)
+            new_tr = re.sub(r"<th(\b[^>]*)>(.*?)</th>", _style_th, old_tr,
+                            flags=re.DOTALL | re.IGNORECASE)
+            table = table.replace(old_tr, new_tr, 1)
         return table
     return re.sub(r'<table class="md-table">.*?</table>', _repl, html or "",
                   flags=re.DOTALL | re.IGNORECASE)
