@@ -50,11 +50,13 @@ from .master_deck import (
     master_pdf_path,
 )
 from .wedding_agent import (
+    apply_stripe_checkout_session,
     capture_couple_lead,
     import_wedding_library,
     run_wedding_pipeline,
     run_wedding_sales_agent,
     seed_default_partnerships,
+    verify_stripe_webhook_signature,
     wedding_public_config,
     wedding_ready_list,
 )
@@ -725,6 +727,62 @@ def create_api_router() -> APIRouter:
         except Exception as exc:
             print(f"[sliw] public wedding lead failed: {exc!r}", flush=True)
             raise HTTPException(status_code=500, detail="Could not save lead") from exc
+
+    @r.post("/public/stripe-webhook")
+    async def public_stripe_webhook(request: Request) -> dict[str, Any]:
+        """Stripe Payment Link / Checkout webhook → wedding CRM stage `won`.
+
+        Env:
+          STRIPE_WEBHOOK_SECRET (whsec_…) required for signature verification.
+        Events handled:
+          - checkout.session.completed
+          - checkout.session.async_payment_succeeded
+        """
+        payload = await request.body()
+        sig = request.headers.get("stripe-signature") or ""
+        secret = (os.environ.get("STRIPE_WEBHOOK_SECRET") or "").strip()
+        if not secret:
+            print("[sliw] stripe webhook: STRIPE_WEBHOOK_SECRET not set", flush=True)
+            raise HTTPException(status_code=503, detail="Webhook not configured")
+        if not verify_stripe_webhook_signature(payload, sig, secret):
+            raise HTTPException(status_code=400, detail="Invalid signature")
+        try:
+            event = json.loads(payload.decode("utf-8"))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid JSON") from exc
+
+        etype = event.get("type") or ""
+        data_obj = (event.get("data") or {}).get("object") or {}
+        if etype in (
+            "checkout.session.completed",
+            "checkout.session.async_payment_succeeded",
+        ):
+            # Only fulfill paid/complete sessions
+            status = (data_obj.get("payment_status") or data_obj.get("status") or "").lower()
+            if etype == "checkout.session.completed" and status not in (
+                "paid",
+                "no_payment_required",
+                "complete",
+                "",
+            ):
+                # unpaid / processing — wait for async success
+                if status in ("unpaid", "processing"):
+                    return {"ok": True, "ignored": True, "reason": f"payment_status={status}"}
+            try:
+                result = apply_stripe_checkout_session(data_obj)
+                print(
+                    f"[sliw] stripe webhook {etype}: prospect={result.get('prospect_id')} "
+                    f"pkg={result.get('package')} created={result.get('created')}",
+                    flush=True,
+                )
+                return {"ok": True, "handled": etype, **{k: result.get(k) for k in (
+                    "prospect_id", "package", "stage", "created", "deduped"
+                )}}
+            except Exception as exc:
+                print(f"[sliw] stripe webhook handler failed: {exc!r}", flush=True)
+                raise HTTPException(status_code=500, detail="Handler failed") from exc
+
+        return {"ok": True, "ignored": True, "type": etype}
 
     @r.get("/wedding/packages")
     def wedding_packages(request: Request) -> list[dict[str, Any]]:

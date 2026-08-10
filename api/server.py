@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui448-20260810-weddings-option-a"
+WEB_BUILD_VERSION = "ui449-20260810-weddings-stripe-media"
 
 
 @app.get("/api/build")
@@ -35565,8 +35565,14 @@ def _mount_sliw_agent() -> None:
                     media = "application/javascript"
                 elif target.suffix == ".svg":
                     media = "image/svg+xml"
-                elif target.suffix in (".png", ".jpg", ".jpeg", ".webp"):
+                elif target.suffix in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
                     media = f"image/{target.suffix.lstrip('.').replace('jpg', 'jpeg')}"
+                elif target.suffix == ".mp4":
+                    media = "video/mp4"
+                elif target.suffix == ".webm":
+                    media = "video/webm"
+                elif target.suffix == ".json":
+                    media = "application/json"
                 return FileResponse(
                     str(target),
                     media_type=media,

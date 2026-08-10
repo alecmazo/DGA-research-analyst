@@ -1,133 +1,162 @@
 # Weddings Option A — Launch checklist
 
-## What’s live in this repo
+## What’s live
 
 | Piece | Path / URL |
 |-------|------------|
 | Storefront | `apps/sliw-agent/weddings-site/` |
 | Preview on DGA | `https://portfolio.dgacapital.com/weddings-site/` |
-| Production host | `https://weddings.edytasliwinska.com/` (after DNS) |
+| Production host | `https://weddings.edytasliwinska.com/` |
 | Public API config | `GET /api/sliw/public/wedding-config` |
 | Public lead form | `POST /api/sliw/public/wedding-lead` |
+| Stripe webhook | `POST /api/sliw/public/stripe-webhook` |
 | Edyta desk | `https://portfolio.dgacapital.com/sliw/` → **Weddings** → **Couples inbox** |
 | Logins | `alecmazo1@gmail.com` + `edytasliw@gmail.com` only |
 
-## 1. DNS (weddings.edytasliwinska.com) — EXACT RECORDS
+---
 
-**Railway side is already done** (custom domain added to `web` service, port 8080).
+## Funnel (how a person reaches the page → pays)
 
-You only need to add DNS at the registrar that owns **edytasliwinska.com** (almost certainly **GoDaddy**, same place the site is hosted).
-
-### Record A (required) — route traffic
-
-| Field | Value |
-|--------|--------|
-| Type | **CNAME** |
-| Name / Host | **`weddings`** |
-| Value / Points to | **`61cyun23.up.railway.app`** |
-| TTL | 600 or 1 hour |
-
-### Record B (required for SSL) — ownership verify
-
-| Field | Value |
-|--------|--------|
-| Type | **TXT** (or CNAME if GoDaddy only shows that for `_railway-verify`) |
-| Name / Host | **`_railway-verify.weddings`** |
-| Value | **`railway-verify=fbf73b839bdc2a65b6709b53d365c552d13cf54f861c5a20e7ffb6daebb83c44`** |
-| TTL | 600 |
-
-> If GoDaddy’s “Name” field already appends `.edytasliwinska.com`, enter **only** `weddings` and `_railway-verify.weddings` — do **not** type the full domain twice.
-
-### After you save
-
-1. Wait 5–30 minutes (sometimes up to a few hours).
-2. Check: `https://weddings.edytasliwinska.com/`
-3. Form posts same-origin to `/api/sliw/public/wedding-lead`.
-
-### Until DNS works
-
-Preview: `https://portfolio.dgacapital.com/weddings-site/`
-
-## 2. Calendly
-
-1. Create a free/pro Calendly event: **“Wedding dance discovery (15 min)”**.
-2. Location: phone or Zoom; buffer 10 min.
-3. Copy the **event link** (e.g. `https://calendly.com/you/wedding-discovery`).
-4. Railway env:
-   ```bash
-   SLIW_WEDDING_CALENDLY_URL=https://calendly.com/YOUR_LINK
-   ```
-5. Redeploy / restart. Storefront “Schedule” button lights up.
-
-There is no bundled Grok Calendly skill yet — use the env URL + optional embed later.
-
-## 3. Stripe (sandbox → live)
-
-You’re mid-setup. When ready:
-
-### Payment Links (simplest for Option A)
-
-1. Stripe Dashboard → **Payment Links** (test mode first).
-2. Create:
-   - **Private wedding lesson ×1** — $150 one-time  
-   - **Wedding package ×10** — $1,250 one-time  
-3. Copy each Payment Link URL.
-4. Railway env (sandbox):
-   ```bash
-   SLIW_WEDDING_STRIPE_MODE=sandbox
-   SLIW_WEDDING_STRIPE_LINK_SINGLE=https://buy.stripe.com/test_...
-   SLIW_WEDDING_STRIPE_LINK_PACKAGE10=https://buy.stripe.com/test_...
-   ```
-5. When going live, create **live** Payment Links and set:
-   ```bash
-   SLIW_WEDDING_STRIPE_MODE=live
-   SLIW_WEDDING_STRIPE_LINK_SINGLE=https://buy.stripe.com/...
-   SLIW_WEDDING_STRIPE_LINK_PACKAGE10=https://buy.stripe.com/...
-   ```
-
-### API keys (later)
-
-Sandbox secret keys are **not** required for Payment Links alone.  
-If you later want Checkout Sessions / webhooks:
-
-```bash
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PUBLISHABLE_KEY=pk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+```text
+  Awareness                          Landing                         Convert
+ ──────────                         ────────                        ────────
+  Instagram bio / Reel CTA  ──┐
+  X / Twitter link          ──┤
+  edytasliwinska.com link   ──┼──►  weddings.edytasliwinska.com
+  Planner referral email    ──┤         │
+  Google (brand / local)    ──┘         ├── #how  (3 steps)
+                                        ├── #studio (media, when added)
+                                        ├── #packages
+                                        ├── #proof (quotes)
+                                        └── #book
+                                              ├── Form → CRM stage `scored`
+                                              ├── Calendly → discovery call
+                                              └── Stripe Pay → CRM stage `won`
+                                                    (webhook, payment_status=paid)
 ```
 
-**Do not commit keys to git.** Paste into Railway variables only.  
-When you have sandbox keys ready, say so and we can wire Checkout + webhook → CRM stage `discovery_booked` / `won`.
+### Entry URLs (always use tagged links)
 
-## 4. Edyta daily loop (Sliw)
+| Channel | Link |
+|---------|------|
+| Instagram bio / Stories | `https://weddings.edytasliwinska.com/?src=instagram` |
+| Instagram Reels CTA | `https://weddings.edytasliwinska.com/?src=instagram&utm_campaign=reel_firstdance` |
+| X / Twitter | `https://weddings.edytasliwinska.com/?src=x` |
+| Main site button | `https://weddings.edytasliwinska.com/?src=main_site` |
+| Planner email | `https://weddings.edytasliwinska.com/?src=planner&utm_campaign=partner` |
+| Paid ads (later) | `...?utm_source=meta&utm_medium=paid&utm_campaign=…` |
+
+UTMs land on the CRM prospect (`utm_source` / medium / campaign).
+
+### Paths after landing (best → good)
+
+1. **Fast pay (hottest):** Packages → Stripe $150 or $1,250 → green success banner → form for wedding date (same email) → Sliw **Couples inbox** shows paid lead first.
+2. **Discovery first:** Calendly 15 min → form → call → send Payment Link if not already paid.
+3. **Form only:** Soft leads, stage `scored` → same-day call/text from desk.
+
+Webhook endpoint (live):  
+`https://weddings.edytasliwinska.com/api/sliw/public/stripe-webhook`  
+Events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`  
+Env: `STRIPE_WEBHOOK_SECRET=whsec_…` (Railway only — never commit).
+
+### Live Payment Links
+
+| Product | Amount | Link |
+|---------|--------|------|
+| Single lesson | $150 | `SLIW_WEDDING_STRIPE_LINK_SINGLE` |
+| Package ×10 | $1,250 | `SLIW_WEDDING_STRIPE_LINK_PACKAGE10` |
+| Mode | `live` | `SLIW_WEDDING_STRIPE_MODE=live` |
+
+---
+
+## Marketing to finish the sale (priority order)
+
+### 1) Make the page visual (not text-heavy)
+
+Drop assets into `apps/sliw-agent/weddings-site/media/` and edit `manifest.json`:
+
+- **Hero** — one strong photo or 8–12s silent loop (first-dance energy).
+- **3 clips** — week-1 vs week-8, studio vibe, planner-friendly shot.
+- Prefer **YouTube unlisted / IG Reel embeds** (`type: "embed"`) so Railway doesn’t host huge MP4s.
+
+Empty manifest = gallery stays hidden (no empty placeholders). Quotes stay as-is.
+
+### 2) Social content that sells (this week)
+
+| Asset | Purpose | CTA |
+|-------|---------|-----|
+| Reel: “Never danced → first dance” 15–30s | Remove fear | Link in bio → trial $150 |
+| Reel: DWTS pro coaching close-up | Authority | Book discovery |
+| Carousel: 3 steps (Discovery → Trial → Package) | Clarity | Site link |
+| Story poll: “Wedding in 2026?” | Warm list | DM → link |
+| Planner story: “I send couples to Edyta” | B2B | Partner email |
+
+Pin one “Book your first dance” highlight on IG with the tagged URL.
+
+### 3) Close the loop same day (ops)
+
+Sliw daily (Alec or Edyta):
+
+1. **Couples inbox** — new form + **paid** leads sorted first.
+2. Call / text within hours: “Saw your booking — when’s the wedding?”
+3. Paid but no form → still call using Stripe email/phone; mark notes.
+4. After first lesson scheduled → set `lessons_scheduled=true` (or stage note) so they leave the “needs scheduling” queue.
+5. Planners & venues — separate channel for B2B pipeline.
+
+### 4) Offer ladder (copy you can paste)
+
+- Soft: “15-min discovery — no commitment”
+- Core: “$150 private trial — leave with steps”
+- Hero: “$1,250 ×10 — polished first dance”
+- Upsell: “Dream + day-of” (custom, form only)
+
+Never invent testimonials, logos, or prices.
+
+---
+
+## Media setup (operators)
+
+See `weddings-site/media/README.md`.
+
+Railway env override (optional): `SLIW_WEDDING_MEDIA_JSON='{"hero":{...},"clips":[...]}'`
+
+---
+
+## Stripe status
+
+- [x] Live products + prices  
+- [x] Live Payment Links wired to storefront  
+- [x] Webhook → CRM `won` + `payment_status=paid`  
+- [x] Return URL banner `?paid=single` / `?paid=package10`  
+- [ ] Optional later: Stripe Tax, receipts branding, restricted API key for advanced Checkout Sessions  
+
+Webhook secret only needs `STRIPE_WEBHOOK_SECRET`. Payment Links do **not** require `STRIPE_SECRET_KEY` on the server.
+
+---
+
+## DNS (already done if site loads)
+
+CNAME `weddings` → Railway service domain; verify TXT if requested.
+
+---
+
+## Edyta daily loop (Sliw)
 
 1. Log in at portfolio.dgacapital.com (Edyta or Alec).
 2. Open **Sliw** (top nav — only Alec + Edyta see it).
 3. **Weddings** tab → **Couples inbox**.
-4. Open each new form lead → call / text → mark stage in Work.
+4. Open each new form / paid lead → call / text → schedule lessons.
 5. Then **Planners & venues** for partnership outreach.
 
-## 5. Instagram / X
+---
 
-IG bio / link-in-bio:
+## Test checklist
 
-```text
-https://weddings.edytasliwinska.com/?src=instagram
-```
-
-X:
-
-```text
-https://weddings.edytasliwinska.com/?src=x
-```
-
-UTMs land on the lead in Sliw (`utm_source`).
-
-## 6. Content (non-code, this week)
-
-- 5 Reels: “week 1 → week 8”, zero experience, 15-sec DWTS intro  
-- 3 real testimonials (names optional) to replace placeholders on the site  
-- One planner one-pager PDF (optional, Materials in Sliw)
+1. Open `https://weddings.edytasliwinska.com/` — packages + Calendly + Pay buttons live.  
+2. `GET /api/sliw/public/wedding-config` — stripe mode `live`, both links non-empty.  
+3. Form submit with test email → appears in Couples inbox.  
+4. (Optional live $150) pay with real card → webhook logs → prospect `won` / paid badge; success banner on return. Refund in Stripe Dashboard if needed.  
+5. Drop a hero image into `media/` + update manifest → redeploy → visual hero.
 
 ## Success (90 days)
 

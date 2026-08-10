@@ -298,9 +298,15 @@ def pipeline_summary(book: str = "corporate") -> dict[str, int]:
 
 
 def interested_leads(book: str = "corporate") -> list[dict[str, Any]]:
-    return list_prospects(stage="interested", book=book) + list_prospects(
+    out = list_prospects(stage="interested", book=book) + list_prospects(
         stage="discovery_booked", book=book
     )
+    if book == "wedding":
+        # Paid couples (stage won) still need scheduling until lessons_scheduled=true
+        for p in list_prospects(stage="won", book=book):
+            if p.get("payment_status") == "paid" and not p.get("lessons_scheduled"):
+                out.append(p)
+    return out
 
 
 # ── Partnerships ──────────────────────────────────────────────────────────────

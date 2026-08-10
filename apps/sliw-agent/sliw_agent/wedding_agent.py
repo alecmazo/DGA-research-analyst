@@ -606,28 +606,29 @@ def wedding_ready_list(limit: int = 12, *, channel: str | None = None) -> list[d
     channel: None = all, "couple" = web form couples, "partner" = planners/venues.
     """
     prospects = crm.list_prospects(book="wedding")
-    ranked = [
-        p for p in prospects
-        if p.get("stage") not in ("won", "lost")
-    ]
+    ranked = []
+    for p in prospects:
+        stage = p.get("stage") or ""
+        if stage == "lost":
+            continue
+        # Keep paid "won" couples visible until lessons are scheduled
+        if stage == "won":
+            if p.get("payment_status") == "paid" and not p.get("lessons_scheduled"):
+                ranked.append(p)
+            continue
+        ranked.append(p)
     if channel == "couple":
         ranked = [p for p in ranked if _is_couple_lead(p)]
     elif channel == "partner":
         ranked = [p for p in ranked if not _is_couple_lead(p)]
-    # Couples (inbound) first by recency, then partners by score
+    # Paid first, then couples, then score
     def _sort_key(p: dict[str, Any]) -> tuple:
+        paid = 0 if p.get("payment_status") == "paid" else 1
         is_c = 0 if _is_couple_lead(p) else 1
-        # newer first for couples
         updated = p.get("updated_at") or p.get("created_at") or ""
-        return (is_c, -(p.get("score") or 0), updated)
+        return (paid, is_c, -(p.get("score") or 0), updated)
+
     ranked.sort(key=_sort_key)
-    # For mixed list, prefer high score for partners but still show couples
-    if channel is None:
-        ranked.sort(key=lambda p: (
-            0 if _is_couple_lead(p) else 1,
-            -(p.get("score") or 0),
-            p.get("company") or "",
-        ))
     out = []
     for p in ranked[:limit]:
         pkg = (p.get("recommended_packages") or [{}])[0]
@@ -653,6 +654,8 @@ def wedding_ready_list(limit: int = 12, *, channel: str | None = None) -> list[d
             "has_draft": bool(p.get("outreach_path") or p.get("sequence_paths")),
             "has_contact": bool(p.get("contacts")),
             "created_at": p.get("created_at") or "",
+            "payment_status": p.get("payment_status") or "",
+            "paid_package": p.get("paid_package") or "",
         })
     return out
 
@@ -794,9 +797,40 @@ def capture_couple_lead(
     }
 
 
+def _load_media_manifest() -> dict[str, Any]:
+    """Optional visual assets for the storefront (images / video / embeds).
+
+    Priority:
+      1) SLIW_WEDDING_MEDIA_JSON env (JSON string)
+      2) weddings-site/media/manifest.json
+    Empty / missing → storefront hides the gallery (no text-wall placeholders).
+    """
+    import os
+
+    raw = (os.environ.get("SLIW_WEDDING_MEDIA_JSON") or "").strip()
+    if raw:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    path = Path(__file__).resolve().parent.parent / "weddings-site" / "media" / "manifest.json"
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return {"hero": None, "clips": []}
+
+
 def wedding_public_config() -> dict[str, Any]:
     """Public config for the storefront (no secrets)."""
     import os
+
+    media = _load_media_manifest()
     return {
         "ok": True,
         "brand": {
@@ -816,5 +850,238 @@ def wedding_public_config() -> dict[str, Any]:
             "package_10": (os.environ.get("SLIW_WEDDING_STRIPE_LINK_PACKAGE10") or "").strip(),
             "mode": (os.environ.get("SLIW_WEDDING_STRIPE_MODE") or "sandbox").strip(),
         },
+        "media": {
+            "hero": media.get("hero"),
+            "clips": media.get("clips") or [],
+        },
         "form_endpoint": "/api/sliw/public/wedding-lead",
     }
+
+
+# Known live Payment Link IDs (fallback if metadata missing on session).
+_PLINK_SINGLE = "plink_1U32GPGfn1u1jQca3ehKC5xp"
+_PLINK_PACKAGE10 = "plink_1U32GQGfn1u1jQcaeTrYJpnr"
+
+
+def _package_from_stripe_session(session: dict[str, Any]) -> str:
+    """Map a Checkout Session to package_id: single_lesson | package_10 | dream."""
+    meta = session.get("metadata") or {}
+    pkg = (meta.get("package_id") or meta.get("package") or "").strip().lower()
+    if pkg in ("single_lesson", "package_10", "dream", "single", "package10"):
+        if pkg in ("single",):
+            return "single_lesson"
+        if pkg in ("package10",):
+            return "package_10"
+        return pkg
+
+    plink = session.get("payment_link") or ""
+    if isinstance(plink, dict):
+        plink = plink.get("id") or ""
+    plink = str(plink)
+    if plink == _PLINK_SINGLE or plink.endswith("3ehKC5xp"):
+        return "single_lesson"
+    if plink == _PLINK_PACKAGE10 or plink.endswith("eTrYJpnr"):
+        return "package_10"
+
+    amount = session.get("amount_total")
+    try:
+        cents = int(amount) if amount is not None else -1
+    except (TypeError, ValueError):
+        cents = -1
+    if cents == 15000:
+        return "single_lesson"
+    if cents == 125000:
+        return "package_10"
+    return "package_10" if cents and cents >= 100000 else "single_lesson"
+
+
+def apply_stripe_checkout_session(session: dict[str, Any]) -> dict[str, Any]:
+    """Mark a wedding CRM prospect won from a paid Stripe Checkout Session.
+
+    Matches existing couple by customer email when possible; otherwise creates
+    a paid lead. Idempotent on stripe_session_id.
+    """
+    if not isinstance(session, dict):
+        return {"ok": False, "error": "invalid session"}
+
+    session_id = (session.get("id") or "").strip()
+    email = (
+        (session.get("customer_details") or {}).get("email")
+        or session.get("customer_email")
+        or ""
+    ).strip().lower()
+    name = (
+        (session.get("customer_details") or {}).get("name")
+        or (session.get("customer_details") or {}).get("phone")
+        or ""
+    )
+    phone = ((session.get("customer_details") or {}).get("phone") or "").strip()
+    amount_total = session.get("amount_total")
+    currency = (session.get("currency") or "usd").upper()
+    pkg = _package_from_stripe_session(session)
+    pkg_label = {
+        "single_lesson": "Private wedding lesson ×1 ($150)",
+        "package_10": "Wedding lesson package ×10 ($1,250)",
+        "dream": "Dream Wedding Dance",
+    }.get(pkg, pkg)
+
+    dollars = ""
+    try:
+        if amount_total is not None:
+            dollars = f"${int(amount_total) / 100:,.2f}"
+    except Exception:
+        dollars = str(amount_total)
+
+    payment_note = (
+        f"STRIPE PAID · {pkg_label} · {dollars} {currency} · session={session_id or '—'}"
+    ).strip()
+
+    # Idempotency: already processed this session?
+    existing = crm.list_prospects(book="wedding")
+    for p in existing:
+        if session_id and (p.get("stripe_session_id") or "") == session_id:
+            return {
+                "ok": True,
+                "deduped": True,
+                "prospect_id": p["id"],
+                "stage": p.get("stage"),
+                "package": pkg,
+            }
+
+    # Match by email among couples
+    matched = None
+    if email:
+        for p in existing:
+            contacts = p.get("contacts") or []
+            emails = {(c.get("email") or "").lower() for c in contacts}
+            if email in emails and _is_couple_lead(p):
+                matched = p
+                break
+
+    if matched:
+        notes = ((matched.get("notes") or "") + "\n---\n" + payment_note).strip()
+        updated = crm.update_prospect(
+            matched["id"],
+            book="wedding",
+            notes=notes,
+            package_interest=pkg,
+            stripe_session_id=session_id,
+            stripe_amount_total=amount_total,
+            stripe_currency=currency,
+            payment_status="paid",
+            paid_package=pkg,
+        )
+        # Paid = won (money in). Note keeps package detail.
+        crm.set_stage(
+            matched["id"],
+            "won",
+            note=payment_note,
+            book="wedding",
+        )
+        return {
+            "ok": True,
+            "deduped": False,
+            "created": False,
+            "prospect_id": matched["id"],
+            "stage": "won",
+            "package": pkg,
+            "company": updated.get("company"),
+            "email": email,
+        }
+
+    # No prior form fill — create paid couple lead
+    display = (name or "").strip() or (email.split("@")[0] if email else "Stripe buyer")
+    company = f"Couple: {display}" if display else f"Couple: {email or 'paid'}"
+    scored = score_wedding_lead(
+        company=company,
+        industry="Wedding couple",
+        geo="Bay Area",
+        notes=payment_note,
+        signals=["stripe_paid", "couple", f"pkg:{pkg}"],
+        package_hint=pkg,
+        priority=10,
+    )
+    contact: dict[str, Any] = {"name": display}
+    if email:
+        contact["email"] = email
+    if phone:
+        contact["phone"] = phone
+
+    p = crm.upsert_prospect(
+        company=company,
+        industry="Wedding couple",
+        geo="Bay Area",
+        notes=payment_note,
+        signals=["stripe_paid", "couple", f"pkg:{pkg}"],
+        contacts=[contact],
+        book="wedding",
+        extra={
+            "source": "stripe",
+            "lead_channel": "couple",
+            "channel_label": "Couple (Stripe payment)",
+            "package_interest": pkg,
+            "paid_package": pkg,
+            "payment_status": "paid",
+            "stripe_session_id": session_id,
+            "stripe_amount_total": amount_total,
+            "stripe_currency": currency,
+            "recommended_packages": scored["recommended_packages"],
+            "score": scored["score"],
+            "tier": scored["tier"],
+            "score_breakdown": scored["breakdown"],
+            "agent_note": "Paid via Stripe — call/text same day to schedule lessons.",
+            "stage": "won",
+            "partner1_name": display,
+        },
+    )
+    # Ensure history shows won
+    if p.get("stage") != "won":
+        crm.set_stage(p["id"], "won", note=payment_note, book="wedding")
+
+    return {
+        "ok": True,
+        "deduped": False,
+        "created": True,
+        "prospect_id": p["id"],
+        "stage": "won",
+        "package": pkg,
+        "company": p.get("company"),
+        "email": email,
+    }
+
+
+def verify_stripe_webhook_signature(
+    payload: bytes,
+    sig_header: str,
+    secret: str,
+    *,
+    tolerance_sec: int = 300,
+) -> bool:
+    """HMAC-SHA256 verify Stripe-Signature without the stripe SDK."""
+    import hashlib
+    import hmac
+    import time
+
+    if not secret or not sig_header or not payload:
+        return False
+    parts: dict[str, list[str]] = {}
+    for item in sig_header.split(","):
+        item = item.strip()
+        if "=" not in item:
+            continue
+        k, v = item.split("=", 1)
+        parts.setdefault(k.strip(), []).append(v.strip())
+    try:
+        timestamp = int((parts.get("t") or ["0"])[0])
+    except ValueError:
+        return False
+    if abs(int(time.time()) - timestamp) > tolerance_sec:
+        return False
+    signed = f"{timestamp}.".encode("utf-8") + payload
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        signed,
+        hashlib.sha256,
+    ).hexdigest()
+    candidates = parts.get("v1") or []
+    return any(hmac.compare_digest(expected, c) for c in candidates)
