@@ -2118,7 +2118,10 @@
           </div>
           <div class="wl-right">
             <div class="wl-px">${pxHtml}</div>
-            <div class="wl-chg ${cssClass(q.pct)}">${fmtPct(q.pct)}</div>
+            <div class="wl-chg-row">
+              <span class="wl-chg ${cssClass(q.pct)}" title="Day %">${fmtPct(q.pct)}</span>
+              <span class="wl-ytd ${cssClass(q.ytd != null ? q.ytd : q.ytd_pct)}" title="YTD %">${fmtPct(q.ytd != null ? q.ytd : q.ytd_pct)}</span>
+            </div>
           </div>
           <button type="button" class="wl-remove" data-remove="${tk}" title="Remove">×</button>
         </div>

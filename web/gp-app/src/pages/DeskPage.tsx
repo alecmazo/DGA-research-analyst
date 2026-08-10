@@ -106,8 +106,13 @@ export function DeskPage() {
       .map((tk) => {
         const q = quotes[tk] || {}
         const pct = quotePct(q)
+        const ytdRaw = q.ytd ?? q.ytd_pct
+        const ytd =
+          ytdRaw == null || Number.isNaN(Number(ytdRaw))
+            ? null
+            : Number(ytdRaw)
         const earn = earnings[tk] || null
-        return { tk, q, pct, earn, abs: pct == null ? -1 : Math.abs(pct) }
+        return { tk, q, pct, ytd, earn, abs: pct == null ? -1 : Math.abs(pct) }
       })
       .sort((a, b) => b.abs - a.abs)
   }, [wl])
@@ -228,26 +233,29 @@ export function DeskPage() {
                 <tr>
                   <th>Ticker</th>
                   <th className="tabular">Last</th>
-                  <th className="tabular">Day %</th>
+                  <th className={`tabular ${styles.colDay}`}>Day %</th>
+                  <th className={`tabular ${styles.colYtd}`} title="Calendar year-to-date return">
+                    YTD
+                  </th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {loading && !rows.length && (
                   <tr>
-                    <td colSpan={4} className={styles.empty}>
+                    <td colSpan={5} className={styles.empty}>
                       Loading quotes…
                     </td>
                   </tr>
                 )}
                 {!loading && !rows.length && (
                   <tr>
-                    <td colSpan={4} className={styles.empty}>
+                    <td colSpan={5} className={styles.empty}>
                       No tickers yet — add a name above.
                     </td>
                   </tr>
                 )}
-                {rows.map(({ tk, q, pct, earn }) => (
+                {rows.map(({ tk, q, pct, ytd, earn }) => (
                   <tr
                     key={tk}
                     className={earn ? styles.rowEarn : undefined}
@@ -291,7 +299,19 @@ export function DeskPage() {
                       </div>
                     </td>
                     <td className="tabular">{fmtPx(q.price)}</td>
-                    <td className={`tabular ${pctClass(pct)}`}>{fmtPct(pct)}</td>
+                    <td className={`tabular ${styles.colDay} ${pctClass(pct)}`}>
+                      {fmtPct(pct)}
+                    </td>
+                    <td
+                      className={`tabular ${styles.colYtd} ${pctClass(ytd)}`}
+                      title={
+                        ytd == null
+                          ? 'YTD unavailable (no Jan price in store)'
+                          : 'Calendar year-to-date %'
+                      }
+                    >
+                      {fmtPct(ytd)}
+                    </td>
                     <td className={styles.actions}>
                       <button
                         type="button"

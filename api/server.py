@@ -3776,6 +3776,96 @@ def _watchlist_earnings_for(tickers: list[str],
     return {}
 
 
+# Per-ticker calendar YTD % for watchlist chips (process cache, free DB only).
+_WL_YTD_CACHE: dict = {}          # symbol -> (epoch, ytd_pct | None)
+_WL_YTD_TTL_S = 15 * 60
+
+
+def _watchlist_ytd_pcts(tickers: list[str],
+                        live_prices: dict | None = None) -> dict[str, float]:
+    """Calendar YTD % for watchlist names from price_history + live last.
+
+    Uses first available close on/after Jan 1 of the current year vs the
+    latest live (or store) price. Pure Postgres — no Yahoo on the request
+    path so Desk stays snappy. Missing history → ticker omitted.
+    """
+    out: dict[str, float] = {}
+    if not tickers:
+        return out
+    now = time.time()
+    need: list[str] = []
+    for tk in tickers:
+        sym = (tk or "").strip().upper()
+        if not sym:
+            continue
+        hit = _WL_YTD_CACHE.get(sym)
+        if hit and (now - float(hit[0])) < _WL_YTD_TTL_S:
+            if hit[1] is not None:
+                out[sym] = hit[1]
+        else:
+            need.append(sym)
+    if not need or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return out
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            # First close of current calendar year + latest close, bulk.
+            cur.execute("""
+                WITH t AS (
+                    SELECT unnest(%s::text[]) AS symbol
+                ),
+                firsts AS (
+                    SELECT DISTINCT ON (p.symbol)
+                           p.symbol, p.close AS jan_close, p.d AS jan_d
+                      FROM price_history p
+                      JOIN t ON t.symbol = p.symbol
+                     WHERE p.d >= date_trunc('year', CURRENT_DATE)::date
+                       AND p.close IS NOT NULL AND p.close > 0
+                     ORDER BY p.symbol, p.d ASC
+                ),
+                lasts AS (
+                    SELECT DISTINCT ON (p.symbol)
+                           p.symbol, p.close AS last_close
+                      FROM price_history p
+                      JOIN t ON t.symbol = p.symbol
+                     WHERE p.close IS NOT NULL AND p.close > 0
+                     ORDER BY p.symbol, p.d DESC
+                )
+                SELECT f.symbol, f.jan_close, l.last_close
+                  FROM firsts f
+                  JOIN lasts  l USING (symbol)
+            """, (need,))
+            rows = cur.fetchall() or []
+        live = live_prices or {}
+        found: set[str] = set()
+        for r in rows:
+            sym = (r.get("symbol") or "").upper()
+            try:
+                jan = float(r.get("jan_close") or 0)
+            except (TypeError, ValueError):
+                jan = 0.0
+            if not sym or jan <= 0:
+                continue
+            px = live.get(sym)
+            if px is None:
+                try:
+                    px = float(r.get("last_close") or 0) or None
+                except (TypeError, ValueError):
+                    px = None
+            if px is None or float(px) <= 0:
+                continue
+            ytd = round((float(px) / jan - 1.0) * 100.0, 2)
+            out[sym] = ytd
+            _WL_YTD_CACHE[sym] = (now, ytd)
+            found.add(sym)
+        # Cache misses so we don't re-query empty names every 45s poll
+        for sym in need:
+            if sym not in found and sym not in _WL_YTD_CACHE:
+                _WL_YTD_CACHE[sym] = (now, None)
+    except Exception as e:
+        print(f"[watchlist] ytd bulk failed: {e!s:.160}", flush=True)
+    return out
+
+
 @app.get("/api/watchlist")
 def watchlist_get(request: Request):
     """Fast watchlist for login / desk paint.
@@ -3784,6 +3874,7 @@ def watchlist_get(request: Request):
     process cache → market_quotes store → Yahoo chart (hard 6s wall).
     Earnings chips: process-cached Nasdaq calendar, ≤4s budget, never hangs
     the list (stale-while-revalidate + background refresh).
+    YTD %: bulk from price_history (calendar year first close vs live last).
     """
     t0 = time.time()
     tickers: list[str] = []
@@ -3895,6 +3986,23 @@ def watchlist_get(request: Request):
                 print(f"[watchlist] earnings failed: {e!s:.160}", flush=True)
                 earnings_map = {}
 
+        # Calendar YTD % (small column next to Day %) — free price_history
+        if tickers:
+            try:
+                live_px = {
+                    tk: (quotes.get(tk) or {}).get("price")
+                    for tk in tickers
+                    if (quotes.get(tk) or {}).get("price") is not None
+                }
+                ytd_map = _watchlist_ytd_pcts(tickers, live_prices=live_px) or {}
+                for tk, ytd in ytd_map.items():
+                    if tk not in quotes:
+                        quotes[tk] = {}
+                    quotes[tk]["ytd"] = ytd
+                    quotes[tk]["ytd_pct"] = ytd
+            except Exception as e:
+                print(f"[watchlist] ytd attach failed: {e!s:.160}", flush=True)
+
         def _wl_move_key(tk: str):
             pct = (quotes.get(tk) or {}).get("pct")
             if pct is None:
@@ -3912,8 +4020,9 @@ def watchlist_get(request: Request):
         tickers_sorted = list(tickers or [])
 
     elapsed_ms = int((time.time() - t0) * 1000)
+    ytd_n = sum(1 for q in quotes.values() if q.get("ytd") is not None)
     print(f"[watchlist] ok n={len(tickers_sorted)} quotes={len(quotes)} "
-          f"earn={len(earnings_map)} {elapsed_ms}ms",
+          f"earn={len(earnings_map)} ytd={ytd_n} {elapsed_ms}ms",
           flush=True)
     return {
         "tickers": tickers_sorted,
@@ -6953,7 +7062,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui444-20260807-strategist-pdf-cols"
+WEB_BUILD_VERSION = "ui445-20260810-watchlist-ytd"
 
 
 @app.get("/api/build")

@@ -294,7 +294,9 @@ export default function MarketsScreen({ navigation }) {
       .map((tk) => {
         const q = quotes[tk] || {};
         const pct = q.pct != null ? Number(q.pct) : (q.pct_change != null ? Number(q.pct_change) : null);
-        return { tk, q, pct, abs: pct == null || isNaN(pct) ? -1 : Math.abs(pct) };
+        const ytdRaw = q.ytd != null ? q.ytd : q.ytd_pct;
+        const ytd = ytdRaw != null && !isNaN(Number(ytdRaw)) ? Number(ytdRaw) : null;
+        return { tk, q, pct, ytd, abs: pct == null || isNaN(pct) ? -1 : Math.abs(pct) };
       })
       .sort((a, b) => b.abs - a.abs);
   }, [watch]);
@@ -548,9 +550,10 @@ export default function MarketsScreen({ navigation }) {
         ) : (
           <Card style={[...cardStyle, { padding: 0 }]}>
             {watchRows.map((row, i) => {
-              const { tk, q, pct } = row;
+              const { tk, q, pct, ytd } = row;
               const up = pct == null || isNaN(pct) ? null : pct >= 0;
               const pxColor = up == null ? t.textSecondary : up ? t.pillUpFg : t.pillDownFg;
+              const ytdUp = ytd == null || isNaN(ytd) ? null : ytd >= 0;
               const open = !!wlExpanded[tk];
               return (
                 <View
@@ -578,7 +581,23 @@ export default function MarketsScreen({ navigation }) {
                   >
                     <Text style={s.wlTk}>{tk}</Text>
                     <Text style={[s.wlPx, { color: pxColor }]}>${fmtPx(q.price)}</Text>
-                    <View style={{ width: 84, alignItems: 'flex-end' }}><PctPill p={pct} t={t} /></View>
+                    <View style={{ width: 72, alignItems: 'flex-end' }}><PctPill p={pct} t={t} /></View>
+                    <View style={{ width: 64, alignItems: 'flex-end', marginLeft: 4 }}>
+                      <Text
+                        style={[
+                          s.wlYtd,
+                          {
+                            color: ytdUp == null
+                              ? t.textDim
+                              : ytdUp ? t.pillUpFg : t.pillDownFg,
+                          },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {ytd == null || isNaN(ytd) ? '—' : fmtPct(ytd)}
+                      </Text>
+                      <Text style={s.wlYtdLbl}>YTD</Text>
+                    </View>
                     <Ionicons
                       name={open ? 'chevron-up' : 'chevron-down'}
                       size={16}
@@ -834,6 +853,11 @@ function makeStyles(t) {
     wlRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14 },
     wlTk: { flex: 1, fontSize: 14, fontWeight: '800', color: t.textPrimary, letterSpacing: 0.5 },
     wlPx: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'], width: 86, textAlign: 'right', marginRight: 8 },
+    wlYtd: { fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    wlYtdLbl: {
+      fontSize: 8, fontWeight: '700', color: t.textDim, letterSpacing: 0.4,
+      marginTop: 1, textTransform: 'uppercase',
+    },
 
     runBtn: {
       backgroundColor: t.gold, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 5,

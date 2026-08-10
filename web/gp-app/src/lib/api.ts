@@ -92,6 +92,9 @@ export type Quote = {
   price?: number | null
   pct?: number | null
   pct_change?: number | null
+  /** Calendar year-to-date % (first close of year → live last). */
+  ytd?: number | null
+  ytd_pct?: number | null
   as_of?: string | null
   prev?: number | null
 }

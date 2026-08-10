@@ -2085,6 +2085,36 @@ html[data-theme="dark"] .opt-cell-empty { color: var(--gray-400); }
   line-height: 1.25;
   margin-top: 2px;
 }
+.wl-list-wrap .wl-chg-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+.wl-list-wrap .wl-chg-row .wl-chg {
+  margin-top: 0;
+  min-width: 3.4em;
+  text-align: right;
+}
+.wl-list-wrap .wl-ytd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  min-width: 3.2em;
+  text-align: right;
+  opacity: 0.92;
+}
+.wl-list-wrap .wl-ytd::before {
+  content: "Y ";
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.55;
+  color: var(--text-tertiary);
+}
 .wl-list-wrap .wl-remove {
   position: absolute;
   top: 50%;
