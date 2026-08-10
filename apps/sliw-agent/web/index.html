@@ -9,10 +9,22 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css?v=wedding2" />
   <script>
-    window.SLIW_API_BASE = window.location.pathname.indexOf("/sliw") === 0 ? "/api/sliw"
-      : (window.location.port === "8787" ? "/api" : "/api");
-    window.SLIW_REQUIRE_DGA_LOGIN = window.location.pathname.indexOf("/sliw") === 0
-      || (window.location.port !== "8787" && !["127.0.0.1","localhost"].includes(window.location.hostname));
+    (function () {
+      var host = (location.hostname || "").toLowerCase();
+      var onSliwHost = host === "sliw.edytasliwinska.com" || host === "www.sliw.edytasliwinska.com";
+      var onPath = location.pathname.indexOf("/sliw") === 0;
+      var local = ["127.0.0.1", "localhost"].indexOf(host) >= 0 && location.port === "8787";
+      // Dedicated host + /sliw path → Sliw API; local standalone uses /api
+      window.SLIW_API_BASE = (onSliwHost || onPath) ? "/api/sliw"
+        : (local ? "/api" : "/api");
+      window.SLIW_REQUIRE_DGA_LOGIN = onSliwHost || onPath
+        || (location.port !== "8787" && !local);
+      // Login: same-origin on dedicated host; DGA portfolio when mounted under /sliw
+      window.SLIW_LOGIN_URL = onSliwHost
+        ? "/login?next=/"
+        : ("/?next=" + encodeURIComponent(location.pathname || "/sliw/"));
+      window.SLIW_HOME = onSliwHost ? "/" : "/sliw/";
+    })();
   </script>
 </head>
 <body>

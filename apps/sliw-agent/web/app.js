@@ -196,6 +196,13 @@ function headers() {
   return h;
 }
 
+function loginRedirectUrl() {
+  return (
+    window.SLIW_LOGIN_URL ||
+    "/?next=" + encodeURIComponent(location.pathname || "/sliw/")
+  );
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(`${API}${path.startsWith("/") ? path : "/" + path}`, {
     ...opts,
@@ -203,7 +210,7 @@ async function api(path, opts = {}) {
   });
   if (res.status === 401 && window.SLIW_REQUIRE_DGA_LOGIN) {
     localStorage.removeItem(TOKEN_KEY);
-    window.location.replace("/?next=" + encodeURIComponent(location.pathname));
+    window.location.replace(loginRedirectUrl());
     throw new Error("Session expired");
   }
   if (!res.ok) {
@@ -221,7 +228,7 @@ function ensureAuth() {
   }
   const tok = localStorage.getItem(TOKEN_KEY);
   if (!tok) {
-    location.replace("/?next=" + encodeURIComponent(location.pathname));
+    location.replace(loginRedirectUrl());
     return false;
   }
   try {
@@ -230,7 +237,13 @@ function ensureAuth() {
       $("#brand-user").textContent = u.name || u.email || "Desk";
       if (u.email && !ALLOWED.includes(String(u.email).toLowerCase())) {
         toast("Not authorized for Sliw");
-        setTimeout(() => location.replace(u.role === "lp" ? "/lp" : "/gp"), 600);
+        const host = (location.hostname || "").toLowerCase();
+        const onSliwHost =
+          host === "sliw.edytasliwinska.com" || host === "www.sliw.edytasliwinska.com";
+        setTimeout(() => {
+          if (onSliwHost) location.replace("/login");
+          else location.replace(u.role === "lp" ? "/lp" : "/gp");
+        }, 600);
         return false;
       }
     }

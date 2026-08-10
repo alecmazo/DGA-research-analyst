@@ -253,7 +253,16 @@
   function postLoginDestination(role) {
     try {
       const raw = new URLSearchParams(window.location.search).get('next') || '';
-      // Allow /sliw and /sliw/... only (no open redirects into other apps)
+      const host = (window.location.hostname || '').toLowerCase();
+      const onSliwHost = host === 'sliw.edytasliwinska.com' || host === 'www.sliw.edytasliwinska.com';
+      // Dedicated Sliw desk host: allow / or /sliw paths only (same-origin, no open redirect)
+      if (onSliwHost) {
+        if (!raw || raw === '/' || raw === '/sliw' || raw === '/sliw/' || raw.indexOf('/sliw/') === 0) {
+          return (raw && raw.charAt(0) === '/' && raw.indexOf('//') === -1) ? (raw === '/sliw' ? '/' : raw) : '/';
+        }
+        return '/';
+      }
+      // Portfolio host: allow /sliw and /sliw/... only (no open redirects into other apps)
       if (raw === '/sliw' || raw === '/sliw/' || raw.indexOf('/sliw/') === 0) {
         if (raw.charAt(0) === '/' && raw.charAt(1) !== '/' && raw.indexOf('//') === -1) {
           return raw;

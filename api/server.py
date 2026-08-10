@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui449-20260810-weddings-stripe-media"
+WEB_BUILD_VERSION = "ui450-20260810-sliw-desk-host"
 
 
 @app.get("/api/build")
@@ -35507,6 +35507,11 @@ _WEDDINGS_HOSTS = frozenset({
     "weddings.edytasliwinska.com",
     "www.weddings.edytasliwinska.com",
 })
+# Dedicated Sliw desk host (separate from portfolio.dgacapital.com)
+_SLIW_DESK_HOSTS = frozenset({
+    "sliw.edytasliwinska.com",
+    "www.sliw.edytasliwinska.com",
+})
 
 
 def _sliw_enabled() -> bool:
@@ -35517,9 +35522,16 @@ def _sliw_enabled() -> bool:
     return _SLIW_ROOT.is_dir()
 
 
+def _request_host(request: Request) -> str:
+    return (request.headers.get("host") or "").split(":")[0].strip().lower()
+
+
 def _is_weddings_host(request: Request) -> bool:
-    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
-    return host in _WEDDINGS_HOSTS
+    return _request_host(request) in _WEDDINGS_HOSTS
+
+
+def _is_sliw_desk_host(request: Request) -> bool:
+    return _request_host(request) in _SLIW_DESK_HOSTS
 
 
 def _mount_sliw_agent() -> None:
@@ -35622,12 +35634,79 @@ def _mount_sliw_agent() -> None:
             print("[sliw] web/ missing — API only", flush=True)
             return
 
+        def _sliw_web_file(name: str, request: Request | None = None):
+            """Serve a file from apps/sliw-agent/web with safe path checks."""
+            target = (_SLIW_WEB / name).resolve()
+            try:
+                target.relative_to(_SLIW_WEB.resolve())
+            except ValueError:
+                raise HTTPException(status_code=404)
+            if not target.is_file():
+                raise HTTPException(status_code=404)
+            media = None
+            headers = {}
+            if target.suffix == ".css":
+                media = "text/css"
+                headers["Cache-Control"] = "no-cache, must-revalidate"
+            elif target.suffix == ".js":
+                media = "application/javascript"
+                headers["Cache-Control"] = "no-cache, must-revalidate"
+            elif target.suffix == ".html":
+                return _shell_response(target, request)
+            return FileResponse(str(target), media_type=media, headers=headers or None)
+
+        # Host: sliw.edytasliwinska.com → Sliw desk at / (login at /login)
+        @app.middleware("http")
+        async def _sliw_desk_host_middleware(request: Request, call_next):
+            if not _is_sliw_desk_host(request):
+                return await call_next(request)
+            path = request.url.path or "/"
+            # API, health, master PDF stay on normal routes
+            if (
+                path.startswith("/api/")
+                or path in ("/health", "/api/build")
+                or path.startswith("/sliw/media/")
+                or path.startswith("/branding/")
+            ):
+                return await call_next(request)
+            # Login shell (same DGA email+password form, same-origin token)
+            if path in ("/login", "/login/"):
+                login = WEB_DIR / "portfolio.html"
+                if login.exists():
+                    return _shell_response(login, request)
+                raise HTTPException(status_code=404, detail="Login shell missing")
+            # Desk root
+            if path in ("/", ""):
+                return _sliw_web_file("index.html", request)
+            # /sliw → desk root on this host
+            if path in ("/sliw", "/sliw/"):
+                return RedirectResponse(url="/", status_code=307)
+            # Static desk assets (app.js, style.css, …)
+            rel = path.lstrip("/")
+            if ".." in rel.split("/"):
+                raise HTTPException(status_code=404)
+            # /sliw/* on desk host → strip prefix for assets
+            if rel == "sliw" or rel.startswith("sliw/"):
+                rel = rel[len("sliw") :].lstrip("/")
+            if not rel:
+                return _sliw_web_file("index.html", request)
+            candidate = _SLIW_WEB / rel
+            if candidate.is_file():
+                return _sliw_web_file(rel, request)
+            # SPA fallback
+            return _sliw_web_file("index.html", request)
+
         @app.get("/sliw")
-        def _sliw_redir():
+        def _sliw_redir(request: Request):
+            # On dedicated host, desk lives at /
+            if _is_sliw_desk_host(request):
+                return RedirectResponse(url="/", status_code=307)
             return RedirectResponse(url="/sliw/", status_code=307)
 
         @app.get("/sliw/")
         def _sliw_index(request: Request):
+            if _is_sliw_desk_host(request):
+                return RedirectResponse(url="/", status_code=307)
             path = _SLIW_WEB / "index.html"
             if not path.exists():
                 raise HTTPException(status_code=404, detail="Sliw Agent UI not found")
@@ -35658,34 +35737,19 @@ def _mount_sliw_agent() -> None:
             )
 
         @app.get("/sliw/{asset_path:path}")
-        def _sliw_asset(asset_path: str):
+        def _sliw_asset(asset_path: str, request: Request):
             # Static assets only under apps/sliw-agent/web — no path traversal.
             if not asset_path or ".." in asset_path or asset_path.startswith(("/", "\\")):
                 raise HTTPException(status_code=404)
             # media/ is handled above
             if asset_path.startswith("media/"):
                 raise HTTPException(status_code=404)
-            target = (_SLIW_WEB / asset_path).resolve()
-            try:
-                target.relative_to(_SLIW_WEB.resolve())
-            except ValueError:
-                raise HTTPException(status_code=404)
-            if not target.is_file():
-                raise HTTPException(status_code=404)
-            media = None
-            headers = {}
-            if target.suffix == ".css":
-                media = "text/css"
-                headers["Cache-Control"] = "no-cache, must-revalidate"
-            elif target.suffix == ".js":
-                media = "application/javascript"
-                headers["Cache-Control"] = "no-cache, must-revalidate"
-            elif target.suffix == ".html":
-                media = "text/html"
-                headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            return FileResponse(str(target), media_type=media, headers=headers or None)
+            return _sliw_web_file(asset_path, request)
 
-        print("[sliw] UI mounted at /sliw/ (isolated from /gp /lp /app)", flush=True)
+        print(
+            "[sliw] UI at /sliw/ + Host sliw.edytasliwinska.com (login /login)",
+            flush=True,
+        )
     except Exception as _outer:
         # Absolute last resort — never take down DGA boot
         print(f"[sliw] mount aborted (DGA unaffected): {_outer!r}", flush=True)
