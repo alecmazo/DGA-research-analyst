@@ -120,22 +120,45 @@
   function wireCalendly(url) {
     const link = document.getElementById("calendly-link");
     const copy = document.getElementById("calendly-copy");
-    if (!url) return;
+    const embed = document.getElementById("calendly-embed");
+    if (!url) {
+      if (copy) {
+        copy.textContent =
+          "Scheduling link not connected yet — submit the form and we’ll reach out, or email admin@edytasliwinska.com.";
+      }
+      return;
+    }
     if (copy) {
-      copy.textContent = "Pick a 15-minute discovery slot. After booking, still submit the form so Edyta has your details in Sliw.";
+      copy.textContent =
+        "Pick a 15-minute discovery slot. After booking, still submit the form so your details land in Edyta’s Sliw desk.";
     }
     if (link) {
       link.hidden = false;
       link.href = url;
       link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = "Open Calendly";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Open calendar →";
     }
-    // Optional inline embed if Calendly script allowed later
-    const embed = document.getElementById("calendly-embed");
-    if (embed && url) {
+    if (embed) {
+      // Inline Calendly widget (official embed)
       embed.innerHTML =
-        `<a class="btn primary full" href="${esc(url)}" target="_blank" rel="noopener" style="margin-top:8px">Schedule discovery call</a>`;
+        '<div class="calendly-inline-widget" data-url="' +
+        esc(url) +
+        '" style="min-width:280px;height:620px;"></div>';
+      if (!document.getElementById("calendly-widget-script")) {
+        const s = document.createElement("script");
+        s.id = "calendly-widget-script";
+        s.src = "https://assets.calendly.com/assets/external/widget.js";
+        s.async = true;
+        document.body.appendChild(s);
+      } else if (window.Calendly && typeof window.Calendly.initInlineWidget === "function") {
+        try {
+          window.Calendly.initInlineWidget({
+            url: url,
+            parentElement: embed.querySelector(".calendly-inline-widget"),
+          });
+        } catch (_) {}
+      }
     }
   }
 
