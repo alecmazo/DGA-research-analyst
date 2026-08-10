@@ -1,15 +1,20 @@
 """
 Multi-book CRM for Sliw Agent (corporate + wedding) + partnerships.
 
-Storage under DATA_DIR:
-  crm.json           — corporate prospects (backward compatible)
-  wedding_crm.json    — wedding book
-  partnerships.json   — channel partners
+Primary storage (production):
+  Postgres table sliw_crm_books when DATABASE_URL is set — shared across the
+  portfolio `web` service and the dedicated `sliw` service so form posts on
+  weddings.edytasliwinska.com appear in the desk at sliw.edytasliwinska.com.
+
+Local fallback / cache:
+  DATA_DIR/crm.json, wedding_crm.json, partnerships.json
 """
 
 from __future__ import annotations
 
 import json
+import os
+import threading
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -18,7 +23,6 @@ from typing import Any
 
 
 def _resolve_data_dir() -> Path:
-    import os
     dedicated = (os.environ.get("SLIW_DATA_DIR") or "").strip()
     if dedicated:
         return Path(dedicated)
@@ -63,6 +67,10 @@ DEFAULT_CRM: dict[str, Any] = {
     "prospects": {},
 }
 
+_pg_lock = threading.Lock()
+_pg_ready = False
+_pg_ok: bool | None = None
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -101,29 +109,244 @@ def _dirs_for_book(book: str = "corporate") -> dict[str, Path]:
     }
 
 
-def load_crm(book: str = "corporate") -> dict[str, Any]:
+def _database_url() -> str:
+    return (os.environ.get("DATABASE_URL") or "").strip()
+
+
+def _use_postgres() -> bool:
+    global _pg_ok
+    if _pg_ok is not None:
+        return _pg_ok
+    if not _database_url():
+        _pg_ok = False
+        return False
+    try:
+        import psycopg2  # noqa: F401
+        _pg_ok = True
+    except Exception:
+        _pg_ok = False
+    return _pg_ok
+
+
+def _pg_connect():
+    import psycopg2
+
+    url = _database_url()
+    # Railway sometimes needs sslmode
+    return psycopg2.connect(url, connect_timeout=10)
+
+
+def _ensure_pg_schema() -> None:
+    global _pg_ready
+    if _pg_ready or not _use_postgres():
+        return
+    with _pg_lock:
+        if _pg_ready:
+            return
+        try:
+            conn = _pg_connect()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS sliw_crm_books (
+                            book TEXT PRIMARY KEY,
+                            payload JSONB NOT NULL,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS sliw_kv (
+                            key TEXT PRIMARY KEY,
+                            payload JSONB NOT NULL,
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                conn.commit()
+                _pg_ready = True
+                print("[sliw-crm] Postgres shared store ready (sliw_crm_books)", flush=True)
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"[sliw-crm] Postgres schema init failed, using files: {exc!r}", flush=True)
+            global _pg_ok
+            _pg_ok = False
+
+
+def _load_file_crm(book: str) -> dict[str, Any] | None:
     ensure_dirs()
     path = _crm_path(book)
     if not path.exists():
-        crm = deepcopy(DEFAULT_CRM)
-        crm["book"] = book
-        crm["updated_at"] = _now()
-        save_crm(crm, book=book)
-        return crm
-    data = json.loads(path.read_text(encoding="utf-8"))
-    # migrate v1 → ensure book field
-    if "book" not in data:
-        data["book"] = book
-    return data
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if "book" not in data:
+            data["book"] = book
+        if not isinstance(data.get("prospects"), dict):
+            data["prospects"] = {}
+        return data
+    except Exception as exc:
+        print(f"[sliw-crm] file read failed {path}: {exc!r}", flush=True)
+        return None
+
+
+def _write_file_crm(crm: dict[str, Any], book: str) -> None:
+    ensure_dirs()
+    crm["updated_at"] = crm.get("updated_at") or _now()
+    crm["book"] = book
+    _crm_path(book).write_text(
+        json.dumps(crm, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _prospect_ts(p: dict[str, Any]) -> str:
+    return str(p.get("updated_at") or p.get("created_at") or "")
+
+
+def _merge_crm_books(a: dict[str, Any], b: dict[str, Any], book: str) -> dict[str, Any]:
+    """Union prospects by id; keep the record with the newer updated_at."""
+    out = deepcopy(DEFAULT_CRM)
+    out["book"] = book
+    out["version"] = max(int(a.get("version") or 2), int(b.get("version") or 2), 2)
+    merged: dict[str, Any] = {}
+    for src in (a, b):
+        for pid, rec in (src.get("prospects") or {}).items():
+            if not pid or not isinstance(rec, dict):
+                continue
+            prev = merged.get(pid)
+            if not prev or _prospect_ts(rec) >= _prospect_ts(prev):
+                row = dict(rec)
+                row["id"] = pid
+                row["book"] = book
+                merged[pid] = row
+    out["prospects"] = merged
+    # Prefer newest book-level timestamp
+    ta = str(a.get("updated_at") or "")
+    tb = str(b.get("updated_at") or "")
+    out["updated_at"] = max(ta, tb) if (ta or tb) else _now()
+    return out
+
+
+def _load_pg_crm(book: str) -> dict[str, Any] | None:
+    _ensure_pg_schema()
+    if not _use_postgres():
+        return None
+    try:
+        conn = _pg_connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT payload FROM sliw_crm_books WHERE book = %s",
+                    (book,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                data = row[0]
+                if isinstance(data, str):
+                    data = json.loads(data)
+                if not isinstance(data, dict):
+                    return None
+                if "book" not in data:
+                    data["book"] = book
+                if not isinstance(data.get("prospects"), dict):
+                    data["prospects"] = {}
+                return data
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[sliw-crm] Postgres load failed: {exc!r}", flush=True)
+        return None
+
+
+def _save_pg_crm(crm: dict[str, Any], book: str) -> bool:
+    _ensure_pg_schema()
+    if not _use_postgres():
+        return False
+    payload = dict(crm)
+    payload["book"] = book
+    payload["updated_at"] = _now()
+    try:
+        conn = _pg_connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sliw_crm_books (book, payload, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (book) DO UPDATE
+                    SET payload = EXCLUDED.payload,
+                        updated_at = NOW()
+                    """,
+                    (book, json.dumps(payload, ensure_ascii=False)),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[sliw-crm] Postgres save failed: {exc!r}", flush=True)
+        return False
+
+
+def load_crm(book: str = "corporate") -> dict[str, Any]:
+    """Load CRM book. Prefer shared Postgres; merge local file so nothing is lost."""
+    ensure_dirs()
+    file_data = _load_file_crm(book)
+    pg_data = _load_pg_crm(book) if _use_postgres() else None
+
+    if pg_data is not None and file_data is not None:
+        merged = _merge_crm_books(pg_data, file_data, book)
+        # If file had prospects missing from PG, push merge up
+        if len(merged.get("prospects") or {}) > len(pg_data.get("prospects") or {}):
+            _save_pg_crm(merged, book)
+            _write_file_crm(merged, book)
+            return merged
+        # Keep local cache warm
+        try:
+            _write_file_crm(pg_data if len(pg_data.get("prospects") or {}) >= len(
+                merged.get("prospects") or {}
+            ) else merged, book)
+        except Exception:
+            pass
+        return merged if len(merged.get("prospects") or {}) >= len(
+            pg_data.get("prospects") or {}
+        ) else pg_data
+
+    if pg_data is not None:
+        try:
+            _write_file_crm(pg_data, book)
+        except Exception:
+            pass
+        return pg_data
+
+    if file_data is not None:
+        # Seed shared store from this service's local file (recovery / first migrate)
+        if _use_postgres():
+            _save_pg_crm(file_data, book)
+        return file_data
+
+    crm = deepcopy(DEFAULT_CRM)
+    crm["book"] = book
+    crm["updated_at"] = _now()
+    save_crm(crm, book=book)
+    return crm
 
 
 def save_crm(crm: dict[str, Any], book: str = "corporate") -> None:
     ensure_dirs()
     crm["updated_at"] = _now()
     crm["book"] = book
-    _crm_path(book).write_text(
-        json.dumps(crm, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    # Shared store first (source of truth across Railway services)
+    _save_pg_crm(crm, book)
+    # Local cache / offline fallback
+    try:
+        _write_file_crm(crm, book)
+    except Exception as exc:
+        print(f"[sliw-crm] local file save failed: {exc!r}", flush=True)
 
 
 def new_prospect_id(company: str) -> str:
