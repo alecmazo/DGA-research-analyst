@@ -12,21 +12,41 @@
 | Edyta desk | `https://portfolio.dgacapital.com/sliw/` → **Weddings** → **Couples inbox** |
 | Logins | `alecmazo1@gmail.com` + `edytasliw@gmail.com` only |
 
-## 1. DNS (weddings.edytasliwinska.com)
+## 1. DNS (weddings.edytasliwinska.com) — EXACT RECORDS
 
-Point the subdomain at the same Railway service as portfolio:
+**Railway side is already done** (custom domain added to `web` service, port 8080).
 
-1. In GoDaddy (or DNS for edytasliwinska.com), create **CNAME**:
-   - Name: `weddings`
-   - Value: your Railway public domain  
-     (often `*.up.railway.app` for the DGA web service, **or** the same target used by `portfolio.dgacapital.com` if you use a custom domain proxy)
-2. In Railway → web service → **Settings → Networking → Custom domain**:
-   - Add `weddings.edytasliwinska.com`
-3. Wait for TLS certificate issued.
-4. Open `https://weddings.edytasliwinska.com/` — should serve the storefront.
-5. Form posts same-origin to `/api/sliw/public/wedding-lead`.
+You only need to add DNS at the registrar that owns **edytasliwinska.com** (almost certainly **GoDaddy**, same place the site is hosted).
 
-Until DNS is ready, use the preview path on portfolio.
+### Record A (required) — route traffic
+
+| Field | Value |
+|--------|--------|
+| Type | **CNAME** |
+| Name / Host | **`weddings`** |
+| Value / Points to | **`61cyun23.up.railway.app`** |
+| TTL | 600 or 1 hour |
+
+### Record B (required for SSL) — ownership verify
+
+| Field | Value |
+|--------|--------|
+| Type | **TXT** (or CNAME if GoDaddy only shows that for `_railway-verify`) |
+| Name / Host | **`_railway-verify.weddings`** |
+| Value | **`railway-verify=fbf73b839bdc2a65b6709b53d365c552d13cf54f861c5a20e7ffb6daebb83c44`** |
+| TTL | 600 |
+
+> If GoDaddy’s “Name” field already appends `.edytasliwinska.com`, enter **only** `weddings` and `_railway-verify.weddings` — do **not** type the full domain twice.
+
+### After you save
+
+1. Wait 5–30 minutes (sometimes up to a few hours).
+2. Check: `https://weddings.edytasliwinska.com/`
+3. Form posts same-origin to `/api/sliw/public/wedding-lead`.
+
+### Until DNS works
+
+Preview: `https://portfolio.dgacapital.com/weddings-site/`
 
 ## 2. Calendly
 
