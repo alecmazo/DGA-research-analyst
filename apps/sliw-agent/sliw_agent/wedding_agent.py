@@ -649,8 +649,8 @@ def wedding_ready_list(limit: int = 12, *, channel: str | None = None) -> list[d
             "source": p.get("source") or "",
             "utm_source": p.get("utm_source") or "",
             "wedding_date": p.get("wedding_date") or "",
-            "email": ((p.get("contacts") or [{}])[0] or {}).get("email") or "",
-            "phone": ((p.get("contacts") or [{}])[0] or {}).get("phone") or "",
+            "email": _best_contact_email(p),
+            "phone": _best_contact_phone(p),
             "has_draft": bool(p.get("outreach_path") or p.get("sequence_paths")),
             "has_contact": bool(p.get("contacts")),
             "created_at": p.get("created_at") or "",
@@ -666,10 +666,43 @@ def _is_couple_lead(p: dict[str, Any]) -> bool:
     ch = (p.get("channel_label") or "").lower()
     return (
         "couple" in ind
-        or src in ("web_form", "instagram", "x", "referral_form")
+        or src in ("web_form", "instagram", "x", "referral_form", "stripe")
         or "couple" in ch
         or (p.get("lead_channel") or "") == "couple"
     )
+
+
+def _best_contact_email(p: dict[str, Any]) -> str:
+    """Prefer real form emails over Hunter-guessed placeholders on couple leads."""
+    contacts = p.get("contacts") or []
+    emails = []
+    for c in contacts:
+        e = (c.get("email") or "").strip()
+        if e:
+            emails.append((e, (c.get("source") or "").lower()))
+    if not emails:
+        return ""
+    # Prefer non-hunter, then common personal providers, then last (often form-submitted)
+    personal = ("gmail.com", "yahoo.com", "icloud.com", "me.com", "outlook.com", "hotmail.com", "aol.com")
+
+    def rank(item: tuple[str, str]) -> tuple:
+        e, src = item
+        el = e.lower()
+        domain = el.split("@")[-1] if "@" in el else ""
+        is_hunter = src == "hunter.io" or "couple" in domain.replace("-", "").replace(".", "")
+        is_personal = domain in personal
+        return (0 if is_personal else 1, 1 if is_hunter else 0, 0 if is_personal else 1)
+
+    emails_sorted = sorted(emails, key=rank)
+    return emails_sorted[0][0]
+
+
+def _best_contact_phone(p: dict[str, Any]) -> str:
+    for c in p.get("contacts") or []:
+        ph = (c.get("phone") or "").strip()
+        if ph:
+            return ph
+    return ""
 
 
 def capture_couple_lead(
