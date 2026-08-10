@@ -440,6 +440,9 @@ function normalizeWeddingRows(payload) {
     : (payload?.items || payload?.prospects || []);
   return (raw || []).map((p) => {
     const pkg = (p.recommended_packages || [])[0] || {};
+    const isCouple = p.lead_channel === "couple"
+      || /couple/i.test(p.industry || "")
+      || p.source === "web_form";
     return {
       id: p.id,
       company: p.company,
@@ -449,22 +452,29 @@ function normalizeWeddingRows(payload) {
       score: p.score,
       tier: p.tier,
       stage: p.stage,
-      package: p.package || pkg.name || "",
+      package: p.package || pkg.name || p.package_interest || "",
       channel_label: p.channel_label || p.industry || "",
       agent_note: p.agent_note || "",
       book: "wedding",
+      lead_channel: isCouple ? "couple" : (p.lead_channel || "partner"),
+      source: p.source || "",
+      utm_source: p.utm_source || "",
+      wedding_date: p.wedding_date || "",
+      email: p.email || "",
+      phone: p.phone || "",
       has_draft: !!(p.has_draft || p.outreach_path || p.sequence_paths),
       has_contact: !!(p.has_contact || (p.contacts && p.contacts.length)),
     };
   }).filter((p) => p.id && p.company);
 }
 
-async function loadWeddingRows() {
+async function loadWeddingRows(channel) {
   try {
-    const ready = await api("/wedding/ready?limit=40");
+    const q = channel ? `?limit=50&channel=${encodeURIComponent(channel)}` : "?limit=50";
+    const ready = await api("/wedding/ready" + q);
+    state.weddingMeta = ready;
     return normalizeWeddingRows(ready);
   } catch (_) {
-    // Older deploy without /wedding/ready
     try {
       const list = await api("/wedding/prospects");
       return normalizeWeddingRows(list);
@@ -913,47 +923,59 @@ function renderWeddings() {
   const grid = $("#wedding-grid");
   if (!grid) return;
   const summary = $("#wedding-summary");
+  const meta = state.weddingMeta || {};
   if (summary) {
+    const couples = rows.filter((p) => p.lead_channel === "couple").length;
     const planners = rows.filter((p) => /planner/i.test(p.industry || "")).length;
     const venues = rows.filter((p) => /venue|winery|hotel/i.test(p.industry || "")).length;
     const a = rows.filter((p) => p.tier === "A").length;
     summary.textContent = rows.length
-      ? `${rows.length} leads · ${planners} planners · ${venues} venues · ${a} tier A`
-      : "No wedding leads yet — Import & score seeds";
+      ? `${rows.length} showing · ${meta.couples != null ? meta.couples + " couples total · " : ""}${couples} couples here · ${planners} planners · ${venues} venues · ${a} A`
+      : "No leads — open Couples inbox after a form submit, or Import planner seeds";
   }
   if (!rows.length) {
+    const ch = state.weddingChannel || "all";
     grid.innerHTML = `<div class="panel empty-state" style="grid-column:1/-1">
-      <h3>No wedding leads scored yet</h3>
-      <p class="muted">Click <strong>Import &amp; score seeds</strong> to load Bay Area planners + venues into the wedding CRM.</p>
+      <h3>${ch === "couple" ? "No couple leads yet" : "No wedding leads scored yet"}</h3>
+      <p class="muted">${ch === "couple"
+        ? "When someone submits the form on <a href=\"/weddings-site/\" target=\"_blank\">weddings storefront</a>, they appear here. Call same day."
+        : "Click <strong>Import planner seeds</strong> for Bay Area B2B, or wait for couple form leads."}</p>
     </div>`;
     return;
   }
   grid.innerHTML = rows.map((p) => {
+    const isCouple = p.lead_channel === "couple";
     const isPlanner = /planner/i.test(p.industry || "");
     const isVenue = /venue|winery|hotel|lodge/i.test(p.industry || "");
-    const channel = isPlanner ? "Planner partner" : isVenue ? "Venue partner" : (p.channel_label || p.industry || "Wedding");
+    const channel = isCouple
+      ? ("Couple" + (p.utm_source ? " · " + p.utm_source : " · web"))
+      : isPlanner ? "Planner partner"
+        : isVenue ? "Venue partner"
+          : (p.channel_label || p.industry || "Wedding");
     const id = esc(p.id);
+    const contactLine = isCouple && (p.email || p.phone)
+      ? `<p class="meta">${p.email ? `<a href="mailto:${esc(p.email)}" onclick="event.stopPropagation()">${esc(p.email)}</a>` : ""}${p.phone ? " · " + esc(p.phone) : ""}${p.wedding_date ? " · 📅 " + esc(p.wedding_date) : ""}</p>`
+      : `<p class="meta">${esc(channel)} · ${esc(p.geo || "Bay Area")}</p>`;
     return `
-    <article class="prospect-card wedding-card ${state.focusId === p.id ? "active" : ""}" data-work="${id}" role="button" tabindex="0" aria-label="Open ${esc(p.company)} in Work">
+    <article class="prospect-card wedding-card ${isCouple ? "couple-lead" : ""} ${state.focusId === p.id ? "active" : ""}" data-work="${id}" role="button" tabindex="0" aria-label="Open ${esc(p.company)} in Work">
       <div class="wedding-card-top">
         ${brandMarkHtml(p.company, p.website, { size: "md" })}
         <div class="wedding-card-copy">
           <div class="top">
             <h4>${esc(p.company)}</h4>
-            <span class="${tierClass(p.tier)}">${esc(p.tier || "—")}</span>
+            <span class="${tierClass(p.tier)}">${esc(isCouple ? "♥" : (p.tier || "—"))}</span>
           </div>
-          <p class="meta">${esc(channel)} · ${esc(p.geo || "Bay Area")}</p>
+          ${contactLine}
         </div>
         <div class="score-ring" title="ICP score">${p.score ?? "—"}</div>
       </div>
-      <p class="wedding-card-pkg">${esc(p.package || "—")}</p>
+      <p class="wedding-card-pkg">${esc(p.package || "—")}${isCouple ? " · <strong>call today</strong>" : ""}</p>
       <div class="foot">
         <span>${esc(p.stage || "scored")}${p.has_draft ? " · draft ready" : ""}${p.has_contact ? " · contacts" : ""}</span>
         <button type="button" class="btn primary sm wedding-open-btn" data-work="${id}">Open in Work →</button>
       </div>
     </article>`;
   }).join("");
-  // Handlers are delegated on #wedding-grid (boot) so re-renders always work
 }
 
 function renderPartners() {
@@ -1091,12 +1113,30 @@ function boot() {
     });
   }
 
+  async function refreshWeddingChannel(channel) {
+    state.weddingChannel = channel || null;
+    state.wedding = await loadWeddingRows(channel || undefined);
+    renderWeddings();
+  }
+
+  $("#btn-wedding-couples")?.addEventListener("click", async () => {
+    try {
+      await refreshWeddingChannel("couple");
+      toast(`Couples inbox · ${state.wedding.length} lead(s)`);
+    } catch (e) { toast(e.message); }
+  });
+  $("#btn-wedding-partners")?.addEventListener("click", async () => {
+    try {
+      await refreshWeddingChannel("partner");
+      toast(`Planners & venues · ${state.wedding.length}`);
+    } catch (e) { toast(e.message); }
+  });
+
   $("#btn-wedding-import")?.addEventListener("click", async () => {
     busy(true, "Importing & scoring Bay Area planners…");
     try {
       const r = await api("/wedding/library/import?limit=40&rescore=true", { method: "POST" });
-      state.wedding = await loadWeddingRows();
-      renderWeddings();
+      await refreshWeddingChannel(state.weddingChannel || null);
       toast(
         `Wedding desk: +${r.imported || 0} new · ${r.rescored || 0} rescored · `
         + `${r.planners || 0} planners · ${r.tier_a || 0} tier A`
@@ -1107,8 +1147,7 @@ function boot() {
 
   $("#btn-wedding-refresh")?.addEventListener("click", async () => {
     try {
-      state.wedding = await loadWeddingRows();
-      renderWeddings();
+      await refreshWeddingChannel(state.weddingChannel || null);
       toast(`Wedding list refreshed (${state.wedding.length})`);
     } catch (e) { toast(e.message); }
   });

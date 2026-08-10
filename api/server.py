@@ -1335,7 +1335,10 @@ async def auth_middleware(request: Request, call_next):
     if (path in _PUBLIC_PATHS
             or path.startswith("/app/")
             or path.startswith("/branding/")
+            or path.startswith("/weddings-site")
             or not path.startswith("/api/")
+            # Sliw wedding storefront (public lead form + config — no PII leak)
+            or path.startswith("/api/sliw/public/")
             # Podcast audio + RSS feed must be public so <audio> tags and
             # podcast platforms (Apple/Spotify) can stream without auth.
             # /listen/<token> is the share landing page — also public so
@@ -7062,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui447-20260810-watchlist-gurufocus"
+WEB_BUILD_VERSION = "ui448-20260810-weddings-option-a"
 
 
 @app.get("/api/build")
@@ -35499,6 +35502,11 @@ def snaptrade_remove(request: Request):
 # ─────────────────────────────────────────────────────────────────────────────
 _SLIW_ROOT = Path(__file__).resolve().parent.parent / "apps" / "sliw-agent"
 _SLIW_WEB = _SLIW_ROOT / "web"
+_SLIW_WEDDINGS_SITE = _SLIW_ROOT / "weddings-site"
+_WEDDINGS_HOSTS = frozenset({
+    "weddings.edytasliwinska.com",
+    "www.weddings.edytasliwinska.com",
+})
 
 
 def _sliw_enabled() -> bool:
@@ -35507,6 +35515,11 @@ def _sliw_enabled() -> bool:
     if flag in ("0", "false", "no", "off"):
         return False
     return _SLIW_ROOT.is_dir()
+
+
+def _is_weddings_host(request: Request) -> bool:
+    host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+    return host in _WEDDINGS_HOSTS
 
 
 def _mount_sliw_agent() -> None:
@@ -35532,6 +35545,72 @@ def _mount_sliw_agent() -> None:
         except Exception as _sliw_exc:
             print(f"[sliw] API mount failed (DGA unaffected): {_sliw_exc!r}", flush=True)
             return
+
+        # ── Public wedding storefront (Option A) ────────────────────────────
+        # Served at Host: weddings.edytasliwinska.com and path /weddings-site/
+        # for preview on portfolio.dgacapital.com.
+        if _SLIW_WEDDINGS_SITE.is_dir():
+            def _weddings_file(name: str):
+                target = (_SLIW_WEDDINGS_SITE / name).resolve()
+                try:
+                    target.relative_to(_SLIW_WEDDINGS_SITE.resolve())
+                except ValueError:
+                    raise HTTPException(status_code=404)
+                if not target.is_file():
+                    raise HTTPException(status_code=404)
+                media = "text/html"
+                if target.suffix == ".css":
+                    media = "text/css"
+                elif target.suffix == ".js":
+                    media = "application/javascript"
+                elif target.suffix == ".svg":
+                    media = "image/svg+xml"
+                elif target.suffix in (".png", ".jpg", ".jpeg", ".webp"):
+                    media = f"image/{target.suffix.lstrip('.').replace('jpg', 'jpeg')}"
+                return FileResponse(
+                    str(target),
+                    media_type=media,
+                    headers={"Cache-Control": "no-cache, must-revalidate"},
+                )
+
+            @app.get("/weddings-site")
+            def _weddings_site_redir():
+                return RedirectResponse(url="/weddings-site/", status_code=307)
+
+            @app.get("/weddings-site/")
+            def _weddings_site_index():
+                return _weddings_file("index.html")
+
+            @app.get("/weddings-site/{asset_path:path}")
+            def _weddings_site_asset(asset_path: str):
+                if not asset_path or ".." in asset_path:
+                    raise HTTPException(status_code=404)
+                return _weddings_file(asset_path)
+
+            # Host-based routing: weddings.edytasliwinska.com → storefront root
+            @app.middleware("http")
+            async def _weddings_host_middleware(request: Request, call_next):
+                if not _is_weddings_host(request):
+                    return await call_next(request)
+                path = request.url.path or "/"
+                # Keep API + health on the same host for same-origin form posts
+                if path.startswith("/api/") or path in ("/health", "/api/build"):
+                    return await call_next(request)
+                if path in ("/", ""):
+                    return _weddings_file("index.html")
+                rel = path.lstrip("/")
+                if ".." in rel:
+                    raise HTTPException(status_code=404)
+                candidate = _SLIW_WEDDINGS_SITE / rel
+                if candidate.is_file():
+                    return _weddings_file(rel)
+                # SPA-style: unknown paths → home
+                if not path.startswith("/sliw"):
+                    return _weddings_file("index.html")
+                return await call_next(request)
+
+            print("[sliw] wedding storefront at /weddings-site/ + Host weddings.edytasliwinska.com",
+                  flush=True)
 
         if not _SLIW_WEB.is_dir():
             print("[sliw] web/ missing — API only", flush=True)

@@ -600,14 +600,34 @@ def seed_default_partnerships() -> dict[str, Any]:
     return {"added": added, "total": len(crm.load_partnerships())}
 
 
-def wedding_ready_list(limit: int = 12) -> list[dict[str, Any]]:
-    """Ranked wedding leads for the Weddings tab (clickable → Work)."""
+def wedding_ready_list(limit: int = 12, *, channel: str | None = None) -> list[dict[str, Any]]:
+    """Ranked wedding leads for the Weddings tab (clickable → Work).
+
+    channel: None = all, "couple" = web form couples, "partner" = planners/venues.
+    """
     prospects = crm.list_prospects(book="wedding")
     ranked = [
         p for p in prospects
         if p.get("stage") not in ("won", "lost")
     ]
-    ranked.sort(key=lambda p: (-(p.get("score") or 0), p.get("company") or ""))
+    if channel == "couple":
+        ranked = [p for p in ranked if _is_couple_lead(p)]
+    elif channel == "partner":
+        ranked = [p for p in ranked if not _is_couple_lead(p)]
+    # Couples (inbound) first by recency, then partners by score
+    def _sort_key(p: dict[str, Any]) -> tuple:
+        is_c = 0 if _is_couple_lead(p) else 1
+        # newer first for couples
+        updated = p.get("updated_at") or p.get("created_at") or ""
+        return (is_c, -(p.get("score") or 0), updated)
+    ranked.sort(key=_sort_key)
+    # For mixed list, prefer high score for partners but still show couples
+    if channel is None:
+        ranked.sort(key=lambda p: (
+            0 if _is_couple_lead(p) else 1,
+            -(p.get("score") or 0),
+            p.get("company") or "",
+        ))
     out = []
     for p in ranked[:limit]:
         pkg = (p.get("recommended_packages") or [{}])[0]
@@ -620,11 +640,181 @@ def wedding_ready_list(limit: int = 12) -> list[dict[str, Any]]:
             "score": p.get("score"),
             "tier": p.get("tier"),
             "stage": p.get("stage"),
-            "package": pkg.get("name"),
+            "package": pkg.get("name") or (p.get("package_interest") or ""),
             "channel_label": p.get("channel_label") or p.get("industry"),
             "agent_note": p.get("agent_note") or "",
             "book": "wedding",
+            "lead_channel": "couple" if _is_couple_lead(p) else "partner",
+            "source": p.get("source") or "",
+            "utm_source": p.get("utm_source") or "",
+            "wedding_date": p.get("wedding_date") or "",
+            "email": ((p.get("contacts") or [{}])[0] or {}).get("email") or "",
+            "phone": ((p.get("contacts") or [{}])[0] or {}).get("phone") or "",
             "has_draft": bool(p.get("outreach_path") or p.get("sequence_paths")),
             "has_contact": bool(p.get("contacts")),
+            "created_at": p.get("created_at") or "",
         })
     return out
+
+
+def _is_couple_lead(p: dict[str, Any]) -> bool:
+    ind = (p.get("industry") or "").lower()
+    src = (p.get("source") or "").lower()
+    ch = (p.get("channel_label") or "").lower()
+    return (
+        "couple" in ind
+        or src in ("web_form", "instagram", "x", "referral_form")
+        or "couple" in ch
+        or (p.get("lead_channel") or "") == "couple"
+    )
+
+
+def capture_couple_lead(
+    *,
+    partner1_name: str = "",
+    partner2_name: str = "",
+    email: str = "",
+    phone: str = "",
+    wedding_date: str = "",
+    city: str = "",
+    experience: str = "",
+    package_interest: str = "",
+    message: str = "",
+    utm_source: str = "",
+    utm_medium: str = "",
+    utm_campaign: str = "",
+    honeypot: str = "",
+) -> dict[str, Any]:
+    """Public storefront form → wedding CRM (no auth). Returns prospect id.
+
+    Honeypot: if filled, silently pretend success (bot trap).
+    """
+    if (honeypot or "").strip():
+        return {"ok": True, "prospect_id": "ok", "deduped": False, "bot": True}
+
+    email = (email or "").strip().lower()
+    p1 = (partner1_name or "").strip()
+    p2 = (partner2_name or "").strip()
+    if not email or "@" not in email:
+        raise ValueError("A valid email is required.")
+    if not p1 and not p2:
+        raise ValueError("Please include at least one name.")
+
+    names = " & ".join([n for n in (p1, p2) if n])
+    company = f"Couple: {names}" if names else f"Couple: {email}"
+    geo = (city or "").strip() or "Bay Area"
+    exp = (experience or "").strip().lower() or "none"
+    pkg = (package_interest or "").strip().lower() or "unsure"
+    notes_parts = [
+        f"Wedding date: {wedding_date or '—'}",
+        f"Experience: {exp}",
+        f"Package interest: {pkg}",
+        f"UTM: {utm_source or '—'}/{utm_medium or '—'}/{utm_campaign or '—'}",
+    ]
+    if (message or "").strip():
+        notes_parts.append(f"Message: {message.strip()[:800]}")
+    notes = "\n".join(notes_parts)
+    signals = ["web_lead", "couple", "first dance", "no experience required"]
+    if utm_source:
+        signals.append(f"utm:{utm_source}")
+    if pkg and pkg != "unsure":
+        signals.append(f"pkg:{pkg}")
+
+    # Dedup by email among couples
+    existing = crm.list_prospects(book="wedding")
+    for p in existing:
+        contacts = p.get("contacts") or []
+        emails = {(c.get("email") or "").lower() for c in contacts}
+        if email in emails and _is_couple_lead(p):
+            updated = crm.update_prospect(
+                p["id"],
+                book="wedding",
+                notes=((p.get("notes") or "") + "\n---\n" + notes).strip(),
+                wedding_date=wedding_date or p.get("wedding_date"),
+                package_interest=pkg,
+                geo=geo or p.get("geo"),
+            )
+            crm.set_stage(p["id"], "scored", note="Repeat web form submit", book="wedding")
+            return {
+                "ok": True,
+                "prospect_id": p["id"],
+                "deduped": True,
+                "company": updated.get("company"),
+                "stage": "scored",
+            }
+
+    scored = score_wedding_lead(
+        company=company,
+        industry="Wedding couple",
+        geo=geo,
+        notes=notes,
+        signals=signals,
+        package_hint=pkg if pkg != "unsure" else "package_10",
+        priority=9,
+    )
+    contact = {"name": names or p1 or p2, "email": email}
+    if phone:
+        contact["phone"] = phone.strip()
+
+    p = crm.upsert_prospect(
+        company=company,
+        industry="Wedding couple",
+        geo=geo,
+        notes=notes,
+        signals=signals,
+        contacts=[contact],
+        book="wedding",
+        extra={
+            "source": "web_form",
+            "lead_channel": "couple",
+            "channel_label": "Couple (web form)",
+            "wedding_date": wedding_date or "",
+            "package_interest": pkg,
+            "experience": exp,
+            "utm_source": utm_source or "",
+            "utm_medium": utm_medium or "",
+            "utm_campaign": utm_campaign or "",
+            "recommended_packages": scored["recommended_packages"],
+            "score": scored["score"],
+            "tier": scored["tier"],
+            "score_breakdown": scored["breakdown"],
+            "agent_note": scored.get("agent_note") or "Inbound couple — call or text same day.",
+            "stage": "scored",
+            "partner1_name": p1,
+            "partner2_name": p2,
+        },
+    )
+    return {
+        "ok": True,
+        "prospect_id": p["id"],
+        "deduped": False,
+        "company": p.get("company"),
+        "stage": p.get("stage"),
+        "suggested_package": (scored["recommended_packages"] or [{}])[0].get("name"),
+    }
+
+
+def wedding_public_config() -> dict[str, Any]:
+    """Public config for the storefront (no secrets)."""
+    import os
+    return {
+        "ok": True,
+        "brand": {
+            "name": "Edyta Śliwińska",
+            "tagline": "DWTS pro · Bay Area wedding dances · no experience required",
+            "studio": "San Rafael, CA · Bay Area",
+            "phone": "+1 (415) 891-7943",
+            "email": "admin@edytasliwinska.com",
+            "instagram": "https://www.instagram.com/edytasliwinska",
+            "x": "https://www.x.com/Edyta_Sliwinska",
+            "site": "https://edytasliwinska.com",
+        },
+        "packages": [package_to_dict(p) for p in WEDDING_PACKAGES.values()],
+        "calendly_url": (os.environ.get("SLIW_WEDDING_CALENDLY_URL") or "").strip(),
+        "stripe": {
+            "single_lesson": (os.environ.get("SLIW_WEDDING_STRIPE_LINK_SINGLE") or "").strip(),
+            "package_10": (os.environ.get("SLIW_WEDDING_STRIPE_LINK_PACKAGE10") or "").strip(),
+            "mode": (os.environ.get("SLIW_WEDDING_STRIPE_MODE") or "sandbox").strip(),
+        },
+        "form_endpoint": "/api/sliw/public/wedding-lead",
+    }

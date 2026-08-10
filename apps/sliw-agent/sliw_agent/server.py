@@ -50,10 +50,12 @@ from .master_deck import (
     master_pdf_path,
 )
 from .wedding_agent import (
+    capture_couple_lead,
     import_wedding_library,
     run_wedding_pipeline,
     run_wedding_sales_agent,
     seed_default_partnerships,
+    wedding_public_config,
     wedding_ready_list,
 )
 from .wedding_bible import WEDDING_PACKAGES, package_to_dict as wedding_pkg_dict
@@ -70,6 +72,24 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
+
+class PublicWeddingLeadRequest(BaseModel):
+    """Couple intake form from weddings.edytasliwinska.com (public)."""
+    partner1_name: str = ""
+    partner2_name: str = ""
+    email: str = ""
+    phone: str = ""
+    wedding_date: str = ""
+    city: str = ""
+    experience: str = "none"
+    package_interest: str = "unsure"
+    message: str = ""
+    utm_source: str = ""
+    utm_medium: str = ""
+    utm_campaign: str = ""
+    # Honeypot — bots fill this; humans leave blank
+    website: str = ""
+
 
 class PipelineRequest(BaseModel):
     company: str
@@ -675,6 +695,37 @@ def create_api_router() -> APIRouter:
 
     # ── Wedding Agent ───────────────────────────────────────────────────────
 
+    # ── Public storefront (no auth) — weddings.edytasliwinska.com ───────────
+    @r.get("/public/wedding-config")
+    def public_wedding_config() -> dict[str, Any]:
+        """Packages + Calendly + Stripe Payment Links for the public site."""
+        return wedding_public_config()
+
+    @r.post("/public/wedding-lead")
+    def public_wedding_lead(body: PublicWeddingLeadRequest) -> dict[str, Any]:
+        """Couple form capture → wedding CRM. Honeypot field: website."""
+        try:
+            return capture_couple_lead(
+                partner1_name=body.partner1_name,
+                partner2_name=body.partner2_name,
+                email=body.email,
+                phone=body.phone,
+                wedding_date=body.wedding_date,
+                city=body.city,
+                experience=body.experience,
+                package_interest=body.package_interest,
+                message=body.message,
+                utm_source=body.utm_source,
+                utm_medium=body.utm_medium,
+                utm_campaign=body.utm_campaign,
+                honeypot=body.website,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            print(f"[sliw] public wedding lead failed: {exc!r}", flush=True)
+            raise HTTPException(status_code=500, detail="Could not save lead") from exc
+
     @r.get("/wedding/packages")
     def wedding_packages(request: Request) -> list[dict[str, Any]]:
         require_sliw_access(request)
@@ -686,18 +737,34 @@ def create_api_router() -> APIRouter:
         return crm.list_prospects(book="wedding")
 
     @r.get("/wedding/ready")
-    def wedding_ready(request: Request, limit: int = 30) -> dict[str, Any]:
-        """Scored, ranked wedding leads for the Weddings tab (click → Work)."""
+    def wedding_ready(
+        request: Request,
+        limit: int = 30,
+        channel: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Scored, ranked wedding leads for the Weddings tab (click → Work).
+
+        channel=couple | partner | omit for mixed (couples first).
+        """
         require_sliw_access(request)
-        items = wedding_ready_list(limit=limit)
+        ch = (channel or "").strip().lower() or None
+        if ch not in (None, "couple", "partner"):
+            ch = None
+        items = wedding_ready_list(limit=limit, channel=ch)
         prospects = crm.list_prospects(book="wedding")
+        couples = [p for p in prospects if "couple" in (p.get("industry") or "").lower()
+                   or (p.get("lead_channel") or "") == "couple"
+                   or (p.get("source") or "") == "web_form"]
         return {
             "items": items,
             "total": len(prospects),
+            "couples": len(couples),
+            "couples_new": sum(1 for p in couples if (p.get("stage") or "") in ("research", "scored", "contacted")),
             "planners": sum(1 for p in prospects if "planner" in (p.get("industry") or "").lower()),
             "venues": sum(1 for p in prospects if "venue" in (p.get("industry") or "").lower()),
             "tier_a": sum(1 for p in prospects if p.get("tier") == "A"),
             "tier_b": sum(1 for p in prospects if p.get("tier") == "B"),
+            "channel": ch or "all",
         }
 
     @r.get("/wedding/pipeline/summary")
