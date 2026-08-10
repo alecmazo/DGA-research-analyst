@@ -1712,7 +1712,8 @@
     const tip = 'Earnings ' + (du === 0 ? 'TODAY' : (du === -1 ? 'yesterday' : ('in ' + du + 'd')))
       + (dateStr ? ' (' + dateStr + ')' : '') + sess + fq + eps
       + ' · click for results / beat-miss card';
-    return '<span class="' + cls + '" data-open-earnings="' + _cfEsc(tk) + '" title="' + _cfEsc(tip) + '">EARN ' + _cfEsc(label) + sess + '</span>';
+    // Compact chip — no "EARN" prefix (saves watchlist row width)
+    return '<span class="' + cls + '" data-open-earnings="' + _cfEsc(tk) + '" title="' + _cfEsc(tip) + '">' + _cfEsc(label) + sess + '</span>';
   }
 
   function _earnFmtEps(v) {

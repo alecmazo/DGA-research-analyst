@@ -31,9 +31,10 @@ function earnLabel(earn: WatchlistEarning): string {
   const du = earn.days_until
   const label =
     earn.label ||
-    (du === 0 ? 'TODAY' : du != null ? `${du}d` : 'EARN')
+    (du === 0 ? 'TODAY' : du != null ? `${du}d` : '·')
   const sess = earn.session ? ` ${earn.session}` : ''
-  return `EARN ${label}${sess}`
+  // Compact chip — no "EARN" prefix (was eating row width)
+  return `${label}${sess}`
 }
 
 function earnTitle(tk: string, earn: WatchlistEarning): string {
