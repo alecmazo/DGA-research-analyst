@@ -2146,15 +2146,10 @@
     });
     rows.querySelectorAll('.wl-row').forEach(row => {
       row.addEventListener('click', (e) => {
-        if (e.target.closest('[data-remove], [data-open-report], .wl-earn')) return;
+        if (e.target.closest('[data-remove], [data-open-report], [data-open-earnings], .wl-earn')) return;
         const tk = row.getAttribute('data-ticker');
-        // Prefer saved report when present; else free snapshot
-        if (tk && reports[tk] && typeof openReport === 'function') {
-          openReport(tk);
-        } else if (tk) {
-          if (typeof openStockPeek === 'function') openStockPeek(tk);
-          else if (typeof openGuruFocus === 'function') openGuruFocus(tk);
-        }
+        // Ticker / row click → GuruFocus summary (Rpt chip still opens DGA report)
+        if (tk) openGuruFocus(tk);
       });
     });
     // Click earnings chip → earnings results card (beat / miss)
@@ -17655,11 +17650,18 @@
     }
   });
 
-  // ── Ticker click → free on-site snapshot (legacy name kept for callers) ──
+  // ── Ticker click → GuruFocus stock summary (new tab) ────────────────────
   function openGuruFocus(ticker) {
-    // Historical name; now opens FREE on-site data, not GuruFocus (no paywall, no tokens).
-    openStockPeek(ticker);
+    const tk = String(ticker || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+    if (!tk) return;
+    window.open(
+      'https://www.gurufocus.com/stock/' + encodeURIComponent(tk) + '/summary',
+      '_blank',
+      'noopener,noreferrer'
+    );
   }
+  // Expose for inline handlers / other modules
+  try { window.openGuruFocus = openGuruFocus; } catch (_) {}
 
   // ══════════════════════════════════════════════════════════════
   // SHARED — draggable + resizable modal utility

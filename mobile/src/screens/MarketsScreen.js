@@ -579,7 +579,16 @@ export default function MarketsScreen({ navigation }) {
                       });
                     }}
                   >
-                    <Text style={s.wlTk}>{tk}</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        haptics.onPressPrimary?.();
+                        const url = `https://www.gurufocus.com/stock/${encodeURIComponent(tk)}/summary`;
+                        Linking.openURL(url).catch(() => {});
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                    >
+                      <Text style={s.wlTk}>{tk}</Text>
+                    </TouchableOpacity>
                     <Text style={[s.wlPx, { color: pxColor }]}>${fmtPx(q.price)}</Text>
                     <View style={{ width: 72, alignItems: 'flex-end' }}><PctPill p={pct} t={t} /></View>
                     <View style={{ width: 64, alignItems: 'flex-end', marginLeft: 4 }}>

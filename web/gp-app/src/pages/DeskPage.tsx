@@ -174,6 +174,17 @@ export function DeskPage() {
     if (autoRun) setRunToken((n) => n + 1)
   }
 
+  /** Open GuruFocus stock summary for a watchlist ticker (new tab). */
+  const openGuruFocus = (tk: string) => {
+    const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
+    if (!sym) return
+    window.open(
+      `https://www.gurufocus.com/stock/${encodeURIComponent(sym)}/summary`,
+      '_blank',
+      'noopener,noreferrer',
+    )
+  }
+
   // Topbar stock peek → “Run AI analysis” dispatches this event.
   useEffect(() => {
     const onFocus = (e: Event) => {
@@ -266,8 +277,8 @@ export function DeskPage() {
                         <button
                           type="button"
                           className={styles.tkBtn}
-                          title="Analyze this ticker"
-                          onClick={() => focusAnalyze(tk, false)}
+                          title={`Open ${tk} on GuruFocus`}
+                          onClick={() => openGuruFocus(tk)}
                         >
                           <span className={styles.tk}>{tk}</span>
                         </button>
