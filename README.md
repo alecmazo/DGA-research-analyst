@@ -1,4 +1,4 @@
-# DGA Capital Research Analyst — Claude Edition
+# DGA Capital Research Analyst
 
 > **Multi-agent handoff:** Before non-trivial edits, read **[LLM_COORDINATION.md](./LLM_COORDINATION.md)** (claims, surfaces map, sync rules for Grok / Fable / Claude).
 
@@ -27,7 +27,7 @@ The pipeline downloads the latest 10-K and 10-Q for each ticker, saves each as a
 ## Install (one-time, on your Mac)
 
 ```bash
-cd "/path/to/Claude Research Analyst"
+cd "/path/to/DGA Research Analyst"
 pip3 install openai python-docx pandas openpyxl requests python-dotenv edgartools
 ```
 

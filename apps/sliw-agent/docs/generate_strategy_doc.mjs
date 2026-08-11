@@ -463,7 +463,7 @@ const doc = new Document({
         bullet("Edyta still only sees interested wedding clients with briefs"),
 
         h1("9. Technical placement (for operators)"),
-        bullet("Code: Claude_Research_Analyst/apps/sliw-agent/ on GitHub main"),
+        bullet("Code: DGA-research-analyst/apps/sliw-agent/ on GitHub main"),
         bullet("Production URL: /sliw/ on portfolio.dgacapital.com (Railway)"),
         bullet("API: /api/sliw/* behind DGA login + email allowlist"),
         bullet("CRM data: $STOCKS_FOLDER/sliw-agent/ (persistent volume)"),

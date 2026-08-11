@@ -7137,7 +7137,7 @@ def _continuity_pack() -> dict:
         f"## Live production (authoritative)\n"
         f"- **Build:** `{WEB_BUILD_VERSION}`\n"
         f"- **Probe:** `GET https://portfolio.dgacapital.com/api/build`\n"
-        f"- **Repo:** `https://github.com/alecmazo/claude-research-analyst` (branch `main`)\n"
+        f"- **Repo:** `https://github.com/alecmazo/DGA-research-analyst` (branch `main`)\n"
         f"- **Git:** `{git_branch or '—'}@{git_sha or '—'}` — {git_msg or '—'}\n"
         f"- **Handoff generated:** {now}\n"
         f"- **BUILD_VERSION file:** `{build_file or WEB_BUILD_VERSION}`\n\n"

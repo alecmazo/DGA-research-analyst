@@ -270,7 +270,7 @@ GP / admin always; also allowlisted emails (default Edyta + Alec).
 | `STOCKS_FOLDER` | CRM data stored under `$STOCKS_FOLDER/sliw-agent/` (persistent volume) |
 | `GAMMA_API_KEY` | Optional live Gamma decks |
 
-**Deploy:** push/redeploy `Claude_Research_Analyst` as usual. After deploy:
+**Deploy:** push/redeploy `DGA-research-analyst` as usual. After deploy:
 
 1. Log in at portfolio.dgacapital.com  
 2. Open **Sliw** in the GP top nav, or go to `/sliw/`  

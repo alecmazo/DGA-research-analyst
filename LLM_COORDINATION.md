@@ -9,7 +9,7 @@
 
 | Item | Value |
 |------|--------|
-| Repo | `https://github.com/alecmazo/claude-research-analyst` |
+| Repo | `https://github.com/alecmazo/DGA-research-analyst` |
 | Default branch | `main` |
 | Last coordination note | 2026-07-13 — Grok high-ROI UX package (Desk/Today/report reader/LP narrative) |
 | Do not commit | `.env`, `.claude/`, `.grok/`, generated `stocks/*` reports, runtime CRM under most of `apps/sliw-agent/data/*` (see `.gitignore`) |

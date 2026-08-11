@@ -132,8 +132,8 @@
       ],
       "gamma_url": null,
       "gamma_pptx": null,
-      "outreach_path": "/Users/dplvideo/.grok/worktrees/desktop-claude-research-analyst/sliw-agent/apps/sliw-agent/data/outreach/Genentech_cold_1_20260712_114005.json",
-      "edyta_brief_path": "/Users/dplvideo/.grok/worktrees/desktop-claude-research-analyst/sliw-agent/apps/sliw-agent/data/briefs/EDYTA_BRIEF_Genentech.md",
+      "outreach_path": "/Users/dplvideo/.grok/worktrees/desktop-DGA-research-analyst/sliw-agent/apps/sliw-agent/data/outreach/Genentech_cold_1_20260712_114005.json",
+      "edyta_brief_path": "/Users/dplvideo/.grok/worktrees/desktop-DGA-research-analyst/sliw-agent/apps/sliw-agent/data/briefs/EDYTA_BRIEF_Genentech.md",
       "history": [
         {
           "at": "2026-07-12T18:40:09.249068+00:00",
@@ -330,7 +330,7 @@
       ],
       "gamma_url": "https://edytasliwinska.com/corporate",
       "gamma_pptx": null,
-      "outreach_path": "/Users/dplvideo/Library/CloudStorage/Dropbox/Mac/Desktop/Claude_Research_Analyst/apps/sliw-agent/data/outreach/Airbnb_cold_1_20260712_134356.json",
+      "outreach_path": "/Users/dplvideo/Library/CloudStorage/Dropbox/Mac/Desktop/DGA-research-analyst/apps/sliw-agent/data/outreach/Airbnb_cold_1_20260712_134356.json",
       "edyta_brief_path": null,
       "history": [],
       "industry": "Technology / SaaS / AI",
@@ -348,7 +348,7 @@
       },
       "agent_note": "Priority target (score 88). Lead with The \"Dancing with the Office Stars\". Build a tailored Gamma deck and draft a senior-tone outreach. Signals: belonging, culture, holiday party, employee experience.",
       "sequence_paths": {
-        "cold_1": "/Users/dplvideo/Library/CloudStorage/Dropbox/Mac/Desktop/Claude_Research_Analyst/apps/sliw-agent/data/outreach/Airbnb_cold_1_20260712_134356.json"
+        "cold_1": "/Users/dplvideo/Library/CloudStorage/Dropbox/Mac/Desktop/DGA-research-analyst/apps/sliw-agent/data/outreach/Airbnb_cold_1_20260712_134356.json"
       },
       "contact_research": "No personal emails found — role inboxes suggested. Set HUNTER_API_KEY for better hit rates.",
       "linkedin_targets": [
@@ -394,7 +394,7 @@
         }
       ],
       "marketing_mode": "full",
-      "gamma_prompt_path": "/Users/dplvideo/Library/CloudStorage/Dropbox/Mac/Desktop/Claude_Research_Analyst/apps/sliw-agent/data/decks/Airbnb_20260712_prompt.txt",
+      "gamma_prompt_path": "/Users/dplvideo/Library/CloudStorage/Dropbox/Mac/Desktop/DGA-research-analyst/apps/sliw-agent/data/decks/Airbnb_20260712_prompt.txt",
       "agent_status": "ready_to_send",
       "sales_agent_ran_at": "2026-07-12T20:43:56.242174",
       "corporate_url": "https://edytasliwinska.com/corporate",

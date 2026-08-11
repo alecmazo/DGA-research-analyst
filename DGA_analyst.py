@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DGA Capital Research Analyst — Claude Edition
+DGA Capital Research Analyst
 ----------------------------------------------
 
 Terminal entry-point that:
@@ -12570,7 +12570,7 @@ def _prompt_yes_no(prompt: str, default: bool = False) -> bool:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="DGA Capital Research — Claude Edition")
+    ap = argparse.ArgumentParser(description="DGA Capital Research")
     ap.add_argument("ticker", nargs="?", help="Single ticker (e.g. AAPL)")
     ap.add_argument("--portfolio", help="Path to a CSV or XLSX portfolio file "
                                         "(columns: Ticker | Weight | Optimized)")
@@ -12614,7 +12614,7 @@ def main() -> int:
         return 0
 
     print("╔══════════════════════════════════════════════════╗")
-    print("║  DGA CAPITAL RESEARCH ANALYST — Claude Edition  ║")
+    print("║  DGA CAPITAL RESEARCH ANALYST  ║")
     print("╚══════════════════════════════════════════════════╝")
 
     # Resolve input: CLI takes precedence; else prompt.

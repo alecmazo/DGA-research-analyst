@@ -130,7 +130,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ### Known systems
 
-- **Push worktree for main:** often `/tmp/cra-push` (clone of `alecmazo/claude-research-analyst`)
+- **Push worktree for main:** often `/tmp/cra-push` (clone of `alecmazo/DGA-research-analyst`)
 - **User worktree:** `~/.grok/worktrees/.../dga-capital-portal` may lag `main`
 - **Railway:** auto-deploy from `main`; probe with `/api/build`
 - **GP login (dev):** email/password via `/api/auth/v2/login` (token header `x-auth-v2-token`)

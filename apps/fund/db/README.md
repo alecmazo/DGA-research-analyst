@@ -27,7 +27,7 @@ pip3 install psycopg2-binary
 3. From the repo root:
 
 ```bash
-cd /path/to/Claude_Research_Analyst
+cd /path/to/DGA-research-analyst
 DATABASE_URL="postgres://..." python3 apps/fund/db/apply_schema.py
 ```
 
@@ -37,7 +37,7 @@ Save the `Fund ID` printed at the end — add it as `FUND_ID` in Railway env var
 
 ```bash
 # Start Docker Desktop first, then:
-cd /path/to/Claude_Research_Analyst
+cd /path/to/DGA-research-analyst
 python3 apps/fund/db/apply_schema.py --local
 ```
 
@@ -55,7 +55,7 @@ source ~/.zshrc
 ### Apply to Railway Postgres
 
 ```bash
-cd /path/to/Claude_Research_Analyst
+cd /path/to/DGA-research-analyst
 psql "$DATABASE_URL" -f apps/fund/db/migrations/0001_initial_schema.sql
 psql "$DATABASE_URL" <<'SQL'
 INSERT INTO funds (

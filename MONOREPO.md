@@ -12,7 +12,7 @@ apps that can each deploy and break independently.
 ## Current state (Phase 0)
 
 ```
-Claude_Research_Analyst/
+DGA-research-analyst/
 ├── DGA_analyst.py        ← Research backend logic (~9000 lines)
 ├── api/server.py            ← FastAPI server for Research
 ├── mobile/                  ← Research mobile app (Expo SDK 54)
