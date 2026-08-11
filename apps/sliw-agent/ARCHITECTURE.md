@@ -52,18 +52,28 @@ Empty hero + empty clips = gallery stays hidden (no placeholder junk).
 
 Sliw and DGA Capital are different businesses. Recommended path:
 
-### Now (done / low risk)
+### Now (done / low risk) — **one database, two code trees**
 - Canonical desk: **sliw.edytasliwinska.com**
-- Shared Postgres for CRM + media
-- No auto-import on load
-- Portfolio `/sliw` redirects to Edyta host
+- **One shared Railway Postgres** (`DATABASE_URL`) for CRM + storefront media  
+  - Tables: `sliw_crm_books`, `sliw_kv`  
+  - Used by **both** Railway services (`web` + `sliw`)  
+  - Local `data/*.json` files are **fallback only** — never the live source of truth  
+- No auto-import on load  
+- Portfolio `/sliw` redirects to Edyta host  
+- **Code mirror:** `apps/sliw-agent/` also lives in repo `alecmazo/sliwinska`  
+  - **Live deploys still from this DGA monorepo → Railway**  
+  - Marketing / Vercel deploys from Sliwinska `public/` only  
+  - Sync script: `Sliwinska/scripts/sync-sliw-agent-from-dga.sh`  
+  - Sync **never** copies CRM JSON into git; production data stays in Postgres  
 
-### Next (clean separation)
-1. **New Railway project** under Alec/Edyta (not DGA monorepo): `sliw-agent` only  
-2. Move `apps/sliw-agent` + thin API shell  
-3. Domains on that project only: `sliw.` + `weddings.`  
-4. Own Postgres volume; stop sharing DGA `DATABASE_URL`  
-5. Auth: keep same email allowlist or dedicated login  
+### Later (clean separation — only when ready)
+1. New Railway project under Alec/Edyta with `sliw-agent` only  
+2. Domains `sliw.` + `weddings.` on that project  
+3. **Migrate** Postgres (dump/restore) — do **not** spin a second empty DB while the first still has leads  
+4. Point Railway deploys at Sliwinska repo; stop monorepo deploys for Sliw  
+5. Auth: same email allowlist  
+
+Until then: **keep one `DATABASE_URL`. Never dual-write to two Postgres instances.**
 
 ### Why not stay in DGA forever?
 - Deploys, secrets, and risk are coupled to fund infrastructure  
@@ -71,7 +81,9 @@ Sliw and DGA Capital are different businesses. Recommended path:
 - Grok/agent context gets polluted with portfolio code  
 
 ### What *not* to do
-- Don’t run two full desks without shared storage (that lost form leads)  
+- Don’t run two full desks **without** the same Postgres (that lost form leads)  
+- Don’t create a second Railway Postgres “for Sliwinska” while the first still holds production CRM  
+- Don’t treat local `wedding_crm.json` / `crm.json` as production  
 - Don’t keep auto-import on every page load  
 - Don’t host large MP4s on Railway — use URLs  
 

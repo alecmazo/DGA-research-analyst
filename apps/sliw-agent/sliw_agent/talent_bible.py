@@ -27,7 +27,7 @@ TALENT = {
     ),
     "website": "https://edytasliwinska.com",
     "corporate_page": "https://edytasliwinska.com/corporate",
-    "package_site": "https://edyta-corporate-dance-866y3wq.gamma.site/",
+    "package_site": "https://corporate.edytasliwinska.com/",
     "about_page": "https://edytasliwinska.com/about",
     "contact_page": "https://edytasliwinska.com/contact-us",
     "email_public": "admin@edytasliwinska.com",
