@@ -52,9 +52,11 @@ from .master_deck import (
 from .wedding_agent import (
     apply_stripe_checkout_session,
     capture_couple_lead,
+    get_wedding_media,
     import_wedding_library,
     run_wedding_pipeline,
     run_wedding_sales_agent,
+    save_wedding_media,
     seed_default_partnerships,
     verify_stripe_webhook_signature,
     wedding_public_config,
@@ -179,6 +181,12 @@ class InterestedRequest(BaseModel):
 class StageRequest(BaseModel):
     stage: str
     note: str = ""
+
+
+class WeddingMediaRequest(BaseModel):
+    """Storefront hero + clips (URLs only — host images on Drive/Dropbox/YouTube)."""
+    hero: Optional[dict[str, Any]] = None
+    clips: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ── Access control (Railway / shared login) ───────────────────────────────────
@@ -893,6 +901,31 @@ def create_api_router() -> APIRouter:
     def wedding_leads(request: Request) -> list[dict[str, Any]]:
         require_sliw_access(request)
         return crm.interested_leads(book="wedding")
+
+    @r.get("/wedding/media")
+    def wedding_media_get(request: Request) -> dict[str, Any]:
+        """Current storefront media (hero + clips) for the desk editor."""
+        require_sliw_access(request)
+        m = get_wedding_media()
+        return {
+            "ok": True,
+            "hero": m.get("hero"),
+            "clips": m.get("clips") or [],
+            "preview": "https://weddings.edytasliwinska.com/",
+            "help": (
+                "Paste https image URLs or YouTube embed URLs. "
+                "Save once — live site picks them up (no redeploy)."
+            ),
+        }
+
+    @r.put("/wedding/media")
+    def wedding_media_put(body: WeddingMediaRequest, request: Request) -> dict[str, Any]:
+        """Update storefront media from the Weddings tab. Shared via Postgres."""
+        require_sliw_access(request)
+        return save_wedding_media({
+            "hero": body.hero,
+            "clips": body.clips or [],
+        })
 
     return r
 

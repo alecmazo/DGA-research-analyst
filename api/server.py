@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui450-20260810-sliw-desk-host"
+WEB_BUILD_VERSION = "ui451-20260810-sliw-media-no-autoimport"
 
 
 @app.get("/api/build")
@@ -35701,16 +35701,21 @@ def _mount_sliw_agent() -> None:
             # On dedicated host, desk lives at /
             if _is_sliw_desk_host(request):
                 return RedirectResponse(url="/", status_code=307)
-            return RedirectResponse(url="/sliw/", status_code=307)
+            # Single desk home: portfolio path → Edyta Sliw host (canonical)
+            return RedirectResponse(
+                url="https://sliw.edytasliwinska.com/",
+                status_code=307,
+            )
 
         @app.get("/sliw/")
         def _sliw_index(request: Request):
             if _is_sliw_desk_host(request):
                 return RedirectResponse(url="/", status_code=307)
-            path = _SLIW_WEB / "index.html"
-            if not path.exists():
-                raise HTTPException(status_code=404, detail="Sliw Agent UI not found")
-            return _shell_response(path, request)
+            # Canonical desk is sliw.edytasliwinska.com (not portfolio.dgacapital.com/sliw/)
+            return RedirectResponse(
+                url="https://sliw.edytasliwinska.com/",
+                status_code=307,
+            )
 
         # Public master PDF for email body links (no login — cold recipients open this)
         @app.get("/sliw/media/master-packages.pdf")

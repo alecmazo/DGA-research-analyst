@@ -830,40 +830,100 @@ def capture_couple_lead(
     }
 
 
-def _load_media_manifest() -> dict[str, Any]:
-    """Optional visual assets for the storefront (images / video / embeds).
+_MEDIA_KV_KEY = "wedding_media"
 
-    Priority:
-      1) SLIW_WEDDING_MEDIA_JSON env (JSON string)
-      2) weddings-site/media/manifest.json
-    Empty / missing → storefront hides the gallery (no text-wall placeholders).
-    """
+
+def _normalize_media_item(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    src = (item.get("src") or "").strip()
+    if not src:
+        return None
+    # Allow https URLs and relative media/ paths only
+    if not (
+        src.startswith("https://")
+        or src.startswith("http://")
+        or src.startswith("media/")
+        or src.startswith("/media/")
+    ):
+        return None
+    typ = (item.get("type") or "image").strip().lower()
+    if typ not in ("image", "video", "embed"):
+        typ = "image"
+    out: dict[str, Any] = {"type": typ, "src": src}
+    if item.get("caption"):
+        out["caption"] = str(item.get("caption"))[:120]
+    if item.get("alt"):
+        out["alt"] = str(item.get("alt"))[:160]
+    if item.get("poster"):
+        poster = str(item.get("poster")).strip()
+        if poster.startswith("https://") or poster.startswith("media/") or poster.startswith("/media/"):
+            out["poster"] = poster
+    return out
+
+
+def _normalize_media_payload(raw: dict[str, Any] | None) -> dict[str, Any]:
+    raw = raw or {}
+    hero = _normalize_media_item(raw.get("hero")) if raw.get("hero") else None
+    clips_in = raw.get("clips") if isinstance(raw.get("clips"), list) else []
+    clips: list[dict[str, Any]] = []
+    for c in clips_in[:6]:
+        n = _normalize_media_item(c)
+        if n:
+            clips.append(n)
+    return {"hero": hero, "clips": clips}
+
+
+def get_wedding_media() -> dict[str, Any]:
+    """Storefront media — shared Postgres (desk editor) → env → file fallback."""
     import os
 
+    # 1) Desk-edited shared store
+    try:
+        stored = crm.load_kv(_MEDIA_KV_KEY)
+        if stored and (stored.get("hero") or stored.get("clips")):
+            return _normalize_media_payload(stored)
+    except Exception:
+        pass
+    # 2) Env override (ops / emergency)
     raw = (os.environ.get("SLIW_WEDDING_MEDIA_JSON") or "").strip()
     if raw:
         try:
             data = json.loads(raw)
             if isinstance(data, dict):
-                return data
+                return _normalize_media_payload(data)
         except Exception:
             pass
+    # 3) Repo file (dev only)
     path = Path(__file__).resolve().parent.parent / "weddings-site" / "media" / "manifest.json"
     if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                return data
+                return _normalize_media_payload(data)
         except Exception:
             pass
     return {"hero": None, "clips": []}
+
+
+def save_wedding_media(payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist storefront media from the Sliw desk (shared across services)."""
+    clean = _normalize_media_payload(payload if isinstance(payload, dict) else {})
+    saved = crm.save_kv(_MEDIA_KV_KEY, clean)
+    return {
+        "ok": True,
+        "hero": clean.get("hero"),
+        "clips": clean.get("clips") or [],
+        "updated_at": saved.get("_updated_at"),
+        "preview": "https://weddings.edytasliwinska.com/",
+    }
 
 
 def wedding_public_config() -> dict[str, Any]:
     """Public config for the storefront (no secrets)."""
     import os
 
-    media = _load_media_manifest()
+    media = get_wedding_media()
     return {
         "ok": True,
         "brand": {

@@ -1015,12 +1015,7 @@ async function softRefresh() {
 async function fullRefresh() {
   busy(true, "Loading desk…");
   try {
-    // Auto-import anything pending so leads never linger
-    try {
-      const imp = await api("/library/import-all", { method: "POST" });
-      if (imp.imported > 0) toast(`Synced ${imp.imported} new leads into CRM`);
-    } catch (_) {}
-
+    // Do NOT auto-import library/seeds on load — only when the user clicks Import.
     const [ready, edyta, lib, weddingRows, partners, me] = await Promise.all([
       api("/work/ready?limit=8"),
       api("/edyta-home"),
@@ -1163,6 +1158,127 @@ function boot() {
       await refreshWeddingChannel(state.weddingChannel || null);
       toast(`Wedding list refreshed (${state.wedding.length})`);
     } catch (e) { toast(e.message); }
+  });
+
+  // ── Storefront media editor (Weddings tab) ─────────────────────────────
+  function clipRowHtml(clip, idx) {
+    const c = clip || {};
+    return `<div class="media-clip-row" data-idx="${idx}" style="display:grid;grid-template-columns:1fr 110px 1fr auto;gap:8px;margin-bottom:8px;align-items:end">
+      <label class="field-label">URL
+        <input type="url" class="media-clip-src" value="${esc(c.src || "")}" placeholder="https://…/clip.jpg" />
+      </label>
+      <label class="field-label">Type
+        <select class="media-clip-type">
+          <option value="image"${(c.type || "image") === "image" ? " selected" : ""}>Image</option>
+          <option value="video"${c.type === "video" ? " selected" : ""}>Video</option>
+          <option value="embed"${c.type === "embed" ? " selected" : ""}>Embed</option>
+        </select>
+      </label>
+      <label class="field-label">Caption
+        <input type="text" class="media-clip-caption" value="${esc(c.caption || "")}" maxlength="120" placeholder="Optional" />
+      </label>
+      <button type="button" class="btn ghost sm media-clip-remove" title="Remove">×</button>
+    </div>`;
+  }
+
+  function renderMediaClips(clips) {
+    const host = $("#media-clips-editor");
+    if (!host) return;
+    const list = Array.isArray(clips) ? clips.slice(0, 3) : [];
+    if (!list.length) {
+      host.innerHTML = clipRowHtml({}, 0);
+      return;
+    }
+    host.innerHTML = list.map((c, i) => clipRowHtml(c, i)).join("");
+  }
+
+  async function loadWeddingMedia() {
+    const st = $("#media-status");
+    try {
+      const m = await api("/wedding/media");
+      const hero = m.hero || {};
+      const heroSrc = $("#media-hero-src");
+      const heroType = $("#media-hero-type");
+      const heroCap = $("#media-hero-caption");
+      if (heroSrc) heroSrc.value = hero.src || "";
+      if (heroType) heroType.value = hero.type || "image";
+      if (heroCap) heroCap.value = hero.caption || hero.alt || "";
+      renderMediaClips(m.clips || []);
+      if (st) st.textContent = m.updated_at ? "Loaded" : "Ready — paste URLs and Save";
+    } catch (e) {
+      if (st) st.textContent = e.message || "Could not load media";
+    }
+  }
+
+  function collectMediaPayload() {
+    const heroSrc = ($("#media-hero-src")?.value || "").trim();
+    const hero = heroSrc
+      ? {
+          type: $("#media-hero-type")?.value || "image",
+          src: heroSrc,
+          caption: ($("#media-hero-caption")?.value || "").trim(),
+          alt: ($("#media-hero-caption")?.value || "").trim() || "Edyta wedding dance",
+        }
+      : null;
+    const clips = [];
+    $$("#media-clips-editor .media-clip-row").forEach((row) => {
+      const src = (row.querySelector(".media-clip-src")?.value || "").trim();
+      if (!src) return;
+      clips.push({
+        type: row.querySelector(".media-clip-type")?.value || "image",
+        src,
+        caption: (row.querySelector(".media-clip-caption")?.value || "").trim(),
+      });
+    });
+    return { hero, clips: clips.slice(0, 3) };
+  }
+
+  $("#btn-media-add-clip")?.addEventListener("click", () => {
+    const host = $("#media-clips-editor");
+    if (!host) return;
+    const n = host.querySelectorAll(".media-clip-row").length;
+    if (n >= 3) {
+      toast("Max 3 clips — keep the page light");
+      return;
+    }
+    host.insertAdjacentHTML("beforeend", clipRowHtml({}, n));
+  });
+
+  $("#media-clips-editor")?.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".media-clip-remove");
+    if (!btn) return;
+    const row = btn.closest(".media-clip-row");
+    row?.remove();
+    if (!$("#media-clips-editor")?.querySelector(".media-clip-row")) {
+      renderMediaClips([]);
+    }
+  });
+
+  $("#btn-media-save")?.addEventListener("click", async () => {
+    const st = $("#media-status");
+    const body = collectMediaPayload();
+    if (st) st.textContent = "Saving…";
+    try {
+      const r = await api("/wedding/media", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      if (st) st.textContent = "Saved — live site updated";
+      toast("Storefront media saved");
+      if (r.preview) {
+        // soft open hint
+      }
+    } catch (e) {
+      if (st) st.textContent = e.message || "Save failed";
+      toast(e.message || "Save failed");
+    }
+  });
+
+  $("#btn-media-reload")?.addEventListener("click", () => loadWeddingMedia());
+
+  // Load media editor when opening Weddings view
+  document.querySelector('[data-view="weddings"]')?.addEventListener("click", () => {
+    loadWeddingMedia();
   });
 
   $("#btn-partner-seed")?.addEventListener("click", async () => {

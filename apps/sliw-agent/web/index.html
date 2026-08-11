@@ -164,22 +164,64 @@
             <h3>Wedding desk — couples + planners</h3>
             <p>
               <strong>Couples inbox</strong> = form leads from
-              <a href="/weddings-site/" target="_blank" rel="noopener">weddings storefront</a>
-              (and soon weddings.edytasliwinska.com). Call / text same day.
-              <strong>Planners</strong> = partnership outreach. Click a card → Work.
+              <a href="https://weddings.edytasliwinska.com/" target="_blank" rel="noopener">weddings.edytasliwinska.com</a>.
+              Call / text same day.
+              <strong>Planners</strong> = partnership outreach (import seeds once, then only when you click Import).
+              Click a card → Work.
             </p>
           </div>
           <div class="toolbar wedding-toolbar">
             <button class="btn primary sm" id="btn-wedding-couples" type="button">Couples inbox</button>
             <button class="btn ghost sm" id="btn-wedding-partners" type="button">Planners &amp; venues</button>
             <button class="btn ghost sm" id="btn-wedding-import" type="button">Import planner seeds</button>
-            <button class="btn ghost sm" id="btn-wedding-refresh" type="button">Refresh</button>
+            <button class="btn ghost sm" id="btn-wedding-refresh" type="button">Refresh list</button>
             <span class="muted" id="wedding-summary">—</span>
           </div>
           <p class="hint-line" id="wedding-hint">
-            Daily cadence: open Couples inbox first → contact new form leads → then planner outreach.
+            Daily: Couples inbox first → contact new form leads → then planner outreach. Seeds stay until you re-import.
           </p>
           <div class="prospect-grid" id="wedding-grid"></div>
+
+          <!-- Storefront media — paste URLs, save once, live site updates -->
+          <div class="panel" id="wedding-media-panel" style="margin-top:18px">
+            <div class="panel-head">
+              <h3>Storefront media</h3>
+              <a class="btn ghost sm" href="https://weddings.edytasliwinska.com/" target="_blank" rel="noopener">Open live site</a>
+            </div>
+            <p class="hint-line">
+              Make the wedding page visual without redeploying. Paste <strong>https</strong> links to photos
+              (Google Drive public link, Dropbox, Imgur) or a YouTube embed URL. Empty = section stays hidden.
+            </p>
+            <div class="materials-grid" style="margin-top:12px">
+              <div class="materials-card materials-card-wide">
+                <label class="field-label">Hero photo or video URL
+                  <input type="url" id="media-hero-src" placeholder="https://…/hero.jpg  or  YouTube embed" />
+                </label>
+                <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+                  <label class="field-label">Type
+                    <select id="media-hero-type">
+                      <option value="image">Image</option>
+                      <option value="video">Video (mp4)</option>
+                      <option value="embed">YouTube / Vimeo embed</option>
+                    </select>
+                  </label>
+                  <label class="field-label">Caption (optional)
+                    <input type="text" id="media-hero-caption" placeholder="First dance · SF" maxlength="120" />
+                  </label>
+                </div>
+              </div>
+              <div class="materials-card materials-card-wide">
+                <p class="eyebrow">Clips (up to 3) — horizontal gallery</p>
+                <div id="media-clips-editor"></div>
+                <button type="button" class="btn ghost sm" id="btn-media-add-clip" style="margin-top:8px">+ Add clip</button>
+              </div>
+            </div>
+            <div class="ws-actions" style="margin-top:14px">
+              <button type="button" class="btn primary sm" id="btn-media-save">Save to live site</button>
+              <button type="button" class="btn ghost sm" id="btn-media-reload">Reload</button>
+              <span class="muted" id="media-status"></span>
+            </div>
+          </div>
         </section>
 
         <!-- PARTNERS -->

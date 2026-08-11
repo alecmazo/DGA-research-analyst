@@ -349,6 +349,85 @@ def save_crm(crm: dict[str, Any], book: str = "corporate") -> None:
         print(f"[sliw-crm] local file save failed: {exc!r}", flush=True)
 
 
+# ── Shared key-value (media config, small settings) ───────────────────────────
+
+def load_kv(key: str) -> dict[str, Any] | None:
+    """Load a shared JSON blob (Postgres when available)."""
+    key = (key or "").strip()
+    if not key:
+        return None
+    _ensure_pg_schema()
+    if _use_postgres():
+        try:
+            conn = _pg_connect()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT payload FROM sliw_kv WHERE key = %s",
+                        (key,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        return None
+                    data = row[0]
+                    if isinstance(data, str):
+                        data = json.loads(data)
+                    return data if isinstance(data, dict) else None
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"[sliw-crm] kv load failed {key}: {exc!r}", flush=True)
+    # file fallback
+    path = DATA_DIR / "kv" / f"{key}.json"
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+def save_kv(key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    key = (key or "").strip()
+    if not key:
+        raise ValueError("kv key required")
+    body = dict(payload or {})
+    body["_updated_at"] = _now()
+    _ensure_pg_schema()
+    if _use_postgres():
+        try:
+            conn = _pg_connect()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO sliw_kv (key, payload, updated_at)
+                        VALUES (%s, %s::jsonb, NOW())
+                        ON CONFLICT (key) DO UPDATE
+                        SET payload = EXCLUDED.payload, updated_at = NOW()
+                        """,
+                        (key, json.dumps(body, ensure_ascii=False)),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"[sliw-crm] kv save failed {key}: {exc!r}", flush=True)
+    # local cache
+    try:
+        ensure_dirs()
+        kv_dir = DATA_DIR / "kv"
+        kv_dir.mkdir(parents=True, exist_ok=True)
+        (kv_dir / f"{key}.json").write_text(
+            json.dumps(body, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        print(f"[sliw-crm] kv file save failed: {exc!r}", flush=True)
+    return body
+
+
 def new_prospect_id(company: str) -> str:
     slug = "".join(c.lower() if c.isalnum() else "-" for c in company).strip("-")
     slug = "-".join(part for part in slug.split("-") if part)[:48]
