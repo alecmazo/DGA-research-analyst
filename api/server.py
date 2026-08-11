@@ -7275,8 +7275,33 @@ def config_models():
                 round(float(est_v(ds_model, 30_000, 8_000)), 4) if callable(est_v) else 0.01,
                 round(float(est_v(ds_model, 45_000, 16_000)), 4) if callable(est_v) else 0.05,
             ],
+            # Flat bands (legacy chips) + per-engine maps for Desk
             "agentic":            [0.05, 0.30],
             "strategist":         [0.30, 1.00],
+            "agentic_by_provider": {
+                # Multi-step tool-use: Claude default · Grok mid · DeepSeek cheap
+                "claude":   [0.05, 0.30],
+                "grok":     [
+                    round(analyst.estimate_grok_cost(g_model, 12_000, 2_500, 2), 3),
+                    round(analyst.estimate_grok_cost(g_model, 35_000, 8_000, 6), 2),
+                ],
+                "deepseek": [
+                    round(float(est_v(ds_model, 12_000, 2_500)), 3) if callable(est_v) else 0.01,
+                    round(float(est_v(ds_model, 35_000, 8_000)), 2) if callable(est_v) else 0.08,
+                ],
+            },
+            "strategist_by_provider": {
+                # Whole-book review — heavier envelope than agentic Q&A
+                "claude":   [0.30, 1.00],
+                "grok":     [
+                    round(analyst.estimate_grok_cost(g_model, 25_000, 6_000, 2), 2),
+                    round(analyst.estimate_grok_cost(g_model, 60_000, 14_000, 5), 2),
+                ],
+                "deepseek": [
+                    round(float(est_v(ds_model, 25_000, 6_000)), 2) if callable(est_v) else 0.05,
+                    round(float(est_v(ds_model, 60_000, 14_000)), 2) if callable(est_v) else 0.25,
+                ],
+            },
             "volume_active":      vol_on,
             "volume_model":       v_model,
             "volume_rates":       (vol.get("rates_usd_per_mtok")

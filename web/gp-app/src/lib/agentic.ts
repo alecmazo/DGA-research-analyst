@@ -59,6 +59,16 @@ export function engLabel(eng: AgentEngine) {
   return 'Claude'
 }
 
+/** Instant engine pick for React desk chips (call inside flushSync). */
+export function pickAndSaveEngine(
+  key: string,
+  eng: AgentEngine,
+  setEngine: (e: AgentEngine) => void,
+) {
+  setEngine(eng)
+  saveEngine(key, eng)
+}
+
 /** Poll agentic job until done/error/timeout. Calls onTick while running. */
 export async function pollAgenticJob(
   jobId: string,

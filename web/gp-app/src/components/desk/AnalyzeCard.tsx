@@ -3,6 +3,12 @@ import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { api, type JobStatus, type LlmProvider } from '@/lib/api'
 import { pollJob } from '@/lib/jobs'
+import {
+  DEFAULT_REPORT_COST,
+  fmtUsd,
+  sumRanges,
+  useCostCatalog,
+} from '@/lib/llmCost'
 import styles from './deskWidgets.module.css'
 
 const ENGINES: { id: LlmProvider; label: string }[] = [
@@ -13,14 +19,6 @@ const ENGINES: { id: LlmProvider; label: string }[] = [
 ]
 
 const STORAGE_KEY = 'dga.hero.engines.v3'
-
-/** Fallback USD range per full report when /api/config/models is unavailable. */
-const DEFAULT_COST: Record<LlmProvider, [number, number]> = {
-  grok: [0.3, 0.6],
-  claude: [0.5, 1.0],
-  deepseek: [0.01, 0.05],
-  kimi: [0.15, 0.6],
-}
 
 function loadEngines(): LlmProvider[] {
   try {
@@ -40,22 +38,6 @@ function loadEngines(): LlmProvider[] {
   }
   return ['grok']
 }
-
-function fmtUsd(n: number): string {
-  if (n < 0.1) return n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') || n.toFixed(2)
-  return n.toFixed(2)
-}
-
-function parseRange(v: unknown, fallback: [number, number]): [number, number] {
-  if (Array.isArray(v) && v.length >= 2) {
-    const lo = Number(v[0])
-    const hi = Number(v[1])
-    if (!Number.isNaN(lo) && !Number.isNaN(hi)) return [lo, hi]
-  }
-  return fallback
-}
-
-type CostMap = Record<LlmProvider, [number, number]>
 
 type Props = {
   /** Prefill / external control of ticker (e.g. Idea Generator → Report). */
@@ -83,7 +65,7 @@ export function AnalyzeCard({
   }
 
   const [engines, setEngines] = useState<LlmProvider[]>(() => loadEngines())
-  const [costMap, setCostMap] = useState<CostMap>(() => ({ ...DEFAULT_COST }))
+  const costs = useCostCatalog()
   const [gamma, setGamma] = useState(false)
   const [running, setRunning] = useState(false)
   const [hint, setHint] = useState('')
@@ -102,31 +84,6 @@ export function AnalyzeCard({
     }
   }, [engines])
 
-  // Live cost bands from server model catalog
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const d = await api<{
-          est?: Record<string, unknown>
-        }>('/api/config/models')
-        if (cancelled || !d?.est) return
-        const est = d.est
-        setCostMap({
-          grok: parseRange(est.grok_report, DEFAULT_COST.grok),
-          claude: parseRange(est.claude_report, DEFAULT_COST.claude),
-          deepseek: parseRange(est.deepseek_report, DEFAULT_COST.deepseek),
-          kimi: parseRange(est.kimi_report, DEFAULT_COST.kimi),
-        })
-      } catch {
-        /* keep defaults */
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   /** Instant toggle — flushSync so highlight paints before the next frame. */
   const toggleEngine = (id: LlmProvider) => {
     if (running) return
@@ -141,17 +98,12 @@ export function AnalyzeCard({
     })
   }
 
+  const costMap = costs.report
+
   const costLabel = useMemo(() => {
     if (!engines.length) return 'Select an engine'
-    let lo = 0
-    let hi = 0
-    const parts: string[] = []
-    for (const e of engines) {
-      const [a, b] = costMap[e] || DEFAULT_COST[e]
-      lo += a
-      hi += b
-      parts.push(`${e} $${fmtUsd(a)}–${fmtUsd(b)}`)
-    }
+    const ranges = engines.map((e) => costMap[e] || DEFAULT_REPORT_COST[e])
+    const [lo, hi] = sumRanges(ranges)
     const range = `$${fmtUsd(lo)}–${fmtUsd(hi)}`
     if (engines.length === 1) {
       return gamma ? `≈ ${range} / report + deck` : `≈ ${range} / report`
@@ -162,7 +114,7 @@ export function AnalyzeCard({
 
   const costTitle = useMemo(() => {
     const parts = engines.map((e) => {
-      const [a, b] = costMap[e] || DEFAULT_COST[e]
+      const [a, b] = costMap[e] || DEFAULT_REPORT_COST[e]
       return `${e}: $${fmtUsd(a)}–${fmtUsd(b)} per report`
     })
     return (

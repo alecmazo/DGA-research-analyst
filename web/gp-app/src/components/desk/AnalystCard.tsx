@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { getCachedUser } from '@/lib/auth'
@@ -14,6 +15,7 @@ import {
   type AgenticJob,
   type AgenticResult,
 } from '@/lib/agentic'
+import { formatRange, useCostCatalog } from '@/lib/llmCost'
 import { renderMd } from '@/lib/md'
 import styles from './deskWidgets.module.css'
 
@@ -46,6 +48,7 @@ type Props = { bare?: boolean }
 
 export function AnalystCard({ bare = false }: Props) {
   const [engine, setEngine] = useState<AgentEngine>(() => loadEngine(ENGINE_KEY, 'claude'))
+  const costs = useCostCatalog()
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -56,9 +59,25 @@ export function AnalystCard({ bare = false }: Props) {
   const [reviews, setReviews] = useState<ReviewRow[]>([])
   const taRef = useRef<HTMLTextAreaElement>(null)
 
+  const costLabel = useMemo(() => {
+    const r = costs.agentic[engine]
+    return formatRange(r, ' / run')
+  }, [costs.agentic, engine])
+
+  const costTitle = useMemo(() => {
+    const r = costs.agentic[engine]
+    return (
+      `${engLabel(engine)} multi-step research estimate · $${r[0].toFixed(2)}–${r[1].toFixed(2)}. ` +
+      'Updates when you switch engines (from live model pricing).'
+    )
+  }, [costs.agentic, engine])
+
   const pickEngine = (e: AgentEngine) => {
-    setEngine(e)
-    saveEngine(ENGINE_KEY, e)
+    if (busy) return
+    flushSync(() => {
+      setEngine(e)
+      saveEngine(ENGINE_KEY, e)
+    })
   }
 
   const loadReviews = useCallback(async () => {
@@ -227,27 +246,41 @@ export function AnalystCard({ bare = false }: Props) {
     <div className={`${styles.agentBody} ${bare ? styles.heroBare : ''}`}>
       <p className={styles.agentHint}>
         Multi-step research over live quotes, saved reports, news, and your books.
-        <strong> ~$0.05–0.30</strong> by engine.
+        Cost follows the selected engine.
       </p>
 
       <div className={styles.agentToolbar}>
         <span className={styles.metaLabel}>Engine</span>
         <span className={styles.seg} role="group" aria-label="Analyst engine">
-          {AGENT_ENGINES.map((e) => (
+          {AGENT_ENGINES.map((e) => {
+            const on = engine === e.id
+            const er = costs.agentic[e.id]
+            return (
             <button
               key={e.id}
               type="button"
-              title={e.title}
-              className={`${styles.segBtn} ${engine === e.id ? styles.segActive : ''}`}
-              onClick={() => pickEngine(e.id)}
+              title={`${e.title} · est. $${er[0].toFixed(2)}–${er[1].toFixed(2)}`}
+              className={`${styles.segBtn} ${on ? styles.segActive : ''}`}
+              onPointerDown={(ev) => {
+                if (ev.button !== 0 || busy) return
+                ev.preventDefault()
+                pickEngine(e.id)
+              }}
+              onClick={(ev) => {
+                if (ev.detail === 0) pickEngine(e.id)
+              }}
               disabled={busy}
+              aria-pressed={on}
             >
               {e.label}
             </button>
-          ))}
+            )
+          })}
         </span>
         <span className={styles.engineTag}>{engLabel(engine)}</span>
-        <span className={styles.costHint}>Multi-step · ~$0.05–0.30</span>
+        <span className={styles.costHint} title={costTitle} aria-live="polite">
+          {costLabel}
+        </span>
       </div>
 
       <div className={styles.compose}>

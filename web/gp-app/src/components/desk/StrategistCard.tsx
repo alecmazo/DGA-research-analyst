@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -15,6 +16,7 @@ import {
   type AgenticJob,
   type AgenticResult,
 } from '@/lib/agentic'
+import { formatRange, useCostCatalog } from '@/lib/llmCost'
 import { renderMd } from '@/lib/md'
 import styles from './deskWidgets.module.css'
 
@@ -38,6 +40,7 @@ type Props = { bare?: boolean }
 export function StrategistCard({ bare = false }: Props) {
   const navigate = useNavigate()
   const [engine, setEngine] = useState<AgentEngine>(() => loadEngine(ENGINE_KEY, 'claude'))
+  const costs = useCostCatalog()
   const [funds, setFunds] = useState<FundOpt[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [file, setFile] = useState<File | null>(null)
@@ -48,14 +51,30 @@ export function StrategistCard({ bare = false }: Props) {
   const [jobId, setJobId] = useState<string | null>(null)
   const [fundLabel, setFundLabel] = useState('')
   const [tickers, setTickers] = useState<string[]>([])
+
+  const costLabel = useMemo(() => {
+    const r = costs.strategist[engine]
+    return formatRange(r, ' / review')
+  }, [costs.strategist, engine])
+
+  const costTitle = useMemo(() => {
+    const r = costs.strategist[engine]
+    return (
+      `${engLabel(engine)} whole-book strategist estimate · $${r[0].toFixed(2)}–${r[1].toFixed(2)}. ` +
+      'Updates when you switch engines (from live model pricing).'
+    )
+  }, [costs.strategist, engine])
+
+  const pickEngine = (e: AgentEngine) => {
+    if (busy) return
+    flushSync(() => {
+      setEngine(e)
+      saveEngine(ENGINE_KEY, e)
+    })
+  }
   const [positions, setPositions] = useState<unknown[]>([])
   const [archive, setArchive] = useState<StratReview[]>([])
   const [roundupMsg, setRoundupMsg] = useState<string | null>(null)
-
-  const pickEngine = (e: AgentEngine) => {
-    setEngine(e)
-    saveEngine(ENGINE_KEY, e)
-  }
 
   const loadFunds = useCallback(async () => {
     try {
@@ -311,27 +330,42 @@ export function StrategistCard({ bare = false }: Props) {
       <p className={styles.agentHint}>
         Full investment-committee review of an entire book. Reasons{' '}
         <em>across</em> positions (concentration, correlation, EV) and proposes
-        grounded adjustments. Hand off to Roundup podcast or strategy memo.{' '}
-        <em>~$0.30–1.00 by engine.</em>
+        grounded adjustments. Hand off to Roundup podcast or strategy memo. Cost
+        follows the selected engine.
       </p>
 
       <div className={styles.agentToolbar}>
         <span className={styles.metaLabel}>Engine</span>
         <span className={styles.seg} role="group" aria-label="Strategist engine">
-          {AGENT_ENGINES.map((e) => (
+          {AGENT_ENGINES.map((e) => {
+            const on = engine === e.id
+            const er = costs.strategist[e.id]
+            return (
             <button
               key={e.id}
               type="button"
-              title={e.title}
-              className={`${styles.segBtn} ${engine === e.id ? styles.segActive : ''}`}
-              onClick={() => pickEngine(e.id)}
+              title={`${e.title} · est. $${er[0].toFixed(2)}–${er[1].toFixed(2)}`}
+              className={`${styles.segBtn} ${on ? styles.segActive : ''}`}
+              onPointerDown={(ev) => {
+                if (ev.button !== 0 || busy) return
+                ev.preventDefault()
+                pickEngine(e.id)
+              }}
+              onClick={(ev) => {
+                if (ev.detail === 0) pickEngine(e.id)
+              }}
               disabled={busy}
+              aria-pressed={on}
             >
               {e.label}
             </button>
-          ))}
+            )
+          })}
         </span>
         <span className={styles.engineTag}>{engLabel(engine)}</span>
+        <span className={styles.costHint} title={costTitle} aria-live="polite">
+          {costLabel}
+        </span>
       </div>
 
       <div className={styles.stratRow}>
