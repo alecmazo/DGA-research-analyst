@@ -209,7 +209,11 @@
   color: rgba(255, 255, 255, 0.72);
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
+  /* Instant toggle — no transition lag between press and selected state */
+  transition: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
 }
 
 .engineChip:hover {
@@ -225,6 +229,13 @@
   box-shadow: 0 0 0 2px rgba(91, 184, 212, 0.35);
 }
 
+/* Hover must not mute selected state */
+.engineChipOn:hover {
+  background: #6fc4dc;
+  border-color: #6fc4dc;
+  color: #0a1628;
+}
+
 .engineChip:disabled {
   opacity: 0.55;
   cursor: default;
@@ -238,6 +249,8 @@
   border: 1px solid rgba(91, 184, 212, 0.28);
   border-radius: 5px;
   padding: 2px 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .gammaLabel {

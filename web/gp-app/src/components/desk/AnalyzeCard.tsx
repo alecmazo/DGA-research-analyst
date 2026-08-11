@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { api, type JobStatus, type LlmProvider } from '@/lib/api'
 import { pollJob } from '@/lib/jobs'
@@ -12,6 +13,14 @@ const ENGINES: { id: LlmProvider; label: string }[] = [
 ]
 
 const STORAGE_KEY = 'dga.hero.engines.v3'
+
+/** Fallback USD range per full report when /api/config/models is unavailable. */
+const DEFAULT_COST: Record<LlmProvider, [number, number]> = {
+  grok: [0.3, 0.6],
+  claude: [0.5, 1.0],
+  deepseek: [0.01, 0.05],
+  kimi: [0.15, 0.6],
+}
 
 function loadEngines(): LlmProvider[] {
   try {
@@ -31,6 +40,22 @@ function loadEngines(): LlmProvider[] {
   }
   return ['grok']
 }
+
+function fmtUsd(n: number): string {
+  if (n < 0.1) return n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') || n.toFixed(2)
+  return n.toFixed(2)
+}
+
+function parseRange(v: unknown, fallback: [number, number]): [number, number] {
+  if (Array.isArray(v) && v.length >= 2) {
+    const lo = Number(v[0])
+    const hi = Number(v[1])
+    if (!Number.isNaN(lo) && !Number.isNaN(hi)) return [lo, hi]
+  }
+  return fallback
+}
+
+type CostMap = Record<LlmProvider, [number, number]>
 
 type Props = {
   /** Prefill / external control of ticker (e.g. Idea Generator → Report). */
@@ -58,6 +83,7 @@ export function AnalyzeCard({
   }
 
   const [engines, setEngines] = useState<LlmProvider[]>(() => loadEngines())
+  const [costMap, setCostMap] = useState<CostMap>(() => ({ ...DEFAULT_COST }))
   const [gamma, setGamma] = useState(false)
   const [running, setRunning] = useState(false)
   const [hint, setHint] = useState('')
@@ -76,15 +102,75 @@ export function AnalyzeCard({
     }
   }, [engines])
 
-  const toggleEngine = (id: LlmProvider) => {
-    setEngines((prev) => {
-      if (prev.includes(id)) {
-        const next = prev.filter((e) => e !== id)
-        return next.length ? next : prev // keep at least one
+  // Live cost bands from server model catalog
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const d = await api<{
+          est?: Record<string, unknown>
+        }>('/api/config/models')
+        if (cancelled || !d?.est) return
+        const est = d.est
+        setCostMap({
+          grok: parseRange(est.grok_report, DEFAULT_COST.grok),
+          claude: parseRange(est.claude_report, DEFAULT_COST.claude),
+          deepseek: parseRange(est.deepseek_report, DEFAULT_COST.deepseek),
+          kimi: parseRange(est.kimi_report, DEFAULT_COST.kimi),
+        })
+      } catch {
+        /* keep defaults */
       }
-      return [...prev, id]
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  /** Instant toggle — flushSync so highlight paints before the next frame. */
+  const toggleEngine = (id: LlmProvider) => {
+    if (running) return
+    flushSync(() => {
+      setEngines((prev) => {
+        if (prev.includes(id)) {
+          const next = prev.filter((e) => e !== id)
+          return next.length ? next : prev // keep at least one
+        }
+        return [...prev, id]
+      })
     })
   }
+
+  const costLabel = useMemo(() => {
+    if (!engines.length) return 'Select an engine'
+    let lo = 0
+    let hi = 0
+    const parts: string[] = []
+    for (const e of engines) {
+      const [a, b] = costMap[e] || DEFAULT_COST[e]
+      lo += a
+      hi += b
+      parts.push(`${e} $${fmtUsd(a)}–${fmtUsd(b)}`)
+    }
+    const range = `$${fmtUsd(lo)}–${fmtUsd(hi)}`
+    if (engines.length === 1) {
+      return gamma ? `≈ ${range} / report + deck` : `≈ ${range} / report`
+    }
+    const base = `≈ ${range} · ${engines.length} reports`
+    return gamma ? `${base} + deck` : base
+  }, [engines, costMap, gamma])
+
+  const costTitle = useMemo(() => {
+    const parts = engines.map((e) => {
+      const [a, b] = costMap[e] || DEFAULT_COST[e]
+      return `${e}: $${fmtUsd(a)}–${fmtUsd(b)} per report`
+    })
+    return (
+      'Estimated LLM cost for selected engines (each run is saved separately). ' +
+      parts.join('; ') +
+      (gamma ? ' · Gamma deck adds cost on Grok only.' : '')
+    )
+  }, [engines, costMap, gamma])
 
   const runAnalysis = useCallback(async () => {
     const tk = ticker.trim().toUpperCase().replace(/[^A-Z.]/g, '')
@@ -283,22 +369,31 @@ export function AnalyzeCard({
           {ENGINES.map((e) => {
             const on = engines.includes(e.id)
             return (
-            <button
-              key={e.id}
-              type="button"
-              className={`${styles.engineChip} ${on ? styles.engineChipOn : ''}`}
-              onClick={() => toggleEngine(e.id)}
-              disabled={running}
-              aria-pressed={on}
-              title={`${e.label} · ${on ? 'selected' : 'off'} · click to toggle`}
-            >
-              {e.label}
-            </button>
+              <button
+                key={e.id}
+                type="button"
+                className={`${styles.engineChip} ${on ? styles.engineChipOn : ''}`}
+                /* pointerdown + flushSync = highlight on press, not on release */
+                onPointerDown={(ev) => {
+                  if (ev.button !== 0 || running) return
+                  ev.preventDefault()
+                  toggleEngine(e.id)
+                }}
+                onClick={(ev) => {
+                  // Keyboard / accessibility path (Space/Enter)
+                  if (ev.detail === 0) toggleEngine(e.id)
+                }}
+                disabled={running}
+                aria-pressed={on}
+                title={`${e.label} · ${on ? 'selected' : 'off'} · click to toggle`}
+              >
+                {e.label}
+              </button>
             )
           })}
         </span>
-        <span className={styles.costEst} title="Estimated LLM cost per selected engine">
-          ≈ $0.30–0.60 / report
+        <span className={styles.costEst} title={costTitle} aria-live="polite">
+          {costLabel}
         </span>
         <label className={styles.gammaLabel}>
           <input
