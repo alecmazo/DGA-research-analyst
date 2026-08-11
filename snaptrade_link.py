@@ -138,22 +138,131 @@ def login_url(user_id: str, user_secret: str, custom_redirect: str = "",
     return str(body)
 
 
+def _fetch_account_positions(ai, uid: str, sec: str, aid: str) -> list:
+    """Positions for one account across SnapTrade SDK generations.
+
+    SDK ≥13 renamed ``get_user_account_positions`` → ``get_all_account_positions``
+    and wraps the list as ``{results: [...], data_freshness: ...}``. Positions
+    use ``instrument`` (kind/symbol/raw_symbol) instead of nested ``symbol``.
+    """
+    body = None
+    last_err: Exception | None = None
+
+    # Preferred: SDK 13+ all-positions endpoint
+    fn = getattr(ai, "get_all_account_positions", None)
+    if callable(fn):
+        try:
+            body = _to_dict(fn(account_id=aid, user_id=uid, user_secret=sec).body)
+        except Exception as e:
+            last_err = e
+
+    # Legacy: SDK ≤12
+    if body is None:
+        fn_legacy = getattr(ai, "get_user_account_positions", None)
+        if callable(fn_legacy):
+            try:
+                body = _to_dict(
+                    fn_legacy(account_id=aid, user_id=uid, user_secret=sec).body
+                )
+            except Exception as e:
+                last_err = e
+
+    # Last resort: per-account holdings envelope (often disabled on new plans)
+    if body is None:
+        fn_hold = getattr(ai, "get_user_holdings", None)
+        if callable(fn_hold):
+            try:
+                body = _to_dict(
+                    fn_hold(account_id=aid, user_id=uid, user_secret=sec).body
+                )
+            except Exception as e:
+                last_err = e
+
+    if body is None:
+        raise RuntimeError(
+            f"SnapTrade positions API unavailable for account {aid}: {last_err!r}"
+        )
+
+    if isinstance(body, list):
+        raw = body
+    elif isinstance(body, dict):
+        raw = (
+            body.get("results")
+            or body.get("positions")
+            or body.get("data")
+            or []
+        )
+    else:
+        raw = []
+
+    out = []
+    for p in raw or []:
+        if not isinstance(p, dict):
+            continue
+        out.append(_normalize_position_dict(p))
+    return out
+
+
+def _normalize_position_dict(p: dict) -> dict:
+    """Normalize a single position so the rest of DGA can keep using
+    nested ``symbol`` + ``average_purchase_price`` fields."""
+    # Already legacy shape
+    if p.get("symbol") and not p.get("instrument"):
+        # Ensure average_purchase_price alias for cost_basis
+        if p.get("average_purchase_price") is None and p.get("cost_basis") is not None:
+            p = {**p, "average_purchase_price": p.get("cost_basis")}
+        return p
+
+    inst = p.get("instrument")
+    if isinstance(inst, dict):
+        # Build a PositionSymbol-like nest for _snaptrade_symbol()
+        ticker = inst.get("raw_symbol") or inst.get("symbol")
+        desc = inst.get("description")
+        kind = (inst.get("kind") or "").lower()
+        p = {
+            **p,
+            "symbol": {
+                "raw_symbol": ticker,
+                "description": desc,
+                "symbol": ticker,
+                "type": {"code": kind} if kind else None,
+                "instrument": inst,
+            },
+            # New API: cost_basis is book/avg purchase price per share
+            "average_purchase_price": (
+                p.get("average_purchase_price")
+                if p.get("average_purchase_price") is not None
+                else p.get("cost_basis")
+            ),
+            "cash_equivalent": bool(
+                p.get("cash_equivalent")
+                or (kind == "mutualfund" and p.get("cash_equivalent") is True)
+                or inst.get("cash_equivalent")
+            ),
+            "instrument_kind": kind,
+        }
+        # Options: mark for downstream asset_class handling
+        if kind == "option":
+            p["is_option"] = True
+            p["option_type"] = inst.get("option_type")
+            p["strike_price"] = inst.get("strike_price")
+            p["expiration_date"] = inst.get("expiration_date")
+            und = inst.get("underlying") or {}
+            if isinstance(und, dict):
+                p["underlying_symbol"] = und.get("raw_symbol") or und.get("symbol")
+    return p
+
+
 def get_account_holdings(user_id: str, user_secret: str, account_id: str):
     """Holdings for ONE account — {positions, total_value}.
 
-    Built from the GRANULAR per-account endpoints. Both the combined
-    get_all_user_holdings AND the per-account get_user_holdings now return
-    'This endpoint is no longer available for your account' — SnapTrade has
-    moved accounts onto get_user_account_positions / get_user_account_balance.
+    Built from the GRANULAR per-account endpoints. Combined holdings endpoints
+    are often disabled; SDK 13 uses get_all_account_positions (+ balance).
     """
     ai = _client().account_information
     uid, sec, aid = str(user_id), user_secret, str(account_id)
 
-    positions = _to_dict(
-        ai.get_user_account_positions(account_id=aid, user_id=uid, user_secret=sec).body
-    ) or []
-    if isinstance(positions, dict):
-        positions = positions.get("positions") or positions.get("data") or []
+    positions = _fetch_account_positions(ai, uid, sec, aid)
 
     # total_value = market value of positions + uninvested cash.
     # NOTE: Fidelity's core sweep (e.g. SPAXX) appears BOTH as a cash_equivalent

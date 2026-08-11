@@ -32844,15 +32844,35 @@ def _snaptrade_mask(num) -> str | None:
 
 
 def _snaptrade_symbol(pos: dict):
-    """Drill SnapTrade's nested PositionSymbol → (ticker, description)."""
-    node = pos.get("symbol")
+    """Drill SnapTrade position → (ticker, description).
+
+    Handles:
+      • legacy PositionSymbol nest under ``symbol``
+      • SDK 13 AccountPosition with top-level ``instrument``
+        (kind/symbol/raw_symbol/description)
+    """
     ticker, desc = None, None
+
+    # SDK 13+ instrument object (stock/etf/mutualfund/option/…)
+    inst = pos.get("instrument")
+    if isinstance(inst, dict):
+        ticker = inst.get("raw_symbol") or inst.get("symbol")
+        desc = inst.get("description")
+        if ticker:
+            return ticker, desc
+
+    node = pos.get("symbol")
     seen = 0
     while isinstance(node, dict) and seen < 6:
         if not ticker and isinstance(node.get("raw_symbol"), str):
             ticker = node.get("raw_symbol")
         if not desc and node.get("description"):
             desc = node.get("description")
+        # Nested instrument (from snaptrade_link._normalize_position_dict)
+        nested_inst = node.get("instrument")
+        if isinstance(nested_inst, dict):
+            ticker = ticker or nested_inst.get("raw_symbol") or nested_inst.get("symbol")
+            desc = desc or nested_inst.get("description")
         nxt = node.get("symbol")
         if isinstance(nxt, str):
             ticker = ticker or nxt
@@ -32861,6 +32881,9 @@ def _snaptrade_symbol(pos: dict):
         seen += 1
     if isinstance(node, str) and not ticker:
         ticker = node
+    # Explicit aliases set by snaptrade_link normalizer
+    if not ticker:
+        ticker = pos.get("underlying_symbol") or pos.get("raw_symbol")
     return ticker, desc
 
 
@@ -32873,7 +32896,11 @@ def _snaptrade_normalize_account(ah: dict) -> dict:
         ticker, desc = _snaptrade_symbol(p)
         units = p.get("units")
         price = p.get("price")
+        # SDK 13 uses cost_basis as per-share book price; older SDKs used
+        # average_purchase_price.
         avg = p.get("average_purchase_price")
+        if avg is None:
+            avg = p.get("cost_basis")
         mv = cost = None
         try:
             if units is not None and price is not None:
@@ -32885,9 +32912,18 @@ def _snaptrade_normalize_account(ah: dict) -> dict:
                 cost = float(units) * float(avg); total_cost += cost
         except Exception:
             pass
+        kind = (p.get("instrument_kind") or "").lower()
+        if not kind and isinstance(p.get("instrument"), dict):
+            kind = (p["instrument"].get("kind") or "").lower()
+        if p.get("is_option") or kind == "option":
+            asset = "option"
+        elif p.get("cash_equivalent") or kind in ("currency",):
+            asset = "cash"
+        else:
+            asset = "equity"
         positions.append({
             "symbol": ticker or "—", "name": desc,
-            "asset_class": "cash" if p.get("cash_equivalent") else "equity",
+            "asset_class": asset,
             "quantity": units, "price": price, "market_value": mv, "cost_basis": cost,
             "cost_basis_per_unit": avg,
         })
