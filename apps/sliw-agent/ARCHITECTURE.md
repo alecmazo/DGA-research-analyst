@@ -17,6 +17,29 @@ Hobby plan: max custom domains **per service**.
 
 Both share **Postgres** (`DATABASE_URL`) for CRM + storefront media so form posts and desk views stay in sync.
 
+### Why it looked like “one deploy hits both sites”
+
+Project **upbeat-ambition** has two app services on the **same GitHub repo** (`DGA-research-analyst`):
+
+| Service | Domains | Role |
+|---------|---------|------|
+| **web** | `portfolio.dgacapital.com`, `weddings.edytasliwinska.com` | DGA desk + wedding storefront |
+| **sliw** | `sliw.edytasliwinska.com` | Edyta/Alec Sliw desk only |
+
+Historically **both** rebuilt on every `main` push (empty `watchPatterns`). Concurrent dual Nixpacks builds on Hobby often left **sliw FAILED** while **web SUCCESS** — so Railway showed a red build on the Sliw service even when portfolio was fine.
+
+### Fix (watch paths)
+
+**sliw** auto-deploys only when these paths change:
+
+- `apps/sliw-agent/**`
+- `requirements.txt`, `railway.toml`, `nixpacks.toml`, `Procfile`
+
+DGA-only pushes (`web/gp-app/**`, fund, etc.) → **web only**, not sliw.  
+Sliw desk / wedding agent code under `apps/sliw-agent/**` → **sliw** (and **web** still rebuilds for weddings on `web`).
+
+Manual: `railway redeploy --service sliw --from-source --yes` if shared API auth needs a sliw refresh without an `apps/sliw-agent` file change.
+
 ## Imports (planners / library)
 
 | Action | When it runs |
