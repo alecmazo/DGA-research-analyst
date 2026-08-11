@@ -64,25 +64,43 @@ TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
 # Tag priority lists (higher = preferred). These cover ~95% of US filers.
 # ---------------------------------------------------------------------------
 TAG_PRIORITIES: dict[str, list[str]] = {
+    # Banks: prefer interest income over ASC-606 contract revenue (fee fragment).
     "Revenue": [
+        "InterestAndDividendIncomeOperating",
+        "Revenues",
         "RevenueFromContractWithCustomerExcludingAssessedTax",
         "RevenueFromContractWithCustomerIncludingAssessedTax",
-        "Revenues",
         "SalesRevenueNet",
         "SalesRevenueGoodsNet",
         "SalesRevenueServicesNet",
+        "RevenueNotFromContractWithCustomerExcludingInterestIncome",
+    ],
+    "InterestIncome": [
+        "InterestAndDividendIncomeOperating",
+        "InterestAndFeeIncomeLoansAndLeases",
+    ],
+    "NetInterestIncome": [
+        "InterestIncomeExpenseNet",
+        "InterestIncomeExpenseAfterProvisionForLoanLoss",
+    ],
+    "NoninterestIncome": [
+        "NoninterestIncome",
+        "NoninterestIncomeOtherOperatingIncome",
     ],
     "CostOfRevenue": [
         "CostOfRevenue",
         "CostOfGoodsAndServicesSold",
         "CostOfGoodsSold",
         "CostOfServices",
+        "InterestExpenseOperating",
     ],
     "GrossProfit": [
         "GrossProfit",
+        "InterestIncomeExpenseNet",
     ],
     "OperatingIncome": [
         "OperatingIncomeLoss",
+        "InterestIncomeExpenseAfterProvisionForLoanLoss",
     ],
     "NetIncome": [
         "NetIncomeLoss",
@@ -287,8 +305,25 @@ def _ensure_ticker_map(user_agent: str | None = None) -> None:
 
 
 def resolve_cik(ticker: str, user_agent: str | None = None) -> str:
-    """Return the 10-digit zero-padded CIK for a ticker (e.g. 'AAPL' -> '0000320193')."""
+    """Return the 10-digit zero-padded CIK for a ticker (e.g. 'AAPL' -> '0000320193').
+
+    Prefers edgartools ``Company(ticker).cik`` when available — the SEC
+    company_tickers.json can lag re-incorporations (CLBK mapped to a thin new
+    CIK while full 10-K history lives under the prior CIK).
+    """
     t = ticker.strip().upper()
+
+    # edgartools resolution first (authoritative for filing history)
+    try:
+        from edgar import Company  # type: ignore
+
+        co = Company(t)
+        cik_raw = getattr(co, "cik", None)
+        if cik_raw is not None:
+            return f"{int(cik_raw):010d}"
+    except Exception:
+        pass
+
     hit = _TICKER_CACHE.get(t)
     if hit is _TICKER_NEGATIVE:
         raise ValueError(
@@ -602,6 +637,9 @@ def extract_financials(
         # Duration facts
         for metric in (
             "Revenue",
+            "InterestIncome",
+            "NetInterestIncome",
+            "NoninterestIncome",
             "CostOfRevenue",
             "GrossProfit",
             "OperatingIncome",
@@ -613,6 +651,8 @@ def extract_financials(
             "RnD",
             "DepreciationAmortization",
         ):
+            if metric not in TAG_PRIORITIES:
+                continue
             hit, tag = _first_hit(
                 facts,
                 TAG_PRIORITIES[metric],
@@ -625,6 +665,25 @@ def extract_financials(
                 row["start"] = hit.get("start", row.get("start", ""))
                 row["accession"] = hit.get("accn", row.get("accession", ""))
                 row["filed"] = hit.get("filed", row.get("filed", ""))
+        # Bank top-line: interest income + noninterest (never fee-only contract rev)
+        interest = row.get("InterestIncome")
+        nonint = row.get("NoninterestIncome")
+        net_ii = row.get("NetInterestIncome")
+        rev_tag = (row.get("_tags") or {}).get("Revenue") or ""
+        if interest is not None:
+            if nonint is not None:
+                row["Revenue"] = float(interest) + float(nonint)
+                row.setdefault("_tags", {})["Revenue"] = (
+                    "InterestAndDividendIncomeOperating+NoninterestIncome"
+                )
+            else:
+                row["Revenue"] = float(interest)
+                row.setdefault("_tags", {})["Revenue"] = "InterestAndDividendIncomeOperating"
+        elif "RevenueFromContract" in rev_tag and net_ii is not None and nonint is not None:
+            row["Revenue"] = float(net_ii) + float(nonint)
+            row.setdefault("_tags", {})["Revenue"] = "InterestIncomeExpenseNet+NoninterestIncome"
+        if row.get("GrossProfit") is None and net_ii is not None:
+            row["GrossProfit"] = float(net_ii)
         # Derive GrossProfit from Revenue - CostOfRevenue when the tag is absent.
         if "GrossProfit" not in row and row.get("Revenue") and row.get("CostOfRevenue"):
             row["GrossProfit"] = row["Revenue"] - row["CostOfRevenue"]
@@ -773,6 +832,9 @@ def _build_quarter_row(facts: dict, fy: int, fp: str, *, is_ytd: bool) -> dict[s
     picker = (lambda f: _pick_ytd(f, fy, fp)) if is_ytd else (lambda f: _pick_quarter_duration(f, fy, fp))
     for metric in (
         "Revenue",
+        "InterestIncome",
+        "NetInterestIncome",
+        "NoninterestIncome",
         "CostOfRevenue",
         "GrossProfit",
         "OperatingIncome",
@@ -786,12 +848,26 @@ def _build_quarter_row(facts: dict, fy: int, fp: str, *, is_ytd: bool) -> dict[s
         "Dividends",
         "BuybacksCash",
     ):
+        if metric not in TAG_PRIORITIES:
+            continue
         hit, tag = _first_hit(facts, TAG_PRIORITIES[metric], picker)
         if hit:
             row[metric] = hit["val"]
             row.setdefault("_tags", {})[metric] = tag
             row["end"] = hit.get("end", row.get("end", ""))
             row["start"] = hit.get("start", row.get("start", ""))
+    interest = row.get("InterestIncome")
+    nonint = row.get("NoninterestIncome")
+    net_ii = row.get("NetInterestIncome")
+    if interest is not None:
+        row["Revenue"] = float(interest) + (float(nonint) if nonint is not None else 0.0)
+        row.setdefault("_tags", {})["Revenue"] = (
+            "InterestAndDividendIncomeOperating+NoninterestIncome"
+            if nonint is not None
+            else "InterestAndDividendIncomeOperating"
+        )
+    if row.get("GrossProfit") is None and net_ii is not None:
+        row["GrossProfit"] = float(net_ii)
     if "GrossProfit" not in row and row.get("Revenue") and row.get("CostOfRevenue"):
         row["GrossProfit"] = row["Revenue"] - row["CostOfRevenue"]
     eps_hit, eps_tag = _first_hit(

@@ -69,22 +69,46 @@ def _p(names: list[str]) -> list[str]:
 
 
 CONCEPT_PRIORITIES: dict[str, list[str]] = {
+    # Banks/thrifts rarely tag "Revenues" — top line is interest income (+ noninterest).
+    # Do NOT put RevenueFromContract* first: for banks that tag is a small fee
+    # component under NoninterestIncome (e.g. CLBK $9M fees vs $119M interest).
     "Revenue": _p([
+        "InterestAndDividendIncomeOperating",  # bank total interest income
+        "Revenues",
         "RevenueFromContractWithCustomerExcludingAssessedTax",
         "RevenueFromContractWithCustomerIncludingAssessedTax",
-        "Revenues",
         "SalesRevenueNet",
         "SalesRevenueGoodsNet",
         "SalesRevenueServicesNet",
+        "RevenueNotFromContractWithCustomerExcludingInterestIncome",
+    ]),
+    "InterestIncome": _p([
+        "InterestAndDividendIncomeOperating",
+        "InterestAndFeeIncomeLoansAndLeases",
+    ]),
+    "NetInterestIncome": _p([
+        "InterestIncomeExpenseNet",
+        "InterestIncomeExpenseAfterProvisionForLoanLoss",
+    ]),
+    "NoninterestIncome": _p([
+        "NoninterestIncome",
+        "NoninterestIncomeOtherOperatingIncome",
     ]),
     "CostOfRevenue": _p([
         "CostOfRevenue",
         "CostOfGoodsAndServicesSold",
         "CostOfGoodsSold",
         "CostOfServices",
+        "InterestExpenseOperating",  # bank analog of COGS
     ]),
-    "GrossProfit": _p(["GrossProfit"]),
-    "OperatingIncome": _p(["OperatingIncomeLoss"]),
+    "GrossProfit": _p([
+        "GrossProfit",
+        "InterestIncomeExpenseNet",  # bank: net interest income ≈ gross profit
+    ]),
+    "OperatingIncome": _p([
+        "OperatingIncomeLoss",
+        "InterestIncomeExpenseAfterProvisionForLoanLoss",
+    ]),
     "NetIncome": _p([
         "NetIncomeLoss",
         "ProfitLoss",
@@ -167,7 +191,8 @@ CONCEPT_PRIORITIES: dict[str, list[str]] = {
 
 # Statements where each metric is expected to live.
 IS_METRICS = {
-    "Revenue", "CostOfRevenue", "GrossProfit", "OperatingIncome",
+    "Revenue", "InterestIncome", "NetInterestIncome", "NoninterestIncome",
+    "CostOfRevenue", "GrossProfit", "OperatingIncome",
     "NetIncome", "DilutedEPS", "BasicEPS", "DilutedShares",
     "SharesOutstanding", "RnD",
 }
@@ -469,6 +494,41 @@ def _build_period_row(
             std = row.get("ShortTermDebt", 0) or 0
             if ltd or std:
                 row["TotalDebt"] = ltd + std
+
+    # ── Bank / thrift revenue fix ──────────────────────────────────────────
+    # InterestAndDividendIncomeOperating is total interest income (bank top line).
+    # NoninterestIncome is fees/BOLI/etc. Contract-with-customer revenue is only
+    # a slice of noninterest income — never use it alone as "Revenue".
+    interest = row.get("InterestIncome")
+    nonint = row.get("NoninterestIncome")
+    net_ii = row.get("NetInterestIncome")
+    rev_tag = (tags.get("Revenue") or "")
+    picked_contract = "RevenueFromContract" in rev_tag or "SalesRevenue" in rev_tag
+
+    if interest is not None:
+        # Prefer total interest + noninterest as operating revenue (bank convention)
+        if nonint is not None:
+            row["Revenue"] = float(interest) + float(nonint)
+            tags["Revenue"] = "InterestAndDividendIncomeOperating+NoninterestIncome"
+            row["_revenue_basis"] = "bank_total_interest_plus_noninterest"
+        else:
+            row["Revenue"] = float(interest)
+            tags["Revenue"] = tags.get("InterestIncome") or "InterestAndDividendIncomeOperating"
+            row["_revenue_basis"] = "bank_interest_income"
+    elif picked_contract and net_ii is not None and nonint is not None:
+        # Contract tag alone understates bank top line — rebuild
+        row["Revenue"] = float(net_ii) + float(nonint)
+        tags["Revenue"] = "InterestIncomeExpenseNet+NoninterestIncome"
+        row["_revenue_basis"] = "bank_nii_plus_noninterest"
+    elif row.get("Revenue") is None and net_ii is not None:
+        row["Revenue"] = float(net_ii)
+        tags["Revenue"] = tags.get("NetInterestIncome") or "InterestIncomeExpenseNet"
+        row["_revenue_basis"] = "bank_net_interest_income"
+
+    # Bank gross-profit proxy = net interest income when GrossProfit absent
+    if row.get("GrossProfit") is None and net_ii is not None:
+        row["GrossProfit"] = float(net_ii)
+        tags["GrossProfit"] = tags.get("NetInterestIncome") or "InterestIncomeExpenseNet"
 
     # Derive GrossProfit when the tag is absent from the filing
     if "GrossProfit" not in row and row.get("Revenue") and row.get("CostOfRevenue"):

@@ -181,56 +181,91 @@ def _extract_statements(xbrl) -> dict[str, pd.DataFrame]:
 
 
 def _process_filing(company, form_type: str, output_path: Path, ticker: str) -> Optional[Path]:
-    """Process one filing (10-K or 10-Q) and write its Excel workbook."""
-    print(f"  📄 Pulling latest {form_type}...")
+    """Process one filing (10-K or 10-Q) and write its Excel workbook.
+
+    Walks recent filings (not only ``.latest()``) so a 10-K/A that is only a
+    cover-page / PVP amendment does not block extraction when the prior full
+    10-K has complete IS/BS/CF statements (CLBK 2026-04-30 10-K/A failure mode).
+    """
+    print(f"  📄 Pulling latest {form_type} with full statements...")
     try:
         filings = company.get_filings(form=form_type)
         if not filings:
+            # Also try form + amendment variants explicitly
+            filings = company.get_filings(form=[form_type, f"{form_type}/A"])
+        if not filings:
             print(f"     No {form_type} filings found for {ticker}.")
             return None
-        latest = filings.latest()
-        print(f"     Filing date: {latest.filing_date} | Accession: "
-              f"{getattr(latest, 'accession_number', 'N/A')}")
 
-        xbrl = latest.xbrl()
-        if not xbrl:
-            print(f"     No XBRL available for this {form_type}.")
-            return None
+        # Prefer full statements: walk up to ~12 most recent of this form family
+        try:
+            candidates = list(filings)[:12]
+        except Exception:
+            latest = filings.latest()
+            candidates = [latest] if latest is not None else []
 
-        financial_data = _extract_statements(xbrl)
-        if not financial_data:
-            print(f"     Could not extract any financial statements from {form_type}.")
-            return None
+        last_err = None
+        for latest in candidates:
+            try:
+                acc = getattr(latest, "accession_number", None) or getattr(latest, "accession_no", "N/A")
+                print(
+                    f"     Trying {getattr(latest, 'form', form_type)} "
+                    f"filed {getattr(latest, 'filing_date', '?')} | Accession: {acc}"
+                )
+                xbrl = latest.xbrl()
+                if not xbrl:
+                    print("       No XBRL — skip")
+                    continue
+                financial_data = _extract_statements(xbrl)
+                if not financial_data or "Income Statement" not in financial_data:
+                    print(
+                        f"       No usable statements "
+                        f"(got {list(financial_data.keys()) if financial_data else []}) — skip"
+                    )
+                    continue
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            for sheet_name, df in financial_data.items():
-                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-            meta_df = pd.DataFrame({
-                "Field": [
-                    "Ticker",
-                    "Company",
-                    "Report Type",
-                    "Filing Date",
-                    "Accession Number",
-                    "Period Of Report",
-                    "Generated On",
-                ],
-                "Value": [
-                    ticker,
-                    getattr(company, "name", ticker),
-                    form_type,
-                    str(getattr(latest, "filing_date", "")),
-                    getattr(latest, "accession_number", "N/A"),
-                    str(getattr(latest, "period_of_report", "")),
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                ],
-            })
-            meta_df.to_excel(writer, sheet_name="Metadata", index=False)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+                    for sheet_name, df in financial_data.items():
+                        df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                    meta_df = pd.DataFrame({
+                        "Field": [
+                            "Ticker",
+                            "Company",
+                            "Report Type",
+                            "Filing Date",
+                            "Accession Number",
+                            "Period Of Report",
+                            "Generated On",
+                        ],
+                        "Value": [
+                            ticker,
+                            getattr(company, "name", ticker),
+                            getattr(latest, "form", form_type),
+                            str(getattr(latest, "filing_date", "")),
+                            acc,
+                            str(getattr(latest, "period_of_report", "")
+                                or getattr(latest, "report_date", "")),
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        ],
+                    })
+                    meta_df.to_excel(writer, sheet_name="Metadata", index=False)
 
-        print(f"     ✅ Saved {form_type} → {output_path.name} "
-              f"({len(financial_data)} statements + Metadata)")
-        return output_path
+                print(
+                    f"     ✅ Saved {form_type} → {output_path.name} "
+                    f"({len(financial_data)} statements + Metadata)"
+                )
+                return output_path
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                print(f"       Skip filing: {exc!s:.120}")
+                continue
+
+        print(
+            f"     Could not extract financial statements from any recent {form_type}"
+            f"{f' (last error: {last_err})' if last_err else ''}."
+        )
+        return None
 
     except Exception as exc:  # noqa: BLE001
         print(f"     ❌ Error processing {form_type}: {exc}")

@@ -9201,15 +9201,68 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     _cached_um_path  = STOCKS_FOLDER / f"{ticker}_user_msg.txt"
     _cached_mkt_path = STOCKS_FOLDER / f"{ticker}_market_snapshot.json"
     _cache_hit = False
-    # DeepSeek always gathers its own financials from live EDGAR (never the
-    # shared user_msg cache / company_financials store) so numbers can be
-    # cross-checked against the public filing source. Other engines still
-    # reuse the Grok cache for fair A/B compares.
-    _is_deepseek = str(llm_provider or "").lower().strip() == "deepseek"
-    if reuse_user_msg and (not _is_deepseek) and _cached_um_path.exists():
+    # Never reuse a cache whose verified financials lack Revenue (common for
+    # banks when older code picked fee-only ASC-606 tags → N/A / $9M crumbs).
+    # DeepSeek always gathers live EDGAR; other engines may reuse only if
+    # the audit JSON has at least one annual/quarter with real Revenue.
+    def _cache_has_real_revenue(d: dict | None) -> bool:
+        if not d:
+            return False
+        for a in (d.get("annuals") or [])[:5]:
+            r = a.get("Revenue")
+            if r is not None and float(r) != 0:
+                return True
+        q = ((d.get("quarterly") or {}).get("current") or {})
+        r = q.get("Revenue")
+        return r is not None and float(r) != 0
+
+    def _user_msg_has_na_revenue(txt: str) -> bool:
+        # Heuristic: verified table rows that show N/A in Revenue columns
+        if not txt:
+            return True
+        low = txt.lower()
+        if "verified financial" not in low and "verified financials" not in low:
+            return False
+        # If revenue column header exists but first few data lines are N/A-heavy
+        if "interestanddividendincomeoperating" in low.replace(" ", ""):
+            return False
+        # Explicit bank basis note means cache is good
+        if "bank_total_interest" in low or "interest income" in low and "noninterest" in low:
+            return False
+        # Count N/A after Revenue header — crude but catches broken CLBK caches
+        if "| revenue |" in low or "revenue |" in low or "fy | periodend | revenue" in low:
+            # sample: if 'N/A' appears more often than digits near financial tables
+            return low.count("| n/a |") >= 3 and "bn" not in low and "$" not in low[:2000]
+        return False
+
+    if reuse_user_msg and _cached_um_path.exists() and audit_path.exists():
+        try:
+            with open(audit_path) as fh:
+                _audit_probe = json.load(fh)
+        except Exception:
+            _audit_probe = None
+        if not _cache_has_real_revenue(_audit_probe):
+            print(
+                f"   ♻️❌ {ticker}: cached financials lack Revenue — forcing fresh EDGAR "
+                f"(was serving N/A to Grok/Claude)",
+                flush=True,
+            )
+            try:
+                _cached_um_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            reuse_user_msg = False
+
+    if reuse_user_msg and _cached_um_path.exists():
         # Full cache hit — read everything off disk, zero new SEC calls.
         try:
             user_msg = _cached_um_path.read_text()
+            if _user_msg_has_na_revenue(user_msg):
+                print(
+                    f"   ♻️❌ {ticker}: user_msg cache looks revenue-empty — re-gathering",
+                    flush=True,
+                )
+                raise RuntimeError("stale_na_revenue_cache")
             # Append hard financial-table rules even on cache hit (older caches
             # predate the ban on qualitative cells).
             if "HARD RULES FOR THIS REPORT" not in user_msg:
@@ -9218,6 +9271,8 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                     "Key Metrics tables: exact numbers from VERIFIED FINANCIAL DATA "
                     "or N/A only — never Elevated/Improving/Turning positive/Solid "
                     "in cells. Live search is for news only, not table figures.\n"
+                    "Banks: Revenue = total interest income + noninterest income from "
+                    "the verified block — never fee-only contract revenue.\n"
                 )
             mkt = (json.loads(_cached_mkt_path.read_text())
                    if _cached_mkt_path.exists() else fetch_market_snapshot(ticker))
