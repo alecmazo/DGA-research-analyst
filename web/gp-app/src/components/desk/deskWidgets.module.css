@@ -191,32 +191,43 @@
   text-transform: uppercase;
 }
 
-.chips {
+/* Analyze Ticker multi-select engines — unique names so CSS modules
+   do not collide with Analyst suggest chips (same file hash). */
+.engineChips {
   display: inline-flex;
   gap: 4px;
   flex-wrap: wrap;
 }
 
-.chip {
+.engineChip {
   font-size: 10px;
   font-weight: 700;
-  padding: 3px 8px;
+  padding: 3px 9px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: transparent;
-  color: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
   cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
 }
 
-.chip:hover {
-  border-color: rgba(91, 184, 212, 0.5);
-  color: #fff;
-}
-
-.chipOn {
-  background: rgba(91, 184, 212, 0.22);
+.engineChip:hover {
   border-color: rgba(91, 184, 212, 0.55);
   color: #fff;
+  background: rgba(91, 184, 212, 0.12);
+}
+
+.engineChipOn {
+  background: #5bb8d4;
+  border-color: #5bb8d4;
+  color: #0a1628;
+  box-shadow: 0 0 0 2px rgba(91, 184, 212, 0.35);
+}
+
+.engineChip:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .costEst {
@@ -982,13 +993,14 @@
   box-shadow: 0 0 0 3px rgba(91, 184, 212, 0.15);
 }
 
-.chips {
+/* AnalystCard suggest / preset chips (light surface) */
+.suggestChips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.chip {
+.suggestChip {
   font-size: 10.5px;
   background: var(--bg-subtle, #f1f5f9);
   border: 1px solid var(--border-subtle);
@@ -999,7 +1011,7 @@
   font-family: inherit;
 }
 
-.chip:hover {
+.suggestChip:hover {
   border-color: var(--brand-400);
   color: var(--text-primary);
 }

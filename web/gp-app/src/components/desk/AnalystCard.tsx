@@ -265,7 +265,7 @@ export function AnalystCard({ bare = false }: Props) {
         </Button>
       </div>
 
-      <div className={styles.chips}>
+      <div className={styles.suggestChips}>
         <button type="button" className={styles.presetPrimary} onClick={applyRetiree} disabled={busy}>
           Retiree portfolio build
         </button>
@@ -273,7 +273,7 @@ export function AnalystCard({ bare = false }: Props) {
           <button
             key={ex}
             type="button"
-            className={styles.chip}
+            className={styles.suggestChip}
             disabled={busy}
             onClick={() => {
               setQuestion(ex)

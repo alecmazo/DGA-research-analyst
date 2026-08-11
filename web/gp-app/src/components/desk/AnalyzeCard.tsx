@@ -279,19 +279,23 @@ export function AnalyzeCard({
 
       <div className={styles.heroMeta}>
         <span className={styles.enginesLbl}>Engines:</span>
-        <span className={styles.chips} role="group" aria-label="Select analysis engines">
-          {ENGINES.map((e) => (
+        <span className={styles.engineChips} role="group" aria-label="Select analysis engines">
+          {ENGINES.map((e) => {
+            const on = engines.includes(e.id)
+            return (
             <button
               key={e.id}
               type="button"
-              className={`${styles.chip} ${engines.includes(e.id) ? styles.chipOn : ''}`}
+              className={`${styles.engineChip} ${on ? styles.engineChipOn : ''}`}
               onClick={() => toggleEngine(e.id)}
               disabled={running}
-              title={`${e.label} · toggle on/off`}
+              aria-pressed={on}
+              title={`${e.label} · ${on ? 'selected' : 'off'} · click to toggle`}
             >
               {e.label}
             </button>
-          ))}
+            )
+          })}
         </span>
         <span className={styles.costEst} title="Estimated LLM cost per selected engine">
           ≈ $0.30–0.60 / report
