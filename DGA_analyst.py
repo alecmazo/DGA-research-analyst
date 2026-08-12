@@ -8741,14 +8741,8 @@ def extract_summary_from_report(report_text: str) -> dict:
         except ZeroDivisionError:
             pass
 
-    # Thesis hint.
-    thesis = ""
-    for line in report_text.split("\n"):
-        s = line.strip()
-        if not s or s.startswith("#") or s.startswith("|") or s.startswith(">"):
-            continue
-        thesis = s[:400]
-        break
+    # Thesis hint — prefer dedicated investment-thesis section, not first junk line.
+    thesis = extract_thesis_snippet(report_text)
 
     return {
         "rating": rating,
@@ -8758,6 +8752,139 @@ def extract_summary_from_report(report_text: str) -> dict:
         "sector": sector,
         "thesis": thesis,
     }
+
+
+def extract_thesis_snippet(report_text: str, max_chars: int = 900) -> str:
+    """Pull a readable thesis excerpt from a prior DGA report markdown body."""
+    if not report_text:
+        return ""
+    text = report_text.strip()
+    lines = text.split("\n")
+    # Prefer section headers that signal thesis / exec summary
+    header_re = re.compile(
+        r"^\s{0,3}#{1,4}\s*(?:\d+[\.\)]\s*)?(investment\s+thesis|thesis|"
+        r"executive\s+summary|why\s+(?:own|buy|this)|bull\s+case)\b",
+        re.I,
+    )
+    body: list[str] = []
+    capturing = False
+    for line in lines:
+        if header_re.match(line):
+            capturing = True
+            body = []
+            continue
+        if capturing:
+            if re.match(r"^\s{0,3}#{1,4}\s+\S", line):
+                break
+            s = line.strip()
+            if not s or s.startswith("|") or s.startswith("---"):
+                continue
+            body.append(s)
+            if sum(len(x) for x in body) >= max_chars:
+                break
+    if body:
+        return " ".join(body)[:max_chars].strip()
+    # Fallback: first non-table prose paragraph after title
+    paras: list[str] = []
+    for line in lines:
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("|") or s.startswith(">") or s.startswith("*"):
+            if paras:
+                break
+            continue
+        if re.match(r"^(DATE|TICKER|ENTITY|CURRENT_PRICE|MARKET_CAP)\b", s, re.I):
+            continue
+        paras.append(s)
+        if sum(len(x) for x in paras) >= max_chars:
+            break
+    return " ".join(paras)[:max_chars].strip()
+
+
+def load_prior_report_context(ticker: str, provider: str = "grok") -> dict | None:
+    """Load the previous Analyze snapshot for thesis continuity (disk first).
+
+    Returns {rating, price_target, upside_pct, thesis, generated_hint, report_excerpt}
+    or None if no prior report exists for this ticker+provider.
+    """
+    tkr = (ticker or "").strip().upper()
+    if not tkr:
+        return None
+    prov = (provider or "grok").lower().strip()
+    if prov == "volume":
+        prov = "kimi"
+    suffix = "" if prov == "grok" else f"_{prov}"
+    path = STOCKS_FOLDER / f"{tkr}_DGA_Report{suffix}.md"
+    md = ""
+    try:
+        if path.exists():
+            md = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        md = ""
+    if not md or len(md.strip()) < 200:
+        return None
+    summary = extract_summary_from_report(md)
+    thesis = summary.get("thesis") or extract_thesis_snippet(md)
+    # mtime as rough generated hint
+    gen_hint = None
+    try:
+        gen_hint = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    return {
+        "rating": summary.get("rating"),
+        "price_target": summary.get("price_target"),
+        "upside_pct": summary.get("upside_pct"),
+        "current_price": summary.get("current_price"),
+        "thesis": thesis,
+        "generated_hint": gen_hint,
+        "report_excerpt": md[:4500],
+        "path": str(path.name),
+        "provider": prov,
+    }
+
+
+def format_prior_thesis_block(prior: dict) -> str:
+    """Markdown block injected into user_msg so the model can write thesis continuity."""
+    if not prior:
+        return ""
+    pt = prior.get("price_target")
+    pt_s = f"${pt:.2f}" if isinstance(pt, (int, float)) else (str(pt) if pt else "—")
+    up = prior.get("upside_pct")
+    up_s = f"{up:+.1f}%" if isinstance(up, (int, float)) else (str(up) if up else "—")
+    thesis = (prior.get("thesis") or "").strip() or "(No dedicated thesis paragraph found — use rating/target and excerpt.)"
+    excerpt = (prior.get("report_excerpt") or "").strip()
+    # Cap excerpt to keep prompt lean
+    if len(excerpt) > 3500:
+        excerpt = excerpt[:3500] + "\n…[truncated]"
+    return (
+        "=== PRIOR DGA REPORT (same ticker — previous Analyze run) ===\n"
+        f"Provider: {(prior.get('provider') or 'grok').upper()}\n"
+        f"As-of (file): {prior.get('generated_hint') or 'unknown'}\n"
+        f"Prior rating: {prior.get('rating') or '—'}\n"
+        f"Prior 12-mo price target: {pt_s}\n"
+        f"Prior upside (implied): {up_s}\n"
+        f"Prior thesis excerpt:\n{thesis}\n\n"
+        f"Prior report excerpt (for continuity only — do not copy wholesale):\n"
+        f"{excerpt}\n"
+        "=== END PRIOR DGA REPORT ===\n\n"
+        "=== THESIS CONTINUITY REQUIREMENT (NON-NEGOTIABLE) ===\n"
+        "Include a short section titled exactly:\n"
+        "## Thesis Continuity vs Prior DGA Report\n"
+        "Place it after the Investment Thesis / Executive Summary and before valuation detail.\n"
+        "Rules:\n"
+        "1. If the investment thesis and rating *direction* are materially unchanged "
+        "(same Buy/Hold/Sell family; no major catalyst/risk flip), open with:\n"
+        "   **Thesis status: CONSISTENT**\n"
+        "   Then 2–4 sentences: what is unchanged, what new facts reinforce it, "
+        "and that the outlook still holds.\n"
+        "2. If rating direction, price target (>~8% move), risk skew, or key catalysts "
+        "changed materially, open with:\n"
+        "   **Thesis status: UPDATED**\n"
+        "   Then bullets with old → new (rating, target, risks/catalysts) and *why*.\n"
+        "3. Use ONLY the PRIOR DGA REPORT block above — never invent a prior view.\n"
+        "4. Keep the section tight (≤180 words). Numbers from VERIFIED FINANCIAL DATA "
+        "and the prior block only.\n"
+    )
 
 
 # ============================================================================
@@ -9889,6 +10016,30 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                 )
         except Exception as _me:
             print(f"   ⚠️  Munger appendix failed: {_me!s:.120}", flush=True)
+
+    # ── Thesis continuity: prior Analyze on same ticker ────────────────────
+    # Re-runs archive the previous version in Postgres; the model still needs
+    # the prior thesis *in context* so the report itself narrates CONSISTENT
+    # vs UPDATED (lost when React Desk stopped showing the legacy delta UI).
+    try:
+        _prior = load_prior_report_context(ticker, _prov)
+        if _prior:
+            _blk = format_prior_thesis_block(_prior)
+            user_msg = user_msg.rstrip() + "\n\n" + _blk
+            print(
+                f"   📜 Prior thesis injected for {ticker}/{_prov} "
+                f"(rating={_prior.get('rating') or '—'}, "
+                f"PT={_prior.get('price_target')}, "
+                f"asof={_prior.get('generated_hint')})",
+                flush=True,
+            )
+        else:
+            print(
+                f"   📜 No prior report on disk for {ticker}/{_prov} — first thesis run",
+                flush=True,
+            )
+    except Exception as _pe:
+        print(f"   ⚠️  Prior thesis inject failed: {_pe!s:.120}", flush=True)
 
     print(f"   🧠 Calling {_prov.upper()} ({_model_label})"
           + (" with live X/news/web search (90d)…" if _live else "…"))

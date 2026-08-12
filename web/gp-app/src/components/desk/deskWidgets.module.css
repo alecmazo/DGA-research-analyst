@@ -591,6 +591,20 @@
   cursor: default;
 }
 
+.pillVer {
+  background: #e0f2fe;
+  color: #0369a1;
+  cursor: default;
+  font-weight: 800;
+}
+
+.pillDelta {
+  background: #fef3c7;
+  color: #92400e;
+  cursor: default;
+  font-weight: 800;
+}
+
 .pillPpt {
   background: #fef3c7;
   color: #b45309;

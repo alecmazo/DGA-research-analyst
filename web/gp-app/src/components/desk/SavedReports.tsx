@@ -170,6 +170,25 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                           <span title="OK">✅</span>
                         ) : null}
                         <span className={styles.repTk}>{rep.ticker}</span>
+                        {Number(rep.version_count || 1) > 1 && (
+                          <span
+                            className={`${styles.pill} ${styles.pillVer}`}
+                            title="Thesis versions archived for this ticker"
+                          >
+                            v{rep.version_count}
+                          </span>
+                        )}
+                        {rep.delta_from_prior &&
+                          (rep.delta_from_prior.rating_changed ||
+                            rep.delta_from_prior.pt_changed ||
+                            rep.delta_from_prior.has_change) && (
+                            <span
+                              className={`${styles.pill} ${styles.pillDelta}`}
+                              title="Changed vs prior Analyze — open report for thesis continuity"
+                            >
+                              Δ
+                            </span>
+                          )}
                         <button
                           type="button"
                           className={styles.repDel}

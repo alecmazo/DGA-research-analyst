@@ -207,6 +207,27 @@ export type MeResponse = {
 
 export type LlmProvider = 'grok' | 'claude' | 'deepseek' | 'kimi'
 
+export type ReportDelta = {
+  has_change?: boolean
+  rating_changed?: boolean
+  pt_changed?: boolean
+  days_since_prior?: number | null
+  prior_generated_at?: string | null
+  prior_report_date?: string | null
+  version_index?: number
+  rating?: { from?: string | null; to?: string | null }
+  price_target?: {
+    from?: number | null
+    to?: number | null
+    chg_pct?: number | null
+  }
+  upside_pct?: {
+    from?: number | null
+    to?: number | null
+    chg_pp?: number | null
+  }
+}
+
 export type SavedReport = {
   ticker: string
   price_target?: number | null
@@ -231,6 +252,15 @@ export type SavedReport = {
   claude_upside_pct?: number | null
   version_count?: number
   rating?: string | null
+  /** Per-provider or flat delta vs prior Analyze (from archive). */
+  delta_from_prior?: ReportDelta | null
+  claude_rating?: string | null
+  kimi_rating?: string | null
+  deepseek_rating?: string | null
+  kimi_price_target?: number | null
+  deepseek_price_target?: number | null
+  kimi_upside_pct?: number | null
+  deepseek_upside_pct?: number | null
 }
 
 export type JobStatus = {
@@ -297,6 +327,28 @@ export type PrioritizeResult = {
   provider?: string
 }
 
+export type ReportHistoryVersion = {
+  id: number | string
+  provider?: string
+  generated_at?: string | null
+  report_date?: string | null
+  rating?: string | null
+  price_target?: number | null
+  upside_pct?: number | null
+  has_md?: boolean
+  is_current?: boolean
+  version_count?: number
+  delta_from_prior?: ReportDelta | null
+  delta_to_next?: ReportDelta | null
+}
+
+export type ReportHistory = {
+  versions?: ReportHistoryVersion[]
+  current?: ReportHistoryVersion | null
+  version_count?: number
+  delta_from_prior?: ReportDelta | null
+}
+
 export type ReportDetail = {
   ticker?: string
   /** Primary field from GET /api/report/{ticker} */
@@ -315,4 +367,5 @@ export type ReportDetail = {
   has_pptx?: boolean
   note?: string
   version_count?: number
+  delta_from_prior?: ReportDelta | null
 }

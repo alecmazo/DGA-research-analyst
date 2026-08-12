@@ -1,10 +1,48 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { SupportFab } from '@/components/support/SupportFab'
-import { api, type Quote, type ReportDetail } from '@/lib/api'
+import {
+  api,
+  type Quote,
+  type ReportDelta,
+  type ReportDetail,
+  type ReportHistory,
+  type ReportHistoryVersion,
+} from '@/lib/api'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { renderMd, reportMarkdown } from '@/lib/md'
 import styles from './ReportPage.module.css'
+
+function fmtTarget(v: number | null | undefined) {
+  if (v == null || Number.isNaN(Number(v))) return '—'
+  const n = Number(v)
+  return `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`
+}
+
+function deltaBits(dlt: ReportDelta | null | undefined): string[] {
+  if (!dlt) return []
+  const bits: string[] = []
+  if (dlt.rating_changed) {
+    bits.push(
+      `Rating ${(dlt.rating?.from || '—')} → ${(dlt.rating?.to || '—')}`,
+    )
+  }
+  if (dlt.pt_changed || dlt.price_target?.from != null) {
+    const ch = dlt.price_target?.chg_pct
+    bits.push(
+      `Target ${fmtTarget(dlt.price_target?.from)} → ${fmtTarget(dlt.price_target?.to)}` +
+        (ch != null ? ` (${ch >= 0 ? '+' : ''}${Number(ch).toFixed(1)}%)` : ''),
+    )
+  }
+  if (dlt.upside_pct?.chg_pp != null) {
+    const pp = Number(dlt.upside_pct.chg_pp)
+    bits.push(`Upside ${pp >= 0 ? '+' : ''}${pp.toFixed(1)} pp`)
+  }
+  if (dlt.days_since_prior != null) {
+    bits.push(`${dlt.days_since_prior}d since prior`)
+  }
+  return bits
+}
 
 export function ReportPage() {
   const [params] = useSearchParams()
@@ -13,8 +51,13 @@ export function ReportPage() {
 
   const [data, setData] = useState<ReportDetail | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
+  const [history, setHistory] = useState<ReportHistory | null>(null)
+  const [viewId, setViewId] = useState<string | number>('current')
+  const [viewMd, setViewMd] = useState<string | null>(null)
+  const [viewSnap, setViewSnap] = useState<ReportHistoryVersion | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [histBusy, setHistBusy] = useState(false)
 
   useEffect(() => {
     document.title = ticker
@@ -32,16 +75,24 @@ export function ReportPage() {
     ;(async () => {
       setLoading(true)
       setErr(null)
+      setViewId('current')
+      setViewMd(null)
+      setViewSnap(null)
       try {
-        const [r, q] = await Promise.all([
+        const [r, q, h] = await Promise.all([
           api<ReportDetail>(
             `/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}`,
           ),
           api<Quote>(`/api/quote/${encodeURIComponent(ticker)}`).catch(() => null),
+          api<ReportHistory>(
+            `/api/report/${encodeURIComponent(ticker)}/history?provider=${encodeURIComponent(provider)}`,
+          ).catch(() => null),
         ])
         if (!alive) return
         setData(r)
         setQuote(q)
+        setHistory(h)
+        if (h?.current) setViewSnap(h.current)
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : 'Failed to load report')
       } finally {
@@ -53,10 +104,80 @@ export function ReportPage() {
     }
   }, [ticker, provider])
 
-  const md = reportMarkdown(data)
+  const loadVersion = async (id: string | number) => {
+    if (!ticker) return
+    setHistBusy(true)
+    try {
+      if (id === 'current') {
+        setViewId('current')
+        setViewMd(null)
+        setViewSnap(history?.current || null)
+        return
+      }
+      const v = await api<{
+        report_md?: string
+        rating?: string | null
+        price_target?: number | null
+        upside_pct?: number | null
+        generated_at?: string | null
+        id?: number
+      }>(
+        `/api/report/${encodeURIComponent(ticker)}/version/${encodeURIComponent(String(id))}`,
+      )
+      setViewId(id)
+      setViewMd(v.report_md || '')
+      setViewSnap({
+        id: v.id ?? id,
+        rating: v.rating,
+        price_target: v.price_target,
+        upside_pct: v.upside_pct,
+        generated_at: v.generated_at,
+        is_current: false,
+      })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not load version')
+    } finally {
+      setHistBusy(false)
+    }
+  }
+
+  const currentMd = reportMarkdown(data)
+  const md = viewId === 'current' ? currentMd : viewMd || ''
   const html = useMemo(() => (md ? renderMd(md) : ''), [md])
   const pct = quote?.pct ?? quote?.pct_change ?? null
   const shownProvider = (data?.provider || provider).toLowerCase()
+
+  const dlt =
+    data?.delta_from_prior ||
+    history?.current?.delta_from_prior ||
+    history?.delta_from_prior ||
+    null
+  const vc =
+    data?.version_count ||
+    history?.current?.version_count ||
+    history?.version_count ||
+    1
+  const bits = deltaBits(dlt)
+  const showDelta =
+    viewId === 'current' &&
+    dlt &&
+    (dlt.rating_changed ||
+      dlt.pt_changed ||
+      dlt.upside_pct?.chg_pp != null ||
+      (vc > 1 && dlt.days_since_prior != null) ||
+      dlt.has_change ||
+      bits.length > 0)
+
+  const versions = history?.versions || []
+  const showTimeline = Boolean(history?.current || versions.length)
+
+  const displayRating = viewSnap?.rating ?? data?.rating
+  const displayTarget = viewSnap?.price_target ?? data?.price_target
+  const displayUpside = viewSnap?.upside_pct ?? data?.upside_pct
+  const displayWhen =
+    viewId === 'current'
+      ? data?.generated_at || data?.report_date
+      : viewSnap?.generated_at || viewSnap?.report_date
 
   return (
     <div className={styles.page}>
@@ -66,9 +187,15 @@ export function ReportPage() {
           <span className={styles.prov} data-p={shownProvider}>
             {shownProvider.toUpperCase()}
           </span>
-          {(data?.generated_at || data?.report_date) && (
+          {vc > 1 && (
+            <span className={styles.verBadge} title="Analyze re-run count for this ticker/engine">
+              v{vc}
+            </span>
+          )}
+          {displayWhen && (
             <span className={styles.meta}>
-              {relativeTime(data.generated_at || data.report_date)}
+              {viewId === 'current' ? '' : 'prior · '}
+              {relativeTime(displayWhen)}
             </span>
           )}
           {data?.note && <span className={styles.note}>{data.note}</span>}
@@ -101,36 +228,79 @@ export function ReportPage() {
         </div>
         <div>
           <span>Rating</span>
-          <strong>{data?.rating || '—'}</strong>
+          <strong>{displayRating || '—'}</strong>
         </div>
         <div>
           <span>Target</span>
-          <strong>
-            {data?.price_target != null
-              ? `$${
-                  Number(data.price_target) >= 100
-                    ? Number(data.price_target).toFixed(0)
-                    : Number(data.price_target).toFixed(2)
-                }`
-              : '—'}
-          </strong>
+          <strong>{fmtTarget(displayTarget)}</strong>
         </div>
         <div>
           <span>Upside</span>
-          <strong className={pctClass(data?.upside_pct)}>
-            {fmtPct(data?.upside_pct)}
-          </strong>
+          <strong className={pctClass(displayUpside)}>{fmtPct(displayUpside)}</strong>
         </div>
       </div>
+
+      {showDelta && (
+        <div className={styles.deltaBanner} role="status">
+          <div className={styles.deltaTitle}>
+            Δ since prior Analyze {vc > 1 ? `(v${vc})` : ''}
+          </div>
+          <div className={styles.deltaBits}>
+            {bits.length ? bits.join(' · ') : 'Thesis re-run archived (headline numbers similar)'}
+          </div>
+          <div className={styles.deltaNote}>
+            Each Analyze is a timestamped snapshot. Priors are kept — pick a version below to re-read
+            the old thesis. New reports include a <strong>Thesis Continuity</strong> section when a
+            prior exists.
+          </div>
+        </div>
+      )}
+
+      {showTimeline && (
+        <div className={styles.timeline}>
+          <div className={styles.timelineLabel}>
+            Thesis timeline · {(history?.current ? 1 : 0) + versions.length} snapshot
+            {(history?.current ? 1 : 0) + versions.length === 1 ? '' : 's'}
+            {histBusy ? ' · loading…' : ''}
+          </div>
+          <div className={styles.timelineChips}>
+            {history?.current && (
+              <button
+                type="button"
+                className={`${styles.histChip} ${viewId === 'current' ? styles.histChipOn : ''}`}
+                onClick={() => void loadVersion('current')}
+              >
+                Current
+                {history.current.generated_at
+                  ? ` · ${relativeTime(history.current.generated_at)}`
+                  : ''}
+                {history.current.rating ? ` · ${history.current.rating}` : ''}
+                {history.current.price_target != null
+                  ? ` · ${fmtTarget(history.current.price_target)}`
+                  : ''}
+              </button>
+            )}
+            {versions.slice(0, 12).map((v) => (
+              <button
+                key={String(v.id)}
+                type="button"
+                className={`${styles.histChip} ${viewId === v.id ? styles.histChipOn : ''}`}
+                onClick={() => void loadVersion(v.id)}
+              >
+                {v.generated_at ? relativeTime(v.generated_at) : `#${v.id}`}
+                {v.rating ? ` · ${v.rating}` : ''}
+                {v.price_target != null ? ` · ${fmtTarget(v.price_target)}` : ''}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className={styles.body}>
         {loading && <div className={styles.empty}>Loading report…</div>}
         {err && <div className={styles.err}>{err}</div>}
         {!loading && !err && html && (
-          <article
-            className={styles.md}
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+          <article className={styles.md} dangerouslySetInnerHTML={{ __html: html }} />
         )}
         {!loading && !err && !html && (
           <div className={styles.empty}>
@@ -158,7 +328,6 @@ export function openReportWindow(ticker: string, provider = 'grok') {
     'width=1040,height=900,menubar=no,toolbar=no,location=no,status=no',
   )
   if (!win) {
-    // Popup blocked — navigate in-place as fallback
-    window.location.assign(url)
+    window.location.href = url
   }
 }
