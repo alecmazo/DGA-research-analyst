@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui453-20260812-research-pdf-match-window"
+WEB_BUILD_VERSION = "ui454-20260812-research-pdf-restore-letterhead"
 
 
 @app.get("/api/build")
@@ -26458,8 +26458,8 @@ def _md_table_colgroup(ncols: int, headers: list | None = None) -> str:
     """
     if ncols <= 1:
         return ""
-    # Letter 612pt − ~1.15cm side margins (matches the window-like PDF chrome)
-    content_w = 548.0
+    # Letter 612pt − ~1.45cm side margins
+    content_w = 524.0
     if headers and len(headers) == ncols:
         widths = _table_col_widths_pts(headers, content_w)
     else:
@@ -26666,34 +26666,31 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
                            tickers: str | None = None,
                            cost_usd=None,
                            verification=None) -> str:
-    """Wrap the on-screen research HTML so the PDF tracks the answer window.
+    """DGA letterhead + window-matched body (Inter, navy zebra tables).
 
-    CSS is xhtml2pdf-safe (tables for layout, inline zebra, Inter + DejaVu).
+    CSS is xhtml2pdf-safe (tables for layout, inline zebra).
     """
     import html as _html
     from datetime import datetime as _dt
     if not stamp:
         try:
-            stamp = _dt.now().strftime("%b %-d, %Y · %-I:%M %p")
+            stamp = _dt.now().strftime("%B %d, %Y · %-I:%M %p")
         except Exception:
-            stamp = _dt.now().strftime("%b %d, %Y")
-    heading = _research_heading(title, kind)
-    title_e = _html.escape(heading)
+            stamp = _dt.now().strftime("%B %d, %Y")
+    # Masthead doc-type: bare "Analyst" → "Research Note" (pre-ui453 letterhead).
+    raw_title = (title or "").strip()
+    if (kind or "").strip().lower() == "strategist":
+        doc_label = raw_title or "Investment Committee Review"
+    elif raw_title.lower() in ("ai analyst", "analyst", ""):
+        doc_label = "Research Note"
+    else:
+        doc_label = raw_title
+    title_e = _html.escape(doc_label)
     q_e = _html.escape((question or "").strip())
     fund_e = _html.escape((fund_name or "").strip())
     tick_e = _html.escape((tickers or "").strip())
     stamp_e = _html.escape(stamp)
-    model_e = _html.escape((model or "").strip())
-    prov = _research_provider_from_model(model)
-    prov_color = _research_provider_color(prov)
-    cost_e = ""
-    if cost_usd is not None:
-        try:
-            cost_e = f"${float(cost_usd):.3f}"
-        except (TypeError, ValueError):
-            cost_e = ""
     logo = _dga_logo_data_uri()
-    # Inter for the window look; DejaVu still registered for any fallback glyphs.
     css = """
       @font-face { font-family: "InterPdf"; src: url(Inter-Regular.ttf); }
       @font-face { font-family: "InterPdf"; src: url(Inter-Bold.ttf); font-weight: bold; }
@@ -26703,11 +26700,10 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
       @font-face { font-family: "DejaVuSans"; src: url(DejaVuSans-Bold.ttf); font-weight: bold; }
       @page {
         size: letter;
-        background-color: #f4f7fb;
-        margin: 0.85cm 1.15cm 1.85cm 1.15cm;
+        margin: 1.35cm 1.45cm 2.15cm 1.45cm;
         @frame footer_frame {
           -pdf-frame-content: footerContent;
-          bottom: 0.55cm; margin-left: 1.15cm; margin-right: 1.15cm; height: 1.05cm;
+          bottom: 0.75cm; margin-left: 1.45cm; margin-right: 1.45cm; height: 1.15cm;
         }
       }
       body {
@@ -26716,41 +26712,57 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
         line-height: 1.6;
         color: #334155;
       }
-      table.head, table.qstrip, table.verify, table.head-inner, table.badge {
-        width: 100%; border: none; border-collapse: collapse;
-      }
-      table.head {
+      table.mast {
+        width: 100%; border: none; margin: 0 0 0 0;
         background-color: #ffffff;
-        border-bottom: 0.6pt solid #e2e8f0;
-        margin: 0 0 0 0;
       }
-      table.head td { border: none; vertical-align: middle; padding: 8pt 10pt; }
-      table.head-inner td { border: none; vertical-align: middle; padding: 0 6pt 0 0; }
-      .htitle {
-        font-size: 12pt; font-weight: bold; color: #0a1628;
-        letter-spacing: 0.3pt;
+      table.mast td { border: none; vertical-align: middle; padding: 5pt 8pt; }
+      .mast-wordmark {
+        font-size: 10pt; font-weight: bold; color: #0A1628;
+        letter-spacing: 1.0pt;
       }
-      table.badge { width: auto; }
-      table.badge td {
-        border: none;
-        color: #ffffff;
-        font-size: 6.5pt; font-weight: bold; letter-spacing: 0.5pt;
-        padding: 2.5pt 6pt;
+      .mast-doc {
+        font-size: 6.5pt; font-weight: bold; color: #5BB8D4;
+        letter-spacing: 0.8pt; text-transform: uppercase;
+        margin-top: 1pt;
       }
-      .hmeta {
-        text-align: right; font-size: 8pt; color: #64748b; line-height: 1.35;
+      .mast-meta {
+        text-align: right; font-size: 6.5pt; color: #64748b; line-height: 1.3;
       }
-      table.qstrip {
-        background-color: #f8fafc;
-        border-bottom: 0.6pt solid #e2e8f0;
-        margin: 0 0 10pt 0;
+      .mast-meta .conf {
+        color: #0A6B8A; font-weight: bold; letter-spacing: 0.5pt;
+        font-size: 6pt; text-transform: uppercase;
       }
-      table.qstrip td { border: none; padding: 9pt 11pt; vertical-align: top; }
-      .qfund { font-size: 10.5pt; font-weight: bold; color: #0a1628; margin-bottom: 1pt; }
-      .qtickers {
-        font-family: Courier; font-size: 8pt; color: #64748b; margin-bottom: 4pt;
+      table.accent { width: 100%; border: none; margin: 0 0 10pt 0; }
+      table.accent td {
+        border: none; padding: 0; height: 2pt;
+        background-color: #5BB8D4; font-size: 1pt; line-height: 1pt;
       }
-      .qtext { font-size: 9.5pt; color: #334155; line-height: 1.45; }
+      table.qbox {
+        width: 100%; border: none; margin: 0 0 14pt 0;
+        background-color: #F0F9FC;
+      }
+      table.qbox td.qbar {
+        border: none; width: 4.5pt; background-color: #5BB8D4;
+        font-size: 1pt; padding: 0;
+      }
+      table.qbox td.qbody {
+        border: none; padding: 9pt 12pt 9pt 11pt; vertical-align: top;
+      }
+      .qlabel {
+        font-size: 6.5pt; font-weight: bold; color: #5BB8D4;
+        letter-spacing: 0.8pt; text-transform: uppercase; margin-bottom: 3pt;
+      }
+      .qtext {
+        font-size: 9pt; font-weight: bold; color: #0A1628; line-height: 1.4;
+      }
+      .qsub { font-size: 8pt; font-weight: normal; color: #64748b; margin-top: 3pt; }
+      .body-label {
+        font-size: 6.5pt; font-weight: bold; color: #94a3b8;
+        letter-spacing: 0.9pt; text-transform: uppercase;
+        margin: 2pt 0 6pt 0;
+      }
+      table.verify { width: 100%; border: none; }
       .md-rendered { color: #334155; }
       .md-rendered .md-h { font-weight: bold; color: #0a1628; page-break-after: avoid; }
       .md-rendered .md-h1 {
@@ -26822,40 +26834,45 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
       #footerContent .fcyan { color: #5BB8D4; font-weight: bold; }
     """
     if logo:
-        logo_cell = f'<img src="{logo}" width="92" height="26" alt="DGA Capital" />'
+        logo_cell = (
+            f'<img src="{logo}" width="120" height="34" alt="DGA Capital" />'
+        )
     else:
-        logo_cell = '<span class="htitle">DGA</span>'
-    badge = (
-        f'<table class="badge"><tr>'
-        f'<td style="background-color:{prov_color};">{_html.escape(prov.upper())}</td>'
-        f'</tr></table>'
-        if model_e else ""
-    )
-    meta_bits = [x for x in (stamp_e, cost_e, model_e) if x]
-    meta_html = "<br/>".join(meta_bits) if meta_bits else ""
+        logo_cell = '<span class="mast-wordmark">DGA CAPITAL</span>'
     head = (
-        f'<table class="head"><tr>'
-        f'<td style="width:68%;padding-right:8pt;">'
-        f'<table class="head-inner"><tr>'
-        f'<td style="width:96pt;">{logo_cell}</td>'
-        f'<td><div class="htitle">{title_e}</div></td>'
-        f'<td style="width:58pt;">{badge}</td>'
-        f'</tr></table>'
+        f'<table class="mast"><tr>'
+        f'<td style="width:58%;">'
+        f'{logo_cell}<div class="mast-doc">{title_e}</div>'
         f'</td>'
-        f'<td class="hmeta" style="width:32%;">{meta_html}</td>'
+        f'<td class="mast-meta">'
+        f'<div class="conf">Confidential</div>'
+        f'<div>{stamp_e}</div>'
+        f'</td>'
         f'</tr></table>'
+        f'<table class="accent"><tr><td>&nbsp;</td></tr></table>'
     )
-    q_parts = []
-    if fund_e:
-        q_parts.append(f'<div class="qfund">{fund_e}</div>')
+    q_main = q_e or fund_e
+    q_sub_bits = []
+    if fund_e and q_e:
+        q_sub_bits.append(fund_e)
     if tick_e:
-        q_parts.append(f'<div class="qtickers">{tick_e}</div>')
-    if q_e:
-        q_parts.append(f'<div class="qtext">{q_e}</div>')
-    qhtml = (
-        f'<table class="qstrip"><tr><td>{"".join(q_parts)}</td></tr></table>'
-        if q_parts else ""
-    )
+        q_sub_bits.append(tick_e)
+    if q_main:
+        sub = (
+            f'<div class="qsub">{" · ".join(q_sub_bits)}</div>' if q_sub_bits else ""
+        )
+        qhtml = (
+            f'<table class="qbox"><tr>'
+            f'<td class="qbar">&nbsp;</td>'
+            f'<td class="qbody">'
+            f'<div class="qlabel">Question</div>'
+            f'<div class="qtext">{q_main}</div>'
+            f'{sub}'
+            f'</td></tr></table>'
+        )
+    else:
+        qhtml = ""
+    body_label = '<div class="body-label">Analysis</div>'
     footer = (
         '<div id="footerContent">'
         '<span class="fnavy">DGA Capital</span>'
@@ -26871,7 +26888,7 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
     return (
         f'<!doctype html><html><head><meta charset="utf-8">'
         f'<style>{css}</style></head><body>'
-        f'{footer}{head}{qhtml}'
+        f'{footer}{head}{qhtml}{body_label}'
         f'<div class="md-rendered">{body}</div>'
         f'{verify}'
         f'</body></html>'
