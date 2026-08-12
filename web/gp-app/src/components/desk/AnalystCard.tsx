@@ -17,6 +17,12 @@ import {
 } from '@/lib/agentic'
 import { formatRange, useCostCatalog } from '@/lib/llmCost'
 import { renderMd } from '@/lib/md'
+import {
+  navigateResearchWindow,
+  openPendingResearchWindow,
+  openResearchWindow,
+  writeResearchSeed,
+} from '@/pages/ResearchAnswerPage'
 import styles from './deskWidgets.module.css'
 
 const ENGINE_KEY = 'dga.agentic.engine.v1'
@@ -56,6 +62,7 @@ export function AnalystCard({ bare = false }: Props) {
   const [elapsed, setElapsed] = useState(0)
   const [result, setResult] = useState<AgenticResult | null>(null)
   const [lastQ, setLastQ] = useState('')
+  const [jobId, setJobId] = useState<string | null>(null)
   const [reviews, setReviews] = useState<ReviewRow[]>([])
   const taRef = useRef<HTMLTextAreaElement>(null)
 
@@ -104,9 +111,12 @@ export function AnalystCard({ bare = false }: Props) {
     setErr(null)
     setResult(null)
     setLastQ(q)
+    setJobId(null)
     setBusy(true)
     setProgress({ status: 'running', label: `Starting · ${engLabel(engine)}…`, steps: 0 })
     setElapsed(0)
+    // Open on the click so the finished answer is not popup-blocked.
+    const win = openPendingResearchWindow('analyst', q)
     try {
       const d0 = await api<{ ok?: boolean; job_id?: string; error?: string }>(
         '/api/research/agentic',
@@ -116,14 +126,33 @@ export function AnalystCard({ bare = false }: Props) {
         },
       )
       if (!d0.ok || !d0.job_id) throw new Error(d0.error || 'Failed to start')
+      setJobId(d0.job_id)
+      navigateResearchWindow(win, 'analyst', d0.job_id, { question: q, title: 'Analyst' })
       const res = await pollAgenticJob(d0.job_id, (j, ms) => {
         setProgress(j)
         setElapsed(ms)
       })
       setResult(res)
       setProgress(null)
+      const seed = {
+        question: q,
+        title: 'Analyst',
+        answer: res.answer,
+        model: res.model,
+        cost_usd: res.cost_usd,
+        verification: res.verification,
+      }
+      writeResearchSeed('analyst', d0.job_id, seed)
+      if (!win || win.closed) openResearchWindow('analyst', d0.job_id, seed)
       window.setTimeout(() => void loadReviews(), 2000)
     } catch (e) {
+      if (win && !win.closed) {
+        try {
+          win.close()
+        } catch {
+          /* ignore */
+        }
+      }
       setErr(e instanceof Error ? e.message : 'Analyst failed')
       setProgress(null)
     } finally {
@@ -131,18 +160,11 @@ export function AnalystCard({ bare = false }: Props) {
     }
   }
 
-  const openReview = async (id: string) => {
-    try {
-      const d = await api<{ ok?: boolean; review?: AgenticResult & { question?: string } }>(
-        `/api/research/analyst/reviews/${encodeURIComponent(id)}`,
-      )
-      if (!d.review) throw new Error('not found')
-      setLastQ(d.review.question || '')
-      setResult(d.review)
-      setErr(null)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not open analysis')
-    }
+  const openReview = (id: string) => {
+    setJobId(id)
+    const opened = openResearchWindow('analyst', id)
+    if (!opened) setErr('Pop-up blocked — allow windows for this site, then click Open again.')
+    else setErr(null)
   }
 
   const deleteReview = async (id: string) => {
@@ -246,6 +268,7 @@ export function AnalystCard({ bare = false }: Props) {
     <div className={`${styles.agentBody} ${bare ? styles.heroBare : ''}`}>
       <p className={styles.agentHint}>
         Multi-step research over live quotes, saved reports, news, and your books.
+        The answer opens in a new window when ready — same as Saved Reports.
         Cost follows the selected engine.
       </p>
 
@@ -352,32 +375,25 @@ export function AnalystCard({ bare = false }: Props) {
       )}
 
       {result && (
-        <div className={styles.result}>
-          <div
-            className={styles.md}
-            dangerouslySetInnerHTML={{ __html: answerHtml }}
-          />
-          {result.verification?.verdict === 'clean' && (
-            <div className={styles.verifyOk}>
-              ✓ Verification pass: every numeric claim is backed by a tool call.
-            </div>
-          )}
-          {result.verification?.verdict === 'flags' && (
-            <div className={styles.verifyWarn}>
-              <strong>
-                ⚠ Verification flagged {(result.verification.flags || []).length} claim(s):
-              </strong>
-              <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-                {(result.verification.flags || []).map((f, i) => (
-                  <li key={i}>
-                    <strong>{f.issue || 'flag'}:</strong> {f.claim || ''}
-                    {f.note ? ` — ${f.note}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+        <div className={styles.resultReady}>
+          <div>
+            ✓ Answer ready — opened in a new window
+            {result.verification?.verdict === 'flags'
+              ? ` · ⚠ ${result.verification.flags?.length || 0} verification flag(s)`
+              : result.verification?.verdict === 'clean'
+                ? ' · verification pass'
+                : ''}
+            .
+          </div>
           <div className={styles.resultActions}>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => jobId && openReview(jobId)}
+              disabled={!jobId}
+            >
+              Open window
+            </Button>
             <Button size="sm" onClick={() => void exportPdf()}>
               ⬇ PDF
             </Button>
@@ -385,7 +401,7 @@ export function AnalystCard({ bare = false }: Props) {
               ✉ Email
             </Button>
             <Button size="sm" onClick={() => void draftMemo()}>
-              📄 Draft memo from this
+              📄 Draft memo
             </Button>
             <span className={styles.resultCost}>
               {result.cost_usd != null ? `$${Number(result.cost_usd).toFixed(3)}` : ''}
@@ -398,7 +414,7 @@ export function AnalystCard({ bare = false }: Props) {
       <div className={styles.reviews}>
         <div className={styles.reviewsHead}>
           <span className={styles.metaLabel}>Saved analyses</span>
-          <span className={styles.reviewsHint}>Re-open or print to PDF</span>
+          <span className={styles.reviewsHint}>Opens in a new window</span>
           <Button size="sm" onClick={() => void loadReviews()}>
             ↻
           </Button>
@@ -417,8 +433,8 @@ export function AnalystCard({ bare = false }: Props) {
                   {rv.model ? ` · ${rv.model}` : ''}
                 </div>
               </div>
-              <Button size="sm" onClick={() => void openReview(rv.id)}>
-                View
+              <Button size="sm" onClick={() => openReview(rv.id)}>
+                Open
               </Button>
               <Button
                 size="sm"

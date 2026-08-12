@@ -1147,6 +1147,16 @@
   box-shadow: var(--shadow-sm);
 }
 
+.resultReady {
+  background: var(--bg-elevated, #fff);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
 .md :global(.md-h) {
   font-weight: 800;
   color: var(--text-primary);

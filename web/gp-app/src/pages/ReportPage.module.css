@@ -43,6 +43,9 @@
   color: #fff;
 }
 
+.prov[data-p='grok'] {
+  background: #0a1628;
+}
 .prov[data-p='claude'] {
   background: #d97706;
 }

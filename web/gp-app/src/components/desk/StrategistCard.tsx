@@ -18,6 +18,12 @@ import {
 } from '@/lib/agentic'
 import { formatRange, useCostCatalog } from '@/lib/llmCost'
 import { renderMd } from '@/lib/md'
+import {
+  navigateResearchWindow,
+  openPendingResearchWindow,
+  openResearchWindow,
+  writeResearchSeed,
+} from '@/pages/ResearchAnswerPage'
 import styles from './deskWidgets.module.css'
 
 const ENGINE_KEY = 'dga.strategist.engine.v1'
@@ -100,7 +106,11 @@ export function StrategistCard({ bare = false }: Props) {
     void loadArchive()
   }, [loadFunds, loadArchive])
 
-  const start = async (payload: Record<string, unknown>, label: string) => {
+  const start = async (
+    payload: Record<string, unknown>,
+    label: string,
+    win: Window | null,
+  ) => {
     setErr(null)
     setResult(null)
     setRoundupMsg(null)
@@ -123,7 +133,15 @@ export function StrategistCard({ bare = false }: Props) {
       setJobId(d0.job_id)
       setPositions(d0.positions || [])
       setTickers(d0.tickers || [])
+      const name = d0.fund_name || label
       if (d0.fund_name) setFundLabel(d0.fund_name)
+      const tickStr = (d0.tickers || []).join(', ')
+      navigateResearchWindow(win, 'strategist', d0.job_id, {
+        title: 'Investment Committee Review',
+        fund_name: name,
+        tickers: tickStr,
+        question: label,
+      })
       const res = await pollAgenticJob(
         d0.job_id,
         (j) => setProgress(j),
@@ -131,8 +149,27 @@ export function StrategistCard({ bare = false }: Props) {
       )
       setResult(res)
       setProgress(null)
+      const seed = {
+        title: 'Investment Committee Review',
+        fund_name: name,
+        tickers: tickStr,
+        question: label,
+        answer: res.answer,
+        model: res.model,
+        cost_usd: res.cost_usd,
+        verification: res.verification,
+      }
+      writeResearchSeed('strategist', d0.job_id, seed)
+      if (!win || win.closed) openResearchWindow('strategist', d0.job_id, seed)
       void loadArchive()
     } catch (e) {
+      if (win && !win.closed) {
+        try {
+          win.close()
+        } catch {
+          /* ignore */
+        }
+      }
       setErr(e instanceof Error ? e.message : 'Strategist failed')
       setProgress(null)
     } finally {
@@ -141,13 +178,24 @@ export function StrategistCard({ bare = false }: Props) {
   }
 
   const run = async () => {
+    if (!selected.length && !file) {
+      setErr('Pick a fund or upload a portfolio file.')
+      return
+    }
+    const hint = selected.length
+      ? funds
+          .filter((f) => selected.includes(f.id))
+          .map((f) => f.short_name || f.name || f.id)
+          .join(' + ')
+      : file?.name || 'uploaded book'
+    const win = openPendingResearchWindow('strategist', hint)
     if (selected.length) {
       const label =
         funds
           .filter((f) => selected.includes(f.id))
           .map((f) => f.short_name || f.name || f.id)
           .join(' + ') + (selected.length > 1 ? ' (combined)' : '')
-      await start({ fund_ids: selected }, label)
+      await start({ fund_ids: selected }, label, win)
       return
     }
     if (file) {
@@ -177,14 +225,19 @@ export function StrategistCard({ bare = false }: Props) {
           positions?: unknown[]
         }
         if (!up.ok || !uj.ok) throw new Error(uj.detail || uj.error || 'Parse failed')
-        await start({ positions: uj.positions || [] }, 'uploaded book')
+        await start({ positions: uj.positions || [] }, 'uploaded book', win)
       } catch (e) {
+        if (win && !win.closed) {
+          try {
+            win.close()
+          } catch {
+            /* ignore */
+          }
+        }
         setErr(e instanceof Error ? e.message : 'Upload failed')
         setBusy(false)
       }
-      return
     }
-    setErr('Pick a fund or upload a portfolio file.')
   }
 
   const answerHtml = result?.answer ? renderMd(result.answer) : ''
@@ -295,20 +348,11 @@ export function StrategistCard({ bare = false }: Props) {
     }
   }
 
-  const viewArchive = async (id: string) => {
-    try {
-      const d = await api<{ ok?: boolean; review?: StratReview }>(
-        `/api/research/strategist/reviews/${encodeURIComponent(id)}`,
-      )
-      if (!d.review) throw new Error('not found')
-      setResult(d.review)
-      setJobId(id)
-      setFundLabel(d.review.fund_name || '')
-      setTickers((d.review.tickers || '').split(',').map((t) => t.trim()).filter(Boolean))
-      setErr(null)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not open review')
-    }
+  const viewArchive = (id: string) => {
+    setJobId(id)
+    const opened = openResearchWindow('strategist', id)
+    if (!opened) setErr('Pop-up blocked — allow windows for this site, then click Open again.')
+    else setErr(null)
   }
 
   const deleteArchive = async (id: string) => {
@@ -330,8 +374,9 @@ export function StrategistCard({ bare = false }: Props) {
       <p className={styles.agentHint}>
         Full investment-committee review of an entire book. Reasons{' '}
         <em>across</em> positions (concentration, correlation, EV) and proposes
-        grounded adjustments. Hand off to Roundup podcast or strategy memo. Cost
-        follows the selected engine.
+        grounded adjustments. The review opens in a new window when ready —
+        same as Saved Reports. Hand off to Roundup podcast or strategy memo.
+        Cost follows the selected engine.
       </p>
 
       <div className={styles.agentToolbar}>
@@ -432,21 +477,25 @@ export function StrategistCard({ bare = false }: Props) {
       )}
 
       {result && (
-        <div className={styles.result}>
-          <div className={styles.md} dangerouslySetInnerHTML={{ __html: answerHtml }} />
-          {result.verification?.verdict === 'clean' && (
-            <div className={styles.verifyOk}>
-              ✓ Verification: every numeric claim is backed by a tool call.
-            </div>
-          )}
-          {result.verification?.verdict === 'flags' && (
-            <div className={styles.verifyWarn}>
-              <strong>
-                ⚠ Verification flagged {(result.verification.flags || []).length} claim(s)
-              </strong>
-            </div>
-          )}
+        <div className={styles.resultReady}>
+          <div>
+            ✓ Review ready — opened in a new window
+            {result.verification?.verdict === 'flags'
+              ? ` · ⚠ ${result.verification.flags?.length || 0} verification flag(s)`
+              : result.verification?.verdict === 'clean'
+                ? ' · verification pass'
+                : ''}
+            . Saved automatically.
+          </div>
           <div className={styles.resultActions}>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => jobId && viewArchive(jobId)}
+              disabled={!jobId}
+            >
+              Open window
+            </Button>
             <Button size="sm" onClick={() => void exportPdf()}>
               ⬇ Review PDF
             </Button>
@@ -463,9 +512,6 @@ export function StrategistCard({ bare = false }: Props) {
               {result.cost_usd != null ? `$${Number(result.cost_usd).toFixed(3)}` : ''}
               {result.model ? ` · ${result.model}` : ''}
             </span>
-          </div>
-          <div className={styles.muted} style={{ marginTop: 6 }}>
-            ✓ Saved automatically — past committee reviews below survive rebuilds.
           </div>
           {roundupMsg && <div className={styles.muted} style={{ marginTop: 8 }}>{roundupMsg}</div>}
         </div>
@@ -494,8 +540,8 @@ export function StrategistCard({ bare = false }: Props) {
                   {(rv.generated_at || '').slice(0, 16).replace('T', ' ')}
                 </div>
               </div>
-              <Button size="sm" onClick={() => void viewArchive(rv.id)}>
-                View
+              <Button size="sm" onClick={() => viewArchive(rv.id)}>
+                Open
               </Button>
               <Button size="sm" onClick={() => void exportPdf(rv.id)}>
                 PDF

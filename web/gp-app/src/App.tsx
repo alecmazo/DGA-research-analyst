@@ -12,6 +12,7 @@ import { TranscriptsPage } from '@/pages/TranscriptsPage'
 import { MemosPage } from '@/pages/MemosPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { ReportPage } from '@/pages/ReportPage'
+import { ResearchAnswerPage } from '@/pages/ResearchAnswerPage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import {
@@ -92,8 +93,9 @@ export default function App() {
       {(user, build) => (
         <BrowserRouter basename="/gp">
           <Routes>
-            {/* Standalone report window (no chrome) */}
+            {/* Standalone report / research windows (no chrome) */}
             <Route path="report" element={<ReportPage />} />
+            <Route path="research" element={<ResearchAnswerPage />} />
             <Route element={<Shell user={user} build={build} />}>
               <Route
                 index

@@ -65,7 +65,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Watchlist morning day %** | **`ui422-20260806-watchlist-morning-pct`** | Closed/pre-market: prior = bar before session close (not same bar → fake 0%) |
 | **GP React+TS shell** | **`ui423-20260806-gp-react-shell`** | Replace /gp with Vite React TypeScript shell; legacy at /gp-legacy |
 | **GP React all tabs** | **`ui424-20260806-gp-react-all-tabs`** | Port Desk/Options/Builder/Financials/Positions/Fund/Memos/Podcasts/Transcripts/Settings |
-| **Next deploy after this** | **`ui425-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Analyst / Strategist answer window** | **`ui452-20260812-research-answer-window`** | Finished Analyst + Portfolio Strategist answers open in a chrome-less window like Saved Reports |
+| **Next deploy after this** | **`ui453-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
