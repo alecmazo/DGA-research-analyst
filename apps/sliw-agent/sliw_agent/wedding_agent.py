@@ -983,7 +983,7 @@ def _package_from_stripe_session(session: dict[str, Any]) -> str:
         cents = -1
     if cents == 15000:
         return "single_lesson"
-    if cents == 125000:
+    if cents in (125000, 145000):
         return "package_10"
     return "package_10" if cents and cents >= 100000 else "single_lesson"
 
@@ -1014,7 +1014,7 @@ def apply_stripe_checkout_session(session: dict[str, Any]) -> dict[str, Any]:
     pkg = _package_from_stripe_session(session)
     pkg_label = {
         "single_lesson": "Private wedding lesson ×1 ($150)",
-        "package_10": "Wedding lesson package ×10 ($1,250)",
+        "package_10": "Wedding lesson package ×10 ($1,450)",
         "dream": "Dream Wedding Dance",
     }.get(pkg, pkg)
 

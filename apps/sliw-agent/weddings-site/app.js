@@ -82,7 +82,7 @@
           {
             id: "package_10",
             name: "Wedding lesson package ×10",
-            price_label: "$1,250",
+            price_label: "$1,450",
             one_liner: "Full prep arc for a polished first dance.",
             includes: ["10 private sessions", "Flexible scheduling", "Detailed feedback"],
             best_for: ["Show-stopping first dance"],
@@ -90,9 +90,9 @@
           {
             id: "dream",
             name: "Dream Wedding Dance",
-            price_label: "Custom",
-            one_liner: "Choreography, venue coordination, day-of support.",
-            includes: ["Personalized choreography", "Rehearsal space", "Performance day support"],
+            price_label: "From $2,800 · custom proposal",
+            one_liner: "Personalized choreography + private lessons with Edyta, venue coordination, and day-of support on request.",
+            includes: ["Personalized choreography + private lessons with Edyta (lesson count scoped to date & song)", "Venue / floor / music coordination (Marin studio base; SF & venue sessions available)", "Day-of performance support on request"],
             best_for: ["Full production"],
           },
         ];
@@ -229,7 +229,7 @@
           <strong>First dances, zero fear</strong>
           <span>San Rafael · private · DWTS pro</span>
           <div class="hero-media-ctas">
-            <a class="btn primary" data-stripe="package_10" href="${esc(pkgUrl)}" ${pkgUrl.startsWith("http") ? 'target="_blank" rel="noopener"' : ""}>$1,250 package</a>
+            <a class="btn primary" data-stripe="package_10" href="${esc(pkgUrl)}" ${pkgUrl.startsWith("http") ? 'target="_blank" rel="noopener"' : ""}>$1,450 package</a>
             <a class="btn ghost" data-stripe="single_lesson" href="${esc(singleUrl)}" ${singleUrl.startsWith("http") ? 'target="_blank" rel="noopener"' : ""}>$150 trial</a>
           </div>
         </div>
