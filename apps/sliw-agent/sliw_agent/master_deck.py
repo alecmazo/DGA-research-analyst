@@ -1,7 +1,7 @@
 """
 Master corporate packages assets for outreach.
 
-- Gamma site: https://edyta-corporate-dance-866y3wq.gamma.site/
+- Packages site: https://corporate.edytasliwinska.com/
 - Corporate page: https://edytasliwinska.com/corporate
 - Master PDF: uploaded via Materials → /sliw/media/master-packages.pdf
 
@@ -33,7 +33,7 @@ CORPORATE_PAGE = TALENT.get("corporate_page") or "https://edytasliwinska.com/cor
 GAMMA_PACKAGES_SITE = (
     (os.environ.get("SLIW_MASTER_DECK_URL") or "").strip()
     or TALENT.get("package_site")
-    or "https://edyta-corporate-dance-866y3wq.gamma.site/"
+    or "https://corporate.edytasliwinska.com/"
 )
 
 _DROPBOX_CLIENT_CACHE: dict[str, Any] = {"client": None, "failed": False}
@@ -363,7 +363,7 @@ def get_master_deck_meta(request_base: str | None = None) -> dict[str, Any]:
         "dropbox_path": dropbox_pdf_dest(),
         "dropbox_shared_url": old.get("dropbox_shared_url"),
         "note": (
-            "Gamma site for interactive packages. Upload master PDF below for a "
+            "Corporate packages site (corporate.edytasliwinska.com). Upload master PDF below for a "
             "downloadable link in emails (not attached). Also mirrored to Dropbox Apps/Sliw."
         ),
         "updated_at": datetime.utcnow().isoformat(),

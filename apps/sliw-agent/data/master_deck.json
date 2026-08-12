@@ -1,9 +1,10 @@
 {
   "status": "published_site",
-  "gamma_url": "https://edyta-corporate-dance-866y3wq.gamma.site/",
-  "gamma_site": "https://edyta-corporate-dance-866y3wq.gamma.site/",
+  "gamma_url": "https://corporate.edytasliwinska.com/",
+  "gamma_site": "https://corporate.edytasliwinska.com/",
   "corporate_page": "https://edytasliwinska.com/corporate",
   "pdf_url": null,
-  "note": "Uses Edyta's existing Gamma packages presentation. Put the link in the email body \u2014 do not attach files to cold email.",
-  "updated_at": "2026-07-12T21:01:11.711630"
+  "note": "Retired Gamma master deck. Use corporate.edytasliwinska.com in email body \u2014 do not attach files to cold email.",
+  "updated_at": "2026-08-12T23:55:37.588180",
+  "corporate_packages_url": "https://corporate.edytasliwinska.com/"
 }

@@ -20,10 +20,10 @@ from .crm import BRIEFS_DIR, OUTREACH_DIR, ensure_dirs, update_prospect
 from .talent_bible import TALENT
 
 CORPORATE = TALENT.get("corporate_page") or "https://edytasliwinska.com/corporate"
-# Existing published packages presentation (Gamma site) — prefer this in body
+# Corporate packages site — prefer this in body
 PACKAGES_DECK = (
     TALENT.get("package_site")
-    or "https://edyta-corporate-dance-866y3wq.gamma.site/"
+    or "https://corporate.edytasliwinska.com/"
 )
 
 

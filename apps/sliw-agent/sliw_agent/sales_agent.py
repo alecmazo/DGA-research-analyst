@@ -97,7 +97,7 @@ def run_sales_agent(
             master_url = get_master_deck_url()
     # Never use the old auto-generated gamma.app/docs link
     if "jk6b492p7fvmjhq" in (master_url or ""):
-        master_url = TALENT.get("package_site") or "https://edyta-corporate-dance-866y3wq.gamma.site/"
+        master_url = TALENT.get("package_site") or "https://corporate.edytasliwinska.com/"
 
     # 1. Score if missing
     if p.get("score") is None:

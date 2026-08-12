@@ -2,8 +2,8 @@
 Talent Bible — everything the Sliw Agent must know about Edyta Śliwińska.
 
 Sourced from edytasliwinska.com (Corporate, About, Weddings, Contact)
-and her existing Gamma package site:
-https://edyta-corporate-dance-866y3wq.gamma.site/
+and her corporate packages site:
+https://corporate.edytasliwinska.com/
 
 Treat this as the "CAA book" for Edyta. Never invent credentials or
 pricing that is not listed here. When uncertain, flag for human review.
@@ -31,7 +31,7 @@ TALENT = {
     "about_page": "https://edytasliwinska.com/about",
     "contact_page": "https://edytasliwinska.com/contact-us",
     "email_public": "admin@edytasliwinska.com",
-    "phone_primary": "+1 (218) 304-8372",
+    "phone_primary": "+1 (415) 891-7943",
     "phone_local": "+1 (415) 891-7943",
     "studio_address": "1133 Francisco Blvd E, San Rafael, California 94901, United States",
     "primary_markets": [

@@ -47,8 +47,8 @@ Website sources internalized:
 | Home | https://edytasliwinska.com |
 | Corporate | https://edytasliwinska.com/corporate |
 | About | https://edytasliwinska.com/about |
-| Package site (Gamma) | https://edyta-corporate-dance-866y3wq.gamma.site/ |
-| Contact | admin@edytasliwinska.com · +1 (218) 304-8372 · San Rafael studio |
+| Package site | https://corporate.edytasliwinska.com/ |
+| Contact | admin@edytasliwinska.com · +1 (415) 891-7943 · San Rafael studio |
 
 ---
 
