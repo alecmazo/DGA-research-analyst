@@ -70,7 +70,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **PDF letterhead restored** | **`ui454-20260812-research-pdf-restore-letterhead`** | Keep pre-ui453 DGA masthead; keep Inter body + navy tables |
 | **PDF tables content-sized** | **`ui455-20260812-pdf-smart-table-cols`** | Research/IC PDF columns size from cell text — short cols tight, prose gets leftover |
 | **PDF tables no bleed** | **`ui456-20260812-pdf-table-no-bleed`** | Drop nowrap; size Inter honestly; ZWSP wrap so cell text cannot paint outside |
-| **Next deploy after this** | **`ui457-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **PDF Name vs Action cols** | **`ui457-20260812-pdf-name-vs-action-cols`** | Name/ticker stay tight; Action sizes to its phrases instead of a chip |
+| **Next deploy after this** | **`ui458-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

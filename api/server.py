@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui456-20260812-pdf-table-no-bleed"
+WEB_BUILD_VERSION = "ui457-20260812-pdf-name-vs-action-cols"
 
 
 @app.get("/api/build")
@@ -22696,9 +22696,9 @@ def _table_col_kind(header: str) -> str:
     # Compact numeric / path columns (≈½× equal width)
     if re.search(
         r"^(from|to|from\s*->\s*to|from\s*to|delta|delta\s*%|delta\s*wt|"
-        r"change|chg|wt\s*delta|action|view|rank|tier|score|beat|status|"
+        r"change|chg|wt\s*delta|view|rank|tier|score|beat|status|"
         r"side|dir|ticker|symbol|code|id|name|names|position|company|"
-        r"security|asset|holding|rec|rating|call|verdict|#|no\.?)$", h
+        r"security|asset|holding|#|no\.?)$", h
     ) or re.search(
         r"\b(from\s*->\s*to|delta\s*%|weight\s*delta|delta\s*weight)\b", h
     ) or h in ("from", "to", "%", "wt", "w", "n", "tk"):
@@ -22785,10 +22785,52 @@ def _col_is_numeric(body: list[str]) -> bool:
     return hits / len(cells) >= 0.65
 
 
+def _norm_table_header(header: str) -> str:
+    h = (header or "").strip().lower()
+    h = (h.replace("→", "->").replace("⇒", "->").replace("—", "-")
+           .replace("–", "-").replace("Δ", "delta").replace("δ", "delta"))
+    return re.sub(r"\s+", " ", h)
+
+
+def _col_role(header: str) -> str:
+    """Coarse role so Name stays tight and Action can grow with its phrases."""
+    h = _norm_table_header(header)
+    if re.search(
+        r"\b(rationale|thesis|reason|reasons|notes?|comment|commentary|"
+        r"description|detail|details|why|assumption|narrative|"
+        r"justification|evidence|risks?)\b", h,
+    ):
+        return "prose"
+    if re.search(
+        r"action|recommend|adjustment|what to do|next step", h,
+    ) or h in ("rec", "rating", "call", "verdict", "view"):
+        return "action"
+    if h in (
+        "ticker", "symbol", "name", "names", "id", "code", "tk",
+        "company", "security", "holding", "asset", "position",
+    ) or re.search(r"^(ticker|symbol|name)\b", h):
+        return "id"
+    if _table_col_kind(header) == "medium_num":
+        return "num"
+    if _table_col_kind(header) == "narrow":
+        return "chip"
+    return "other"
+
+
 def _col_is_compact(header: str, body: list[str], max_units: float) -> bool:
-    """True when the column can stay tight (ticker, %, action, short token)."""
+    """True when the column can stay tight (ticker, %, short token).
+
+    Action is not auto-compact — those cells are usually phrases.
+    Name/ticker stay compact even if one holding has a longer label.
+    """
+    role = _col_role(header)
+    if role == "prose":
+        return False
+    if role == "action":
+        return max_units <= 10
+    if role == "id":
+        return True
     cells = [c.strip() for c in body if c and str(c).strip()]
-    kind = _table_col_kind(header)
     if max_units <= 5.5:
         return True
     if cells:
@@ -22802,6 +22844,7 @@ def _col_is_compact(header: str, body: list[str], max_units: float) -> bool:
         )
         if shortish / len(cells) >= 0.7 and max_units <= 16:
             return True
+    kind = _table_col_kind(header)
     if kind in ("narrow", "medium_num") and max_units <= 18:
         return True
     return False
@@ -22839,50 +22882,74 @@ def _table_col_widths_from_content(
     need: list[float] = []
     compact: list[bool] = []
     numeric: list[bool] = []
+    roles: list[str] = []
     flex_w: list[float] = []
     for i in range(n):
         header = hs[i]
+        role = _col_role(header)
+        roles.append(role)
         body = cols[i][1:] if len(cols[i]) > 1 else []
-        # CSS text-transform:uppercase on <th> — measure the painted header.
+        # CSS text-transform:uppercase on <th> — measure the painted header,
+        # but don't let a long label (HOLDING / ACTION) dominate a short body.
         head_u = _cell_char_units(header.upper())
         body_u = [_cell_char_units(c) for c in body] or [0.0]
         typical = _pctile(body_u, 0.85)
         longest = min(max(body_u), max(typical * 1.65, typical + 8))
-        body_need = max(typical, longest * 0.72) * char_pt
-        col_need = pad + max(head_u * head_pt, body_need, 10.0)
-        max_u = max([head_u] + body_u)
-        is_num = _col_is_numeric(body)
+        body_need = max(typical, longest * 0.85) * char_pt
+        head_floor = min(head_u * head_pt, 36.0 if role == "id" else 48.0)
+        col_need = pad + max(head_floor, body_need, 10.0)
+        max_u = max(body_u) if body else head_u
+        is_num = _col_is_numeric(body) or role == "num"
         is_cmp = _col_is_compact(header, body, max_u) or (is_num and max_u <= 16)
-        if body and max(len(c.strip()) for c in body) <= 10 and max_u <= 12:
+        if role == "id":
             is_cmp = True
-        kind = _table_col_kind(header)
-        if kind == "wide" and max_u > 22:
+            # Tickers / names: body wins. Wrap a long legal name rather than
+            # stretching the column past the Action phrases next to it.
+            col_need = pad + max(min(head_floor, 28.0), max(body_u) * char_pt, 16.0)
+            col_need = min(col_need, 62.0)
+        elif role == "action":
+            # Phrases like "Trim 200bp on a bounce" — pin to that length so
+            # Action is wider than Name, but cap so rationale still gets leftover.
+            col_need = pad + max(head_floor * 0.7, typical * char_pt, longest * char_pt)
+            is_cmp = True
+            col_need = min(max(col_need, 48.0), 140.0)
+        elif is_cmp:
+            col_need = pad + max(head_floor, max(body_u) * char_pt, 12.0)
+        if role == "prose":
             is_cmp = False
-        if is_cmp:
-            col_need = pad + max(head_u * head_pt, max(body_u) * char_pt, 12.0)
         need.append(col_need)
         compact.append(is_cmp)
         numeric.append(is_num)
         boost = _table_col_weight(header)
-        if not is_cmp and (kind == "wide" or max_u > 40):
+        if role == "action":
+            boost = max(boost, 1.25)
+        if role == "prose" or (not is_cmp and max_u > 40):
             boost *= 1.35
+        if role == "id":
+            boost = 0.35
         flex_w.append(max(col_need, 24.0) * boost)
 
     # Pin compact columns to content size. Never shrink below that — clipping
-    # short cells was the bleed. If pins eat the page, unpin the widest ones.
+    # short cells was the bleed. If pins eat the page, unpin non-id first.
     min_c = 32.0
     max_c = 90.0
     widths = [0.0] * n
     for i in range(n):
         if compact[i]:
-            widths[i] = min(max_c, max(min_c, need[i]))
+            cap = 62.0 if roles[i] == "id" else (130.0 if roles[i] == "action" else max_c)
+            widths[i] = min(cap, max(min_c, need[i]))
 
     def _reserved() -> float:
         return sum(widths[i] for i in range(n) if compact[i])
 
-    while _reserved() > tw * 0.58 and sum(1 for x in compact if x) > 1:
+    while _reserved() > tw * 0.64 and sum(1 for x in compact if x) > 1:
         pinned = [i for i in range(n) if compact[i]]
-        fattest = max(pinned, key=lambda i: widths[i])
+        # Never steal width from Name or Action to feed leftover — those
+        # were sized from their own cell text on purpose.
+        candidates = [i for i in pinned if roles[i] in ("chip", "other")]
+        if not candidates:
+            break
+        fattest = max(candidates, key=lambda i: widths[i])
         compact[fattest] = False
         widths[fattest] = 0.0
 
