@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui454-20260812-research-pdf-restore-letterhead"
+WEB_BUILD_VERSION = "ui455-20260812-pdf-smart-table-cols"
 
 
 @app.get("/api/build")
@@ -22698,7 +22698,7 @@ def _table_col_kind(header: str) -> str:
         r"^(from|to|from\s*->\s*to|from\s*to|delta|delta\s*%|delta\s*wt|"
         r"change|chg|wt\s*delta|action|view|rank|tier|score|beat|status|"
         r"side|dir|ticker|symbol|code|id|name|names|position|company|"
-        r"security|asset|holding)$", h
+        r"security|asset|holding|rec|rating|call|verdict|#|no\.?)$", h
     ) or re.search(
         r"\b(from\s*->\s*to|delta\s*%|weight\s*delta|delta\s*weight)\b", h
     ) or h in ("from", "to", "%", "wt", "w", "n", "tk"):
@@ -22712,42 +22712,231 @@ def _table_col_kind(header: str) -> str:
 
 
 def _table_col_weight(header: str) -> float:
-    """Relative width weight for a column header (equal baseline = 1.0).
-
-    User request for Portfolio Strategist PDFs: Rationale twice as wide as
-    equal-size columns; delta / name / from→to twice as small (0.5×).
-    """
+    """Relative width weight for a column header (equal baseline = 1.0)."""
     kind = _table_col_kind(header)
     if kind == "wide":
-        return 2.0
+        return 2.2
     if kind == "narrow":
-        return 0.5
+        return 0.4
     if kind == "medium":
         return 0.85
     if kind == "medium_num":
-        return 0.65
+        return 0.55
     return 1.0
 
 
-def _table_col_widths_pts(headers: list, total_width: float) -> list:
-    """Absolute point widths that sum to total_width, biased by header kind."""
-    hs = list(headers or []) or ["col"]
-    n = len(hs)
-    if n <= 0:
-        return []
+_NUM_CELL_RE = re.compile(
+    r"""^
+    \(?
+    [\$€£]?\s*
+    [+\u2212-]?
+    \d{1,3}(?:,\d{3})*(?:\.\d+)?
+    \s*%?
+    \)?
+    (?:x|pp|bps)?
+    $""",
+    re.IGNORECASE | re.VERBOSE,
+)
+_TICKER_CELL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,6}$")
+_SHORT_TOKEN_RE = re.compile(
+    r"^(yes|no|n/?a|hold|buy|sell|trim|add|keep|ok|tbd|nm|pass|fail|"
+    r"—|–|-|–|none|low|mid|high)$",
+    re.IGNORECASE,
+)
+
+
+def _cell_char_units(text: str) -> float:
+    """Approximate rendered width in average-character units (Inter-ish)."""
+    t = re.sub(r"\s+", " ", (text or "")).strip()
+    if not t:
+        return 0.0
+    n = 0.0
+    for ch in t:
+        o = ord(ch)
+        if o > 0x2E80:
+            n += 1.8
+        elif ch in "mwWM@%":
+            n += 1.3
+        elif ch in "ilI1.,':;| ":
+            n += 0.42
+        else:
+            n += 1.0
+    return n
+
+
+def _pctile(vals: list[float], p: float) -> float:
+    if not vals:
+        return 0.0
+    s = sorted(vals)
+    if len(s) == 1:
+        return s[0]
+    i = (len(s) - 1) * max(0.0, min(1.0, p))
+    lo = int(i)
+    hi = min(lo + 1, len(s) - 1)
+    f = i - lo
+    return s[lo] * (1.0 - f) + s[hi] * f
+
+
+def _col_is_numeric(body: list[str]) -> bool:
+    cells = [c.strip() for c in body if c and c.strip()]
+    if not cells:
+        return False
+    hits = sum(1 for c in cells if _NUM_CELL_RE.match(c) or c in ("—", "–", "-", "n/a", "N/A"))
+    return hits / len(cells) >= 0.65
+
+
+def _col_is_compact(header: str, body: list[str], max_units: float) -> bool:
+    """True when the column can stay tight (ticker, %, action, short token)."""
+    cells = [c.strip() for c in body if c and str(c).strip()]
+    kind = _table_col_kind(header)
+    if max_units <= 5.5:
+        return True
+    if cells:
+        shortish = sum(
+            1 for c in cells
+            if len(c) <= 14 and (
+                _NUM_CELL_RE.match(c)
+                or _TICKER_CELL_RE.match(c)
+                or _SHORT_TOKEN_RE.match(c)
+            )
+        )
+        if shortish / len(cells) >= 0.7 and max_units <= 16:
+            return True
+    if kind in ("narrow", "medium_num") and max_units <= 18:
+        return True
+    return False
+
+
+def _table_col_widths_from_content(
+    headers: list,
+    columns: list,
+    total_width: float,
+) -> tuple[list[float], list[bool], list[bool]]:
+    """Content-aware column widths that sum to total_width.
+
+    Short columns (tickers, weights, actions) get only what they need.
+    Leftover width goes to long-text columns so rows do not wrap into
+    multi-page towers. Header names are a prior, not the only signal.
+    """
+    hs = [str(h or "") for h in (headers or [])]
+    n = max(len(hs), len(columns or []), 1)
+    hs = (hs + [""] * n)[:n]
+    cols: list[list[str]] = []
+    for i in range(n):
+        raw = columns[i] if columns and i < len(columns) else [hs[i]]
+        cols.append([str(x or "") for x in raw])
     tw = float(total_width or 460)
     if n == 1:
-        return [tw]
-    weights = [_table_col_weight(h) for h in hs]
-    s = sum(weights) or float(n)
-    widths = [tw * w / s for w in weights]
-    # Floor/ceiling so tiny columns stay readable and prose never starves
-    min_pt = max(28.0, tw * 0.06)
-    max_pt = tw * 0.62
-    widths = [min(max_pt, max(min_pt, w)) for w in widths]
-    # Renormalize after clamps
-    s2 = sum(widths) or 1.0
-    return [tw * w / s2 for w in widths]
+        return [tw], [False], [False]
+
+    pad = 13.0 if n <= 6 else 11.0
+    char_pt = 4.55
+    head_pt = 5.15
+
+    need: list[float] = []
+    compact: list[bool] = []
+    numeric: list[bool] = []
+    flex_w: list[float] = []
+    for i in range(n):
+        header = hs[i]
+        body = cols[i][1:] if len(cols[i]) > 1 else []
+        head_u = _cell_char_units(header)
+        body_u = [_cell_char_units(c) for c in body] or [0.0]
+        # Typical row + some room for the longest, ignoring a single outlier.
+        typical = _pctile(body_u, 0.85)
+        longest = min(max(body_u), max(typical * 1.65, typical + 8))
+        body_need = max(typical, longest * 0.72) * char_pt
+        col_need = pad + max(head_u * head_pt, body_need, 10.0)
+        max_u = max([head_u] + body_u)
+        is_num = _col_is_numeric(body)
+        is_cmp = _col_is_compact(header, body, max_u) or (is_num and max_u <= 16)
+        # Header said "notes" but every cell is "—" → still compact.
+        if body and max(len(c.strip()) for c in body) <= 10 and max_u <= 12:
+            is_cmp = True
+        kind = _table_col_kind(header)
+        if kind == "wide" and max_u > 22:
+            is_cmp = False
+        # Compact cols nowrap — they must fit the longest real cell, not a blend.
+        if is_cmp:
+            col_need = pad + 3.0 + max(head_u * head_pt, max(body_u) * char_pt, 10.0)
+        need.append(col_need)
+        compact.append(is_cmp)
+        numeric.append(is_num)
+        boost = _table_col_weight(header)
+        if not is_cmp and (kind == "wide" or max_u > 40):
+            boost *= 1.35
+        flex_w.append(max(col_need, 24.0) * boost)
+
+    # First pass: pin compact columns to content size.
+    min_c = 22.0 if n >= 7 else 24.0
+    max_c = 64.0 if n >= 7 else 72.0
+    widths = [0.0] * n
+    reserved = 0.0
+    for i in range(n):
+        if compact[i]:
+            widths[i] = min(max_c, max(min_c, need[i]))
+            reserved += widths[i]
+
+    leftover = tw - reserved
+    flex_idx = [i for i in range(n) if not compact[i]]
+    if not flex_idx:
+        # Everything compact — give leftover to the hungriest column.
+        hungry = max(range(n), key=lambda i: need[i])
+        compact[hungry] = False
+        flex_idx = [hungry]
+        leftover += widths[hungry]
+        widths[hungry] = 0.0
+
+    if leftover < 48.0 * len(flex_idx) and reserved > 0:
+        # Too many compact pins — shrink them so prose still gets a column.
+        scale = max(0.55, (tw - 56.0 * len(flex_idx)) / reserved) if reserved else 1.0
+        reserved = 0.0
+        for i in range(n):
+            if compact[i]:
+                widths[i] = max(min_c, widths[i] * scale)
+                reserved += widths[i]
+        leftover = tw - reserved
+
+    leftover = max(40.0, leftover)
+    # If pins + leftover drifted, renormalize leftover only (never the pins).
+    flex_sum = sum(flex_w[i] for i in flex_idx) or float(len(flex_idx))
+    floor_f = 52.0 if n <= 6 else 44.0
+    raw_flex = {i: leftover * (flex_w[i] / flex_sum) for i in flex_idx}
+    # If some flex cols fall under the floor, take from the widest flex cols.
+    for i in flex_idx:
+        if raw_flex[i] < floor_f:
+            raw_flex[i] = floor_f
+    extra = sum(raw_flex.values()) - leftover
+    if extra > 0:
+        donors = [i for i in flex_idx if raw_flex[i] > floor_f + 8]
+        donor_pool = sum(raw_flex[i] - floor_f for i in donors) or 1.0
+        for i in donors:
+            take = extra * ((raw_flex[i] - floor_f) / donor_pool)
+            raw_flex[i] = max(floor_f, raw_flex[i] - take)
+    for i in flex_idx:
+        widths[i] = raw_flex[i]
+
+    # Final exact sum — nudge the widest flex column, not the short ones.
+    drift = tw - sum(widths)
+    if flex_idx:
+        widest = max(flex_idx, key=lambda i: widths[i])
+        widths[widest] = max(floor_f, widths[widest] + drift)
+    else:
+        widths[-1] += drift
+    return widths, compact, numeric
+
+
+def _table_col_widths_pts(headers: list, total_width: float,
+                          columns: list | None = None) -> list:
+    """Absolute point widths that sum to total_width.
+
+    When *columns* (per-column cell texts, header first) are provided, size
+    from real content. Otherwise fall back to header-name priors.
+    """
+    hs = list(headers or []) or ["col"]
+    cols = columns if columns else [[h] for h in hs]
+    widths, _, _ = _table_col_widths_from_content(hs, cols, total_width)
+    return widths
 
 
 def _memo_md_inline(text: str) -> str:
@@ -22821,8 +23010,11 @@ def _memo_md_flowables(md_text: str, S: dict) -> list:
             for r in rows:
                 data.append([Paragraph(_memo_md_inline(c), S["tcell"]) for c in r])
             width = float(S.get("width") or 460)
-            # Smart widths: Rationale/thesis ≈2× equal; delta / from→to / ticker ≈½×
-            col_w = _table_col_widths_pts(heads, width)
+            col_texts = [
+                [heads[c]] + [r[c] for r in rows] for c in range(ncol)
+            ]
+            col_w, _compact_cols, numeric_cols = _table_col_widths_from_content(
+                heads, col_texts, width)
             style_cmds = [
                 ("BACKGROUND", (0, 0), (-1, 0), NAVY),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -22836,7 +23028,7 @@ def _memo_md_flowables(md_text: str, S: dict) -> list:
                 ("BOX", (0, 0), (-1, -1), 0.5, GRID),
             ]
             for ci, h in enumerate(heads):
-                if _table_col_kind(h) in ("narrow", "medium_num"):
+                if numeric_cols[ci] or _table_col_kind(h) in ("narrow", "medium_num"):
                     style_cmds.append(("ALIGN", (ci, 0), (ci, -1), "RIGHT"))
             tbl = Table(data, colWidths=col_w, repeatRows=1)
             tbl.setStyle(TableStyle(style_cmds))
@@ -26448,22 +26640,18 @@ def strategist_review_pdf(review_id: str, request: Request):
 # The client posts the same `.md-*` HTML the window renders. We wrap it in
 # window-like chrome (header, question strip, Inter, navy zebra tables) and
 # print with xhtml2pdf. Shared by Analyst, Strategist, and Transcripts Q&A.
-def _md_table_colgroup(ncols: int, headers: list | None = None) -> str:
-    """Explicit column widths as ABSOLUTE points (xhtml2pdf mishandles %).
-
-    When *headers* are available (Portfolio Strategist / IC tables), size by
-    kind: Rationale/thesis ≈2× equal, delta / from→to / ticker ≈½×. Falls back
-    to a mild first-column bias when headers are missing.
-    Content width ≈ Letter 612pt − ~1.45cm margins each side ≈ 524pt.
-    """
+def _md_table_colgroup(ncols: int, headers: list | None = None,
+                       columns: list | None = None) -> str:
+    """Explicit column widths as ABSOLUTE points (xhtml2pdf mishandles %)."""
     if ncols <= 1:
         return ""
-    # Letter 612pt − ~1.45cm side margins
     content_w = 524.0
-    if headers and len(headers) == ncols:
+    if columns:
+        widths, _, _ = _table_col_widths_from_content(
+            headers or [""] * ncols, columns, content_w)
+    elif headers and len(headers) == ncols:
         widths = _table_col_widths_pts(headers, content_w)
     else:
-        # Legacy fallback: first column a bit wider for labels
         first_frac = 0.40 if ncols >= 3 else 0.50
         first_w = first_frac * content_w
         rest_w = (content_w - first_w) / (ncols - 1)
@@ -26507,71 +26695,90 @@ def _stripe_md_table_rows(table: str) -> str:
     return "".join(parts)
 
 
-def _fix_md_table_widths(html: str) -> str:
-    """xhtml2pdf corrupts markdown tables (columns overlap, numbers collide).
-    Two root causes, both fixed per `.md-table`:
-      1. An EMPTY cell (<td></td>) collapses the WHOLE table's column widths —
-         fill empties with &nbsp; so every cell has width.
-      2. xhtml2pdf's auto column-sizing hogs column 1 and overlaps the rest —
-         strip <thead>/<tbody> (they block colgroup widths) and inject an
-         explicit <colgroup> with absolute point widths sized by header kind
-         (Rationale wide; delta / from→to / name compact)."""
-    def _cell_text(cell_html: str) -> str:
-        t = re.sub(r"<[^>]+>", " ", cell_html or "")
-        t = re.sub(r"&nbsp;|&#160;", " ", t, flags=re.IGNORECASE)
-        t = re.sub(r"\s+", " ", t).strip()
-        return t
+def _apply_md_table_cell_widths(table: str, widths: list, compact: list,
+                                numeric: list) -> str:
+    """Stamp absolute widths (and nowrap / right-align) onto every cell.
 
+    xhtml2pdf honors colgroup poorly unless the first row also carries widths.
+    """
+    def _row(m):
+        row = m.group(0)
+        idx = [0]
+
+        def _cell(cm, _idx=idx):
+            tag, attrs, inner = cm.group(1), cm.group(2) or "", cm.group(3)
+            i = _idx[0]
+            _idx[0] += 1
+            if i >= len(widths):
+                return cm.group(0)
+            extra = f"width:{widths[i]:.1f}pt"
+            if compact[i]:
+                extra += ";white-space:nowrap"
+            if numeric[i]:
+                extra += ";text-align:right"
+            return f"<{tag}{_add_inline_css(attrs, extra)}>{inner}</{tag}>"
+
+        return re.sub(
+            r"<(td|th)(\b[^>]*)>(.*?)</\1>",
+            _cell, row, flags=re.DOTALL | re.IGNORECASE,
+        )
+
+    return re.sub(r"<tr\b[^>]*>.*?</tr>", _row, table, flags=re.DOTALL | re.I)
+
+
+def _cell_text_plain(cell_html: str) -> str:
+    t = re.sub(r"<[^>]+>", " ", cell_html or "")
+    t = re.sub(r"&nbsp;|&#160;", " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"&amp;", "&", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _fix_md_table_widths(html: str) -> str:
+    """Make `.md-table` columns fit the page from real cell content.
+
+    xhtml2pdf otherwise equalizes / overflows columns so short tickers hog
+    space and long rationale cells wrap into multi-page towers.
+    """
     def _repl(m):
         table = m.group(0)
-        # 1. fill empty cells
         table = re.sub(r"<(td|th)([^>]*)>\s*</\1>", r"<\1\2>&nbsp;</\1>",
                        table, flags=re.IGNORECASE)
-        fr = re.search(r"<tr\b[^>]*>(.*?)</tr>", table, re.DOTALL | re.IGNORECASE)
-        if not fr:
+        row_htmls = re.findall(r"<tr\b[^>]*>(.*?)</tr>", table,
+                               flags=re.DOTALL | re.IGNORECASE)
+        if not row_htmls:
             return table
-        cells = re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", fr.group(1),
-                           flags=re.DOTALL | re.IGNORECASE)
-        ncols = len(cells)
+        parsed: list[list[str]] = []
+        for rh in row_htmls:
+            cells = re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", rh,
+                               flags=re.DOTALL | re.IGNORECASE)
+            parsed.append([_cell_text_plain(c) for c in cells])
+        ncols = max((len(r) for r in parsed), default=0)
         if ncols < 2:
             return table
-        headers = [_cell_text(c) for c in cells]
-        # 2. strip thead/tbody + inject (or replace) colgroup
+        for r in parsed:
+            if len(r) < ncols:
+                r.extend([""] * (ncols - len(r)))
+            del r[ncols:]
+        headers = parsed[0]
+        columns = [[parsed[r][c] for r in range(len(parsed))] for c in range(ncols)]
+        widths, compact, numeric = _table_col_widths_from_content(
+            headers, columns, 524.0)
+
         table = re.sub(r"</?(thead|tbody)\b[^>]*>", "", table, flags=re.IGNORECASE)
         table = re.sub(r"<colgroup\b[^>]*>.*?</colgroup>", "", table,
                        flags=re.DOTALL | re.IGNORECASE)
-        cg = _md_table_colgroup(ncols, headers)
-        table = re.sub(r"(<table\b[^>]*>)",
-                       lambda mm: mm.group(1) + cg,
-                       table, count=1)
-        # Right-align compact numeric headers via inline style (xhtml2pdf-safe)
-        def _style_th(mm, _headers=headers):
-            full, attrs, inner = mm.group(0), mm.group(1) or "", mm.group(2)
-            # Find which th this is among the first row only — approximate by text
-            label = _cell_text(inner)
-            kind = _table_col_kind(label)
-            if kind not in ("narrow", "medium_num"):
-                return full
-            if re.search(r"text-align\s*:", attrs, re.I):
-                return full
-            if "style=" in attrs.lower():
-                attrs2 = re.sub(
-                    r'style=(["\'])(.*?)\1',
-                    lambda sm: f'style={sm.group(1)}{sm.group(2)};text-align:right{sm.group(1)}',
-                    attrs, count=1, flags=re.I,
-                )
-            else:
-                attrs2 = attrs + ' style="text-align:right"'
-            return f"<th{attrs2}>{inner}</th>"
+        cg = "<colgroup>" + "".join(
+            f'<col width="{round(w)}pt"/>' for w in widths
+        ) + "</colgroup>"
 
-        # Only restyle header cells (first row already identified)
-        first_tr = re.search(r"<tr\b[^>]*>.*?</tr>", table, re.DOTALL | re.IGNORECASE)
-        if first_tr:
-            old_tr = first_tr.group(0)
-            new_tr = re.sub(r"<th(\b[^>]*)>(.*?)</th>", _style_th, old_tr,
-                            flags=re.DOTALL | re.IGNORECASE)
-            table = table.replace(old_tr, new_tr, 1)
-        # Zebra body rows — window uses tr:nth-child(even) td { background:#f8fafc }
+        def _open(mm):
+            attrs = mm.group(1) or ""
+            attrs = _add_inline_css(attrs, "table-layout:fixed")
+            return f"<table{attrs}>" + cg
+
+        table = re.sub(r"<table(\b[^>]*)>", _open, table, count=1)
+        table = _apply_md_table_cell_widths(table, widths, compact, numeric)
         table = _stripe_md_table_rows(table)
         return table
     return re.sub(r'<table class="md-table">.*?</table>', _repl, html or "",
@@ -26810,6 +27017,7 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
         width: 100%; margin-top: 9pt; margin-bottom: 12pt;
         font-size: 9pt; line-height: 1.4;
         border: 0.6pt solid #cbd5e1;
+        table-layout: fixed;
         -pdf-keep-with-next: false;
       }
       .md-rendered table.md-table th {
