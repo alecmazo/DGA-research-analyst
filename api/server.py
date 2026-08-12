@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui452-20260812-research-answer-window"
+WEB_BUILD_VERSION = "ui453-20260812-research-pdf-match-window"
 
 
 @app.get("/api/build")
@@ -26444,11 +26444,10 @@ def strategist_review_pdf(review_id: str, request: Request):
                      headers={"Content-Disposition": _content_disposition("inline", fname)})
 
 
-# ── Research → PDF / email (View-identical, DGA Capital template) ──────────────
-# The client renders the answer with _dgaMarkdown into `.md-rendered` HTML — the
-# exact markup shown on screen. It POSTs that HTML here; we wrap it in the DGA
-# Capital letterhead and render with xhtml2pdf. Shared by the AI Analyst, the
-# Portfolio Strategist, and the Transcripts Q&A.
+# ── Research → PDF / email (match the /gp/research answer window) ─────────────
+# The client posts the same `.md-*` HTML the window renders. We wrap it in
+# window-like chrome (header, question strip, Inter, navy zebra tables) and
+# print with xhtml2pdf. Shared by Analyst, Strategist, and Transcripts Q&A.
 def _md_table_colgroup(ncols: int, headers: list | None = None) -> str:
     """Explicit column widths as ABSOLUTE points (xhtml2pdf mishandles %).
 
@@ -26459,7 +26458,8 @@ def _md_table_colgroup(ncols: int, headers: list | None = None) -> str:
     """
     if ncols <= 1:
         return ""
-    content_w = 524.0
+    # Letter 612pt − ~1.15cm side margins (matches the window-like PDF chrome)
+    content_w = 548.0
     if headers and len(headers) == ncols:
         widths = _table_col_widths_pts(headers, content_w)
     else:
@@ -26471,6 +26471,40 @@ def _md_table_colgroup(ncols: int, headers: list | None = None) -> str:
     return "<colgroup>" + "".join(
         f'<col width="{round(w)}pt"/>' for w in widths
     ) + "</colgroup>"
+
+
+def _add_inline_css(attrs: str, extra: str) -> str:
+    """Append a CSS declaration to an HTML attribute string (xhtml2pdf-safe)."""
+    attrs = attrs or ""
+    if re.search(r"style\s*=", attrs, re.I):
+        return re.sub(
+            r'style=(["\'])(.*?)\1',
+            lambda sm: f'style={sm.group(1)}{sm.group(2)};{extra}{sm.group(1)}',
+            attrs, count=1, flags=re.I,
+        )
+    return attrs + f' style="{extra}"'
+
+
+def _stripe_md_table_rows(table: str) -> str:
+    """Paint even data rows like the research window (nth-child even)."""
+    matches = list(re.finditer(r"<tr\b[^>]*>.*?</tr>", table, re.DOTALL | re.I))
+    if len(matches) < 2:
+        return table
+    parts: list[str] = []
+    last = 0
+    for i, m in enumerate(matches):
+        parts.append(table[last:m.start()])
+        row = m.group(0)
+        if i > 0 and (i + 1) % 2 == 0:
+            row = re.sub(
+                r"<td(\b[^>]*)>",
+                lambda mm: f"<td{_add_inline_css(mm.group(1) or '', 'background-color:#f8fafc')}>",
+                row, flags=re.I,
+            )
+        parts.append(row)
+        last = m.end()
+    parts.append(table[last:])
+    return "".join(parts)
 
 
 def _fix_md_table_widths(html: str) -> str:
@@ -26537,193 +26571,291 @@ def _fix_md_table_widths(html: str) -> str:
             new_tr = re.sub(r"<th(\b[^>]*)>(.*?)</th>", _style_th, old_tr,
                             flags=re.DOTALL | re.IGNORECASE)
             table = table.replace(old_tr, new_tr, 1)
+        # Zebra body rows — window uses tr:nth-child(even) td { background:#f8fafc }
+        table = _stripe_md_table_rows(table)
         return table
     return re.sub(r'<table class="md-table">.*?</table>', _repl, html or "",
                   flags=re.DOTALL | re.IGNORECASE)
 
 
-def _dga_research_pdf_html(title: str, question: str, answer_html: str,
-                           stamp: str = "") -> str:
-    """Wrap client-rendered `.md-rendered` HTML in a polished DGA Capital PDF.
+def _research_provider_from_model(model: str | None) -> str:
+    m = (model or "").lower()
+    if "grok" in m:
+        return "grok"
+    if "deepseek" in m:
+        return "deepseek"
+    if "kimi" in m:
+        return "kimi"
+    return "claude"
 
-    Institutional letterhead for agentic saved-analysis / email PDFs.
-    CSS is written for xhtml2pdf (reportlab) — tables only for layout, no flex.
+
+def _research_provider_color(prov: str) -> str:
+    return {
+        "grok": "#0a1628",
+        "claude": "#d97706",
+        "kimi": "#166534",
+        "deepseek": "#1e3a8a",
+    }.get(prov, "#0a1628")
+
+
+def _research_heading(title: str, kind: str | None) -> str:
+    k = (kind or "").strip().lower()
+    if k == "strategist":
+        return "Portfolio Strategist"
+    if k == "analyst":
+        return "Analyst"
+    raw = (title or "").strip()
+    if raw.lower() in ("investment committee review", "committee review"):
+        return "Portfolio Strategist"
+    if raw.lower() in ("ai analyst", "analyst", "research note", ""):
+        return "Analyst"
+    return raw
+
+
+def _research_verify_html(verification) -> str:
+    """Match the research window's verification banners."""
+    import html as _html
+    v = verification
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except Exception:
+            return ""
+    if not isinstance(v, dict):
+        return ""
+    verdict = (v.get("verdict") or "").lower()
+    if verdict == "clean":
+        return (
+            '<table class="verify ok"><tr><td>'
+            "✓ Verification pass: every numeric claim is backed by a tool call."
+            "</td></tr></table>"
+        )
+    if verdict != "flags":
+        return ""
+    flags = v.get("flags") or []
+    if not isinstance(flags, list) or not flags:
+        return (
+            '<table class="verify warn"><tr><td>'
+            "⚠ Verification flagged claims in this write-up."
+            "</td></tr></table>"
+        )
+    items = []
+    for f in flags:
+        if not isinstance(f, dict):
+            continue
+        issue = _html.escape(str(f.get("issue") or "flag"))
+        claim = _html.escape(str(f.get("claim") or ""))
+        note = _html.escape(str(f.get("note") or ""))
+        extra = f" — {note}" if note else ""
+        items.append(f"<div class=\"vflag\"><strong>{issue}:</strong> {claim}{extra}</div>")
+    if not items:
+        return ""
+    return (
+        f'<table class="verify warn"><tr><td>'
+        f"<strong>⚠ Verification flagged {len(items)} claim(s):</strong>"
+        f"{''.join(items)}"
+        f"</td></tr></table>"
+    )
+
+
+def _dga_research_pdf_html(title: str, question: str, answer_html: str,
+                           stamp: str = "", *,
+                           kind: str | None = None,
+                           model: str | None = None,
+                           fund_name: str | None = None,
+                           tickers: str | None = None,
+                           cost_usd=None,
+                           verification=None) -> str:
+    """Wrap the on-screen research HTML so the PDF tracks the answer window.
+
+    CSS is xhtml2pdf-safe (tables for layout, inline zebra, Inter + DejaVu).
     """
     import html as _html
     from datetime import datetime as _dt
     if not stamp:
         try:
-            stamp = _dt.now().strftime("%B %d, %Y · %-I:%M %p")
+            stamp = _dt.now().strftime("%b %-d, %Y · %-I:%M %p")
         except Exception:
-            stamp = _dt.now().strftime("%B %d, %Y")
-    # Doc-type label under the wordmark. Bare "Analyst" becomes "Research Note".
-    raw_title = (title or "").strip()
-    if raw_title.lower() in ("ai analyst", "analyst", ""):
-        doc_label = "Research Note"
-        show_doc_type = True
-    else:
-        doc_label = raw_title
-        show_doc_type = True
-    title_e = _html.escape(doc_label)
-    q_e     = _html.escape(question or "")
+            stamp = _dt.now().strftime("%b %d, %Y")
+    heading = _research_heading(title, kind)
+    title_e = _html.escape(heading)
+    q_e = _html.escape((question or "").strip())
+    fund_e = _html.escape((fund_name or "").strip())
+    tick_e = _html.escape((tickers or "").strip())
     stamp_e = _html.escape(stamp)
-    logo    = _dga_logo_data_uri()
-    # Navy #0A1628 · Cyan #5BB8D4 · Slate neutrals — matches desk chrome
+    model_e = _html.escape((model or "").strip())
+    prov = _research_provider_from_model(model)
+    prov_color = _research_provider_color(prov)
+    cost_e = ""
+    if cost_usd is not None:
+        try:
+            cost_e = f"${float(cost_usd):.3f}"
+        except (TypeError, ValueError):
+            cost_e = ""
+    logo = _dga_logo_data_uri()
+    # Inter for the window look; DejaVu still registered for any fallback glyphs.
     css = """
+      @font-face { font-family: "InterPdf"; src: url(Inter-Regular.ttf); }
+      @font-face { font-family: "InterPdf"; src: url(Inter-Bold.ttf); font-weight: bold; }
+      @font-face { font-family: "InterPdf"; src: url(Inter-Italic.ttf); font-style: italic; }
+      @font-face { font-family: "InterPdf"; src: url(Inter-BoldItalic.ttf); font-weight: bold; font-style: italic; }
       @font-face { font-family: "DejaVuSans"; src: url(DejaVuSans.ttf); }
       @font-face { font-family: "DejaVuSans"; src: url(DejaVuSans-Bold.ttf); font-weight: bold; }
-      @font-face { font-family: "DejaVuSans"; src: url(DejaVuSans-Oblique.ttf); font-style: italic; }
-      @font-face { font-family: "DejaVuSans"; src: url(DejaVuSans-BoldOblique.ttf); font-weight: bold; font-style: italic; }
       @page {
         size: letter;
-        margin: 1.35cm 1.45cm 2.15cm 1.45cm;
+        background-color: #f4f7fb;
+        margin: 0.85cm 1.15cm 1.85cm 1.15cm;
         @frame footer_frame {
           -pdf-frame-content: footerContent;
-          bottom: 0.75cm; margin-left: 1.45cm; margin-right: 1.45cm; height: 1.15cm;
+          bottom: 0.55cm; margin-left: 1.15cm; margin-right: 1.15cm; height: 1.05cm;
         }
       }
       body {
-        font-family: "DejaVuSans"; font-size: 9pt; line-height: 1.55;
-        color: #0A1628;
+        font-family: "InterPdf", "DejaVuSans";
+        font-size: 10pt;
+        line-height: 1.6;
+        color: #334155;
       }
-      /* ── Masthead (light — dark DGA wordmark needs contrast) ─ */
-      table.mast {
-        width: 100%; border: none; margin: 0 0 0 0;
+      table.head, table.qstrip, table.verify, table.head-inner, table.badge {
+        width: 100%; border: none; border-collapse: collapse;
+      }
+      table.head {
         background-color: #ffffff;
+        border-bottom: 0.6pt solid #e2e8f0;
+        margin: 0 0 0 0;
       }
-      table.mast td { border: none; vertical-align: middle; padding: 5pt 8pt; }
-      .mast-wordmark {
-        font-size: 10pt; font-weight: bold; color: #0A1628;
-        letter-spacing: 1.0pt;
+      table.head td { border: none; vertical-align: middle; padding: 8pt 10pt; }
+      table.head-inner td { border: none; vertical-align: middle; padding: 0 6pt 0 0; }
+      .htitle {
+        font-size: 12pt; font-weight: bold; color: #0a1628;
+        letter-spacing: 0.3pt;
       }
-      .mast-doc {
-        font-size: 6.5pt; font-weight: bold; color: #5BB8D4;
-        letter-spacing: 0.8pt; text-transform: uppercase;
-        margin-top: 1pt;
+      table.badge { width: auto; }
+      table.badge td {
+        border: none;
+        color: #ffffff;
+        font-size: 6.5pt; font-weight: bold; letter-spacing: 0.5pt;
+        padding: 2.5pt 6pt;
       }
-      .mast-meta {
-        text-align: right; font-size: 6.5pt; color: #64748b; line-height: 1.3;
+      .hmeta {
+        text-align: right; font-size: 8pt; color: #64748b; line-height: 1.35;
       }
-      .mast-meta .conf {
-        color: #0A6B8A; font-weight: bold; letter-spacing: 0.5pt;
-        font-size: 6pt; text-transform: uppercase;
+      table.qstrip {
+        background-color: #f8fafc;
+        border-bottom: 0.6pt solid #e2e8f0;
+        margin: 0 0 10pt 0;
       }
-      /* cyan accent bar under masthead */
-      table.accent { width: 100%; border: none; margin: 0 0 10pt 0; }
-      table.accent td {
-        border: none; padding: 0; height: 2pt;
-        background-color: #5BB8D4; font-size: 1pt; line-height: 1pt;
+      table.qstrip td { border: none; padding: 9pt 11pt; vertical-align: top; }
+      .qfund { font-size: 10.5pt; font-weight: bold; color: #0a1628; margin-bottom: 1pt; }
+      .qtickers {
+        font-family: Courier; font-size: 8pt; color: #64748b; margin-bottom: 4pt;
       }
-      /* ── Question callout ─────────────────────────────────── */
-      table.qbox {
-        width: 100%; border: none; margin: 0 0 14pt 0;
-        background-color: #F0F9FC;
-      }
-      table.qbox td.qbar {
-        border: none; width: 4.5pt; background-color: #5BB8D4;
-        font-size: 1pt; padding: 0;
-      }
-      table.qbox td.qbody {
-        border: none; padding: 9pt 12pt 9pt 11pt; vertical-align: top;
-      }
-      .qlabel {
-        font-size: 6.5pt; font-weight: bold; color: #5BB8D4;
-        letter-spacing: 0.8pt; text-transform: uppercase; margin-bottom: 3pt;
-      }
-      .qtext {
-        font-size: 9pt; font-weight: bold; color: #0A1628; line-height: 1.4;
-      }
-      /* ── Body prose ───────────────────────────────────────── */
-      .body-label {
-        font-size: 6.5pt; font-weight: bold; color: #94a3b8;
-        letter-spacing: 0.9pt; text-transform: uppercase;
-        margin: 2pt 0 6pt 0;
-      }
-      .md-rendered .md-h { font-weight: bold; color: #0A1628; page-break-after: avoid; }
+      .qtext { font-size: 9.5pt; color: #334155; line-height: 1.45; }
+      .md-rendered { color: #334155; }
+      .md-rendered .md-h { font-weight: bold; color: #0a1628; page-break-after: avoid; }
       .md-rendered .md-h1 {
-        font-size: 13pt; margin-top: 2pt; margin-bottom: 8pt;
-        color: #0A1628; letter-spacing: -0.2pt;
-        border-bottom: 1.5pt solid #5BB8D4; padding-bottom: 4pt;
+        font-size: 15pt; margin-top: 6pt; margin-bottom: 7pt;
+        color: #0a1628; padding-bottom: 4.5pt;
+        border-bottom: 1.9pt solid #5bb8d4;
       }
       .md-rendered .md-h2 {
-        font-size: 11pt; margin-top: 14pt; margin-bottom: 5pt;
-        color: #0A1628; border-bottom: 0.75pt solid #cbd5e1; padding-bottom: 3pt;
+        font-size: 12pt; margin-top: 13pt; margin-bottom: 5pt;
+        color: #0a1628; padding-bottom: 3pt;
+        border-bottom: 0.7pt solid #e2e8f0;
       }
       .md-rendered .md-h3, .md-rendered .md-h4 {
-        font-size: 9.5pt; color: #1e3a5f; margin-top: 11pt; margin-bottom: 4pt;
+        font-size: 10.5pt; color: #1e3a5f; margin-top: 10pt; margin-bottom: 4pt;
       }
       .md-rendered p { margin-top: 0; margin-bottom: 7.5pt; }
-      .md-rendered ul.md-list, .md-rendered ol.md-list {
-        margin-top: 3pt; margin-bottom: 9pt; padding-left: 14pt;
+      .md-rendered .md-li {
+        padding: 1.5pt 0 1.5pt 3pt; line-height: 1.55; color: #334155;
       }
-      .md-rendered li { margin-bottom: 3.5pt; }
-      .md-rendered strong { font-weight: bold; color: #0A1628; }
+      .md-rendered strong { font-weight: bold; color: #0a1628; }
       .md-rendered em { font-style: italic; color: #334155; }
       .md-rendered code {
-        font-family: Courier; background-color: #eef2f7; font-size: 7.5pt;
+        font-family: Courier; background-color: #eef2f7; font-size: 8.5pt;
         color: #0f2744;
       }
+      .md-rendered .md-pre, .md-rendered pre.md-pre {
+        background-color: #0a1628; color: #e8eef7;
+        font-size: 8pt; line-height: 1.45;
+        padding: 8pt 9pt; margin: 8pt 0 10pt 0;
+      }
+      .md-rendered .md-pre code, .md-rendered pre.md-pre code {
+        background-color: transparent; color: #e8eef7; font-size: 8pt;
+      }
       .md-rendered hr.md-hr {
-        border: 0; border-top: 0.75pt solid #cbd5e1;
+        border: 0; border-top: 0.7pt solid #e2e8f0;
         margin-top: 11pt; margin-bottom: 11pt;
       }
-      .md-rendered a { color: #0A6B8A; text-decoration: underline; }
+      .md-rendered a { color: #0a6b8a; text-decoration: underline; }
+      .md-rendered .md-bq, .md-rendered blockquote.md-bq {
+        margin: 6pt 0; padding: 6pt 9pt;
+        border-left: 2.2pt solid #5bb8d4;
+        background-color: #f0f9fc; color: #334155;
+      }
       .md-rendered table.md-table {
-        width: 100%; margin-top: 8pt; margin-bottom: 12pt;
-        font-size: 7.5pt; border: 0.5pt solid #cbd5e1;
+        width: 100%; margin-top: 9pt; margin-bottom: 12pt;
+        font-size: 9pt; line-height: 1.4;
+        border: 0.6pt solid #cbd5e1;
         -pdf-keep-with-next: false;
       }
       .md-rendered table.md-table th {
-        background-color: #0A1628; color: #ffffff;
-        text-align: left; padding: 5.5pt 7pt; font-weight: bold;
-        font-size: 6.5pt; letter-spacing: 0.4pt; text-transform: uppercase;
+        background-color: #0a1628; color: #ffffff;
+        text-align: left; padding: 5.5pt 7.5pt; font-weight: bold;
+        font-size: 7.5pt; letter-spacing: 0.35pt; text-transform: uppercase;
       }
       .md-rendered table.md-table td {
-        padding: 4.5pt 7pt; border-bottom: 0.4pt solid #e2e8f0;
-        color: #0A1628; vertical-align: top;
+        padding: 4.5pt 7.5pt; border-bottom: 0.45pt solid #e2e8f0;
+        color: #0a1628; vertical-align: top;
       }
-      /* ── Footer ───────────────────────────────────────────── */
+      table.verify { margin: 12pt 0 4pt 0; }
+      table.verify td { border: none; padding: 8pt 10pt; font-size: 9pt; }
+      table.verify.ok td { background-color: #ecfdf5; color: #047857; font-weight: bold; }
+      table.verify.warn td { background-color: #fffbeb; color: #92400e; }
+      .vflag { margin-top: 3pt; font-weight: normal; }
       #footerContent {
-        font-size: 6.5pt; color: #94a3b8; text-align: center;
-        border-top: 0.6pt solid #e2e8f0; padding-top: 5pt;
+        font-size: 7pt; color: #94a3b8; text-align: center;
+        border-top: 0.6pt solid #e2e8f0; padding-top: 4pt;
       }
       #footerContent .fnavy { color: #0A1628; font-weight: bold; }
       #footerContent .fcyan { color: #5BB8D4; font-weight: bold; }
     """
     if logo:
-        # Larger wordmark on light mast; keep tight padding so header stays compact
-        logo_cell = (
-            f'<img src="{logo}" width="120" height="34" alt="DGA Capital" />'
-        )
+        logo_cell = f'<img src="{logo}" width="92" height="26" alt="DGA Capital" />'
     else:
-        logo_cell = '<span class="mast-wordmark">DGA CAPITAL</span>'
-    doc_type_html = (
-        f'<div class="mast-doc">{title_e}</div>' if show_doc_type and title_e else ""
-    )
-    head = (
-        f'<table class="mast"><tr>'
-        f'<td style="width:58%;">'
-        f'{logo_cell}{doc_type_html}'
-        f'</td>'
-        f'<td class="mast-meta">'
-        f'<div class="conf">Confidential</div>'
-        f'<div>{stamp_e}</div>'
-        f'</td>'
+        logo_cell = '<span class="htitle">DGA</span>'
+    badge = (
+        f'<table class="badge"><tr>'
+        f'<td style="background-color:{prov_color};">{_html.escape(prov.upper())}</td>'
         f'</tr></table>'
-        f'<table class="accent"><tr><td>&nbsp;</td></tr></table>'
+        if model_e else ""
     )
+    meta_bits = [x for x in (stamp_e, cost_e, model_e) if x]
+    meta_html = "<br/>".join(meta_bits) if meta_bits else ""
+    head = (
+        f'<table class="head"><tr>'
+        f'<td style="width:68%;padding-right:8pt;">'
+        f'<table class="head-inner"><tr>'
+        f'<td style="width:96pt;">{logo_cell}</td>'
+        f'<td><div class="htitle">{title_e}</div></td>'
+        f'<td style="width:58pt;">{badge}</td>'
+        f'</tr></table>'
+        f'</td>'
+        f'<td class="hmeta" style="width:32%;">{meta_html}</td>'
+        f'</tr></table>'
+    )
+    q_parts = []
+    if fund_e:
+        q_parts.append(f'<div class="qfund">{fund_e}</div>')
+    if tick_e:
+        q_parts.append(f'<div class="qtickers">{tick_e}</div>')
     if q_e:
-        qhtml = (
-            f'<table class="qbox"><tr>'
-            f'<td class="qbar">&nbsp;</td>'
-            f'<td class="qbody">'
-            f'<div class="qlabel">Question</div>'
-            f'<div class="qtext">{q_e}</div>'
-            f'</td></tr></table>'
-        )
-    else:
-        qhtml = ""
-    body_label = '<div class="body-label">Analysis</div>'
+        q_parts.append(f'<div class="qtext">{q_e}</div>')
+    qhtml = (
+        f'<table class="qstrip"><tr><td>{"".join(q_parts)}</td></tr></table>'
+        if q_parts else ""
+    )
     footer = (
         '<div id="footerContent">'
         '<span class="fnavy">DGA Capital</span>'
@@ -26735,11 +26867,13 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
         '</div>'
     )
     body = _fix_md_table_widths(answer_html or "")
+    verify = _research_verify_html(verification)
     return (
         f'<!doctype html><html><head><meta charset="utf-8">'
         f'<style>{css}</style></head><body>'
-        f'{footer}{head}{qhtml}{body_label}'
+        f'{footer}{head}{qhtml}'
         f'<div class="md-rendered">{body}</div>'
+        f'{verify}'
         f'</body></html>'
     )
 
@@ -26782,8 +26916,8 @@ def _research_link_callback(uri, rel):
 
 def _render_research_pdf(html_doc: str) -> bytes:
     """HTML → PDF via xhtml2pdf (pisa). Pure-Python (reportlab-backed) so it runs
-    on Railway without WeasyPrint's native pango/cairo libraries. Embeds DejaVu
-    Sans for full Unicode coverage so the PDF matches the on-screen View."""
+    on Railway without WeasyPrint's native pango/cairo libraries. Embeds Inter
+    (window face) plus DejaVu for any missing glyphs."""
     from xhtml2pdf import pisa
     import io as _io
     out = _io.BytesIO()
@@ -26805,6 +26939,12 @@ class ResearchPdfRequest(BaseModel):
     filename:    Optional[str] = None
     to:          Optional[str] = None
     subject:     Optional[str] = None
+    kind:        Optional[str] = None
+    model:       Optional[str] = None
+    fund_name:   Optional[str] = None
+    tickers:     Optional[str] = None
+    cost_usd:    Optional[float] = None
+    verification: Optional[dict] = None
 
 
 def _research_pdf_filename(req: "ResearchPdfRequest") -> str:
@@ -26828,7 +26968,12 @@ def research_pdf(body: ResearchPdfRequest, request: Request):
         raise HTTPException(403, "GP only")
     if not (body.answer_html or "").strip():
         raise HTTPException(400, "No content to render.")
-    html_doc = _dga_research_pdf_html(body.title, body.question, body.answer_html, body.stamp)
+    html_doc = _dga_research_pdf_html(
+        body.title, body.question, body.answer_html, body.stamp,
+        kind=body.kind, model=body.model, fund_name=body.fund_name,
+        tickers=body.tickers, cost_usd=body.cost_usd,
+        verification=body.verification,
+    )
     try:
         pdf = _render_research_pdf(html_doc)
     except Exception as e:
@@ -26850,7 +26995,12 @@ def research_email_pdf(body: ResearchPdfRequest, request: Request):
         raise HTTPException(400, "A valid recipient email is required.")
     if not (body.answer_html or "").strip():
         raise HTTPException(400, "No content to render.")
-    html_doc = _dga_research_pdf_html(body.title, body.question, body.answer_html, body.stamp)
+    html_doc = _dga_research_pdf_html(
+        body.title, body.question, body.answer_html, body.stamp,
+        kind=body.kind, model=body.model, fund_name=body.fund_name,
+        tickers=body.tickers, cost_usd=body.cost_usd,
+        verification=body.verification,
+    )
     try:
         pdf = _render_research_pdf(html_doc)
     except Exception as e:

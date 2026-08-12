@@ -186,6 +186,10 @@ export function AnalystCard({ bare = false }: Props) {
         title: 'Analyst',
         question: lastQ,
         answer_html: answerHtml,
+        kind: 'analyst',
+        model: result.model,
+        cost_usd: result.cost_usd,
+        verification: result.verification,
       })
     } catch (e) {
       alert('PDF failed: ' + (e instanceof Error ? e.message : e))
@@ -202,6 +206,10 @@ export function AnalystCard({ bare = false }: Props) {
         title: 'Analyst',
         question: lastQ,
         answer_html: answerHtml,
+        kind: 'analyst',
+        model: result.model,
+        cost_usd: result.cost_usd,
+        verification: result.verification,
         to,
       })
       if (!d.ok) throw new Error(d.detail || 'Send failed')

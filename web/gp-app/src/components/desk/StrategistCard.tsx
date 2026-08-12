@@ -257,11 +257,17 @@ export function StrategistCard({ bare = false }: Props) {
       if (!rv.answer) throw new Error('Nothing to export')
       await researchPdfDownload({
         title: 'Investment Committee Review',
-        question: [rv.fund_name || fundLabel, rv.tickers || tickers.join(',')].filter(Boolean).join(' — '),
+        question: '',
         answer_html: renderMd(rv.answer),
         stamp: rv.generated_at
           ? new Date(rv.generated_at).toLocaleString()
           : undefined,
+        kind: 'strategist',
+        model: rv.model,
+        fund_name: rv.fund_name || fundLabel,
+        tickers: rv.tickers || tickers.join(', '),
+        cost_usd: rv.cost_usd,
+        verification: rv.verification,
         filename:
           'IC-Review_' +
           String(rv.fund_name || fundLabel || 'Portfolio').replace(/[^A-Za-z0-9]+/g, '_') +
@@ -280,8 +286,14 @@ export function StrategistCard({ bare = false }: Props) {
     try {
       await researchPdfEmail({
         title: 'Investment Committee Review',
-        question: fundLabel,
+        question: '',
         answer_html: answerHtml,
+        kind: 'strategist',
+        model: result.model,
+        fund_name: fundLabel,
+        tickers: tickers.join(', '),
+        cost_usd: result.cost_usd,
+        verification: result.verification,
         to,
       })
       alert('✉ Sent to ' + to)

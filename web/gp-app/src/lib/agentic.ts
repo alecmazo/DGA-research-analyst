@@ -94,13 +94,23 @@ export async function pollAgenticJob(
   throw new Error('Timed out waiting for agent. Check saved analyses — server may still finish.')
 }
 
-export async function researchPdfDownload(body: {
+export type ResearchPdfBody = {
   title?: string
   question?: string
   answer_html?: string
   stamp?: string
   filename?: string
-}) {
+  kind?: 'analyst' | 'strategist' | string
+  model?: string
+  fund_name?: string
+  tickers?: string
+  cost_usd?: number
+  verification?: AgenticResult['verification']
+  to?: string
+  subject?: string
+}
+
+export async function researchPdfDownload(body: ResearchPdfBody) {
   const headers = new Headers({ 'Content-Type': 'application/json' })
   try {
     const token = localStorage.getItem('dga_v2_token')
@@ -150,13 +160,7 @@ export async function researchPdfDownload(body: {
   }
 }
 
-export async function researchPdfEmail(body: {
-  title?: string
-  question?: string
-  answer_html?: string
-  stamp?: string
-  to: string
-}) {
+export async function researchPdfEmail(body: ResearchPdfBody & { to: string }) {
   return api<{ ok?: boolean; detail?: string }>('/api/research/email-pdf', {
     method: 'POST',
     body: JSON.stringify(body),

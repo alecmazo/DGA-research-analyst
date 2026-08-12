@@ -262,27 +262,32 @@ export function ResearchAnswerPage() {
   const tools = (job?.tool_calls || []).slice(-10)
   const waiting = Boolean((pending && !id) || (id && loading && !answer))
 
+  const pdfPayload = () => ({
+    title: kind === 'strategist' ? 'Investment Committee Review' : 'Analyst',
+    question: question || '',
+    answer_html: html,
+    stamp: review?.generated_at
+      ? new Date(review.generated_at).toLocaleString()
+      : undefined,
+    kind,
+    model: model || undefined,
+    fund_name: review?.fund_name,
+    tickers: review?.tickers,
+    cost_usd: review?.cost_usd,
+    verification,
+    filename:
+      kind === 'strategist'
+        ? 'IC-Review_' +
+          String(review?.fund_name || 'Portfolio').replace(/[^A-Za-z0-9]+/g, '_') +
+          '.pdf'
+        : undefined,
+  })
+
   const exportPdf = async () => {
     if (!answer) return
     setBusyAct(true)
     try {
-      const title =
-        kind === 'strategist' ? 'Investment Committee Review' : 'Analyst'
-      const q = [review?.fund_name, review?.tickers || question].filter(Boolean).join(' — ')
-      await researchPdfDownload({
-        title,
-        question: q,
-        answer_html: html,
-        stamp: review?.generated_at
-          ? new Date(review.generated_at).toLocaleString()
-          : undefined,
-        filename:
-          kind === 'strategist'
-            ? 'IC-Review_' +
-              String(review?.fund_name || 'Portfolio').replace(/[^A-Za-z0-9]+/g, '_') +
-              '.pdf'
-            : undefined,
-      })
+      await researchPdfDownload(pdfPayload())
     } catch (e) {
       alert('PDF failed: ' + (e instanceof Error ? e.message : e))
     } finally {
@@ -298,9 +303,7 @@ export function ResearchAnswerPage() {
     setBusyAct(true)
     try {
       const d = await researchPdfEmail({
-        title: kind === 'strategist' ? 'Investment Committee Review' : 'Analyst',
-        question: review?.fund_name || question,
-        answer_html: html,
+        ...pdfPayload(),
         to,
       })
       if (!d.ok) throw new Error(d.detail || 'Send failed')
