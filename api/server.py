@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui455-20260812-pdf-smart-table-cols"
+WEB_BUILD_VERSION = "ui456-20260812-pdf-table-no-bleed"
 
 
 @app.get("/api/build")
@@ -22829,9 +22829,12 @@ def _table_col_widths_from_content(
     if n == 1:
         return [tw], [False], [False]
 
-    pad = 13.0 if n <= 6 else 11.0
-    char_pt = 4.55
-    head_pt = 5.15
+    # Cell padding in the PDF CSS is ~7.5pt/side. Inter 9pt (and uppercase
+    # 7.5pt bold headers) is wider than a naive 4.5pt/char estimate — undersizing
+    # here is what made glyphs bleed out of the cell.
+    pad = 18.0 if n <= 6 else 16.0
+    char_pt = 5.6
+    head_pt = 6.4
 
     need: list[float] = []
     compact: list[bool] = []
@@ -22840,9 +22843,9 @@ def _table_col_widths_from_content(
     for i in range(n):
         header = hs[i]
         body = cols[i][1:] if len(cols[i]) > 1 else []
-        head_u = _cell_char_units(header)
+        # CSS text-transform:uppercase on <th> — measure the painted header.
+        head_u = _cell_char_units(header.upper())
         body_u = [_cell_char_units(c) for c in body] or [0.0]
-        # Typical row + some room for the longest, ignoring a single outlier.
         typical = _pctile(body_u, 0.85)
         longest = min(max(body_u), max(typical * 1.65, typical + 8))
         body_need = max(typical, longest * 0.72) * char_pt
@@ -22850,15 +22853,13 @@ def _table_col_widths_from_content(
         max_u = max([head_u] + body_u)
         is_num = _col_is_numeric(body)
         is_cmp = _col_is_compact(header, body, max_u) or (is_num and max_u <= 16)
-        # Header said "notes" but every cell is "—" → still compact.
         if body and max(len(c.strip()) for c in body) <= 10 and max_u <= 12:
             is_cmp = True
         kind = _table_col_kind(header)
         if kind == "wide" and max_u > 22:
             is_cmp = False
-        # Compact cols nowrap — they must fit the longest real cell, not a blend.
         if is_cmp:
-            col_need = pad + 3.0 + max(head_u * head_pt, max(body_u) * char_pt, 10.0)
+            col_need = pad + max(head_u * head_pt, max(body_u) * char_pt, 12.0)
         need.append(col_need)
         compact.append(is_cmp)
         numeric.append(is_num)
@@ -22867,37 +22868,34 @@ def _table_col_widths_from_content(
             boost *= 1.35
         flex_w.append(max(col_need, 24.0) * boost)
 
-    # First pass: pin compact columns to content size.
-    min_c = 22.0 if n >= 7 else 24.0
-    max_c = 64.0 if n >= 7 else 72.0
+    # Pin compact columns to content size. Never shrink below that — clipping
+    # short cells was the bleed. If pins eat the page, unpin the widest ones.
+    min_c = 32.0
+    max_c = 90.0
     widths = [0.0] * n
-    reserved = 0.0
     for i in range(n):
         if compact[i]:
             widths[i] = min(max_c, max(min_c, need[i]))
-            reserved += widths[i]
 
-    leftover = tw - reserved
+    def _reserved() -> float:
+        return sum(widths[i] for i in range(n) if compact[i])
+
+    while _reserved() > tw * 0.58 and sum(1 for x in compact if x) > 1:
+        pinned = [i for i in range(n) if compact[i]]
+        fattest = max(pinned, key=lambda i: widths[i])
+        compact[fattest] = False
+        widths[fattest] = 0.0
+
+    leftover = tw - _reserved()
     flex_idx = [i for i in range(n) if not compact[i]]
     if not flex_idx:
-        # Everything compact — give leftover to the hungriest column.
         hungry = max(range(n), key=lambda i: need[i])
         compact[hungry] = False
         flex_idx = [hungry]
         leftover += widths[hungry]
         widths[hungry] = 0.0
 
-    if leftover < 48.0 * len(flex_idx) and reserved > 0:
-        # Too many compact pins — shrink them so prose still gets a column.
-        scale = max(0.55, (tw - 56.0 * len(flex_idx)) / reserved) if reserved else 1.0
-        reserved = 0.0
-        for i in range(n):
-            if compact[i]:
-                widths[i] = max(min_c, widths[i] * scale)
-                reserved += widths[i]
-        leftover = tw - reserved
-
-    leftover = max(40.0, leftover)
+    leftover = max(48.0, leftover)
     # If pins + leftover drifted, renormalize leftover only (never the pins).
     flex_sum = sum(flex_w[i] for i in flex_idx) or float(len(flex_idx))
     floor_f = 52.0 if n <= 6 else 44.0
@@ -23006,9 +23004,9 @@ def _memo_md_flowables(md_text: str, S: dict) -> list:
                 cells = (cells + [""] * ncol)[:ncol]   # pad/truncate to header width
                 rows.append(cells)
                 i += 1
-            data = [[Paragraph(_memo_md_inline(h), S["thead"]) for h in heads]]
+            data = [[Paragraph(_memo_md_inline(_pdf_soft_break_plain(h)), S["thead"]) for h in heads]]
             for r in rows:
-                data.append([Paragraph(_memo_md_inline(c), S["tcell"]) for c in r])
+                data.append([Paragraph(_memo_md_inline(_pdf_soft_break_plain(c)), S["tcell"]) for c in r])
             width = float(S.get("width") or 460)
             col_texts = [
                 [heads[c]] + [r[c] for r in rows] for c in range(ncol)
@@ -26695,11 +26693,55 @@ def _stripe_md_table_rows(table: str) -> str:
     return "".join(parts)
 
 
+def _pdf_soft_break_text(text: str, every: int = 12) -> str:
+    """Insert HTML zero-width spaces so xhtml2pdf can wrap long tokens.
+
+    Without this, words/URLs/tickers-with-suffixes paint past the cell edge.
+    Skip HTML entities so we don't split ``&amp;``.
+    """
+    if not text:
+        return text
+
+    def _brk(tok: str) -> str:
+        if len(tok) <= every:
+            return tok
+        return "&#8203;".join(tok[i:i + every] for i in range(0, len(tok), every))
+
+    parts = re.split(r"(&[#\w]+;)", text)
+    out: list[str] = []
+    for p in parts:
+        if p.startswith("&") and p.endswith(";"):
+            out.append(p)
+        else:
+            out.append(re.sub(r"\S+", lambda m: _brk(m.group(0)), p))
+    return "".join(out)
+
+
+def _pdf_soft_break_html(inner: str, every: int = 12) -> str:
+    parts = re.split(r"(<[^>]+>)", inner or "")
+    return "".join(
+        p if p.startswith("<") else _pdf_soft_break_text(p, every) for p in parts
+    )
+
+
+def _pdf_soft_break_plain(text: str, every: int = 12) -> str:
+    """Unicode ZWSP variant for reportlab Paragraphs."""
+    if not text:
+        return text
+
+    def _brk(tok: str) -> str:
+        if len(tok) <= every:
+            return tok
+        return "\u200b".join(tok[i:i + every] for i in range(0, len(tok), every))
+
+    return re.sub(r"\S+", lambda m: _brk(m.group(0)), text)
+
+
 def _apply_md_table_cell_widths(table: str, widths: list, compact: list,
                                 numeric: list) -> str:
-    """Stamp absolute widths (and nowrap / right-align) onto every cell.
+    """Stamp absolute widths onto every cell and insert wrap points.
 
-    xhtml2pdf honors colgroup poorly unless the first row also carries widths.
+    Never nowrap — that was the bleed. xhtml2pdf wraps at spaces / ZWSP only.
     """
     def _row(m):
         row = m.group(0)
@@ -26711,12 +26753,17 @@ def _apply_md_table_cell_widths(table: str, widths: list, compact: list,
             _idx[0] += 1
             if i >= len(widths):
                 return cm.group(0)
-            extra = f"width:{widths[i]:.1f}pt"
-            if compact[i]:
-                extra += ";white-space:nowrap"
+            extra = (
+                f"width:{widths[i]:.1f}pt;"
+                f"max-width:{widths[i]:.1f}pt;"
+                "word-wrap:break-word"
+            )
             if numeric[i]:
                 extra += ";text-align:right"
-            return f"<{tag}{_add_inline_css(attrs, extra)}>{inner}</{tag}>"
+            # Compact cells are short — wrap less aggressively (keep numbers intact).
+            every = 18 if compact[i] else 10
+            inner2 = _pdf_soft_break_html(inner, every)
+            return f"<{tag}{_add_inline_css(attrs, extra)}>{inner2}</{tag}>"
 
         return re.sub(
             r"<(td|th)(\b[^>]*)>(.*?)</\1>",
@@ -27015,18 +27062,18 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
       }
       .md-rendered table.md-table {
         width: 100%; margin-top: 9pt; margin-bottom: 12pt;
-        font-size: 9pt; line-height: 1.4;
+        font-size: 8.5pt; line-height: 1.35;
         border: 0.6pt solid #cbd5e1;
         table-layout: fixed;
         -pdf-keep-with-next: false;
       }
       .md-rendered table.md-table th {
         background-color: #0a1628; color: #ffffff;
-        text-align: left; padding: 5.5pt 7.5pt; font-weight: bold;
-        font-size: 7.5pt; letter-spacing: 0.35pt; text-transform: uppercase;
+        text-align: left; padding: 5pt 5.5pt; font-weight: bold;
+        font-size: 7pt; letter-spacing: 0.25pt; text-transform: uppercase;
       }
       .md-rendered table.md-table td {
-        padding: 4.5pt 7.5pt; border-bottom: 0.45pt solid #e2e8f0;
+        padding: 4pt 5.5pt; border-bottom: 0.45pt solid #e2e8f0;
         color: #0a1628; vertical-align: top;
       }
       table.verify { margin: 12pt 0 4pt 0; }

@@ -69,7 +69,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Research PDF matches window** | **`ui453-20260812-research-pdf-match-window`** | Analyst/Strategist PDF uses Inter, window header/question strip, navy zebra tables |
 | **PDF letterhead restored** | **`ui454-20260812-research-pdf-restore-letterhead`** | Keep pre-ui453 DGA masthead; keep Inter body + navy tables |
 | **PDF tables content-sized** | **`ui455-20260812-pdf-smart-table-cols`** | Research/IC PDF columns size from cell text — short cols tight, prose gets leftover |
-| **Next deploy after this** | **`ui456-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **PDF tables no bleed** | **`ui456-20260812-pdf-table-no-bleed`** | Drop nowrap; size Inter honestly; ZWSP wrap so cell text cannot paint outside |
+| **Next deploy after this** | **`ui457-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
