@@ -292,6 +292,31 @@ export function DeskBoard({ cards }: Props) {
     persist({ ...DEFAULT_LAYOUT })
   }
 
+  const setAllCollapsed = (collapsed: boolean) => {
+    setLayout((prev) => {
+      const next = { ...prev }
+      for (const id of ALL_IDS) {
+        if (!isLayout(next[id])) continue
+        next[id] = { ...next[id], collapsed }
+      }
+      saveLayout(next)
+      return next
+    })
+  }
+
+  const toggleCollapsed = (id: CardId) => {
+    setLayout((prev) => {
+      const cur = prev[id] || DEFAULT_LAYOUT[id]
+      const next = {
+        ...prev,
+        [id]: { ...cur, collapsed: !cur.collapsed },
+      }
+      saveLayout(next)
+      return next
+    })
+    setZTop(id)
+  }
+
   // Re-merge if product ships new card ids while the tab is open (hot reload).
   useEffect(() => {
     setLayout((prev) => {
@@ -314,12 +339,30 @@ export function DeskBoard({ cards }: Props) {
     <div className={styles.wrap}>
       <div className={styles.hintBar}>
         <span>
-          Drag card headers to move · bottom-right corner to resize · ▾ to
-          collapse · layout is saved automatically
+          Drag ⠿ to move · corner to resize · chevron or title to collapse/expand ·
+          layout saved automatically
         </span>
-        <button type="button" className={styles.resetBtn} onClick={reset}>
-          Reset layout
-        </button>
+        <div className={styles.hintActions}>
+          <button
+            type="button"
+            className={styles.resetBtn}
+            onClick={() => setAllCollapsed(true)}
+            title="Collapse every desk card"
+          >
+            Collapse all
+          </button>
+          <button
+            type="button"
+            className={styles.resetBtn}
+            onClick={() => setAllCollapsed(false)}
+            title="Expand every desk card"
+          >
+            Expand all
+          </button>
+          <button type="button" className={styles.resetBtn} onClick={reset}>
+            Reset layout
+          </button>
+        </div>
       </div>
       <div
         ref={boardRef}
@@ -334,6 +377,7 @@ export function DeskBoard({ cards }: Props) {
             <section
               key={card.id}
               data-desk-widget={card.id}
+              data-collapsed={collapsed ? '1' : '0'}
               className={`${styles.card} ${collapsed ? styles.collapsed : ''}`}
               style={{
                 left: L.x,
@@ -346,33 +390,79 @@ export function DeskBoard({ cards }: Props) {
               <header
                 className={styles.head}
                 onMouseDown={(e) => startMove(card.id, e)}
+                onDoubleClick={(e) => {
+                  // Double-click header (not controls) toggles collapse
+                  if (
+                    (e.target as HTMLElement).closest(
+                      'button, a, input, select, textarea',
+                    )
+                  )
+                    return
+                  e.preventDefault()
+                  toggleCollapsed(card.id)
+                }}
               >
                 <button
                   type="button"
                   className={styles.collapse}
-                  title={collapsed ? 'Expand' : 'Collapse'}
-                  onClick={(e) => {
+                  title={collapsed ? 'Expand card' : 'Collapse card'}
+                  aria-expanded={!collapsed}
+                  aria-label={collapsed ? `Expand ${card.title}` : `Collapse ${card.title}`}
+                  onMouseDown={(e) => {
+                    // Never start a drag from the chevron
                     e.stopPropagation()
-                    patch(card.id, { collapsed: !collapsed })
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    toggleCollapsed(card.id)
                   }}
                 >
-                  {collapsed ? '▸' : '▾'}
+                  <span className={styles.collapseIcon} aria-hidden>
+                    {collapsed ? '▸' : '▾'}
+                  </span>
                 </button>
-                <div className={styles.titleWrap}>
+                <button
+                  type="button"
+                  className={styles.titleWrap}
+                  title={
+                    collapsed
+                      ? 'Click to expand · drag ⠿ to move'
+                      : 'Click to collapse · drag ⠿ to move'
+                  }
+                  onMouseDown={(e) => {
+                    // Allow drag from title area (not a form control for startMove skip)
+                    // but click still toggles — handled below via click without drag
+                    e.stopPropagation()
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    toggleCollapsed(card.id)
+                  }}
+                >
                   <h2 className={styles.title}>{card.title}</h2>
                   {card.badge != null && (
                     <span className={styles.badge}>{card.badge}</span>
                   )}
-                </div>
-                {card.action != null && (
+                  {collapsed && (
+                    <span className={styles.collapsedHint}>collapsed</span>
+                  )}
+                </button>
+                {card.action != null && !collapsed && (
                   <div
                     className={styles.action}
                     onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {card.action}
                   </div>
                 )}
-                <span className={styles.dragHint} title="Drag to move">
+                <span
+                  className={styles.dragHint}
+                  title="Drag to move"
+                  onMouseDown={(e) => startMove(card.id, e)}
+                >
                   ⠿
                 </span>
               </header>

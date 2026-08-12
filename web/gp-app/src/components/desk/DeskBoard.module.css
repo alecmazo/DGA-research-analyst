@@ -12,6 +12,14 @@
   color: var(--text-tertiary);
 }
 
+.hintActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .resetBtn {
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
@@ -21,6 +29,7 @@
   padding: 3px 10px;
   border-radius: 6px;
   cursor: pointer;
+  font-family: inherit;
 }
 
 .resetBtn:hover {
@@ -53,6 +62,13 @@
 
 .collapsed {
   min-height: 44px;
+  border-color: var(--border-default, #cbd5e1);
+  opacity: 0.96;
+}
+
+.collapsed .head {
+  border-bottom: none;
+  background: var(--bg-subtle, #f1f5f9);
 }
 
 .head {
@@ -73,22 +89,32 @@
 }
 
 .collapse {
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: 12px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-default, #cbd5e1);
+  background: var(--bg-surface, #fff);
+  color: var(--text-secondary, #475569);
+  font-size: 13px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   flex-shrink: 0;
   line-height: 1;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
 }
 
 .collapse:hover {
-  background: var(--bg-hover);
-  color: var(--brand-600);
+  background: var(--brand-50, #e0f2fe);
+  border-color: var(--brand-400, #38bdf8);
+  color: var(--brand-700, #0369a1);
+}
+
+.collapseIcon {
+  display: block;
+  transform: translateY(-0.5px);
 }
 
 .titleWrap {
@@ -97,6 +123,19 @@
   gap: 8px;
   min-width: 0;
   flex: 1;
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  border-radius: 6px;
+}
+
+.titleWrap:hover {
+  background: rgba(14, 165, 233, 0.08);
 }
 
 .title {
@@ -109,6 +148,15 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.collapsedHint {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary, #94a3b8);
+  flex-shrink: 0;
 }
 
 .badge {
