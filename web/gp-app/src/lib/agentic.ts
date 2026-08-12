@@ -1,4 +1,4 @@
-import { api } from './api'
+import { api, ApiError } from './api'
 
 export type AgentEngine = 'claude' | 'grok' | 'deepseek'
 
@@ -69,29 +69,69 @@ export function pickAndSaveEngine(
   saveEngine(key, eng)
 }
 
-/** Poll agentic job until done/error/timeout. Calls onTick while running. */
+export class AgenticPendingError extends Error {
+  constructor(message = 'still running') {
+    super(message)
+    this.name = 'AgenticPendingError'
+  }
+}
+
+/** Finished row from analyst or strategist persist (job_id is the PK). */
+export async function loadSavedAgenticReview(
+  jobId: string,
+): Promise<AgenticResult | null> {
+  const paths = [
+    `/api/research/analyst/reviews/${encodeURIComponent(jobId)}`,
+    `/api/research/strategist/reviews/${encodeURIComponent(jobId)}`,
+  ]
+  for (const path of paths) {
+    try {
+      const d = await api<{ review?: AgenticResult & { answer?: string } }>(path)
+      if (d.review?.answer) return d.review
+    } catch {
+      /* 404 */
+    }
+  }
+  return null
+}
+
+/** Poll agentic job until done/error. Recovers from saved reviews after deploys. */
 export async function pollAgenticJob(
   jobId: string,
   onTick?: (job: AgenticJob, elapsedMs: number) => void,
   opts?: { intervalMs?: number; maxMs?: number },
 ): Promise<AgenticResult> {
   const interval = opts?.intervalMs ?? 1500
-  const maxMs = opts?.maxMs ?? 14 * 60 * 1000
+  // Grok 4.6 multi-step often exceeds the old 14 min client cap.
+  const maxMs = opts?.maxMs ?? 24 * 60 * 1000
   const t0 = Date.now()
 
   while (Date.now() - t0 < maxMs) {
     await new Promise((r) => setTimeout(r, interval))
-    let j: AgenticJob
     try {
-      j = await api<AgenticJob>(`/api/research/agentic/${encodeURIComponent(jobId)}`)
-    } catch {
-      continue
+      const j = await api<AgenticJob>(`/api/research/agentic/${encodeURIComponent(jobId)}`)
+      onTick?.(j, Date.now() - t0)
+      if (j.status === 'done' && j.result) return j.result
+      if (j.status === 'error') throw new Error(j.label || j.error || 'failed')
+    } catch (e) {
+      if (e instanceof Error && e.name !== 'ApiError' && !(e instanceof ApiError)) {
+        // Job reported status=error — do not keep polling.
+        if (!/no such job|HTTP 404|Failed to fetch|NetworkError/i.test(e.message)) {
+          throw e
+        }
+      }
+      if (e instanceof ApiError && e.status !== 404 && e.status !== 502 && e.status !== 503) {
+        throw e
+      }
+      const saved = await loadSavedAgenticReview(jobId)
+      if (saved) return saved
     }
-    onTick?.(j, Date.now() - t0)
-    if (j.status === 'done' && j.result) return j.result
-    if (j.status === 'error') throw new Error(j.label || j.error || 'failed')
   }
-  throw new Error('Timed out waiting for agent. Check saved analyses — server may still finish.')
+  const saved = await loadSavedAgenticReview(jobId)
+  if (saved) return saved
+  throw new AgenticPendingError(
+    'Still running on the server. The answer will land in Saved analyses when it finishes.',
+  )
 }
 
 export type ResearchPdfBody = {

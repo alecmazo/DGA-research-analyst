@@ -71,7 +71,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **PDF tables content-sized** | **`ui455-20260812-pdf-smart-table-cols`** | Research/IC PDF columns size from cell text — short cols tight, prose gets leftover |
 | **PDF tables no bleed** | **`ui456-20260812-pdf-table-no-bleed`** | Drop nowrap; size Inter honestly; ZWSP wrap so cell text cannot paint outside |
 | **PDF Name vs Action cols** | **`ui457-20260812-pdf-name-vs-action-cols`** | Name/ticker stay tight; Action sizes to its phrases instead of a chip |
-| **Next deploy after this** | **`ui458-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Analyst false timeout** | **`ui458-20260812-analyst-no-false-timeout`** | SUP_20260812_c64355e0 — stop 14m client timeout killing a live/saved Analyst run |
+| **Next deploy after this** | **`ui459-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

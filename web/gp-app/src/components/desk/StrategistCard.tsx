@@ -117,6 +117,7 @@ export function StrategistCard({ bare = false }: Props) {
     setBusy(true)
     setFundLabel(label)
     setProgress({ status: 'running', label: `Loading book · ${engLabel(engine)}…`, steps: 0 })
+    let startedId: string | null = null
     try {
       const d0 = await api<{
         ok?: boolean
@@ -130,6 +131,7 @@ export function StrategistCard({ bare = false }: Props) {
         body: JSON.stringify({ ...payload, llm_provider: engine }),
       })
       if (!d0.ok || !d0.job_id) throw new Error(d0.error || 'Failed to start')
+      startedId = d0.job_id
       setJobId(d0.job_id)
       setPositions(d0.positions || [])
       setTickers(d0.tickers || [])
@@ -145,7 +147,7 @@ export function StrategistCard({ bare = false }: Props) {
       const res = await pollAgenticJob(
         d0.job_id,
         (j) => setProgress(j),
-        { maxMs: 12 * 60 * 1000, intervalMs: 1400 },
+        { maxMs: 24 * 60 * 1000, intervalMs: 1400 },
       )
       setResult(res)
       setProgress(null)
@@ -163,7 +165,7 @@ export function StrategistCard({ bare = false }: Props) {
       if (!win || win.closed) openResearchWindow('strategist', d0.job_id, seed)
       void loadArchive()
     } catch (e) {
-      if (win && !win.closed) {
+      if (!startedId && win && !win.closed) {
         try {
           win.close()
         } catch {

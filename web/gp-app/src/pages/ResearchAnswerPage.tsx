@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { getCachedUser } from '@/lib/auth'
 import {
+  AgenticPendingError,
+  loadSavedAgenticReview,
   pollAgenticJob,
   researchPdfDownload,
   researchPdfEmail,
@@ -230,7 +232,14 @@ export function ResearchAnswerPage() {
         }
       } catch (e) {
         if (!alive) return
-        setErr(e instanceof Error ? e.message : 'Failed to load analysis')
+        const saved = await loadSavedAgenticReview(id)
+        if (saved) {
+          applyReview({ ...seeded, ...saved, id })
+        } else if (e instanceof AgenticPendingError) {
+          setJob({ status: 'running', label: e.message, steps: 0 })
+        } else {
+          setErr(e instanceof Error ? e.message : 'Failed to load analysis')
+        }
       }
 
       // Prefer persisted row (question / fund metadata) once the writer commits.

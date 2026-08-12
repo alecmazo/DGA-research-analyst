@@ -5,8 +5,10 @@ import { api } from '@/lib/api'
 import { getCachedUser } from '@/lib/auth'
 import {
   AGENT_ENGINES,
+  AgenticPendingError,
   engLabel,
   loadEngine,
+  loadSavedAgenticReview,
   pollAgenticJob,
   researchPdfDownload,
   researchPdfEmail,
@@ -117,6 +119,7 @@ export function AnalystCard({ bare = false }: Props) {
     setElapsed(0)
     // Open on the click so the finished answer is not popup-blocked.
     const win = openPendingResearchWindow('analyst', q)
+    let startedId: string | null = null
     try {
       const d0 = await api<{ ok?: boolean; job_id?: string; error?: string }>(
         '/api/research/agentic',
@@ -126,12 +129,38 @@ export function AnalystCard({ bare = false }: Props) {
         },
       )
       if (!d0.ok || !d0.job_id) throw new Error(d0.error || 'Failed to start')
+      startedId = d0.job_id
       setJobId(d0.job_id)
       navigateResearchWindow(win, 'analyst', d0.job_id, { question: q, title: 'Analyst' })
-      const res = await pollAgenticJob(d0.job_id, (j, ms) => {
-        setProgress(j)
-        setElapsed(ms)
-      })
+      let res: AgenticResult
+      try {
+        res = await pollAgenticJob(d0.job_id, (j, ms) => {
+          setProgress(j)
+          setElapsed(ms)
+        })
+      } catch (e) {
+        if (e instanceof AgenticPendingError) {
+          const saved = await loadSavedAgenticReview(d0.job_id)
+          if (saved) {
+            res = saved
+          } else {
+            setProgress({
+              status: 'running',
+              label: 'Still working — answer will open when ready.',
+            })
+            res = await pollAgenticJob(
+              d0.job_id,
+              (j, ms) => {
+                setProgress(j)
+                setElapsed(ms)
+              },
+              { maxMs: 12 * 60 * 1000, intervalMs: 2500 },
+            )
+          }
+        } else {
+          throw e
+        }
+      }
       setResult(res)
       setProgress(null)
       const seed = {
@@ -146,14 +175,20 @@ export function AnalystCard({ bare = false }: Props) {
       if (!win || win.closed) openResearchWindow('analyst', d0.job_id, seed)
       window.setTimeout(() => void loadReviews(), 2000)
     } catch (e) {
-      if (win && !win.closed) {
+      // Only close the placeholder if we never started a job.
+      if (!startedId && win && !win.closed) {
         try {
           win.close()
         } catch {
           /* ignore */
         }
       }
-      setErr(e instanceof Error ? e.message : 'Analyst failed')
+      if (e instanceof AgenticPendingError) {
+        setErr(e.message)
+        window.setTimeout(() => void loadReviews(), 1500)
+      } else {
+        setErr(e instanceof Error ? e.message : 'Analyst failed')
+      }
       setProgress(null)
     } finally {
       setBusy(false)

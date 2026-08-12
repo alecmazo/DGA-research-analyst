@@ -7065,7 +7065,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui457-20260812-pdf-name-vs-action-cols"
+WEB_BUILD_VERSION = "ui458-20260812-analyst-no-false-timeout"
 
 
 @app.get("/api/build")
