@@ -717,7 +717,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             </Panel>
           )}
 
-          <div className={styles.sideBySide}>
+          <div className={`${styles.sideBySide} ${styles.equalCards}`}>
             <FundPositionsTable rows={positions} />
             <Panel
               title="Rebalance Suggestions"
@@ -771,7 +771,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                                 <td className={`tabular ${pctClass(row.upside_pct)}`}>
                                   {fmtPct(row.upside_pct, 1)}
                                 </td>
-                                <td className="tabular">
+                                <td className={`tabular ${styles.nowrap}`}>
                                   {(row.current_pct || 0).toFixed(1)}% →{' '}
                                   <strong>{(row.suggested_pct || 0).toFixed(1)}%</strong>
                                 </td>
