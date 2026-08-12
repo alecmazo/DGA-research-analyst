@@ -179,7 +179,7 @@ export function ModelsSection() {
         Every wired provider below. Assign a model to <strong>each task</strong> — those choices
         drive labels and costs on the desk (Market Pulse, Prioritize, Daily Pulse, Agents, etc.).
         Desk jobs: <strong>Kimi K3</strong> / <strong>DeepSeek</strong> (cheap) or{' '}
-        <strong>Grok</strong> (live search). Full reports + Agents: Grok 4.5 · Claude Opus 5 ·
+        <strong>Grok</strong> (live search). Full reports + Agents: Grok 4.6 · Claude Opus 5 ·
         DeepSeek. Costs tracked per call. Survives redeploys.
       </p>
 

@@ -4972,7 +4972,7 @@
       const cfg = window.DGA_LLM || {};
       const map = {
         claude: cfg.claude || cfg.agentic || 'claude-opus-5',
-        grok: cfg.grok || 'grok-4.5',
+        grok: cfg.grok || 'grok-4.6',
         deepseek: (cfg.routing && cfg.routing.deepseek_model) || 'deepseek-v4-pro',
       };
       tag.textContent = map[p] || p;

@@ -187,7 +187,7 @@ def _optional_env(name: str, default: str = "") -> str:
 # FULL REPORTS default to Grok. Volume jobs (daily brief, intelligence,
 # prioritize) can use a cheaper OpenAI-compatible open model when enabled.
 # Override via GROK_MODEL in .env to pin a specific version.
-GROK_MODEL = _optional_env("GROK_MODEL", "grok-4.3")
+GROK_MODEL = _optional_env("GROK_MODEL", "grok-4.6")
 # Premium intel path (used when volume LLM is rolled back / disabled).
 GROK_INTEL_MODEL = GROK_MODEL
 
@@ -358,7 +358,7 @@ MODEL_TASKS: dict[str, dict] = {
         "group": "Agents",
         "allowed": ("claude", "grok", "deepseek"),
         "default": "claude",
-        "note": "Tool-use agent. Pick Grok 4.5, Claude Opus 5, or DeepSeek. Kimi not available for agents.",
+        "note": "Tool-use agent. Pick Grok 4.6, Claude Opus 5, or DeepSeek. Kimi not available for agents.",
     },
     "strategist": {
         "label": "Portfolio Strategist",
@@ -624,7 +624,7 @@ def providers_catalog() -> dict[str, dict]:
     return {
         "grok": {
             "id": "grok",
-            "label": "Grok 4.5 (xAI)",
+            "label": "Grok 4.6 (xAI)",
             "model": g_model,
             "configured": _provider_key_set(("XAI_API_KEY",)),
             "key_env": "XAI_API_KEY",
@@ -7868,11 +7868,13 @@ GROK_PRICING_PER_MTOK = {
     "grok-latest":         (1.25, 2.50),
     "grok-4.20-reasoning": (1.25, 2.50),
     "grok-4.20-0309-reasoning": (1.25, 2.50),
-    # grok-4.5: $2.00 in / $6.00 out per Mtok ($0.50 cached in), 500k ctx —
-    # from xAI's published comparison table (Alec, 2026-07-09).
+    # grok-4.5 / 4.6: $2.00 in / $6.00 out per Mtok (4.6 list price until confirmed otherwise)
     "grok-4.5":            (2.00, 6.00),
     "grok-4.5-latest":     (2.00, 6.00),
     "grok-4.5-reasoning":  (2.00, 6.00),
+    "grok-4.6":            (2.00, 6.00),
+    "grok-4.6-latest":     (2.00, 6.00),
+    "grok-4.6-reasoning":  (2.00, 6.00),
     "grok-4-reasoning":    (5.0, 15.0),
     "grok-beta":           (5.0, 15.0),
 }
@@ -7882,9 +7884,9 @@ GROK_LIVE_SEARCH_PER_CALL = 0.025
 
 def grok_rates(model: str) -> tuple:
     """(input, output) $/Mtok for a Grok model id. Exact match first, then
-    LONGEST-PREFIX match so dated snapshots ('grok-4.5-0219-reasoning') and
+    LONGEST-PREFIX match so dated snapshots ('grok-4.6-0219-reasoning') and
     alias forms price like their family. Unknown ids assume newest-gen
-    (grok-4.5) rates — better slightly high than the old 4x-overstated $5/$15."""
+    (grok-4.6) rates — better slightly high than the old 4x-overstated $5/$15."""
     m = (model or "").lower().strip()
     if m in GROK_PRICING_PER_MTOK:
         return GROK_PRICING_PER_MTOK[m]
@@ -8083,9 +8085,9 @@ CLAUDE_REPORT_MAX_TOKENS = int(os.environ.get("CLAUDE_REPORT_MAX_TOKENS") or "28
 CLAUDE_REPORT_EFFORT = (os.environ.get("CLAUDE_REPORT_EFFORT") or "medium").strip().lower()
 CLAUDE_REPORT_THINKING = (os.environ.get("CLAUDE_REPORT_THINKING") or "disabled").strip().lower()
 
-# Idea Generator "Prioritize" — Grok 4.5 triage (not Claude).
-# Override without redeploy:  GROK_SCREEN_MODEL=grok-4.5-latest
-GROK_SCREEN_MODEL = _optional_env("GROK_SCREEN_MODEL", "grok-4.5")
+# Idea Generator "Prioritize" — Grok 4.6 triage (not Claude).
+# Override without redeploy:  GROK_SCREEN_MODEL=grok-4.6-latest
+GROK_SCREEN_MODEL = _optional_env("GROK_SCREEN_MODEL", "grok-4.6")
 
 # Claude screening tier — still used by podcast bolt-on screening, etc.
 # Do not repoint this at Grok; that path calls the Anthropic API.
@@ -8100,7 +8102,7 @@ def get_claude_api_key() -> str:
 
 
 def screen_universe(candidates: list[dict], *, top_n: int = 5) -> dict:
-    """Grok 4.5 screening pass — rank N tickers by "deserves a full report this week".
+    """Grok 4.6 screening pass — rank N tickers by "deserves a full report this week".
 
     Args:
         candidates: list of {ticker, name?, sector?, pct_change?, price?,

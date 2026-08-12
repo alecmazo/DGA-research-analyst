@@ -3,7 +3,7 @@
 > **Multi-agent handoff:** Before non-trivial edits, read **[LLM_COORDINATION.md](./LLM_COORDINATION.md)** (claims, surfaces map, sync rules for Grok / Fable / Claude).
 
 Runs an institutional-quality equity research pipeline end-to-end:
-**SEC EDGAR XBRL filing → Excel workbooks → Grok 4.20 reasoning → Word report with bordered tables → optional Gamma.app deck.**
+**SEC EDGAR XBRL filing → Excel workbooks → Grok 4.6 → Word report with bordered tables → optional Gamma.app deck.**
 
 The pipeline downloads the latest 10-K and 10-Q for each ticker, saves each as a per-filing Excel file (Income Statement / Balance Sheet / Cash Flow / Metadata), and reads those workbooks to build the verified numbers block the LLM must use.
 
@@ -62,7 +62,7 @@ is the safe-to-share template.
 
 | Name | Default | Purpose |
 |---|---|---|
-| `GROK_MODEL` | `grok-4.20-reasoning` | Override to try newer models |
+| `GROK_MODEL` | `grok-4.6` | Override to try newer models |
 | `GAMMA_FOLDER_ID` | *(none)* | Target Gamma folder for generated decks |
 | `STOCK_FINANCIALS_DIR` | `stock-financials` | Where per-ticker 10-K / 10-Q Excel workbooks are saved & read. Relative paths are resolved against this project root. |
 
@@ -123,7 +123,7 @@ excel_financials.extract_financials(ticker)
   │  "2026-02-28 (YTD)", "2025-08-31"), filters out segment breakdown
   │  rows, normalizes outflow signs for CapEx / Dividends / Buybacks.
   ▼
-Canonical data dict ─►  format_verified_block()  ─►  Grok 4.20 reasoning
+Canonical data dict ─►  format_verified_block()  ─►  Grok 4.6
                                                            │
                                                            ▼
                        Markdown research report  ─►  Word (bordered tables)

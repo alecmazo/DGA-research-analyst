@@ -8970,7 +8970,7 @@ _SECTOR_ETF_MAP = {
 
 @app.post("/api/v2/research/prioritize")
 def research_prioritize(request: Request, top_n: int = 5):
-    """Grok 4.5 pre-screen (Option C — hybrid universe).
+    """Grok 4.6 pre-screen (Option C — hybrid universe).
 
     Universe = (today's movers from idea-feed) ∪ (ALL saved-report tickers).
     Each candidate is tagged with a bucket signal that the screener uses
@@ -8981,11 +8981,11 @@ def research_prioritize(request: Request, top_n: int = 5):
       • bucket='fresh'  → no big move + last_report_at ≤ 14 days
                           (deprioritized — recently analyzed, quiet today)
 
-    Grok 4.5 returns picks ideally mixing buckets so the UI gets a balanced
+    Grok 4.6 returns picks ideally mixing buckets so the UI gets a balanced
     "what to refresh / what to react to" list.
 
     Cost: small structured JSON call (no live search). Override model via
-    GROK_SCREEN_MODEL env (default grok-4.5).
+    GROK_SCREEN_MODEL env (default grok-4.6).
     """
     claims = _claims_or_401(request)
     lp_id = claims.get("lp_id") or claims.get("email") or "anon"
@@ -9066,7 +9066,7 @@ def research_prioritize(request: Request, top_n: int = 5):
         return {"ok": True, "picks": [], "skipped": [],
                 "note": "Nothing in universe — no movers and no saved reports."}
 
-    # Cap considered set to keep input cheap (Grok 4.5 structured triage;
+    # Cap considered set to keep input cheap (Grok 4.6 structured triage;
     # going past 100 tickers makes the input prompt bloat without much picking benefit)
     candidates.sort(key=lambda c: (
         0 if c["bucket"] == "active" else
@@ -9079,7 +9079,7 @@ def research_prioritize(request: Request, top_n: int = 5):
     bucket_counts = {b: sum(1 for c in candidates if c["bucket"] == b)
                      for b in ("active", "stale", "fresh")}
 
-    _screen_model = getattr(analyst, "GROK_SCREEN_MODEL", None) or "grok-4.5"
+    _screen_model = getattr(analyst, "GROK_SCREEN_MODEL", None) or "grok-4.6"
     print(f"🎯 [prioritize {lp_id}] {len(candidates)} candidates "
           f"(active={bucket_counts['active']} stale={bucket_counts['stale']} fresh={bucket_counts['fresh']}) → {_screen_model}", flush=True)
 
@@ -24796,9 +24796,9 @@ def _agentic_non_claude_system_addon(mode: str, max_steps: int, model: str) -> s
     as Claude, but coached to batch tools and write a full native-quality answer.
 
     Without this, Grok often burns 1 tool/round and hits wall-clock with a thin
-    forced wrap-up instead of a competitive Grok 4.5 conclusion.
+    forced wrap-up instead of a competitive Grok 4.6 conclusion.
     """
-    eng = "Grok 4.5" if "grok" in (model or "").lower() else "this engine"
+    eng = "Grok 4.6" if "grok" in (model or "").lower() else "this engine"
     if mode == "strategist":
         return (
             f"\n\nENGINE: {eng} with the IDENTICAL tool set and evidence rules as Claude. "
@@ -24828,7 +24828,7 @@ def _agentic_non_claude_system_addon(mode: str, max_steps: int, model: str) -> s
 
 def _agentic_final_write_prompt(mode: str, model: str, *, reason: str = "budget") -> str:
     """High-quality no-tools final prompt — Grok must still produce its own full conclusion."""
-    eng = "Grok 4.5" if "grok" in (model or "").lower() else "your model"
+    eng = "Grok 4.6" if "grok" in (model or "").lower() else "your model"
     why = {
         "budget": "You have used (or nearly used) your tool budget.",
         "timeout": "A model call timed out mid-loop; do not wait for more tools.",
@@ -28184,7 +28184,7 @@ def _estimate_call_sync_cost(n_names: int, max_quarters: int, n_already: int = 0
     Already-indexed quarters are free (skipped). Worst case ≈ max_quarters
     live searches per name that still needs data; typical is 1–2 new quarters.
     """
-    # Live search $0.025 + ~8k in / 3k out tokens on grok-4.5 ≈ $0.03–0.06/call
+    # Live search $0.025 + ~8k in / 3k out tokens on grok-4.6 ≈ $0.03–0.06/call
     per_search_lo, per_search_hi = 0.03, 0.08
     # Names that need work
     need = max(0, int(n_names) - int(n_already or 0))

@@ -31,7 +31,7 @@ export type AgenticJob = {
 
 export const AGENT_ENGINES: { id: AgentEngine; label: string; title: string }[] = [
   { id: 'claude', label: 'Claude', title: 'Claude Opus 5 · tool-use default' },
-  { id: 'grok', label: 'Grok', title: 'Grok 4.5 · live/current markets' },
+  { id: 'grok', label: 'Grok', title: 'Grok 4.6 · live/current markets' },
   { id: 'deepseek', label: 'DeepSeek', title: 'DeepSeek · cheapest agent path' },
 ]
 
