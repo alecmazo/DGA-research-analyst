@@ -915,7 +915,7 @@ def create_api_router() -> APIRouter:
     @r.get("/wedding/ready")
     def wedding_ready(
         request: Request,
-        limit: int = 30,
+        limit: int = 80,
         channel: Optional[str] = None,
     ) -> dict[str, Any]:
         """Scored, ranked wedding leads for the Weddings tab (click → Work).
@@ -981,7 +981,7 @@ def create_api_router() -> APIRouter:
     @r.post("/wedding/library/import")
     def wedding_lib_import(
         request: Request,
-        limit: int = 40,
+        limit: int = 10_000,
         rescore: bool = True,
     ) -> dict[str, Any]:
         """Import Bay Area planner/venue seeds, score them, make them Work-ready."""

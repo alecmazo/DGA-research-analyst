@@ -29,8 +29,81 @@ def load_wedding_library() -> list[dict[str, Any]]:
     return json.loads(LIBRARY_PATH.read_text(encoding="utf-8"))
 
 
+def _norm_company(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def _norm_host(website: str) -> str:
+    w = (website or "").strip().lower()
+    if not w:
+        return ""
+    w = w.replace("https://", "").replace("http://", "")
+    w = w.split("/")[0]
+    if w.startswith("www."):
+        w = w[4:]
+    return w
+
+
+def _norm_email(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def _seed_contacts(row: dict[str, Any]) -> list[dict[str, str]]:
+    """Personal inbox from the seed list — never invent; skip empty."""
+    if row.get("contacts"):
+        out = []
+        for c in row["contacts"]:
+            email = _norm_email(c.get("email") or "")
+            if not email or "@" not in email:
+                continue
+            out.append({
+                "name": (c.get("name") or row.get("contact_name") or "").strip(),
+                "email": email,
+                "title": (c.get("title") or "").strip(),
+                "source": c.get("source") or "seed",
+            })
+        if out:
+            return out
+    email = _norm_email(row.get("email") or "")
+    if not email or "@" not in email:
+        return []
+    return [{
+        "name": (row.get("contact_name") or "").strip(),
+        "email": email,
+        "title": (row.get("contact_title") or "Planner").strip(),
+        "source": "seed",
+    }]
+
+
+def _seed_match_keys(row: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    company = _norm_company(row.get("company") or "")
+    if company:
+        keys.add(f"company:{company}")
+    host = _norm_host(row.get("website") or "")
+    if host:
+        keys.add(f"website:{host}")
+    email = _norm_email(row.get("email") or "")
+    if email:
+        keys.add(f"email:{email}")
+    for c in row.get("contacts") or []:
+        em = _norm_email(c.get("email") or "")
+        if em:
+            keys.add(f"email:{em}")
+    return keys
+
+
+def _prospect_match_keys(p: dict[str, Any]) -> set[str]:
+    keys = _seed_match_keys(p)
+    for c in p.get("contacts") or []:
+        em = _norm_email(c.get("email") or "")
+        if em:
+            keys.add(f"email:{em}")
+    return keys
+
+
 def import_wedding_library(
-    limit: int = 40,
+    limit: int = 10_000,
     *,
     draft_email: bool = False,
     rescore_existing: bool = True,
@@ -40,6 +113,8 @@ def import_wedding_library(
     Import library seeds into wedding CRM with real scores.
     - New rows: upsert + score (+ optional draft / sales agent)
     - Existing: rescore so old flat 70s get real tiers
+    Dedup by company / website host / email so growing the seed list
+    creates only the new cards (original 20 stay unique).
     """
     lib = load_wedding_library()
     # Prefer planners, then high priority, then rest
@@ -49,10 +124,10 @@ def import_wedding_library(
         return (is_planner, -(row.get("priority") or 0), row.get("company") or "")
 
     lib_sorted = sorted(lib, key=sort_key)
-    existing = {
-        (p.get("company") or "").lower(): p
-        for p in crm.list_prospects(book="wedding")
-    }
+    existing_keys: dict[str, dict[str, Any]] = {}
+    for p in crm.list_prospects(book="wedding"):
+        for k in _prospect_match_keys(p):
+            existing_keys.setdefault(k, p)
     results: list[dict[str, Any]] = []
     rescored = 0
     imported = 0
@@ -61,10 +136,14 @@ def import_wedding_library(
         name = (row.get("company") or "").strip()
         if not name:
             continue
-        key = name.lower()
-        if key in existing:
+        hit = None
+        for k in _seed_match_keys(row):
+            hit = existing_keys.get(k)
+            if hit:
+                break
+        if hit:
             if rescore_existing:
-                r = rescore_wedding_prospect(existing[key]["id"], row=row)
+                r = rescore_wedding_prospect(hit["id"], row=row)
                 rescored += 1
                 results.append(r)
             continue
@@ -77,13 +156,21 @@ def import_wedding_library(
             website=row.get("website", ""),
             notes=row.get("notes", ""),
             signals=row.get("signals") or [],
+            contacts=_seed_contacts(row),
             package_hint=row.get("package_hint", ""),
             priority=row.get("priority"),
             draft_email=draft_email,
             run_sales_agent=run_agent,
         )
         imported += 1
-        existing[key] = {"id": r["prospect_id"], "company": name}
+        created = {
+            "id": r["prospect_id"],
+            "company": name,
+            "website": row.get("website", ""),
+            "contacts": _seed_contacts(row),
+        }
+        for k in _prospect_match_keys(created):
+            existing_keys.setdefault(k, created)
         results.append(r)
 
     # Also rescore any CRM rows not in this library pass (stale scores)

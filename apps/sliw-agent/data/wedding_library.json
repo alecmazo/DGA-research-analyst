@@ -200,6 +200,66 @@
     "priority": 7
   },
   {
+    "company": "Vanessa Pence Events",
+    "industry": "Wedding planner",
+    "geo": "Marin, CA",
+    "website": "https://www.vanessapenceevents.com",
+    "email": "vanessa@vanessapenceevents.com",
+    "contact_name": "Vanessa",
+    "signals": ["planner partnership", "first dance", "marin"],
+    "notes": "Marin planner — named first-touch on the personal inbox.",
+    "package_hint": "package_10",
+    "priority": 9
+  },
+  {
+    "company": "Laurie Arons Special Events",
+    "industry": "Wedding planner",
+    "geo": "San Francisco, CA",
+    "website": "https://www.lauriearons.com",
+    "email": "laurie@lauriearons.com",
+    "contact_name": "Laurie",
+    "signals": ["planner partnership", "luxury", "first dance"],
+    "notes": "SF planner — named first-touch on the personal inbox.",
+    "package_hint": "dream",
+    "priority": 9
+  },
+  {
+    "company": "Amazáe Events",
+    "industry": "Wedding planner",
+    "geo": "Campbell / South Bay, CA",
+    "website": "https://www.amazae.com",
+    "email": "crystal@amazae.com",
+    "contact_name": "Crystal",
+    "signals": ["planner partnership", "first dance", "south bay"],
+    "notes": "South Bay planner — named first-touch on the personal inbox.",
+    "package_hint": "package_10",
+    "priority": 9
+  },
+  {
+    "company": "Blissful Events",
+    "industry": "Wedding planner",
+    "geo": "Napa, CA",
+    "website": "https://www.blissfuleventplanning.com",
+    "email": "samar@blissfuleventplanning.com",
+    "contact_name": "Samar",
+    "signals": ["planner partnership", "first dance", "wine country"],
+    "notes": "Napa planner — named first-touch on the personal inbox.",
+    "package_hint": "package_10",
+    "priority": 9
+  },
+  {
+    "company": "Despina Craig Events",
+    "industry": "Wedding planner",
+    "geo": "San Rafael, CA",
+    "website": "https://www.despinacraigevents.com",
+    "email": "despinacraigevents@gmail.com",
+    "contact_name": "Despina",
+    "signals": ["planner partnership", "first dance", "marin"],
+    "notes": "San Rafael planner — named first-touch on the personal inbox.",
+    "package_hint": "package_10",
+    "priority": 9
+  },
+  {
     "company": "Cavallo Point Lodge",
     "industry": "Wedding venue",
     "geo": "Sausalito, CA",
