@@ -19,6 +19,7 @@ import tempfile
 import threading
 import traceback
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Optional
 
@@ -7065,7 +7066,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui459-20260812-fund-equal-pos-reb-cards"
+WEB_BUILD_VERSION = "ui460-20260813-snaptrade-taxlot-balance"
 
 
 @app.get("/api/build")
@@ -18602,10 +18603,10 @@ def fund_import_positions(
             txn_id = str(cur.fetchone()["id"])
 
             # Build lines: one Dr per position, one Cr total
-            total_cost = 0.0
+            total_cost = Decimal("0")
             line_num   = 1
             for p in positions:
-                cost = float(p["cost_basis"])
+                cost = _ledger_q4(p["cost_basis"])
                 if cost <= 0:
                     continue
                 total_cost += cost
@@ -18616,7 +18617,7 @@ def fund_import_positions(
                     INSERT INTO transaction_lines
                         (transaction_id, line_number, account_id, debit, security_id)
                     VALUES (%s, %s, %s, %s, %s)
-                """, (txn_id, line_num, acct, round(cost, 4),
+                """, (txn_id, line_num, acct, cost,
                       sec_ids.get(p["symbol"])))
                 line_num += 1
 
@@ -18626,7 +18627,7 @@ def fund_import_positions(
                     INSERT INTO transaction_lines
                         (transaction_id, line_number, account_id, credit)
                     VALUES (%s, %s, %s, %s)
-                """, (txn_id, line_num, cap_acct, round(total_cost, 4)))
+                """, (txn_id, line_num, cap_acct, total_cost))
 
             # ── Insert new tax_lots ───────────────────────────────────────
             for p in positions:
@@ -19698,10 +19699,10 @@ def fund_account_ytd_run(
                         txn_id = str(cur.fetchone()["id"])
 
                         # Transaction lines (Dr positions, Cr capital)
-                        total_cost_lots = 0.0
+                        total_cost_lots = Decimal("0")
                         ln = 1
                         for p in positions_parsed:
-                            cost = float(p["cost_basis"] or 0)
+                            cost = _ledger_q4(p["cost_basis"] or 0)
                             if cost <= 0:
                                 continue
                             total_cost_lots += cost
@@ -19712,7 +19713,7 @@ def fund_account_ytd_run(
                                 INSERT INTO transaction_lines
                                     (transaction_id, line_number, account_id, debit, security_id)
                                 VALUES (%s, %s, %s, %s, %s)
-                            """, (txn_id, ln, acct, round(cost, 4),
+                            """, (txn_id, ln, acct, cost,
                                   sec_ids.get(p["symbol"])))
                             ln += 1
                         if total_cost_lots > 0:
@@ -19720,7 +19721,7 @@ def fund_account_ytd_run(
                                 INSERT INTO transaction_lines
                                     (transaction_id, line_number, account_id, credit)
                                 VALUES (%s, %s, %s, %s)
-                            """, (txn_id, ln, cap_acct, round(total_cost_lots, 4)))
+                            """, (txn_id, ln, cap_acct, total_cost_lots))
 
                         # Insert tax lots
                         for p in positions_parsed:
@@ -33406,7 +33407,11 @@ def _snaptrade_normalize_account(ah: dict) -> dict:
             kind = (p["instrument"].get("kind") or "").lower()
         if p.get("is_option") or kind == "option":
             asset = "option"
-        elif p.get("cash_equivalent") or kind in ("currency",):
+        elif (
+            p.get("cash_equivalent")
+            or kind in ("currency", "cash")
+            or (ticker or "").upper() in _FIDELITY_CASH_SYMS
+        ):
             asset = "cash"
         else:
             asset = "equity"
@@ -33501,6 +33506,23 @@ def _snaptrade_normalize_options(raw) -> list:
     return out
 
 
+def _ledger_q4(value) -> Decimal:
+    """Quantize to NUMERIC(20,4) the same way Postgres stores ledger amounts.
+
+    Sum-then-round vs round-then-sum of IEEE floats is what made SnapTrade
+    tax-lot imports fail trg_check_tx_balanced (debit off credit by $0.0002).
+    """
+    if value is None:
+        return Decimal("0")
+    d = value if isinstance(value, Decimal) else Decimal(str(value))
+    return d.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+_FIDELITY_CASH_SYMS = {
+    "CASH", "USD", "FCASH", "SPAXX", "FZFXX", "FDRXX", "SPRXX", "FDLXX",
+}
+
+
 def _snaptrade_write_lots(cur, fund_id: str, positions: list) -> int:
     """Make SnapTrade the LIVE position source for one fund.
 
@@ -33525,13 +33547,19 @@ def _snaptrade_write_lots(cur, fund_id: str, positions: list) -> int:
     # share-based, matching the manual CSV import which never carried options.
     rows = []
     for p in (positions or []):
+        if p.get("asset_class") == "option":
+            continue
         sym = (p.get("symbol") or "").strip()
+        if (not sym or sym == "—") and p.get("asset_class") == "cash":
+            sym = "CASH"
         try:
             qty = float(p.get("quantity"))
         except (TypeError, ValueError):
             qty = 0.0
-        if not sym or sym == "—" or qty <= 0 or p.get("asset_class") == "option":
+        if not sym or sym == "—" or qty <= 0:
             continue
+        if p.get("asset_class") != "cash" and sym.upper() in _FIDELITY_CASH_SYMS:
+            p = {**p, "asset_class": "cash"}
         rows.append((p, sym, qty))
 
     # Existing open lots, aggregated per symbol.
@@ -33604,7 +33632,7 @@ def _snaptrade_write_lots(cur, fund_id: str, positions: list) -> int:
     """, (fund_id, today_iso))
     txn_id = str(cur.fetchone()["id"])
 
-    total_cost = 0.0
+    total_cost = Decimal("0")
     ln = 1
     for p, sym, qty in rows:
         per_unit = p.get("cost_basis_per_unit")
@@ -33612,7 +33640,7 @@ def _snaptrade_write_lots(cur, fund_id: str, positions: list) -> int:
             per_unit = float(per_unit) if per_unit is not None else 0.0
         except (TypeError, ValueError):
             per_unit = 0.0
-        cost = qty * per_unit
+        cost = _ledger_q4(Decimal(str(qty)) * Decimal(str(per_unit)))
         if cost > 0:
             total_cost += cost
             acct = mm_acct if p.get("asset_class") == "cash" else sec_acct
@@ -33620,7 +33648,7 @@ def _snaptrade_write_lots(cur, fund_id: str, positions: list) -> int:
                 cur.execute("""INSERT INTO transaction_lines
                                  (transaction_id, line_number, account_id, debit, security_id)
                                VALUES (%s,%s,%s,%s,%s)""",
-                            (txn_id, ln, acct, round(cost, 4), sec_ids[sym]))
+                            (txn_id, ln, acct, cost, sec_ids[sym]))
                 ln += 1
         cur.execute("""INSERT INTO tax_lots
                          (fund_id, security_id, acquired_at, quantity,
@@ -33631,7 +33659,7 @@ def _snaptrade_write_lots(cur, fund_id: str, positions: list) -> int:
         cur.execute("""INSERT INTO transaction_lines
                          (transaction_id, line_number, account_id, credit)
                        VALUES (%s,%s,%s,%s)""",
-                    (txn_id, ln, cap_acct, round(total_cost, 4)))
+                    (txn_id, ln, cap_acct, total_cost))
     return len(rows)
 
 
@@ -35340,9 +35368,15 @@ def _snaptrade_run_sync() -> dict:
                     by_fund.setdefault(str(r["fund_id"]), []).extend(acct_norm[r["account_id"]])
             for fid, poss in by_fund.items():
                 try:
+                    cur.execute("SAVEPOINT lot_write")
                     n = _snaptrade_write_lots(cur, fid, poss)
+                    cur.execute("RELEASE SAVEPOINT lot_write")
                     lots_written.append({"fund_id": fid, "lots": n})
                 except Exception as e:
+                    try:
+                        cur.execute("ROLLBACK TO SAVEPOINT lot_write")
+                    except Exception:
+                        pass
                     errors.append({"fund_id": fid, "error": _snaptrade_error_detail(e)})
             conn.commit()
     except Exception as e:
