@@ -75,7 +75,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Fund equal pos/reb cards** | **`ui459-20260812-fund-equal-pos-reb-cards`** | SUP_20260812_9ad006bd — Open Positions and Rebalance Suggestions same height |
 | **SnapTrade tax-lot balance** | **`ui460-20260813-snaptrade-taxlot-balance`** | Ledger debit/credit off by $0.0002 aborted tax_lots so Fidelity cash never updated |
 | **SnapTrade uninvested cash** | **`ui461-20260813-snaptrade-uninvested-cash`** | Sale proceeds sit in balances.cash minus SPAXX — inject residual CASH lot |
-| **Next deploy after this** | **`ui462-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Cash / MM always $1** | **`ui462-20260813-cash-par-price`** | Never Yahoo-price CASH (listed ~$86) — NAV/positions force par |
+| **Next deploy after this** | **`ui463-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

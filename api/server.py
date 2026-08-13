@@ -407,6 +407,18 @@ def _resolve_ticker_alias(sym: str) -> str:
     return clean
 
 
+# Cash / money-market: always $1. Never send "CASH" to Yahoo (it's a listed
+# stock ~$86 and blew EM-DEF NAV to $21M after we booked uninvested cash).
+_PRICE_AT_PAR = {
+    "SPAXX", "FDRXX", "SPRXX", "FZFXX", "FZDXX", "FDLXX", "VMFXX",
+    "CASH", "USD", "FCASH",
+}
+
+
+def _is_par_cash_symbol(sym: str) -> bool:
+    return (sym or "").rstrip("*").upper() in _PRICE_AT_PAR
+
+
 def _fetch_prices(symbols: list) -> dict:
     """Return {symbol: last_price | None} for the given list.
 
@@ -419,7 +431,6 @@ def _fetch_prices(symbols: list) -> dict:
     if not symbols:
         return {}
 
-    MM_FUNDS = ('SPAXX', 'FDRXX', 'SPRXX', 'FZFXX', 'FZDXX')
     out: dict = {}
     need: list = []
 
@@ -431,7 +442,7 @@ def _fetch_prices(symbols: list) -> dict:
         if _is_bond_cusip(clean):
             out[sym] = None
             continue
-        if any(mm in clean.upper() for mm in MM_FUNDS):
+        if _is_par_cash_symbol(clean):
             out[sym] = 1.0
             continue
         need.append(sym)
@@ -457,8 +468,9 @@ def _fund_market_nav(cur, fid: str) -> float:
       2. Cost-basis fallback when no live price (prevents NAV from going to zero
          on data outages or unlisted securities)
 
-    Money-market positions (asset_class='cash') are priced at $1.00/unit via
-    the existing _fetch_prices() logic (SPAXX/FDRXX/SPRXX → 1.0).
+    Money-market / uninvested cash (asset_class='cash' or CASH/SPAXX/…) is
+    always $1.00/unit. Never use a Yahoo quote for ticker CASH (it's a
+    listed stock ~$86 and inflates NAV).
     """
     cur.execute("""
         SELECT s.symbol, s.asset_class,
@@ -483,7 +495,7 @@ def _fund_market_nav(cur, fid: str) -> float:
         qty      = float(r["total_qty"] or 0)
         avg_cost = float(r["avg_cost"]  or 0)
         sym      = r["symbol"]
-        price    = prices.get(sym)
+        price    = 1.0 if _is_par_cash_symbol(sym) or (r.get("asset_class") == "cash") else prices.get(sym)
         total   += qty * (price if price is not None else avg_cost)
     return round(total, 2)
 
@@ -522,7 +534,7 @@ def _bulk_fund_market_nav(cur, fids: list) -> dict:
         qty      = float(r["total_qty"] or 0)
         avg_cost = float(r["avg_cost"]  or 0)
         sym      = r["symbol"]
-        price    = prices.get(sym)
+        price    = 1.0 if _is_par_cash_symbol(sym) or (r.get("asset_class") == "cash") else prices.get(sym)
         totals[fid] = round(totals.get(fid, 0.0) + qty * (price if price is not None else avg_cost), 2)
 
     # Funds with no positions → 0.0
@@ -4737,6 +4749,9 @@ def lp_me_positions(request: Request):
         q        = quotes.get(sym) or {}
         last_p   = q.get("price")
         pct_chg  = q.get("pct_change")
+        if _is_par_cash_symbol(sym):
+            last_p = 1.0
+            pct_chg = None
         mkt_val  = round(qty * last_p, 2) if last_p else None
         if mkt_val:
             total_mkt += mkt_val
@@ -7066,7 +7081,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui461-20260813-snaptrade-uninvested-cash"
+WEB_BUILD_VERSION = "ui462-20260813-cash-par-price"
 
 
 @app.get("/api/build")
@@ -14003,6 +14018,15 @@ def batch_quotes(tickers: str = ""):
     # prices and must appear in the live portfolio / watchlist.
     null_row: dict = {"price": None, "pct_change": None}
     result: dict = {}
+    remaining: list = []
+    for sym in originals:
+        if _is_par_cash_symbol(sym):
+            result[sym] = {"price": 1.0, "pct_change": 0.0}
+        else:
+            remaining.append(sym)
+    originals = remaining
+    if not originals:
+        return result
 
     # ── Per-ticker cache check ────────────────────────────────────────────────
     # Require BOTH price and pct_change for a cache hit — a price-only row
@@ -17151,11 +17175,12 @@ def fund_positions(request: Request, fund_id: str = None):
                     pct_chg = None
                 is_cash = (
                     (r.get("asset_class") or "") == "cash"
+                    or _is_par_cash_symbol(sym)
                     or _is_cash_ticker(sym)
-                    or (sym or "").upper() in ("CASH", "USD", "FCASH")
                 )
-                if last_p is None and is_cash:
+                if is_cash:
                     last_p = 1.0
+                    pct_chg = None
                 mkt_val   = round(qty * last_p, 2) if last_p else None
                 if mkt_val:
                     total_mkt += mkt_val
@@ -17285,7 +17310,7 @@ def fund_positions(request: Request, fund_id: str = None):
 # ---------------------------------------------------------------------------
 
 # Money-market / cash tickers to exclude from equity rebalance
-_CASH_TICKERS = {"SPAXX", "FDRXX", "FDLXX", "FZFXX", "FZDXX", "SPRXX", "VMFXX"}
+_CASH_TICKERS = set(_PRICE_AT_PAR) | {"SPAXX", "FDRXX", "FDLXX", "FZFXX", "FZDXX", "SPRXX", "VMFXX"}
 
 def _is_cash_ticker(sym: str) -> bool:
     """Return True if this ticker is cash/money-market, a bond CUSIP, or ignored.
