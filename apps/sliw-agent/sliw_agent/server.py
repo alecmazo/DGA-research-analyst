@@ -27,6 +27,7 @@ from . import crm
 from .pipeline import batch_score_seed, mark_interested, run_prospect_pipeline
 from .lead_engine import (
     build_sequences_for_prospect,
+    disqualify_prospect,
     edyta_home,
     import_from_library,
     import_all_pending,
@@ -185,6 +186,10 @@ class InterestedRequest(BaseModel):
 class StageRequest(BaseModel):
     stage: str
     note: str = ""
+
+
+class DisqualifyRequest(BaseModel):
+    reason: str = ""
 
 
 class WeddingMediaRequest(BaseModel):
@@ -560,6 +565,19 @@ def create_api_router() -> APIRouter:
                 reply_text=body.reply_text,
                 reply_summary=body.reply_summary,
             )
+        except KeyError:
+            raise HTTPException(404, "Prospect not found") from None
+
+    @r.post("/prospects/{prospect_id}/disqualify")
+    def api_disqualify(
+        prospect_id: str,
+        body: DisqualifyRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        """Park not-ICP / wrong-geo leads. Does not create an Edyta brief."""
+        require_sliw_access(request)
+        try:
+            return disqualify_prospect(prospect_id, reason=body.reason)
         except KeyError:
             raise HTTPException(404, "Prospect not found") from None
 

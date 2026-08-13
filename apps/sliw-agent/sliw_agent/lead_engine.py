@@ -256,36 +256,59 @@ def workstream_for_prospect(prospect_id: str) -> dict[str, Any]:
         },
     ]
 
-    next_step = next((s for s in steps if not s["done"]), None)
-    if not next_step:
-        next_step = {"id": "done", "title": "Complete / nurture", "done": True, "detail": "Pipeline finished for this lead"}
+    # Parked wrong-geo / not-ICP: no qualify, no Edyta escalate.
+    if stage == "disqualified":
+        reason = (p.get("disqualify_reason") or "").strip()
+        kind = p.get("disqualify_kind") or "not_fit"
+        detail = "Not a fit / wrong geo — parked (not sent to Edyta)"
+        if reason:
+            detail = f"{detail}: {reason}"
+        else:
+            detail = f"{detail} ({kind})"
+        next_step = {
+            "id": "parked",
+            "title": "Not a fit / wrong geo",
+            "done": True,
+            "detail": detail,
+        }
+        actions = []
+    else:
+        next_step = next((s for s in steps if not s["done"]), None)
+        if not next_step:
+            next_step = {"id": "done", "title": "Complete / nurture", "done": True, "detail": "Pipeline finished for this lead"}
 
-    actions = []
-    nid = next_step["id"]
-    if nid == "agent" or nid == "qualify":
-        actions = [
-            {"id": "run_sales_agent", "label": "▶ Run sales agent (find contacts + pitch + draft)", "type": "button"},
-            {"id": "run_sales_agent_live_gamma", "label": "Run agent + live Gamma (credits)", "type": "button"},
-        ]
-    elif nid == "send":
-        actions = [
-            {"id": "copy_cold", "label": "Copy first-touch email", "type": "button"},
-            {"id": "mark_contacted", "label": "I sent it — mark contacted", "type": "button"},
-            {"id": "run_sales_agent", "label": "Re-run sales agent", "type": "button"},
-        ]
-        # follow-up only after contacted — shown on reply step too
-    elif nid == "reply":
-        actions = [
-            {"id": "copy_cold", "label": "Copy first-touch (resend)", "type": "button"},
-            {"id": "prepare_followup", "label": "Create follow-up email", "type": "button"},
-            {"id": "qualify_reply", "label": "Qualify reply → Edyta if warm", "type": "form_reply"},
-            {"id": "escalate_edyta", "label": "Force to Edyta pipeline", "type": "button"},
-        ]
-    elif nid == "edyta":
-        actions = [
-            {"id": "open_brief", "label": "View Edyta brief", "type": "button"},
-            {"id": "escalate_edyta", "label": "Refresh Edyta brief", "type": "button"},
-        ]
+        actions = []
+        nid = next_step["id"]
+        if nid == "agent" or nid == "qualify":
+            actions = [
+                {"id": "run_sales_agent", "label": "▶ Run sales agent (find contacts + pitch + draft)", "type": "button"},
+                {"id": "run_sales_agent_live_gamma", "label": "Run agent + live Gamma (credits)", "type": "button"},
+            ]
+        elif nid == "send":
+            actions = [
+                {"id": "copy_cold", "label": "Copy first-touch email", "type": "button"},
+                {"id": "mark_contacted", "label": "I sent it — mark contacted", "type": "button"},
+                {"id": "run_sales_agent", "label": "Re-run sales agent", "type": "button"},
+            ]
+            # follow-up only after contacted — shown on reply step too
+        elif nid == "reply":
+            actions = [
+                {"id": "copy_cold", "label": "Copy first-touch (resend)", "type": "button"},
+                {"id": "prepare_followup", "label": "Create follow-up email", "type": "button"},
+                {"id": "qualify_reply", "label": "Qualify reply → Edyta if warm", "type": "form_reply"},
+                {"id": "escalate_edyta", "label": "Force to Edyta pipeline", "type": "button"},
+            ]
+        elif nid == "edyta":
+            actions = [
+                {"id": "open_brief", "label": "View Edyta brief", "type": "button"},
+                {"id": "escalate_edyta", "label": "Refresh Edyta brief", "type": "button"},
+            ]
+        if nid in ("qualify", "agent", "send", "reply") or is_wedding:
+            actions.append({
+                "id": "disqualify",
+                "label": "Not a fit / wrong geo — remove from radar",
+                "type": "button",
+            })
 
     # Primary contact for UI (name + email always surfaceable)
     primary = next(
@@ -311,13 +334,38 @@ def workstream_for_prospect(prospect_id: str) -> dict[str, Any]:
     }
 
 
+
+def disqualify_prospect(prospect_id: str, reason: str = "") -> dict[str, Any]:
+    """Park a lead as not-ICP / wrong geo. Does NOT escalate to Edyta.
+
+    No Edyta brief is written and agent_status is never set to edyta_pipeline.
+    """
+    p = crm.get_prospect(prospect_id)
+    if not p:
+        raise KeyError(prospect_id)
+    reason = (reason or "").strip()
+    note = reason or "Not a fit / wrong geo"
+    crm.set_stage(prospect_id, "disqualified", note=note)
+    p = crm.update_prospect(
+        prospect_id,
+        disqualify_reason=reason,
+        disqualify_kind="wrong_geo" if reason else "not_fit",
+        disqualified_at=_now(),
+    )
+    return {
+        "ok": True,
+        "prospect": p,
+        "workstream": workstream_for_prospect(prospect_id),
+    }
+
+
 def top_ready_to_contact(limit: int = 5) -> list[dict[str, Any]]:
     """Highest-score prospects the desk can work right now."""
     prospects = crm.list_prospects(book="corporate")
     ranked = [
         p for p in prospects
         if p.get("tier") in ("A", "B")
-        and p.get("stage") not in ("won", "lost", "interested", "discovery_booked")
+        and p.get("stage") not in ("won", "lost", "interested", "discovery_booked", "disqualified")
     ]
     ranked.sort(key=lambda p: (-(p.get("score") or 0), p.get("company") or ""))
     out = []

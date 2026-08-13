@@ -56,6 +56,7 @@ STAGES = [
     "won",
     "lost",
     "nurture",
+    "disqualified",
 ]
 
 BOOKS = ("corporate", "wedding")

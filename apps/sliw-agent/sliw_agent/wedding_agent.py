@@ -609,7 +609,7 @@ def wedding_ready_list(limit: int = 12, *, channel: str | None = None) -> list[d
     ranked = []
     for p in prospects:
         stage = p.get("stage") or ""
-        if stage == "lost":
+        if stage in ("lost", "disqualified"):
             continue
         # Keep paid "won" couples visible until lessons are scheduled
         if stage == "won":

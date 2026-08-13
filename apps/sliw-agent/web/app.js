@@ -882,6 +882,18 @@ async function runAction(act) {
       state.workstream = await api(`/prospects/${encodeURIComponent(id)}/workstream`);
       renderWorkstream();
       await softRefresh();
+    } else if (act === "disqualify") {
+      const raw = window.prompt("Optional reason (e.g. Boston, not Bay Area)");
+      if (raw === null) return; // cancelled
+      busy(true, "Parking lead…");
+      const out = await api(`/prospects/${encodeURIComponent(id)}/disqualify`, {
+        method: "POST",
+        body: JSON.stringify({ reason: String(raw).trim() }),
+      });
+      toast("Parked — not sent to Edyta");
+      state.workstream = out.workstream || await api(`/prospects/${encodeURIComponent(id)}/workstream`);
+      await renderWorkstream();
+      await softRefresh();
     } else if (act === "escalate_edyta") {
       busy(true, "Escalating to Edyta…");
       const out = await api(`/prospects/${encodeURIComponent(id)}/escalate-edyta`, {
@@ -1045,7 +1057,9 @@ function renderWeddings() {
       </div>
       <p class="wedding-card-pkg">${esc(p.package || "—")}${isCouple ? " · <strong>call today</strong>" : ""}</p>
       <div class="foot">
-        <span>${esc(p.stage || "scored")}${p.has_draft ? " · draft ready" : ""}${p.has_contact ? " · contacts" : ""}</span>
+        <span>${p.stage === "disqualified"
+          ? `<span class="pill">wrong geo</span> disqualified`
+          : esc(p.stage || "scored")}${p.stage !== "disqualified" && p.has_draft ? " · draft ready" : ""}${p.stage !== "disqualified" && p.has_contact ? " · contacts" : ""}</span>
         <button type="button" class="btn primary sm wedding-open-btn" data-work="${id}">Open in Work →</button>
       </div>
     </article>`;
@@ -1071,6 +1085,10 @@ async function softRefresh() {
   $("#lib-summary").textContent =
     `${lib.total} qualified · ${lib.in_crm} in CRM · ${lib.pending} pending · ${lib.tier_a} tier A`;
   renderReady();
+  try {
+    state.wedding = await loadWeddingRows(state.weddingChannel || undefined);
+    renderWeddings();
+  } catch (_) {}
 }
 
 async function fullRefresh() {
