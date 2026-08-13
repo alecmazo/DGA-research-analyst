@@ -1,16 +1,19 @@
 """
-Master corporate packages assets for outreach.
+Materials PDF assets + corporate packages site links for outreach.
 
 - Packages site: https://corporate.edytasliwinska.com/
 - Corporate page: https://edytasliwinska.com/corporate
 - Wedding/master PDF: Materials → /sliw/media/master-packages.pdf
-- Corporate PDF: Materials → /sliw/media/corporate-packages.pdf (no Dropbox for now)
+  (file master_packages.pdf, Dropbox /Apps/Sliw/master_packages.pdf)
+- Corporate PDF: Materials → /sliw/media/corporate-packages.pdf
+  (file corporate_packages.pdf, Dropbox /Apps/Sliw/corporate_packages.pdf)
 
-PDF is dual-written to:
+Each PDF is dual-written to:
   1. Persistent data dir (STOCKS_FOLDER/sliw-agent when set) — Railway volume
-  2. Dropbox /Apps/Sliw/master_packages.pdf — survives redeploys even without volume
+  2. Dropbox /Apps/Sliw/<filename> — survives redeploys even without volume
 
 On miss, local path is re-hydrated from Dropbox before serving.
+Corporate outreach must only link the corporate PDF (never master/wedding).
 """
 
 from __future__ import annotations
@@ -76,6 +79,11 @@ def dropbox_folder() -> str:
 def dropbox_pdf_dest() -> str:
     folder = dropbox_folder()
     return f"{folder}/{MASTER_PDF_FILENAME}" if folder else f"/{MASTER_PDF_FILENAME}"
+
+
+def dropbox_corporate_pdf_dest() -> str:
+    folder = dropbox_folder()
+    return f"{folder}/{CORPORATE_PDF_FILENAME}" if folder else f"/{CORPORATE_PDF_FILENAME}"
 
 
 def _optional_env(key: str, default: str = "") -> str:
@@ -366,8 +374,9 @@ def get_master_deck_meta(request_base: str | None = None) -> dict[str, Any]:
         "dropbox_path": dropbox_pdf_dest(),
         "dropbox_shared_url": old.get("dropbox_shared_url"),
         "note": (
-            "Corporate packages site (corporate.edytasliwinska.com). Wedding and corporate PDFs are separate "
-            "Materials slots. Corporate outreach uses corporate PDF only (not wedding master PDF)."
+            "Two Materials PDF slots: wedding/master (partner kit) and corporate packages. "
+            "Corporate outreach links corporate.edytasliwinska.com and corporate-packages.pdf only "
+            "(never master-packages.pdf). Both mirrored to Dropbox Apps/Sliw."
         ),
         "updated_at": datetime.utcnow().isoformat(),
     }
@@ -375,10 +384,12 @@ def get_master_deck_meta(request_base: str | None = None) -> dict[str, Any]:
         meta["pdf_url"] = MASTER_PDF_PUBLIC_PATH
         meta["pdf_preview_url"] = MASTER_PDF_PUBLIC_PATH
 
-    # Corporate packages PDF (separate from wedding master PDF; Dropbox skipped for now)
-    corp_exists = corporate_pdf_exists()
+    # Corporate packages PDF (separate slot; dual-write + hydrate via Dropbox)
+    corp_exists = corporate_pdf_exists(hydrate=True)
     corp_path = corporate_pdf_path()
     corp_url = get_corporate_pdf_url(request_base) if corp_exists else (get_corporate_pdf_url(request_base) or None)
+    meta["pdf_slot"] = "wedding_master"
+    meta["pdf_label"] = "Master packages PDF (wedding)"
     meta["corporate_pdf_url"] = corp_url if corp_exists else None
     meta["corporate_pdf_uploaded"] = corp_exists
     meta["corporate_pdf_bytes"] = corp_path.stat().st_size if corp_exists else 0
@@ -391,7 +402,21 @@ def get_master_deck_meta(request_base: str | None = None) -> dict[str, Any]:
     meta["corporate_pdf_preview_url"] = (
         (corp_url or CORPORATE_PDF_PUBLIC_PATH) if corp_exists else None
     )
-    meta["corporate_pdf_storage_path"] = str(corp_path) if corp_exists else None
+    meta["corporate_pdf_storage_path"] = str(corp_path)
+    meta["corporate_dropbox"] = {
+        "folder": dropbox_folder(),
+        "path": dropbox_corporate_pdf_dest(),
+        "configured": _dropbox_client() is not None,
+        "shared_url": old.get("corporate_dropbox_shared_url"),
+        "last_upload_ok": old.get("corporate_dropbox_ok"),
+        "last_error": old.get("corporate_dropbox_error"),
+        "ok": old.get("corporate_dropbox_ok"),
+        "error": old.get("corporate_dropbox_error"),
+    }
+    meta["corporate_dropbox_path"] = dropbox_corporate_pdf_dest()
+    meta["corporate_dropbox_shared_url"] = old.get("corporate_dropbox_shared_url")
+    meta["corporate_dropbox_ok"] = old.get("corporate_dropbox_ok")
+    meta["corporate_dropbox_error"] = old.get("corporate_dropbox_error")
     if corp_exists and not meta.get("corporate_pdf_url"):
         meta["corporate_pdf_url"] = CORPORATE_PDF_PUBLIC_PATH
         meta["corporate_pdf_preview_url"] = CORPORATE_PDF_PUBLIC_PATH
@@ -459,9 +484,9 @@ def save_master_pdf(
         "dropbox_error": dbx_result.get("error"),
         "dropbox_shared_url": dbx_result.get("shared_url"),
         "note": (
-            "Master PDF on disk + Dropbox /Apps/Sliw. Linked in new outreach emails."
+            "Wedding master PDF on disk + Dropbox /Apps/Sliw/master_packages.pdf."
             if dbx_result.get("ok")
-            else "Master PDF on disk. Dropbox mirror skipped or failed — see dropbox_error."
+            else "Wedding master PDF on disk. Dropbox mirror skipped or failed — see dropbox_error."
         ),
         "updated_at": uploaded_at,
     }
@@ -494,23 +519,133 @@ def corporate_pdf_path() -> Path:
     return data_dir() / CORPORATE_PDF_FILENAME
 
 
-def corporate_pdf_exists() -> bool:
+def push_corporate_pdf_to_dropbox(content: bytes | None = None) -> dict[str, Any]:
+    """Upload corporate PDF to Dropbox /Apps/Sliw/corporate_packages.pdf."""
+    dbx = _dropbox_client()
+    if dbx is None:
+        return {
+            "ok": False,
+            "skipped": True,
+            "error": "Dropbox not configured (DROPBOX_APP_KEY / SECRET / REFRESH_TOKEN)",
+        }
+    try:
+        import dropbox  # type: ignore
+    except ImportError:
+        return {"ok": False, "error": "dropbox package not installed"}
+
+    data = content
+    if data is None:
+        path = corporate_pdf_path()
+        if not path.is_file():
+            return {"ok": False, "error": "No local corporate PDF to upload"}
+        data = path.read_bytes()
+    if not data or len(data) < 100:
+        return {"ok": False, "error": "PDF content too small"}
+
+    folder = dropbox_folder()
+    dest = dropbox_corporate_pdf_dest()
+    if dest.rstrip("/").endswith("/" + MASTER_PDF_FILENAME) or dest.endswith(MASTER_PDF_FILENAME):
+        return {"ok": False, "error": "Refusing Dropbox path that would overwrite wedding master PDF"}
+    try:
+        _ensure_dropbox_folder(dbx, folder)
+        meta = dbx.files_upload(
+            data,
+            dest,
+            mode=dropbox.files.WriteMode.overwrite,
+            mute=True,
+        )
+        shared = _get_or_create_shared_link(dbx, dest)
+        return {
+            "ok": True,
+            "path": dest,
+            "folder": folder,
+            "size": getattr(meta, "size", len(data)),
+            "shared_url": shared,
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Dropbox corporate upload failed (%s): %s", dest, exc)
+        return {"ok": False, "error": str(exc), "path": dest}
+
+
+def fetch_corporate_pdf_from_dropbox() -> dict[str, Any]:
+    """Download corporate PDF from Dropbox into local data dir if present."""
+    dbx = _dropbox_client()
+    if dbx is None:
+        return {"ok": False, "skipped": True, "error": "Dropbox not configured"}
+    dest = dropbox_corporate_pdf_dest()
+    try:
+        _meta, res = dbx.files_download(dest)
+        content = res.content
+        if not content or len(content) < 100:
+            return {"ok": False, "error": "Dropbox file empty"}
+        path = corporate_pdf_path()
+        if path.name == MASTER_PDF_FILENAME:
+            return {"ok": False, "error": "Refusing to hydrate into wedding master path"}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return {
+            "ok": True,
+            "path": dest,
+            "bytes": len(content),
+            "local": str(path),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc), "path": dest}
+
+
+def delete_corporate_pdf_from_dropbox() -> dict[str, Any]:
+    dbx = _dropbox_client()
+    if dbx is None:
+        return {"ok": False, "skipped": True}
+    dest = dropbox_corporate_pdf_dest()
+    if dest.endswith(MASTER_PDF_FILENAME):
+        return {"ok": False, "error": "Refusing to delete wedding master Dropbox path"}
+    try:
+        dbx.files_delete_v2(dest)
+        return {"ok": True, "path": dest}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc), "path": dest}
+
+
+def hydrate_corporate_pdf_if_needed() -> bool:
+    """If local corporate PDF missing, try Dropbox. Returns True if local file exists after."""
+    if corporate_pdf_exists(hydrate=False):
+        return True
+    result = fetch_corporate_pdf_from_dropbox()
+    if result.get("ok"):
+        log.info("Hydrated corporate PDF from Dropbox %s", result.get("path"))
+        return corporate_pdf_exists(hydrate=False)
+    return False
+
+
+def corporate_pdf_exists(*, hydrate: bool = True) -> bool:
     p = corporate_pdf_path()
     try:
-        return p.is_file() and p.stat().st_size > 100
+        if p.is_file() and p.stat().st_size > 100:
+            return True
     except OSError:
-        return False
+        pass
+    if hydrate:
+        return hydrate_corporate_pdf_if_needed()
+    return False
 
 
 def get_corporate_pdf_url(request_base: str | None = None) -> str:
-    """Public URL for corporate packages PDF. Never returns wedding master PDF."""
+    """Public URL for corporate packages PDF only (never wedding master)."""
     env = (os.environ.get("SLIW_CORPORATE_PDF_URL") or "").strip()
     if env:
-        return env
+        if MASTER_PDF_PUBLIC_PATH in env or "master-packages.pdf" in env or "master_packages" in env:
+            log.warning("SLIW_CORPORATE_PDF_URL points at wedding master PDF — ignoring")
+        else:
+            return env
     if not corporate_pdf_exists():
         try:
             data = json.loads(master_meta_path().read_text(encoding="utf-8"))
-            url = (data.get("corporate_pdf_url") or "").strip()
+            url = (
+                data.get("corporate_pdf_url")
+                or data.get("corporate_dropbox_shared_url")
+                or ""
+            ).strip()
             if (
                 url
                 and url.startswith("http")
@@ -549,6 +684,8 @@ def save_corporate_pdf(
     if not path.is_file() or path.stat().st_size < 100:
         raise ValueError(f"Failed to write corporate PDF to {path}")
 
+    dbx_result = push_corporate_pdf_to_dropbox(content)
+
     uploaded_at = datetime.utcnow().isoformat()
     old: dict[str, Any] = {}
     try:
@@ -569,11 +706,15 @@ def save_corporate_pdf(
             "corporate_pdf_original_name": original_name,
             "corporate_pdf_uploaded_at": uploaded_at,
             "corporate_pdf_storage_path": str(path),
+            "corporate_dropbox_path": dropbox_corporate_pdf_dest(),
+            "corporate_dropbox_ok": bool(dbx_result.get("ok")),
+            "corporate_dropbox_error": dbx_result.get("error"),
+            "corporate_dropbox_shared_url": dbx_result.get("shared_url"),
             "updated_at": uploaded_at,
         }
     )
     master_meta_path().write_text(json.dumps(old, indent=2) + "\n", encoding="utf-8")
-    return get_master_deck_meta(request_base)
+    return get_master_deck_meta(request_base=request_base)
 
 
 def delete_corporate_pdf() -> dict[str, Any]:
@@ -581,6 +722,7 @@ def delete_corporate_pdf() -> dict[str, Any]:
     p = corporate_pdf_path()
     if p.exists() and p.name != MASTER_PDF_FILENAME:
         p.unlink()
+    delete_corporate_pdf_from_dropbox()
     old: dict[str, Any] = {}
     try:
         if master_meta_path().exists():
@@ -596,6 +738,9 @@ def delete_corporate_pdf() -> dict[str, Any]:
         "corporate_pdf_original_name",
         "corporate_pdf_uploaded_at",
         "corporate_pdf_storage_path",
+        "corporate_dropbox_shared_url",
+        "corporate_dropbox_ok",
+        "corporate_dropbox_error",
     ):
         old.pop(key, None)
     old["corporate_pdf_uploaded"] = False
@@ -630,8 +775,10 @@ def email_asset_links(
     else:
         pdf = get_corporate_pdf_url(request_base)
         if pdf and corporate_pdf_exists():
-            out["pdf"] = pdf
+            if MASTER_PDF_PUBLIC_PATH not in pdf and "master-packages.pdf" not in pdf:
+                out["pdf"] = pdf
     return out
+
 
 
 # Compatibility for `from master_deck import MASTER_PDF_PATH`

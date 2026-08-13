@@ -723,6 +723,8 @@ def create_api_router() -> APIRouter:
             "corporate_dropbox": meta.get("corporate_dropbox"),
             "corporate_dropbox_path": meta.get("corporate_dropbox_path"),
             "corporate_dropbox_shared_url": meta.get("corporate_dropbox_shared_url"),
+            "corporate_dropbox_ok": meta.get("corporate_dropbox_ok"),
+            "corporate_dropbox_error": meta.get("corporate_dropbox_error"),
             "data_dir": meta.get("data_dir"),
         }
 
@@ -1031,7 +1033,7 @@ def serve_master_pdf():
 
 @app.get("/sliw/media/corporate-packages.pdf")
 def serve_corporate_pdf():
-    if not corporate_pdf_exists():
+    if not corporate_pdf_exists(hydrate=True):
         raise HTTPException(404, "No corporate PDF uploaded yet")
     return FileResponse(
         str(corporate_pdf_path()),

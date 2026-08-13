@@ -36298,7 +36298,7 @@ def _mount_sliw_agent() -> None:
                 from sliw_agent.master_deck import corporate_pdf_exists, corporate_pdf_path
             except Exception:
                 raise HTTPException(status_code=404, detail="PDF module unavailable")
-            if not corporate_pdf_exists():
+            if not corporate_pdf_exists(hydrate=True):
                 raise HTTPException(
                     status_code=404,
                     detail="No corporate packages PDF uploaded yet. Upload in Sliw → Materials.",
