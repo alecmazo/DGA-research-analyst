@@ -575,6 +575,52 @@ def get_prospect(prospect_id: str, book: str | None = None) -> dict[str, Any] | 
         return None
 
 
+def clean_email(value: Any) -> str:
+    """Trim a real address. Empty if missing or not an email — never invent."""
+    s = str(value or "").strip()
+    if not s or "@" not in s:
+        return ""
+    return s
+
+
+def primary_contact_email(prospect: dict[str, Any] | None) -> str:
+    contacts = (prospect or {}).get("contacts") or []
+    primary = next(
+        (
+            c
+            for c in contacts
+            if c.get("email")
+            and c.get("source") not in ("role_inbox_guess", "hunter.io_error")
+        ),
+        None,
+    ) or next((c for c in contacts if c.get("email")), None) or {}
+    return clean_email(primary.get("email") or "")
+
+
+def resolved_send_to(prospect: dict[str, Any] | None) -> str:
+    """Prefer last emailed address over Hunter/CRM primary. Never invent."""
+    last = clean_email((prospect or {}).get("last_contacted_email") or "")
+    if last:
+        return last
+    return primary_contact_email(prospect)
+
+
+def record_last_contacted(
+    prospect_id: str,
+    email: str = "",
+    book: str | None = None,
+) -> dict[str, Any]:
+    """Persist the address the desk actually emailed (never invent)."""
+    p = get_prospect(prospect_id, book=book)
+    if not p:
+        raise KeyError(prospect_id)
+    chosen = clean_email(email) or primary_contact_email(p)
+    fields: dict[str, Any] = {"last_contacted_at": _now()}
+    if chosen:
+        fields["last_contacted_email"] = chosen
+    return update_prospect(prospect_id, book=p.get("book") or book, **fields)
+
+
 def list_prospects(
     stage: str | None = None,
     min_score: float | None = None,

@@ -186,6 +186,8 @@ class InterestedRequest(BaseModel):
 class StageRequest(BaseModel):
     stage: str
     note: str = ""
+    email: str = ""
+    last_contacted_email: str = ""
 
 
 class DisqualifyRequest(BaseModel):
@@ -358,7 +360,11 @@ def create_api_router() -> APIRouter:
     def set_stage(prospect_id: str, body: StageRequest, request: Request) -> dict[str, Any]:
         require_sliw_access(request)
         try:
-            return crm.set_stage(prospect_id, body.stage, note=body.note)
+            p = crm.set_stage(prospect_id, body.stage, note=body.note)
+            if body.stage == "contacted":
+                override = body.last_contacted_email or body.email or ""
+                p = crm.record_last_contacted(prospect_id, email=override)
+            return p
         except KeyError:
             raise HTTPException(404, "Prospect not found") from None
         except ValueError as exc:

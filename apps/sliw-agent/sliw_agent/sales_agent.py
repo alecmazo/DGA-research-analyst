@@ -353,7 +353,14 @@ def prepare_followup(prospect_id: str) -> dict[str, Any]:
         raise ValueError(
             f"Follow-up only after cold is sent (stage is '{stage}'). Mark contacted first."
         )
-    contact = (p.get("contacts") or [{}])[0]
+    last = crm.clean_email(p.get("last_contacted_email") or "")
+    contacts = p.get("contacts") or []
+    contact = next(
+        (c for c in contacts if last and (c.get("email") or "").lower() == last.lower()),
+        None,
+    ) or (contacts[0] if contacts else {}) or {}
+    if last:
+        contact = {**contact, "email": last}
     deck = p.get("master_deck_url") or p.get("gamma_url") or get_master_deck_url()
     if "master-packages.pdf" in str(deck or "") or "gamma.app" in str(deck or ""):
         deck = TALENT.get("package_site") or "https://corporate.edytasliwinska.com/"
@@ -362,6 +369,7 @@ def prepare_followup(prospect_id: str) -> dict[str, Any]:
         contact_name=contact.get("name") or "",
         master_deck_url=deck,
     )
+    email["to_email"] = contact.get("email") or ""
     path = save_outreach_draft(
         prospect_id=prospect_id,
         company=p.get("company") or "",

@@ -314,11 +314,25 @@ def workstream_for_prospect(prospect_id: str) -> dict[str, Any]:
     primary = next(
         (c for c in contacts if c.get("email") and c.get("source") not in ("role_inbox_guess", "hunter.io_error")),
         None,
-    ) or next((c for c in contacts if c.get("email")), None) or (contacts[0] if contacts else {})
+    ) or next((c for c in contacts if c.get("email")), None) or (contacts[0] if contacts else {}) or {}
+
+    last_email = crm.clean_email(p.get("last_contacted_email") or "")
+    if last_email:
+        match = next(
+            (c for c in contacts if (c.get("email") or "").lower() == last_email.lower()),
+            None,
+        )
+        if match:
+            primary = dict(match)
+        else:
+            # Keep known name/title; overlay the address actually emailed.
+            primary = {**(primary or {}), "email": last_email}
 
     return {
         "prospect": p,
         "primary_contact": primary,
+        "last_contacted_email": last_email or None,
+        "last_contacted_at": p.get("last_contacted_at"),
         "contacts": contacts[:8],
         "steps": steps,
         "next_step": next_step,

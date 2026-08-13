@@ -39,6 +39,34 @@ function esc(s) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/** Work pane To: — last emailed address, else CRM/Hunter primary. Never invent. */
+function workToEmail() {
+  const fromInput = ($("#ws-to-email")?.value || "").trim();
+  if (fromInput) return fromInput;
+  const ws = state.workstream || {};
+  const p = ws.prospect || {};
+  return (
+    (p.last_contacted_email || ws.last_contacted_email || "").trim()
+    || (ws.primary_contact?.email || "").trim()
+  );
+}
+
+/** Stable Work deep link: #lead=<id> or ?lead=<id>. */
+function leadDeepLinkId() {
+  try {
+    const hash = String(location.hash || "").replace(/^#/, "");
+    if (hash.startsWith("lead=")) {
+      return decodeURIComponent(hash.slice(5).split("&")[0] || "").trim();
+    }
+    const hp = new URLSearchParams(hash);
+    if (hp.get("lead")) return String(hp.get("lead")).trim();
+    const q = new URLSearchParams(location.search);
+    const lead = (q.get("lead") || "").trim();
+    if (lead) return lead;
+  } catch (_) {}
+  return "";
+}
+
 function tierClass(t) {
   return `pill tier-${(t || "c").toLowerCase()}`;
 }
@@ -474,6 +502,12 @@ async function focusLead(id, { autoAgent = true } = {}) {
   try {
     let ws = await api(`/prospects/${encodeURIComponent(id)}/workstream`);
     state.workstream = ws;
+    try {
+      const want = `#lead=${encodeURIComponent(id)}`;
+      if (location.hash !== want) {
+        history.replaceState(null, "", `${location.pathname}${location.search}${want}`);
+      }
+    } catch (_) {}
     await renderWorkstream();
     // Auto-run sales agent when contacts/drafts missing — you should not fill contacts manually
     const needAgent = (ws.next_step?.id === "agent" || ws.next_step?.id === "qualify") && autoAgent;
@@ -666,10 +700,24 @@ async function renderWorkstream() {
 
   const n = ws.next_step || {};
   $("#ws-next-title").textContent = n.title || "Done";
-  const toLine = primary.email
-    ? `To: ${primary.name || "Contact"} <${primary.email}>`
+  const lastEmailed = (p.last_contacted_email || ws.last_contacted_email || "").trim();
+  const toEmail = lastEmailed || primary.email || "";
+  const toLine = toEmail
+    ? `To: ${primary.name || "Contact"} <${toEmail}>`
     : (primary.name ? `Contact: ${primary.name} (no email yet)` : (n.detail || ""));
   $("#ws-next-detail").textContent = toLine;
+  const toInput = $("#ws-to-email");
+  if (toInput) toInput.value = toEmail;
+  const lastEl = $("#ws-last-emailed");
+  if (lastEl) {
+    if (lastEmailed) {
+      lastEl.hidden = false;
+      lastEl.textContent = `Last emailed: ${lastEmailed}`;
+    } else {
+      lastEl.hidden = true;
+      lastEl.textContent = "";
+    }
+  }
 
   $("#ws-form").hidden = true;
   $("#ws-form").innerHTML = "";
@@ -836,8 +884,15 @@ async function runAction(act) {
       toast(`First-touch ready (${result.marketing_mode})`);
     } else if (act === "mark_contacted") {
       busy(true);
+      const to = workToEmail();
       await api(`/prospects/${encodeURIComponent(id)}/stage`, {
-        method: "POST", body: JSON.stringify({ stage: "contacted", note: "Sent by desk" }),
+        method: "POST",
+        body: JSON.stringify({
+          stage: "contacted",
+          note: "Sent by desk",
+          email: to,
+          last_contacted_email: to,
+        }),
       });
       state.workstream = await api(`/prospects/${encodeURIComponent(id)}/workstream`);
       toast("Marked contacted — waiting on reply");
@@ -855,7 +910,7 @@ async function runAction(act) {
       }
       if (!body) return toast("No first-touch draft — run sales agent first");
       await navigator.clipboard.writeText((subj ? `Subject: ${subj}\n\n` : "") + body);
-      const to = state._lastAgent?.primary_contact?.email || state.workstream?.primary_contact?.email || "";
+      const to = workToEmail() || state._lastAgent?.primary_contact?.email || state.workstream?.primary_contact?.email || "";
       toast(to ? `Email 1 (first touch) copied → ${to}` : "Email 1 (first touch) copied");
     } else if (act === "copy_follow") {
       const email = state._followEmail;
@@ -863,7 +918,8 @@ async function runAction(act) {
       await navigator.clipboard.writeText(
         (email.subject ? `Subject: ${email.subject}\n\n` : "") + email.body
       );
-      toast("Email 2 (follow-up) copied");
+      const to = workToEmail();
+      toast(to ? `Email 2 (follow-up) copied → ${to}` : "Email 2 (follow-up) copied");
     } else if (act === "prepare_followup") {
       busy(true, "Creating follow-up (only after cold was sent)…");
       const out = await api(`/prospects/${encodeURIComponent(id)}/followup`, { method: "POST" });
@@ -1466,6 +1522,11 @@ function boot() {
   });
 
   fullRefresh().then(() => {
+    const deep = leadDeepLinkId();
+    if (deep) {
+      focusLead(deep, { autoAgent: false });
+      return;
+    }
     // Auto-open first ready lead for immediate flow
     if (state.ready?.[0]?.id) focusLead(state.ready[0].id);
   });

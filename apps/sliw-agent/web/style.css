@@ -452,6 +452,23 @@ a:hover { text-decoration: underline; }
   margin-top: 14px;
 }
 
+.ws-to-row {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+  max-width: 420px;
+}
+.ws-to-row label {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+.ws-to-row input {
+  width: 100%;
+  font-size: 14px;
+}
+
 .ws-form {
   margin-top: 14px;
 }
