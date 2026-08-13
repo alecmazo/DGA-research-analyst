@@ -253,55 +253,113 @@ def _normalize_position_dict(p: dict) -> dict:
     return p
 
 
+_MM_TICKERS = {
+    "SPAXX", "FDRXX", "FDLXX", "FZFXX", "FZDXX", "SPRXX", "VMFXX",
+    "FCASH", "CASH", "USD",
+}
+
+
+def _pos_symbol(p: dict) -> str:
+    inst = p.get("instrument") if isinstance(p.get("instrument"), dict) else {}
+    node = p.get("symbol") if isinstance(p.get("symbol"), dict) else {}
+    return str(
+        inst.get("raw_symbol")
+        or node.get("raw_symbol")
+        or (p.get("symbol") if isinstance(p.get("symbol"), str) else None)
+        or p.get("raw_symbol")
+        or ""
+    ).strip().upper()
+
+
+def _sum_balance_cash(balances) -> float:
+    """USD (and unknown-currency) cash from get_user_account_balance."""
+    if isinstance(balances, dict):
+        balances = balances.get("balances") or balances.get("data") or [balances]
+    total = 0.0
+    for b in balances or []:
+        if not isinstance(b, dict):
+            continue
+        cur = b.get("currency")
+        code = ""
+        if isinstance(cur, dict):
+            code = str(cur.get("code") or "").upper()
+        elif isinstance(cur, str):
+            code = cur.upper()
+        if code and code not in ("USD", "US"):
+            continue
+        c = b.get("cash")
+        if isinstance(c, dict):
+            c = c.get("amount") or c.get("value")
+        if c is not None:
+            try:
+                total += float(c)
+            except (TypeError, ValueError):
+                pass
+    return total
+
+
 def get_account_holdings(user_id: str, user_secret: str, account_id: str):
     """Holdings for ONE account — {positions, total_value}.
 
     Built from the GRANULAR per-account endpoints. Combined holdings endpoints
     are often disabled; SDK 13 uses get_all_account_positions (+ balance).
+
+    Fidelity core sweep (SPAXX) is a cash_equivalent *position*, but sale
+    proceeds often sit as uninvested cash on the balance endpoint only.
+    ``balances.cash`` is SPAXX + that residual. We inject only the residual
+    so we don't double-count the sweep.
     """
     ai = _client().account_information
     uid, sec, aid = str(user_id), user_secret, str(account_id)
 
     positions = _fetch_account_positions(ai, uid, sec, aid)
 
-    # total_value = market value of positions + uninvested cash.
-    # NOTE: Fidelity's core sweep (e.g. SPAXX) appears BOTH as a cash_equivalent
-    # position AND in the balance `cash` field — adding both double-counts it.
-    # So we only fold in balance cash when no cash-equivalent position exists.
     pos_mv = 0.0
-    has_cash_position = False
+    cash_pos_mv = 0.0
     for p in positions:
         if not isinstance(p, dict):
             continue
-        if p.get("cash_equivalent"):
-            has_cash_position = True
+        sym = _pos_symbol(p)
+        is_cash = bool(p.get("cash_equivalent")) or sym in _MM_TICKERS
+        if is_cash:
+            p["cash_equivalent"] = True
         units, price = p.get("units"), p.get("price")
         try:
             if units is not None and price is not None:
-                pos_mv += float(units) * float(price)
+                mv = float(units) * float(price)
+                pos_mv += mv
+                if is_cash:
+                    cash_pos_mv += mv
         except Exception:
             pass
 
-    cash = 0.0
-    if not has_cash_position:
-        try:
-            balances = _to_dict(
-                ai.get_user_account_balance(account_id=aid, user_id=uid, user_secret=sec).body
-            ) or []
-            if isinstance(balances, dict):
-                balances = balances.get("balances") or balances.get("data") or [balances]
-            for b in balances:
-                if not isinstance(b, dict):
-                    continue
-                c = b.get("cash")
-                if isinstance(c, dict):
-                    c = c.get("amount") or c.get("value")
-                if c is not None:
-                    cash += float(c)
-        except Exception:
-            pass
+    cash_bal = 0.0
+    try:
+        balances = _to_dict(
+            ai.get_user_account_balance(account_id=aid, user_id=uid, user_secret=sec).body
+        ) or []
+        cash_bal = _sum_balance_cash(balances)
+    except Exception:
+        pass
 
-    return {"positions": positions, "total_value": (pos_mv + cash) or None}
+    residual = round(cash_bal - cash_pos_mv, 2)
+    if residual > 0.50:
+        positions.append({
+            "units": residual,
+            "price": 1.0,
+            "average_purchase_price": 1.0,
+            "cost_basis": 1.0,
+            "cash_equivalent": True,
+            "instrument_kind": "currency",
+            "symbol": {
+                "raw_symbol": "CASH",
+                "symbol": "CASH",
+                "description": "Uninvested cash",
+            },
+        })
+        pos_mv += residual
+
+    return {"positions": positions, "total_value": pos_mv or None}
 
 
 def get_option_holdings(user_id: str, user_secret: str, account_id: str):

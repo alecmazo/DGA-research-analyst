@@ -44,6 +44,10 @@ export function FundPositionsTable({ rows }: { rows: FundPosition[] }) {
                       <span className={styles.tk} title={p.name || ''}>
                         {p.symbol || '—'}
                       </span>
+                      {(p.asset_class === 'cash' ||
+                        (p.symbol || '').toUpperCase() === 'CASH') && (
+                        <span className={styles.pill}>CASH</span>
+                      )}
                     </td>
                     <td className="tabular">{(p.total_qty || 0).toFixed(2)}</td>
                     <td className="tabular">

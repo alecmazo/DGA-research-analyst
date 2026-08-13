@@ -74,7 +74,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Analyst false timeout** | **`ui458-20260812-analyst-no-false-timeout`** | SUP_20260812_c64355e0 — stop 14m client timeout killing a live/saved Analyst run |
 | **Fund equal pos/reb cards** | **`ui459-20260812-fund-equal-pos-reb-cards`** | SUP_20260812_9ad006bd — Open Positions and Rebalance Suggestions same height |
 | **SnapTrade tax-lot balance** | **`ui460-20260813-snaptrade-taxlot-balance`** | Ledger debit/credit off by $0.0002 aborted tax_lots so Fidelity cash never updated |
-| **Next deploy after this** | **`ui461-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **SnapTrade uninvested cash** | **`ui461-20260813-snaptrade-uninvested-cash`** | Sale proceeds sit in balances.cash minus SPAXX — inject residual CASH lot |
+| **Next deploy after this** | **`ui462-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

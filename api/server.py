@@ -7066,7 +7066,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui460-20260813-snaptrade-taxlot-balance"
+WEB_BUILD_VERSION = "ui461-20260813-snaptrade-uninvested-cash"
 
 
 @app.get("/api/build")
@@ -17093,7 +17093,7 @@ def fund_positions(request: Request, fund_id: str = None):
             fid = _resolve_fund_id(cur, fund_id)
             cur.execute("""
                 SELECT
-                    s.symbol, s.name, s.issuer,
+                    s.symbol, s.name, s.issuer, s.asset_class,
                     COUNT(tl.id)                                              AS lot_count,
                     SUM(tl.quantity)                                          AS total_qty,
                     SUM(tl.quantity * tl.cost_basis_per_unit)
@@ -17103,7 +17103,7 @@ def fund_positions(request: Request, fund_id: str = None):
                   FROM tax_lots tl
                   JOIN securities s ON s.id = tl.security_id
                  WHERE tl.fund_id = %s AND tl.closed_at IS NULL
-                 GROUP BY s.id, s.symbol, s.name, s.issuer
+                 GROUP BY s.id, s.symbol, s.name, s.issuer, s.asset_class
                  ORDER BY SUM(tl.quantity * tl.cost_basis_per_unit) DESC
             """, (fid,))
             rows = cur.fetchall()
@@ -17149,12 +17149,20 @@ def fund_positions(request: Request, fund_id: str = None):
                 if last_p is None and _snap_px.get(sym):
                     last_p = _snap_px[sym]
                     pct_chg = None
+                is_cash = (
+                    (r.get("asset_class") or "") == "cash"
+                    or _is_cash_ticker(sym)
+                    or (sym or "").upper() in ("CASH", "USD", "FCASH")
+                )
+                if last_p is None and is_cash:
+                    last_p = 1.0
                 mkt_val   = round(qty * last_p, 2) if last_p else None
                 if mkt_val:
                     total_mkt += mkt_val
                 result.append({
                     "symbol":          sym,
-                    "name":            r["name"],
+                    "name":            r["name"] or ("Uninvested cash" if is_cash else None),
+                    "asset_class":     r.get("asset_class"),
                     "issuer":          r["issuer"],
                     "lot_count":       r["lot_count"],
                     "total_qty":       qty,
@@ -33519,7 +33527,7 @@ def _ledger_q4(value) -> Decimal:
 
 
 _FIDELITY_CASH_SYMS = {
-    "CASH", "USD", "FCASH", "SPAXX", "FZFXX", "FDRXX", "SPRXX", "FDLXX",
+    "CASH", "USD", "FCASH", "SPAXX", "FZFXX", "FDRXX", "SPRXX", "FDLXX", "FZDXX",
 }
 
 

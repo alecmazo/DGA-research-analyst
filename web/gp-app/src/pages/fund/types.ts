@@ -56,6 +56,7 @@ export type FundDetail = {
 export type FundPosition = {
   symbol?: string
   name?: string
+  asset_class?: string
   total_qty?: number
   avg_cost?: number | null
   last_price?: number | null
