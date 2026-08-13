@@ -271,7 +271,13 @@ def workstream_for_prospect(prospect_id: str) -> dict[str, Any]:
             "done": True,
             "detail": detail,
         }
-        actions = []
+        actions = [
+            {
+                "id": "disqualify",
+                "label": "Save / update reason",
+                "type": "button",
+            }
+        ]
     else:
         next_step = next((s for s in steps if not s["done"]), None)
         if not next_step:
@@ -353,13 +359,16 @@ def disqualify_prospect(prospect_id: str, reason: str = "") -> dict[str, Any]:
     """Park a lead as not-ICP / wrong geo. Does NOT escalate to Edyta.
 
     No Edyta brief is written and agent_status is never set to edyta_pipeline.
+    Safe to call again on an already-disqualified lead: stage stays
+    disqualified and only disqualify_reason is updated.
     """
     p = crm.get_prospect(prospect_id)
     if not p:
         raise KeyError(prospect_id)
     reason = (reason or "").strip()
     note = reason or "Not a fit / wrong geo"
-    crm.set_stage(prospect_id, "disqualified", note=note)
+    if p.get("stage") != "disqualified":
+        crm.set_stage(prospect_id, "disqualified", note=note)
     p = crm.update_prospect(
         prospect_id,
         disqualify_reason=reason,

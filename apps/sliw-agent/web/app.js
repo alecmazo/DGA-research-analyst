@@ -734,6 +734,9 @@ async function renderWorkstream() {
   if ((ws.actions || []).some((a) => a.type === "form_reply")) {
     showReplyForm();
   }
+  if ((ws.actions || []).some((a) => a.id === "disqualify")) {
+    showDisqualifyForm();
+  }
 
   const out = $("#ws-output");
   out.hidden = false;
@@ -862,6 +865,18 @@ function showReplyForm() {
     </label>`;
 }
 
+function showDisqualifyForm() {
+  const f = $("#ws-form");
+  if (!f) return;
+  if ($("#c-disqualify-reason")) return;
+  f.hidden = false;
+  const existing = (state.workstream?.prospect?.disqualify_reason || "");
+  f.insertAdjacentHTML("beforeend", `
+    <label>Park reason (optional)
+      <textarea id="c-disqualify-reason" rows="2" placeholder="e.g. Boston — not Bay Area ICP">${esc(existing)}</textarea>
+    </label>`);
+}
+
 async function runAction(act) {
   const id = state.focusId;
   if (!id) return;
@@ -939,12 +954,10 @@ async function runAction(act) {
       renderWorkstream();
       await softRefresh();
     } else if (act === "disqualify") {
-      const raw = window.prompt("Optional reason (e.g. Boston, not Bay Area)");
-      if (raw === null) return; // cancelled
       busy(true, "Parking lead…");
       const out = await api(`/prospects/${encodeURIComponent(id)}/disqualify`, {
         method: "POST",
-        body: JSON.stringify({ reason: String(raw).trim() }),
+        body: JSON.stringify({ reason: $("#c-disqualify-reason")?.value || "" }),
       });
       toast("Parked — not sent to Edyta");
       state.workstream = out.workstream || await api(`/prospects/${encodeURIComponent(id)}/workstream`);
