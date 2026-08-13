@@ -79,21 +79,24 @@ def draft_cold_email(
             f"might enjoy something different for a team gathering — {company} made the list."
         )
 
-    # Prefer the published packages Gamma site; never force an attachment
+    # Prefer the published corporate packages site; never force an attachment
     deck = (master_deck_url or gamma_url or PACKAGES_DECK or CORPORATE).strip()
-    if "jk6b492p7fvmjhq" in deck:
-        # Old auto-generated deck — replace with the good published one
+    if "jk6b492p7fvmjhq" in deck or "gamma.app" in deck:
+        # Old auto-generated / Gamma deck — replace with corporate site
+        deck = PACKAGES_DECK
+    if "master-packages.pdf" in deck:
+        # Wedding/partner kit PDF must never appear in corporate cold body
         deck = PACKAGES_DECK
     one = package_one_liner or "a high-energy, zero-judgment session people actually talk about afterward"
 
     subject = subject_override or subject_variants(company=company, package_name=package_name)[0]
 
-    # Optional PDF line if provided later via env/meta
+    # Optional corporate PDF only — never wedding master-packages.pdf
     pdf_line = ""
     try:
-        from .master_deck import get_pdf_url
-        pdf = get_pdf_url()
-        if pdf:
+        from .master_deck import get_corporate_pdf_url, corporate_pdf_exists, MASTER_PDF_PUBLIC_PATH
+        pdf = get_corporate_pdf_url() if corporate_pdf_exists() else ""
+        if pdf and MASTER_PDF_PUBLIC_PATH not in pdf and "master-packages.pdf" not in pdf:
             pdf_line = f"\nPDF version (optional): {pdf}\n"
     except Exception:
         pass
@@ -141,7 +144,9 @@ def draft_followup_email(
     first = _first_name(contact_name)
     greeting = f"Hi {first}," if first else "Hi,"
     deck = (master_deck_url or gamma_url or PACKAGES_DECK or CORPORATE).strip()
-    if "jk6b492p7fvmjhq" in deck:
+    if "jk6b492p7fvmjhq" in deck or "gamma.app" in deck:
+        deck = PACKAGES_DECK
+    if "master-packages.pdf" in deck:
         deck = PACKAGES_DECK
     subject = f"Re: {company} — following up gently"
     body = f"""{greeting}

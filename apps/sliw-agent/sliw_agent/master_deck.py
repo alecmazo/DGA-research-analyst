@@ -3,7 +3,8 @@ Master corporate packages assets for outreach.
 
 - Packages site: https://corporate.edytasliwinska.com/
 - Corporate page: https://edytasliwinska.com/corporate
-- Master PDF: uploaded via Materials → /sliw/media/master-packages.pdf
+- Wedding/master PDF: Materials → /sliw/media/master-packages.pdf
+- Corporate PDF: Materials → /sliw/media/corporate-packages.pdf (no Dropbox for now)
 
 PDF is dual-written to:
   1. Persistent data dir (STOCKS_FOLDER/sliw-agent when set) — Railway volume
@@ -27,6 +28,8 @@ log = logging.getLogger("sliw.master_deck")
 
 MASTER_PDF_PUBLIC_PATH = "/sliw/media/master-packages.pdf"
 MASTER_PDF_FILENAME = "master_packages.pdf"
+CORPORATE_PDF_PUBLIC_PATH = "/sliw/media/corporate-packages.pdf"
+CORPORATE_PDF_FILENAME = "corporate_packages.pdf"
 # Dropbox UI path: Dropbox → Apps → Sliw (override with SLIW_DROPBOX_FOLDER)
 DEFAULT_DROPBOX_FOLDER = "/Apps/Sliw"
 CORPORATE_PAGE = TALENT.get("corporate_page") or "https://edytasliwinska.com/corporate"
@@ -363,14 +366,35 @@ def get_master_deck_meta(request_base: str | None = None) -> dict[str, Any]:
         "dropbox_path": dropbox_pdf_dest(),
         "dropbox_shared_url": old.get("dropbox_shared_url"),
         "note": (
-            "Corporate packages site (corporate.edytasliwinska.com). Upload master PDF below for a "
-            "downloadable link in emails (not attached). Also mirrored to Dropbox Apps/Sliw."
+            "Corporate packages site (corporate.edytasliwinska.com). Wedding and corporate PDFs are separate "
+            "Materials slots. Corporate outreach uses corporate PDF only (not wedding master PDF)."
         ),
         "updated_at": datetime.utcnow().isoformat(),
     }
     if exists and not meta.get("pdf_url"):
         meta["pdf_url"] = MASTER_PDF_PUBLIC_PATH
         meta["pdf_preview_url"] = MASTER_PDF_PUBLIC_PATH
+
+    # Corporate packages PDF (separate from wedding master PDF; Dropbox skipped for now)
+    corp_exists = corporate_pdf_exists()
+    corp_path = corporate_pdf_path()
+    corp_url = get_corporate_pdf_url(request_base) if corp_exists else (get_corporate_pdf_url(request_base) or None)
+    meta["corporate_pdf_url"] = corp_url if corp_exists else None
+    meta["corporate_pdf_uploaded"] = corp_exists
+    meta["corporate_pdf_bytes"] = corp_path.stat().st_size if corp_exists else 0
+    meta["corporate_pdf_public_path"] = CORPORATE_PDF_PUBLIC_PATH
+    meta["corporate_pdf_filename"] = old.get("corporate_pdf_original_name") or (
+        CORPORATE_PDF_FILENAME if corp_exists else None
+    )
+    meta["corporate_pdf_original_name"] = old.get("corporate_pdf_original_name") if corp_exists else None
+    meta["corporate_pdf_uploaded_at"] = old.get("corporate_pdf_uploaded_at") if corp_exists else None
+    meta["corporate_pdf_preview_url"] = (
+        (corp_url or CORPORATE_PDF_PUBLIC_PATH) if corp_exists else None
+    )
+    meta["corporate_pdf_storage_path"] = str(corp_path) if corp_exists else None
+    if corp_exists and not meta.get("corporate_pdf_url"):
+        meta["corporate_pdf_url"] = CORPORATE_PDF_PUBLIC_PATH
+        meta["corporate_pdf_preview_url"] = CORPORATE_PDF_PUBLIC_PATH
 
     try:
         master_meta_path().write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
@@ -441,8 +465,9 @@ def save_master_pdf(
         ),
         "updated_at": uploaded_at,
     }
+    # Persist slot-local fields; return full Materials meta (both PDF slots)
     master_meta_path().write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
-    return meta
+    return get_master_deck_meta(request_base=request_base)
 
 
 def delete_master_pdf() -> dict[str, Any]:
@@ -450,25 +475,162 @@ def delete_master_pdf() -> dict[str, Any]:
     if p.exists():
         p.unlink()
     delete_master_pdf_from_dropbox()
-    # Clear dropbox fields in meta by rewriting
-    meta = get_master_deck_meta()
-    meta["dropbox_shared_url"] = None
-    meta["dropbox_ok"] = None
+    # Clear dropbox fields in persisted master meta, then return dual-slot meta
     try:
-        master_meta_path().write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+        old: dict = {}
+        if master_meta_path().exists():
+            old = json.loads(master_meta_path().read_text(encoding="utf-8"))
+        old["dropbox_shared_url"] = None
+        old["dropbox_ok"] = None
+        old["pdf_uploaded"] = False
+        master_meta_path().write_text(json.dumps(old, indent=2) + "\n", encoding="utf-8")
     except Exception:
         pass
-    return meta
+    return get_master_deck_meta()
 
 
-def email_asset_links(request_base: str | None = None) -> dict[str, str]:
+
+def corporate_pdf_path() -> Path:
+    return data_dir() / CORPORATE_PDF_FILENAME
+
+
+def corporate_pdf_exists() -> bool:
+    p = corporate_pdf_path()
+    try:
+        return p.is_file() and p.stat().st_size > 100
+    except OSError:
+        return False
+
+
+def get_corporate_pdf_url(request_base: str | None = None) -> str:
+    """Public URL for corporate packages PDF. Never returns wedding master PDF."""
+    env = (os.environ.get("SLIW_CORPORATE_PDF_URL") or "").strip()
+    if env:
+        return env
+    if not corporate_pdf_exists():
+        try:
+            data = json.loads(master_meta_path().read_text(encoding="utf-8"))
+            url = (data.get("corporate_pdf_url") or "").strip()
+            if (
+                url
+                and url.startswith("http")
+                and MASTER_PDF_PUBLIC_PATH not in url
+                and "master-packages" not in url
+                and "master_packages" not in url
+            ):
+                return url
+        except Exception:
+            pass
+        return ""
+    base = public_base_url(request_base)
+    if base:
+        return base + CORPORATE_PDF_PUBLIC_PATH
+    return CORPORATE_PDF_PUBLIC_PATH
+
+
+def save_corporate_pdf(
+    content: bytes,
+    *,
+    original_name: str = CORPORATE_PDF_FILENAME,
+    request_base: str | None = None,
+) -> dict[str, Any]:
+    """Save corporate packages PDF. Does not touch wedding master_packages.pdf."""
+    if not content or len(content) < 100:
+        raise ValueError("Empty or tiny file — expected a real PDF")
+    if not content[:8].startswith(b"%PDF") and not original_name.lower().endswith(".pdf"):
+        raise ValueError("File does not look like a PDF")
+
+    path = corporate_pdf_path()
+    if path.name == MASTER_PDF_FILENAME or path.resolve() == master_pdf_path().resolve():
+        raise ValueError("Refusing to overwrite wedding master packages PDF")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    if not path.is_file() or path.stat().st_size < 100:
+        raise ValueError(f"Failed to write corporate PDF to {path}")
+
+    uploaded_at = datetime.utcnow().isoformat()
+    old: dict[str, Any] = {}
+    try:
+        if master_meta_path().exists():
+            old = json.loads(master_meta_path().read_text(encoding="utf-8"))
+    except Exception:
+        old = {}
+
+    pdf_url = get_corporate_pdf_url(request_base) or CORPORATE_PDF_PUBLIC_PATH
+    old.update(
+        {
+            "corporate_pdf_url": pdf_url,
+            "corporate_pdf_preview_url": pdf_url,
+            "corporate_pdf_uploaded": True,
+            "corporate_pdf_bytes": path.stat().st_size,
+            "corporate_pdf_public_path": CORPORATE_PDF_PUBLIC_PATH,
+            "corporate_pdf_filename": original_name,
+            "corporate_pdf_original_name": original_name,
+            "corporate_pdf_uploaded_at": uploaded_at,
+            "corporate_pdf_storage_path": str(path),
+            "updated_at": uploaded_at,
+        }
+    )
+    master_meta_path().write_text(json.dumps(old, indent=2) + "\n", encoding="utf-8")
+    return get_master_deck_meta(request_base)
+
+
+def delete_corporate_pdf() -> dict[str, Any]:
+    """Remove corporate PDF only. Wedding master PDF is untouched."""
+    p = corporate_pdf_path()
+    if p.exists() and p.name != MASTER_PDF_FILENAME:
+        p.unlink()
+    old: dict[str, Any] = {}
+    try:
+        if master_meta_path().exists():
+            old = json.loads(master_meta_path().read_text(encoding="utf-8"))
+    except Exception:
+        old = {}
+    for key in (
+        "corporate_pdf_url",
+        "corporate_pdf_preview_url",
+        "corporate_pdf_uploaded",
+        "corporate_pdf_bytes",
+        "corporate_pdf_filename",
+        "corporate_pdf_original_name",
+        "corporate_pdf_uploaded_at",
+        "corporate_pdf_storage_path",
+    ):
+        old.pop(key, None)
+    old["corporate_pdf_uploaded"] = False
+    old["corporate_pdf_bytes"] = 0
+    old["updated_at"] = datetime.utcnow().isoformat()
+    try:
+        master_meta_path().write_text(json.dumps(old, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return get_master_deck_meta()
+
+
+def email_asset_links(
+    request_base: str | None = None,
+    *,
+    book: str = "corporate",
+) -> dict[str, str]:
+    """Links for email bodies.
+
+    Corporate outreach never receives the wedding master-packages.pdf.
+    Wedding book may still use the master PDF.
+    """
     out = {
         "corporate_page": get_corporate_page_url(),
         "packages_deck": get_master_deck_url(),
     }
-    pdf = get_pdf_url(request_base)
-    if pdf and master_pdf_exists():
-        out["pdf"] = pdf
+    book_l = (book or "corporate").strip().lower()
+    if book_l == "wedding":
+        pdf = get_pdf_url(request_base)
+        if pdf and master_pdf_exists():
+            out["pdf"] = pdf
+    else:
+        pdf = get_corporate_pdf_url(request_base)
+        if pdf and corporate_pdf_exists():
+            out["pdf"] = pdf
     return out
 
 

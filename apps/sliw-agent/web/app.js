@@ -292,9 +292,36 @@ async function loadMaterials() {
   }
 }
 
+function _materialsDropboxHint(m, {
+  dropboxKey = "dropbox",
+  pathKey = "dropbox_path",
+  sharedKey = "dropbox_shared_url",
+  okKey = "dropbox_ok",
+  errKey = "dropbox_error",
+  defaultPath = "/Apps/Sliw/master_packages.pdf",
+} = {}) {
+  const parts = [];
+  if (m.data_dir) parts.push(`Local: ${m.data_dir}`);
+  const dbx = m[dropboxKey] || {};
+  const dbxPath = m[pathKey] || dbx.path || defaultPath;
+  if (dbx.ok || m[okKey]) {
+    parts.push(`Dropbox: ${dbxPath} ✓`);
+  } else if (dbx.configured || dbx.folder) {
+    const err = dbx.error || m[errKey];
+    parts.push(err
+      ? `Dropbox: ${dbxPath} (mirror error: ${err})`
+      : `Dropbox: ${dbxPath} (mirrored on next upload)`);
+  } else {
+    parts.push(`Dropbox: ${dbxPath} (set DROPBOX_* env to enable)`);
+  }
+  if (m[sharedKey] || dbx.shared_url) parts.push("Shared link ready");
+  return parts.join(" · ");
+}
+
 function renderMaterials() {
   const m = state.materials || {};
-  // Accept file on disk OR any usable pdf_url
+
+  // Slot 1 — wedding / partner kit master PDF (path unchanged)
   const hasPdf = !!(m.pdf_uploaded || (m.pdf_bytes && m.pdf_bytes > 100) || m.pdf_url);
   const pdfHref = m.pdf_preview_url || m.pdf_url || "/sliw/media/master-packages.pdf";
   const title = $("#pdf-status-title");
@@ -306,16 +333,16 @@ function renderMaterials() {
   const storage = $("#pdf-storage-hint");
 
   if (title) {
-    title.textContent = hasPdf ? "PDF ready ✓" : "No PDF on server yet";
+    title.textContent = hasPdf ? "Wedding master PDF ready ✓" : "No wedding master PDF on server yet";
   }
   if (detail) {
     if (hasPdf) {
       const kb = m.pdf_bytes ? `${Math.round(m.pdf_bytes / 1024)} KB` : "";
       const when = m.pdf_uploaded_at ? m.pdf_uploaded_at.replace("T", " ").slice(0, 16) + " UTC" : "";
       const orig = m.pdf_original_name || m.pdf_filename || "master_packages.pdf";
-      detail.innerHTML = `<strong>${esc(orig)}</strong>${kb ? " · " + esc(kb) : ""}${when ? " · " + esc(when) : ""}<br/><span class="muted">Linked in new outreach emails (browser link, not attachment).</span>`;
+      detail.innerHTML = `<strong>${esc(orig)}</strong>${kb ? " · " + esc(kb) : ""}${when ? " · " + esc(when) : ""}<br/><span class="muted">Wedding / partner kit only — not used in corporate cold emails.</span>`;
     } else {
-      detail.textContent = "Upload your master packages PDF. After a successful upload you’ll see a live preview here.";
+      detail.textContent = "Upload the wedding/partner kit master packages PDF. Path stays /sliw/media/master-packages.pdf.";
     }
   }
   if (view) {
@@ -323,13 +350,10 @@ function renderMaterials() {
     if (hasPdf) view.href = pdfHref;
   }
   if (del) del.hidden = !hasPdf;
-
-  // Live preview card
   if (frame && empty) {
     if (hasPdf) {
       empty.hidden = true;
       frame.hidden = false;
-      // cache-bust so replace shows new file
       frame.src = pdfHref + (pdfHref.includes("?") ? "&" : "?") + "t=" + Date.now();
     } else {
       frame.hidden = true;
@@ -338,29 +362,66 @@ function renderMaterials() {
     }
   }
   if (storage) {
-    const parts = [];
-    if (m.data_dir) {
-      parts.push(`Local: ${m.data_dir}`);
-    }
-    const dbx = m.dropbox || {};
-    const dbxPath = m.dropbox_path || dbx.path || "/Apps/Sliw/master_packages.pdf";
-    if (dbx.ok || m.dropbox_ok) {
-      parts.push(`Dropbox: ${dbxPath} ✓`);
-    } else if (dbx.configured || dbx.folder) {
-      const err = dbx.error || m.dropbox_error;
-      parts.push(err
-        ? `Dropbox: ${dbxPath} (mirror error: ${err})`
-        : `Dropbox: ${dbxPath} (mirrored on next upload)`);
-    } else {
-      parts.push(`Dropbox: ${dbxPath} (set DROPBOX_* env to enable)`);
-    }
-    if (m.dropbox_shared_url) {
-      parts.push("Shared link ready");
-    }
-    storage.textContent = parts.join(" · ");
+    storage.textContent = _materialsDropboxHint(m, {
+      defaultPath: "/Apps/Sliw/master_packages.pdf",
+    });
   }
+
+  // Slot 2 — corporate packages PDF (corporate outreach only)
+  const hasCorp = !!(m.corporate_pdf_uploaded || (m.corporate_pdf_bytes && m.corporate_pdf_bytes > 100) || m.corporate_pdf_url);
+  const corpHref = m.corporate_pdf_preview_url || m.corporate_pdf_url || "/sliw/media/corporate-packages.pdf";
+  const cTitle = $("#corp-pdf-status-title");
+  const cDetail = $("#corp-pdf-status-detail");
+  const cView = $("#corp-pdf-view-link");
+  const cDel = $("#corp-pdf-delete-btn");
+  const cFrame = $("#corp-pdf-preview-frame");
+  const cEmpty = $("#corp-pdf-preview-empty");
+  const cStorage = $("#corp-pdf-storage-hint");
+
+  if (cTitle) {
+    cTitle.textContent = hasCorp ? "Corporate PDF ready ✓" : "No corporate PDF on server yet";
+  }
+  if (cDetail) {
+    if (hasCorp) {
+      const kb = m.corporate_pdf_bytes ? `${Math.round(m.corporate_pdf_bytes / 1024)} KB` : "";
+      const when = m.corporate_pdf_uploaded_at ? m.corporate_pdf_uploaded_at.replace("T", " ").slice(0, 16) + " UTC" : "";
+      const orig = m.corporate_pdf_original_name || m.corporate_pdf_filename || "corporate_packages.pdf";
+      cDetail.innerHTML = `<strong>${esc(orig)}</strong>${kb ? " · " + esc(kb) : ""}${when ? " · " + esc(when) : ""}<br/><span class="muted">Linked in corporate outreach when present (browser link, not attachment). Never uses wedding master PDF.</span>`;
+    } else {
+      cDetail.textContent = "Upload the corporate packages PDF. Corporate emails will link it only after upload; package site stays corporate.edytasliwinska.com.";
+    }
+  }
+  if (cView) {
+    cView.hidden = !hasCorp;
+    if (hasCorp) cView.href = corpHref;
+  }
+  if (cDel) cDel.hidden = !hasCorp;
+  if (cFrame && cEmpty) {
+    if (hasCorp) {
+      cEmpty.hidden = true;
+      cFrame.hidden = false;
+      cFrame.src = corpHref + (corpHref.includes("?") ? "&" : "?") + "t=" + Date.now();
+    } else {
+      cFrame.hidden = true;
+      cFrame.removeAttribute("src");
+      cEmpty.hidden = false;
+    }
+  }
+  if (cStorage) {
+    cStorage.textContent = _materialsDropboxHint(m, {
+      dropboxKey: "corporate_dropbox",
+      pathKey: "corporate_dropbox_path",
+      sharedKey: "corporate_dropbox_shared_url",
+      okKey: "corporate_dropbox_ok",
+      errKey: "corporate_dropbox_error",
+      defaultPath: "/Apps/Sliw/corporate_packages.pdf",
+    });
+  }
+
   if (m.gamma_site && $("#gamma-site-link")) {
     $("#gamma-site-link").href = m.gamma_site;
+  } else if ($("#gamma-site-link")) {
+    $("#gamma-site-link").href = "https://corporate.edytasliwinska.com/";
   }
   if (m.corporate_page && $("#corporate-page-link")) {
     $("#corporate-page-link").href = m.corporate_page;
@@ -1290,7 +1351,7 @@ function boot() {
     } catch (e) { toast(e.message); }
   });
 
-  // Master PDF upload
+  // Wedding / partner kit master PDF upload (path unchanged)
   $("#pdf-file-input")?.addEventListener("change", async (ev) => {
     const file = ev.target.files && ev.target.files[0];
     if (!file) return;
@@ -1298,7 +1359,7 @@ function boot() {
       toast("Please choose a PDF file");
       return;
     }
-    busy(true, "Uploading master PDF…");
+    busy(true, "Uploading wedding master PDF…");
     const msg = $("#pdf-upload-msg");
     try {
       const fd = new FormData();
@@ -1317,7 +1378,7 @@ function boot() {
       const data = await res.json();
       state.materials = data;
       renderMaterials();
-      toast("Master PDF uploaded — linked in new outreach");
+      toast("Wedding master PDF uploaded (not used in corporate outreach)");
       if (msg) msg.textContent = `Uploaded. Public link: ${data.pdf_url || "/sliw/media/master-packages.pdf"}`;
     } catch (e) {
       toast(e.message);
@@ -1329,10 +1390,59 @@ function boot() {
   });
 
   $("#pdf-delete-btn")?.addEventListener("click", async () => {
-    if (!confirm("Remove the master PDF from the server?")) return;
+    if (!confirm("Remove the wedding master PDF from the server?")) return;
     try {
       await api("/master-deck/pdf", { method: "DELETE" });
-      toast("PDF removed");
+      toast("Wedding master PDF removed");
+      await loadMaterials();
+    } catch (e) { toast(e.message); }
+  });
+
+  // Corporate packages PDF upload (independent slot)
+  $("#corp-pdf-file-input")?.addEventListener("change", async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      toast("Please choose a PDF file");
+      return;
+    }
+    busy(true, "Uploading corporate packages PDF…");
+    const msg = $("#corp-pdf-upload-msg");
+    try {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const token = localStorage.getItem(TOKEN_KEY) || "";
+      const res = await fetch(`${API}/corporate-packages/pdf`, {
+        method: "POST",
+        headers: token ? { "x-auth-v2-token": token } : {},
+        body: fd,
+      });
+      if (!res.ok) {
+        let err = res.statusText;
+        try { err = (await res.json()).detail || err; } catch (_) {}
+        throw new Error(err);
+      }
+      const data = await res.json();
+      state.materials = data;
+      renderMaterials();
+      toast("Corporate packages PDF uploaded — linked in corporate outreach");
+      if (msg) {
+        msg.textContent = `Uploaded. Public link: ${data.corporate_pdf_url || "/sliw/media/corporate-packages.pdf"}`;
+      }
+    } catch (e) {
+      toast(e.message);
+      if (msg) msg.textContent = e.message;
+    } finally {
+      busy(false);
+      ev.target.value = "";
+    }
+  });
+
+  $("#corp-pdf-delete-btn")?.addEventListener("click", async () => {
+    if (!confirm("Remove the corporate packages PDF from the server?")) return;
+    try {
+      await api("/corporate-packages/pdf", { method: "DELETE" });
+      toast("Corporate packages PDF removed");
       await loadMaterials();
     } catch (e) { toast(e.message); }
   });

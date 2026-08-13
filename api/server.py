@@ -36267,7 +36267,7 @@ def _mount_sliw_agent() -> None:
                 status_code=307,
             )
 
-        # Public master PDF for email body links (no login — cold recipients open this)
+        # Public master / wedding PDF for Materials (path unchanged — do not overwrite)
         @app.get("/sliw/media/master-packages.pdf")
         def _sliw_master_pdf():
             try:
@@ -36281,6 +36281,29 @@ def _mount_sliw_agent() -> None:
                     detail="No master PDF uploaded yet. Upload in Sliw → Materials.",
                 )
             path = master_pdf_path()
+            return FileResponse(
+                str(path),
+                media_type="application/pdf",
+                filename="Edyta_Sliwinska_Wedding_Master_Packages.pdf",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Content-Disposition": 'inline; filename="Edyta_Sliwinska_Wedding_Master_Packages.pdf"',
+                },
+            )
+
+        # Public corporate packages PDF (separate slot; corporate outreach only)
+        @app.get("/sliw/media/corporate-packages.pdf")
+        def _sliw_corporate_pdf():
+            try:
+                from sliw_agent.master_deck import corporate_pdf_exists, corporate_pdf_path
+            except Exception:
+                raise HTTPException(status_code=404, detail="PDF module unavailable")
+            if not corporate_pdf_exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail="No corporate packages PDF uploaded yet. Upload in Sliw → Materials.",
+                )
+            path = corporate_pdf_path()
             return FileResponse(
                 str(path),
                 media_type="application/pdf",

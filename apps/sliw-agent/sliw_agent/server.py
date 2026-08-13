@@ -48,6 +48,10 @@ from .master_deck import (
     delete_master_pdf,
     master_pdf_exists,
     master_pdf_path,
+    save_corporate_pdf,
+    delete_corporate_pdf,
+    corporate_pdf_exists,
+    corporate_pdf_path,
 )
 from .wedding_agent import (
     apply_stripe_checkout_session,
@@ -663,6 +667,65 @@ def create_api_router() -> APIRouter:
         require_sliw_access(request)
         return delete_master_pdf()
 
+    @r.post("/corporate-packages/pdf")
+    async def api_upload_corporate_pdf(
+        request: Request,
+        file: UploadFile = File(...),
+    ) -> dict[str, Any]:
+        """Upload corporate packages PDF (Materials slot 2; linked in corporate outreach only)."""
+        require_sliw_access(request)
+        name = file.filename or "corporate_packages.pdf"
+        if not name.lower().endswith(".pdf"):
+            raise HTTPException(400, "Please upload a .pdf file")
+        content = await file.read()
+        if len(content) > 25 * 1024 * 1024:
+            raise HTTPException(400, "PDF too large (max 25 MB)")
+        if len(content) < 100:
+            raise HTTPException(400, "File is empty or too small")
+        base = str(request.base_url).rstrip("/")
+        try:
+            meta = save_corporate_pdf(
+                content,
+                original_name=name,
+                request_base=base,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {
+            "ok": True,
+            "message": "Corporate packages PDF uploaded",
+            **meta,
+        }
+
+    @r.delete("/corporate-packages/pdf")
+    def api_delete_corporate_pdf(request: Request) -> dict[str, Any]:
+        require_sliw_access(request)
+        return delete_corporate_pdf()
+
+    @r.get("/corporate-packages")
+    def api_corporate_packages(request: Request) -> dict[str, Any]:
+        """Meta for corporate PDF slot (also included on GET /master-deck)."""
+        require_sliw_access(request)
+        base = str(request.base_url).rstrip("/")
+        meta = get_master_deck_meta(request_base=base)
+        return {
+            "gamma_site": meta.get("gamma_site"),
+            "corporate_page": meta.get("corporate_page"),
+            "corporate_pdf_url": meta.get("corporate_pdf_url"),
+            "corporate_pdf_uploaded": meta.get("corporate_pdf_uploaded"),
+            "corporate_pdf_bytes": meta.get("corporate_pdf_bytes"),
+            "corporate_pdf_public_path": meta.get("corporate_pdf_public_path"),
+            "corporate_pdf_filename": meta.get("corporate_pdf_filename"),
+            "corporate_pdf_original_name": meta.get("corporate_pdf_original_name"),
+            "corporate_pdf_uploaded_at": meta.get("corporate_pdf_uploaded_at"),
+            "corporate_pdf_preview_url": meta.get("corporate_pdf_preview_url"),
+            "corporate_pdf_storage_path": meta.get("corporate_pdf_storage_path"),
+            "corporate_dropbox": meta.get("corporate_dropbox"),
+            "corporate_dropbox_path": meta.get("corporate_dropbox_path"),
+            "corporate_dropbox_shared_url": meta.get("corporate_dropbox_shared_url"),
+            "data_dir": meta.get("data_dir"),
+        }
+
     @r.post("/prospects/bulk")
     def bulk_import(body: BulkImportRequest, request: Request) -> dict[str, Any]:
         require_sliw_access(request)
@@ -948,6 +1011,37 @@ def index() -> FileResponse:
 
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+
+
+
+@app.get("/sliw/media/master-packages.pdf")
+def serve_master_pdf():
+    if not master_pdf_exists(hydrate=True):
+        raise HTTPException(404, "No master PDF uploaded yet")
+    return FileResponse(
+        str(master_pdf_path()),
+        media_type="application/pdf",
+        filename="Edyta_Sliwinska_Wedding_Packages.pdf",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Content-Disposition": 'inline; filename="Edyta_Sliwinska_Wedding_Packages.pdf"',
+        },
+    )
+
+
+@app.get("/sliw/media/corporate-packages.pdf")
+def serve_corporate_pdf():
+    if not corporate_pdf_exists():
+        raise HTTPException(404, "No corporate PDF uploaded yet")
+    return FileResponse(
+        str(corporate_pdf_path()),
+        media_type="application/pdf",
+        filename="Edyta_Sliwinska_Corporate_Packages.pdf",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Content-Disposition": 'inline; filename="Edyta_Sliwinska_Corporate_Packages.pdf"',
+        },
+    )
 
 
 def main() -> None:

@@ -95,8 +95,10 @@ def run_sales_agent(
             master_url = meta.get("gamma_site") or meta.get("gamma_url") or master_url
         except Exception:
             master_url = get_master_deck_url()
-    # Never use the old auto-generated gamma.app/docs link
-    if "jk6b492p7fvmjhq" in (master_url or ""):
+    # Never use the old auto-generated gamma.app/docs link or wedding master PDF as package site
+    if "jk6b492p7fvmjhq" in (master_url or "") or "gamma.app" in (master_url or ""):
+        master_url = TALENT.get("package_site") or "https://corporate.edytasliwinska.com/"
+    if "master-packages.pdf" in (master_url or ""):
         master_url = TALENT.get("package_site") or "https://corporate.edytasliwinska.com/"
 
     # 1. Score if missing
@@ -242,13 +244,12 @@ def run_sales_agent(
     p = crm.get_prospect(prospect_id) or p
 
     # 4. First-touch draft only (warm human voice)
-    # Body link = master deck if ready, else corporate page. Custom Gamma only as extra.
-    deck_for_body = master_url
-    if mode in ("light", "full") and gamma_url and "gamma.app" in str(gamma_url):
-        deck_for_body = gamma_url  # personalized live deck in body
-    elif master_url:
-        deck_for_body = master_url
-    else:
+    # Body package site = corporate.edytasliwinska.com (never wedding master PDF).
+    # PDF link (if any) is added inside draft_cold_email from corporate-packages only.
+    deck_for_body = master_url or PORTFOLIO_URL
+    if "master-packages.pdf" in str(deck_for_body) or "gamma.app" in str(deck_for_body):
+        deck_for_body = TALENT.get("package_site") or "https://corporate.edytasliwinska.com/"
+    if not deck_for_body:
         deck_for_body = PORTFOLIO_URL
 
     email = draft_cold_email(
@@ -354,6 +355,8 @@ def prepare_followup(prospect_id: str) -> dict[str, Any]:
         )
     contact = (p.get("contacts") or [{}])[0]
     deck = p.get("master_deck_url") or p.get("gamma_url") or get_master_deck_url()
+    if "master-packages.pdf" in str(deck or "") or "gamma.app" in str(deck or ""):
+        deck = TALENT.get("package_site") or "https://corporate.edytasliwinska.com/"
     email = draft_followup_email(
         company=p.get("company") or "",
         contact_name=contact.get("name") or "",

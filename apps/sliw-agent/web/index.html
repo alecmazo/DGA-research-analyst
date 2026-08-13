@@ -232,24 +232,25 @@
           <div id="partner-list" class="leads-list"></div>
         </section>
 
-        <!-- MATERIALS: master PDF upload + links -->
+        <!-- MATERIALS: dual PDF slots (wedding master + corporate) + site links -->
         <section class="view" id="view-materials">
           <div class="panel">
             <div class="panel-head">
-              <h3>Master packages PDF</h3>
-              <span class="muted">Used in cold email body links</span>
+              <h3>Materials PDFs</h3>
+              <span class="muted">Two independent slots — wedding master stays separate from corporate</span>
             </div>
             <p class="hint-line">
-              Upload your polished packages PDF here. It is stored on the server volume and mirrored to
-              <strong>Dropbox → Apps → Sliw</strong>, then linked in outreach (browser link, not attached).
-              Interactive overview stays on the published Gamma site.
+              Upload polished packages PDFs here. Each slot is stored on the server volume under its own
+              filename. Wedding master may still mirror to Dropbox; corporate Dropbox is skipped for now.
+              Corporate cold emails link corporate.edytasliwinska.com and (when present) the corporate PDF
+              only — never the wedding master PDF.
             </p>
 
             <div class="materials-grid">
               <div class="materials-card materials-card-wide" id="materials-pdf-card">
                 <div class="materials-pdf-layout">
                   <div class="materials-pdf-info">
-                    <p class="eyebrow">Master packages PDF</p>
+                    <p class="eyebrow">Master packages PDF (wedding)</p>
                     <h4 id="pdf-status-title">Checking…</h4>
                     <p class="muted" id="pdf-status-detail"></p>
                     <div class="ws-actions" style="margin-top:12px">
@@ -265,17 +266,43 @@
                   </div>
                   <div class="materials-pdf-preview" id="pdf-preview-wrap">
                     <div class="pdf-preview-empty" id="pdf-preview-empty">
-                      <p class="muted">PDF preview appears here after upload</p>
+                      <p class="muted">Wedding master PDF preview appears here after upload</p>
                     </div>
-                    <iframe id="pdf-preview-frame" title="Master packages PDF preview" hidden></iframe>
+                    <iframe id="pdf-preview-frame" title="Master packages PDF (wedding) preview" hidden></iframe>
+                  </div>
+                </div>
+              </div>
+
+              <div class="materials-card materials-card-wide" id="materials-corporate-pdf-card">
+                <div class="materials-pdf-layout">
+                  <div class="materials-pdf-info">
+                    <p class="eyebrow">Corporate packages PDF</p>
+                    <h4 id="corp-pdf-status-title">Checking…</h4>
+                    <p class="muted" id="corp-pdf-status-detail"></p>
+                    <div class="ws-actions" style="margin-top:12px">
+                      <label class="btn primary sm" style="cursor:pointer">
+                        Upload / replace PDF
+                        <input type="file" id="corp-pdf-file-input" accept="application/pdf,.pdf" hidden />
+                      </label>
+                      <a class="btn ghost sm" id="corp-pdf-view-link" href="#" target="_blank" rel="noopener" hidden>Open PDF</a>
+                      <button type="button" class="btn ghost sm" id="corp-pdf-delete-btn" hidden>Remove</button>
+                    </div>
+                    <p class="muted" id="corp-pdf-upload-msg" style="margin-top:10px"></p>
+                    <p class="muted" id="corp-pdf-storage-hint" style="margin-top:8px;font-size:11px"></p>
+                  </div>
+                  <div class="materials-pdf-preview" id="corp-pdf-preview-wrap">
+                    <div class="pdf-preview-empty" id="corp-pdf-preview-empty">
+                      <p class="muted">Corporate PDF preview appears here after upload</p>
+                    </div>
+                    <iframe id="corp-pdf-preview-frame" title="Corporate packages PDF preview" hidden></iframe>
                   </div>
                 </div>
               </div>
 
               <div class="materials-card">
-                <p class="eyebrow">Always linked in email</p>
+                <p class="eyebrow">Always linked in corporate email</p>
                 <h4>Corporate packages site</h4>
-                <p class="muted">Live packages page (replaces retired Gamma deck)</p>
+                <p class="muted">Live packages page at corporate.edytasliwinska.com</p>
                 <p style="margin-top:10px">
                   <a id="gamma-site-link" href="https://corporate.edytasliwinska.com/" target="_blank" rel="noopener">Open packages site →</a>
                 </p>
@@ -292,6 +319,6 @@
 
   <div class="toast" id="toast" hidden></div>
   <div class="busy" id="busy" hidden><div class="busy-card">Working…</div></div>
-  <script src="app.js?v=wedding2"></script>
+  <script src="app.js?v=corp-pdf1"></script>
 </body>
 </html>
