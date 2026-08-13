@@ -62,6 +62,76 @@ WEDDING_ROLE_KEYWORDS = [
     "bridal", "celebration",
 ]
 
+# Corporate ICP — High: People / CHRO / EX / Events / L&D / culture / workplace /
+# internal comms / chief of staff. Medium: HRBP / recruiting / wellness.
+_PEOPLE_EX_CORE = (
+    "chro",
+    "chief people",
+    "chief human resources",
+    "head of people",
+    "vp people",
+    "vp of people",
+    "vice president of people",
+    "vice president people",
+    "people officer",
+    "people ops",
+    "people operations",
+    "people experience",
+    "employee experience",
+    "employee engagement",
+    "head of hr",
+    "vp hr",
+    "vp of hr",
+    "director of people",
+    "director of hr",
+)
+_EVENTS_LD_CULTURE = (
+    "head of events",
+    "director of events",
+    "event manager",
+    "events manager",
+    "corporate event",
+    "corporate events",
+    "learning and development",
+    "learning & development",
+    "l&d",
+    "l and d",
+    "talent development",
+    "director of culture",
+    "head of culture",
+    "head of workplace",
+    "director of workplace",
+    "workplace experience",
+    "internal communication",
+    "internal comms",
+    "internal comm",
+    "chief of staff",
+)
+_MEDIUM_ROLE = (
+    "hrbp",
+    "hr bp",
+    "people partner",
+    "human resources",
+    "recruiting",
+    "recruiter",
+    "talent acquisition",
+    "talent partner",
+    "wellness",
+    "benefits",
+)
+_PENALTY_ROLE = (
+    "engineer",
+    "engineering",
+    "software developer",
+    "developer",
+    "account executive",
+    "demand gen",
+    "demand-gen",
+    "demand generation",
+    "sales development",
+)
+_STRONG_PEOPLE_EX_MIN = 3
+
 
 def _hunter_api_key() -> str:
     """Read key from several common Railway/env spellings; strip quotes/whitespace."""
@@ -107,6 +177,9 @@ def _domain_from_website(website: str, company: str = "") -> str:
         "openai": "openai.com",
         "anthropic": "anthropic.com",
         "notion": "notion.so",
+        "rippling": "rippling.com",
+        "asana": "asana.com",
+        "pinterest": "pinterest.com",
         "figma": "figma.com",
         "block (square)": "block.xyz",
         "block": "block.xyz",
@@ -121,51 +194,232 @@ def _domain_from_website(website: str, company: str = "") -> str:
     return f"{slug}.com" if slug else ""
 
 
-def _parse_hunter_emails(emails: list[dict]) -> list[dict[str, Any]]:
+def _hunter_title_blob(e: dict) -> str:
+    return " ".join(
+        str(e.get(k) or "") for k in ("position", "position_raw", "department")
+    ).lower()
+
+
+def _has_people_ex_core(blob: str) -> bool:
+    if any(k in blob for k in ("people partner", "hrbp", "hr bp")):
+        return False
+    if any(k in blob for k in _PEOPLE_EX_CORE):
+        return True
+    return "people" in blob
+
+
+def _has_events_ld_culture(blob: str) -> bool:
+    if any(k in blob for k in _EVENTS_LD_CULTURE):
+        return True
+    if "events" in blob or "event " in blob:
+        return True
+    if "culture" in blob or "workplace" in blob:
+        return True
+    return False
+
+
+def _has_high_people_ex_events_ld(blob: str) -> bool:
+    return _has_people_ex_core(blob) or _has_events_ld_culture(blob)
+
+
+def _has_medium_role(blob: str) -> bool:
+    if any(k in blob for k in _MEDIUM_ROLE):
+        return True
+    return bool(re.search(r"\bhr\b", blob))
+
+
+def _has_penalty_role(blob: str) -> bool:
+    if any(k in blob for k in _PENALTY_ROLE):
+        return True
+    if re.search(r"\bae\b", blob):
+        return True
+    if "sales" in blob and not _has_high_people_ex_events_ld(blob):
+        return True
+    return False
+
+
+def _legacy_role_score(e: dict) -> int:
+    """Original Hunter scoring — wedding mode must stay on this path."""
+    pos = (e.get("position") or e.get("position_raw") or "").lower()
+    dept = (e.get("department") or "").lower()
+    score = 0
+    if any(k in pos for k in ROLE_KEYWORDS) or dept in (
+        "hr", "management", "executive", "operations", "communication",
+    ):
+        score += 5
+    if e.get("confidence", 0) >= 70:
+        score += 2
+    if (e.get("type") or "") == "personal":
+        score += 1
+    if e.get("seniority") in ("senior", "executive"):
+        score += 1
+    if (e.get("type") or "") == "generic":
+        score = max(0, score - 3)
+    return score
+
+
+def _corporate_role_score(e: dict) -> tuple[int, bool]:
+    """
+    Stronger corporate ranking. High = People/CHRO/EX/Events/L&D/culture/
+    workplace/internal comms/chief of staff. Medium = HRBP/recruiting/wellness.
+    Engineer / sales AE / demand-gen are penalized unless also People/EX.
+    """
+    blob = _hunter_title_blob(e)
+    people_ex_core = _has_people_ex_core(blob)
+    high = _has_high_people_ex_events_ld(blob)
+    score = 0
+    if high:
+        score += 10
+        if people_ex_core:
+            score += 2
+    elif _has_medium_role(blob):
+        score += 5
+    elif (e.get("department") or "").lower() == "hr":
+        score += 2
+    if e.get("confidence", 0) >= 70:
+        score += 2
+    if (e.get("type") or "") == "personal":
+        score += 1
+    if e.get("seniority") in ("senior", "executive"):
+        score += 1
+    if (e.get("type") or "") == "generic":
+        score -= 3
+    if _has_penalty_role(blob) and not people_ex_core:
+        score -= 8
+    return score, high
+
+
+def _is_generic(c: dict) -> bool:
+    return (c.get("type") or "").lower() == "generic"
+
+
+def _is_personal(c: dict) -> bool:
+    t = (c.get("type") or "").lower()
+    if t == "generic":
+        return False
+    if t == "personal":
+        return True
+    return bool((c.get("name") or "").strip()) and "@" not in (c.get("name") or "")
+
+
+def _is_strong_people_ex_personal(c: dict) -> bool:
+    return bool(c.get("people_ex")) and _is_personal(c) and not _is_generic(c)
+
+
+def _contact_sort_key(c: dict, *, wedding_mode: bool = False):
+    if wedding_mode:
+        return (-int(c.get("role_fit_score") or 0), -int(c.get("confidence") or 0))
+    generic = 1 if _is_generic(c) else 0
+    strong = 1 if _is_strong_people_ex_personal(c) else 0
+    personal = 1 if _is_personal(c) else 0
+    return (
+        generic,
+        -strong,
+        -personal,
+        -int(c.get("role_fit_score") or 0),
+        -int(c.get("confidence") or 0),
+    )
+
+
+def _parse_hunter_emails(
+    emails: list[dict],
+    *,
+    wedding_mode: bool = False,
+) -> list[dict[str, Any]]:
     out = []
     for e in emails:
-        pos = (e.get("position") or e.get("position_raw") or "").lower()
-        dept = (e.get("department") or "").lower()
-        score = 0
-        if any(k in pos for k in ROLE_KEYWORDS) or dept in (
-            "hr", "management", "executive", "operations", "communication",
-        ):
-            score += 5
-        if e.get("confidence", 0) >= 70:
-            score += 2
-        if (e.get("type") or "") == "personal":
-            score += 1
-        if e.get("seniority") in ("senior", "executive"):
-            score += 1
         first = (e.get("first_name") or "").strip()
         last = (e.get("last_name") or "").strip()
         name = f"{first} {last}".strip()
         email = (e.get("value") or "").strip()
         if not email:
             continue
-        # Skip pure generic inboxes from Hunter if labeled generic (keep as low priority)
-        is_generic = (e.get("type") or "") == "generic"
-        if is_generic:
-            score = max(0, score - 3)
+        if wedding_mode:
+            score = _legacy_role_score(e)
+            people_ex = False
+        else:
+            score, people_ex = _corporate_role_score(e)
         out.append({
             "name": name or email.split("@")[0].replace(".", " ").title(),
             "title": e.get("position") or e.get("position_raw") or e.get("department") or "",
             "email": email,
             "linkedin": e.get("linkedin") or "",
             "source": "hunter.io",
-            "confidence": min(95, int(e.get("confidence") or 50) + score * 3),
+            "confidence": min(95, int(e.get("confidence") or 50) + max(score, 0) * 3),
             "role_fit_score": score,
             "department": e.get("department") or "",
             "type": e.get("type") or "",
+            "people_ex": people_ex,
         })
-    out.sort(key=lambda x: (-x.get("role_fit_score", 0), -x.get("confidence", 0)))
+    out.sort(key=lambda c: _contact_sort_key(c, wedding_mode=wedding_mode))
     return out
 
 
-def _hunter_domain_search(domain: str, company: str = "", limit: int = 10) -> dict[str, Any]:
+def _dedupe_contacts(contacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    deduped = []
+    for c in contacts:
+        em = (c.get("email") or "").lower()
+        if not em or em in seen:
+            continue
+        seen.add(em)
+        deduped.append(c)
+    return deduped
+
+
+def _count_strong_people_ex_personal(contacts: list[dict[str, Any]]) -> int:
+    return sum(1 for c in contacts if _is_strong_people_ex_personal(c))
+
+
+def _hunter_get(params: dict[str, Any], diag: dict[str, Any]) -> list[dict]:
+    """One Domain Search call. Never logs the API key. Returns raw email dicts."""
+    label = {k: v for k, v in params.items() if k != "api_key"}
+    try:
+        r = requests.get(
+            "https://api.hunter.io/v2/domain-search",
+            params=params,
+            timeout=30,
+        )
+        attempt_info: dict[str, Any] = {
+            "params": label,
+            "http_status": r.status_code,
+        }
+        if r.status_code != 200:
+            try:
+                body = r.json()
+                attempt_info["error"] = body.get("errors") or body
+            except Exception:
+                attempt_info["error"] = (r.text or "")[:180]
+            diag["attempts"].append(attempt_info)
+            return []
+        data = r.json().get("data") or {}
+        emails = data.get("emails") or []
+        attempt_info["emails_returned"] = len(emails)
+        attempt_info["organization"] = (data.get("organization") or "")[:80]
+        diag["attempts"].append(attempt_info)
+        return emails
+    except Exception as exc:
+        diag["attempts"].append({"params": label, "error": str(exc)})
+        return []
+
+
+def _hunter_domain_search(
+    domain: str,
+    company: str = "",
+    limit: int = 10,
+    *,
+    wedding_mode: bool = False,
+) -> dict[str, Any]:
     """
     Call Hunter Domain Search. Returns {contacts, diagnostics}.
     Does NOT invent role inboxes here.
+
+    Corporate: do not stop after an open search that returned zero strong
+    People/EX/Events/L&D personal emails — continue with department=hr
+    (and type=personal). Optional offset page 2 if still empty. Stop once
+    we have ≥3 strong role-fit personal emails.
+
+    Wedding: keep the original open-search-first, break-on-first-emails path.
     """
     key = _hunter_api_key()
     diag: dict[str, Any] = {
@@ -173,6 +427,8 @@ def _hunter_domain_search(domain: str, company: str = "", limit: int = 10) -> di
         "hunter_key_length": len(key),
         "domain": domain,
         "attempts": [],
+        "hunter_emails_fetched": 0,
+        "people_ex_hits": 0,
     }
     if not key:
         diag["error"] = "HUNTER_API_KEY not visible to this process"
@@ -181,65 +437,87 @@ def _hunter_domain_search(domain: str, company: str = "", limit: int = 10) -> di
         diag["error"] = "No domain resolved for company"
         return {"contacts": [], "diagnostics": diag}
 
-    # Simple open search first (most reliable). Then optional HR filter.
-    # Avoid burning credits on empty department filters before open search.
-    attempts = [
-        {"domain": domain, "api_key": key, "limit": limit},
-        {"domain": domain, "api_key": key, "limit": limit, "department": "hr"},
-        {"domain": domain, "api_key": key, "limit": limit, "type": "personal"},
-    ]
-    # Also try company name if domain might be wrong
-    if company:
-        attempts.append({"company": company, "api_key": key, "limit": limit})
-
     all_contacts: list[dict[str, Any]] = []
-    for params in attempts:
-        label = {k: v for k, v in params.items() if k != "api_key"}
-        try:
-            r = requests.get(
-                "https://api.hunter.io/v2/domain-search",
-                params=params,
-                timeout=30,
+
+    def ingest(raw_emails: list[dict]) -> list[dict[str, Any]]:
+        parsed = _parse_hunter_emails(raw_emails, wedding_mode=wedding_mode)
+        if parsed:
+            all_contacts.extend(parsed)
+        return _dedupe_contacts(all_contacts)
+
+    if wedding_mode:
+        attempts = [
+            {"domain": domain, "api_key": key, "limit": limit},
+            {"domain": domain, "api_key": key, "limit": limit, "department": "hr"},
+            {"domain": domain, "api_key": key, "limit": limit, "type": "personal"},
+        ]
+        if company:
+            attempts.append({"company": company, "api_key": key, "limit": limit})
+        for params in attempts:
+            parsed = _parse_hunter_emails(
+                _hunter_get(params, diag),
+                wedding_mode=True,
             )
-            attempt_info: dict[str, Any] = {
-                "params": label,
-                "http_status": r.status_code,
-            }
-            if r.status_code != 200:
-                try:
-                    body = r.json()
-                    attempt_info["error"] = body.get("errors") or body
-                except Exception:
-                    attempt_info["error"] = (r.text or "")[:180]
-                diag["attempts"].append(attempt_info)
-                continue
-            data = r.json().get("data") or {}
-            emails = data.get("emails") or []
-            attempt_info["emails_returned"] = len(emails)
-            attempt_info["organization"] = (data.get("organization") or "")[:80]
-            diag["attempts"].append(attempt_info)
-            parsed = _parse_hunter_emails(emails)
             if parsed:
                 all_contacts.extend(parsed)
-                # Good enough — stop spending more credits
                 break
-        except Exception as exc:
-            diag["attempts"].append({"params": label, "error": str(exc)})
+    else:
+        # 1. Open search
+        ingest(_hunter_get(
+            {"domain": domain, "api_key": key, "limit": limit},
+            diag,
+        ))
+        strong = _count_strong_people_ex_personal(all_contacts)
 
-    # Dedup
-    seen: set[str] = set()
-    deduped = []
-    for c in all_contacts:
-        em = (c.get("email") or "").lower()
-        if not em or em in seen:
-            continue
-        seen.add(em)
-        deduped.append(c)
-    deduped.sort(key=lambda x: (-x.get("role_fit_score", 0), -x.get("confidence", 0)))
+        # 2. If fewer than 3 strong People/EX/Events/L&D personal emails,
+        #    keep fetching — never treat raw top-N as good enough.
+        if strong < _STRONG_PEOPLE_EX_MIN:
+            ingest(_hunter_get(
+                {
+                    "domain": domain, "api_key": key, "limit": limit,
+                    "department": "hr",
+                },
+                diag,
+            ))
+            strong = _count_strong_people_ex_personal(all_contacts)
+        if strong < _STRONG_PEOPLE_EX_MIN:
+            ingest(_hunter_get(
+                {
+                    "domain": domain, "api_key": key, "limit": limit,
+                    "type": "personal",
+                },
+                diag,
+            ))
+            strong = _count_strong_people_ex_personal(all_contacts)
+        # 3. Offset page 2 only if still empty of strong role-fit personal emails
+        if strong == 0:
+            ingest(_hunter_get(
+                {
+                    "domain": domain, "api_key": key, "limit": limit,
+                    "offset": limit,
+                },
+                diag,
+            ))
+            strong = _count_strong_people_ex_personal(all_contacts)
+        # 4. Company-name search only if Hunter returned nothing at all
+        if company and not _dedupe_contacts(all_contacts):
+            ingest(_hunter_get(
+                {"company": company, "api_key": key, "limit": limit},
+                diag,
+            ))
 
-    # Prefer role-fit; if none, still return real people from Hunter
-    role_fit = [c for c in deduped if c.get("role_fit_score", 0) >= 4]
-    contacts = (role_fit or deduped)[:10]
+    deduped = _dedupe_contacts(all_contacts)
+    deduped.sort(key=lambda c: _contact_sort_key(c, wedding_mode=wedding_mode))
+
+    people_ex_hits = _count_strong_people_ex_personal(deduped)
+    diag["hunter_emails_fetched"] = len(deduped)
+    diag["people_ex_hits"] = people_ex_hits
+
+    if wedding_mode:
+        role_fit = [c for c in deduped if c.get("role_fit_score", 0) >= 4]
+        contacts = (role_fit or deduped)[:10]
+    else:
+        contacts = deduped[:10]
     diag["hunter_contacts"] = len(contacts)
     if not contacts:
         diag["error"] = (
@@ -361,6 +639,54 @@ def _boost_wedding_contacts(contacts: list[dict[str, Any]]) -> list[dict[str, An
     return out
 
 
+def _why_primary(contact: dict[str, Any] | None, *, wedding_mode: bool) -> str:
+    if not contact or not contact.get("email"):
+        return "No email found"
+    title = (contact.get("title") or "").strip() or "untitled"
+    source = contact.get("source") or ""
+    if wedding_mode:
+        return f"Wedding ranking: {title}"
+    if source == "role_inbox_guess":
+        return "No Hunter personal email; role-inbox fallback"
+    if _is_generic(contact):
+        return f"No personal Hunter email; generic inbox ({title})"
+    if _is_strong_people_ex_personal(contact):
+        blob = f"{contact.get('title') or ''} {contact.get('department') or ''}".lower()
+        kind = "People/EX" if _has_people_ex_core(blob) else "Events/L&D"
+        return f"Highest ranked personal {kind}: {title}"
+    if _is_personal(contact):
+        return f"No People/EX/Events/L&D personal email; next personal Hunter contact ({title})"
+    return f"Highest ranked remaining Hunter contact ({title})"
+
+
+def _pick_primary(
+    contacts: list[dict[str, Any]],
+    *,
+    wedding_mode: bool,
+) -> dict[str, Any]:
+    if wedding_mode:
+        return next(
+            (c for c in contacts if c.get("source") == "hunter.io" and c.get("email")),
+            None,
+        ) or next((c for c in contacts if c.get("email")), None) or (
+            contacts[0] if contacts else {}
+        )
+
+    hunter = [c for c in contacts if c.get("source") == "hunter.io" and c.get("email")]
+    strong = next((c for c in hunter if _is_strong_people_ex_personal(c)), None)
+    if strong:
+        return strong
+    personal = next((c for c in hunter if _is_personal(c) and not _is_generic(c)), None)
+    if personal:
+        return personal
+    non_generic = next((c for c in hunter if not _is_generic(c)), None)
+    if non_generic:
+        return non_generic
+    return next((c for c in contacts if c.get("email")), None) or (
+        contacts[0] if contacts else {}
+    )
+
+
 def find_contacts(
     *,
     company: str,
@@ -375,7 +701,9 @@ def find_contacts(
         wedding_mode = True
 
     domain = _domain_from_website(website, company)
-    hunter_result = _hunter_domain_search(domain, company=company, limit=10)
+    hunter_result = _hunter_domain_search(
+        domain, company=company, limit=10, wedding_mode=wedding_mode,
+    )
     hunter_contacts = hunter_result.get("contacts") or []
     diagnostics = hunter_result.get("diagnostics") or {}
     diagnostics["wedding_mode"] = wedding_mode
@@ -402,7 +730,7 @@ def find_contacts(
         seen.add(key)
         deduped.append(c)
 
-    deduped.sort(key=lambda x: (-x.get("role_fit_score", 0), -x.get("confidence", 0)))
+    deduped.sort(key=lambda c: _contact_sort_key(c, wedding_mode=wedding_mode))
 
     hunter_personal = [c for c in deduped if c.get("source") == "hunter.io" and c.get("email")]
     if not hunter_personal:
@@ -411,10 +739,16 @@ def find_contacts(
             if rb["email"].lower() not in seen:
                 deduped.append(rb)
 
-    primary = next(
-        (c for c in deduped if c.get("source") == "hunter.io" and c.get("email")),
-        None,
-    ) or next((c for c in deduped if c.get("email")), None) or (deduped[0] if deduped else {})
+    primary = _pick_primary(deduped, wedding_mode=wedding_mode)
+    # Keep the chosen primary first so desk/CRM first-contact pickers match
+    if primary and primary.get("email"):
+        pem = (primary.get("email") or "").lower()
+        rest = [c for c in deduped if (c.get("email") or "").lower() != pem]
+        deduped = [primary] + rest
+
+    diagnostics["why_primary"] = _why_primary(primary, wedding_mode=wedding_mode)
+    if not wedding_mode:
+        diagnostics["people_ex_hits"] = _count_strong_people_ex_personal(deduped)
 
     summary = _method_summary(deduped, diagnostics, domain)
     if wedding_mode and summary:
@@ -446,7 +780,9 @@ def _method_summary(
             "On Railway: set HUNTER_API_KEY, then Redeploy (not just save)."
         )
     if hunter_n:
-        return f"Hunter ✓ — {hunter_n} email(s) for {domain or 'domain'}."
+        hits = diagnostics.get("people_ex_hits")
+        extra = f" {hits} People/EX/Events/L&D." if hits else ""
+        return f"Hunter ✓ — {hunter_n} email(s) for {domain or 'domain'}.{extra}"
     # Key present but no hits
     attempts = diagnostics.get("attempts") or []
     statuses = [a.get("http_status") for a in attempts if a.get("http_status")]

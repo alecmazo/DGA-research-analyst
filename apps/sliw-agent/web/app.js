@@ -670,6 +670,8 @@ function contactCardHtml(primary, contacts, research, diagnostics) {
       </div>
       ${research ? `<p class="muted" style="margin-top:8px">${esc(research)}</p>` : ""}
       ${diagnostics?.domain ? `<p class="muted" style="font-size:11px">Domain searched: <code>${esc(diagnostics.domain)}</code></p>` : ""}
+      ${diagnostics?.why_primary ? `<p class="muted" style="font-size:11px">${esc(diagnostics.why_primary)}</p>` : ""}
+      ${diagnostics?.hunter_emails_fetched != null ? `<p class="muted" style="font-size:11px">Hunter emails fetched: ${esc(String(diagnostics.hunter_emails_fetched))} · People/EX hits: ${esc(String(diagnostics.people_ex_hits ?? 0))}</p>` : ""}
       ${list.length ? `
         <p class="eyebrow" style="margin-top:12px">Contacts found</p>
         <ul class="contact-list">${list.slice(0, 6).map((x) => `

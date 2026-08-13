@@ -543,6 +543,8 @@ def create_api_router() -> APIRouter:
                 book=p.get("book") or "corporate",
                 contacts=result["contacts"][:12],
                 contact_research=result.get("method_summary"),
+                hunter_enabled=result.get("hunter_enabled"),
+                hunter_diagnostics=result.get("hunter_diagnostics"),
                 linkedin_targets=result.get("linkedin_targets"),
             )
         return result
