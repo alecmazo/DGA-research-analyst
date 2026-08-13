@@ -76,7 +76,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **SnapTrade tax-lot balance** | **`ui460-20260813-snaptrade-taxlot-balance`** | Ledger debit/credit off by $0.0002 aborted tax_lots so Fidelity cash never updated |
 | **SnapTrade uninvested cash** | **`ui461-20260813-snaptrade-uninvested-cash`** | Sale proceeds sit in balances.cash minus SPAXX — inject residual CASH lot |
 | **Cash / MM always $1** | **`ui462-20260813-cash-par-price`** | Never Yahoo-price CASH (listed ~$86) — NAV/positions force par |
-| **Next deploy after this** | **`ui463-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Fund table scroll** | **`ui463-20260813-fund-table-scroll`** | Equal-height Positions/Rebalance cards scroll inside the table |
+| **Next deploy after this** | **`ui464-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

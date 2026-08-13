@@ -398,7 +398,10 @@
   align-items: start;
 }
 
-/* Positions + Rebalance: same card height; tables fill and scroll inside. */
+/* Positions + Rebalance: same card height; the Panel body (section > last
+   child) is a flex column so .tableWrap can shrink and scroll. ui459 set
+   max-height + overflow:hidden on the card but left the body as a block,
+   so long tables were clipped with no scrollbar. */
 .equalCards {
   align-items: stretch;
 }
@@ -411,10 +414,21 @@
   max-height: min(56vh, 560px);
 }
 
+.equalCards > * > *:last-child {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .equalCards .tableWrap {
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (max-width: 980px) {
