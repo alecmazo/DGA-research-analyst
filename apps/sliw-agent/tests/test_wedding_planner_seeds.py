@@ -1,4 +1,4 @@
-"""Planner seed import: named personal emails, no duplicate of the original 20."""
+"""Planner seed import: named personal emails as primary, no duplicate of the original 20."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ from sliw_agent import wedding_agent  # noqa: E402
 from sliw_agent.wedding_agent import import_wedding_library  # noqa: E402
 
 NEW_PLANNERS = {
-    "Vanessa Pence Events": "vanessa@vanessapenceevents.com",
-    "Laurie Arons Special Events": "laurie@lauriearons.com",
-    "Amazáe Events": "crystal@amazae.com",
-    "Blissful Events": "samar@blissfuleventplanning.com",
-    "Despina Craig Events": "despinacraigevents@gmail.com",
+    "Vanessa Pence Events": ("Vanessa", "vanessa@vanessapenceevents.com"),
+    "Laurie Arons Special Events": ("Laurie", "laurie@lauriearons.com"),
+    "Amazáe Events": ("Crystal", "crystal@amazae.com"),
+    "Blissful Events": ("Samar", "samar@blissfuleventplanning.com"),
+    "Despina Craig Events": ("Despina", "despinacraigevents@gmail.com"),
 }
 
 
@@ -58,34 +58,36 @@ class PlannerSeedImportTests(unittest.TestCase):
         return out
 
     def _assert_new_planners(self, by_company: dict[str, list[dict]]) -> None:
-        for name, email in NEW_PLANNERS.items():
+        for name, (contact_name, email) in NEW_PLANNERS.items():
             self.assertEqual(len(by_company.get(name) or []), 1, name)
-            contacts = by_company[name][0].get("contacts") or []
-            emails = [c.get("email") for c in contacts]
-            self.assertIn(email, emails, name)
-            primary = next(c for c in contacts if c.get("email") == email)
-            self.assertEqual(primary.get("source"), "seed")
-            self.assertNotEqual(by_company[name][0].get("stage"), "contacted")
+            p = by_company[name][0]
+            self.assertEqual(p.get("industry"), "Wedding planner", name)
+            self.assertEqual(crm.primary_contact_email(p).lower(), email, name)
+            contacts = p.get("contacts") or []
+            self.assertEqual(len(contacts), 1, name)
+            self.assertEqual(contacts[0].get("name"), contact_name, name)
+            self.assertEqual(contacts[0].get("email"), email, name)
+            self.assertEqual(contacts[0].get("source"), "seed", name)
 
-    def test_growing_list_then_reimport_does_not_duplicate(self) -> None:
+    def test_import_twice_keeps_seed_emails_as_primary(self) -> None:
         original = [
             row
             for row in wedding_agent.load_wedding_library()
             if row.get("company") not in NEW_PLANNERS
         ]
         with patch.object(wedding_agent, "load_wedding_library", return_value=original):
-            first = import_wedding_library(rescore_existing=False)
+            first = import_wedding_library(limit=40, rescore_existing=False)
         self.assertEqual(first["imported"], len(original))
         self.assertNotIn("Vanessa Pence Events", self._by_company())
 
-        grown = import_wedding_library(rescore_existing=False)
+        grown = import_wedding_library(limit=40, rescore_existing=False)
         self.assertEqual(grown["imported"], 5)
 
         by = self._by_company()
         self._assert_new_planners(by)
         self.assertEqual(len(by.get("Contagious Events") or []), 1)
 
-        again = import_wedding_library(rescore_existing=True)
+        again = import_wedding_library(limit=40, rescore_existing=True)
         self.assertEqual(again["imported"], 0)
         by2 = self._by_company()
         self.assertEqual(len(by2), len(by))

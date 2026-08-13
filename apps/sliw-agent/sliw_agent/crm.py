@@ -585,7 +585,15 @@ def clean_email(value: Any) -> str:
 
 def primary_contact_email(prospect: dict[str, Any] | None) -> str:
     contacts = (prospect or {}).get("contacts") or []
-    primary = next(
+    seed = next(
+        (
+            c
+            for c in contacts
+            if c.get("email") and (c.get("source") or "").lower() == "seed"
+        ),
+        None,
+    )
+    primary = seed or next(
         (
             c
             for c in contacts

@@ -616,7 +616,7 @@ function normalizeWeddingRows(payload) {
 
 async function loadWeddingRows(channel) {
   try {
-    const q = channel ? `?limit=80&channel=${encodeURIComponent(channel)}` : "?limit=80";
+    const q = channel ? `?limit=50&channel=${encodeURIComponent(channel)}` : "?limit=50";
     const ready = await api("/wedding/ready" + q);
     state.weddingMeta = ready;
     return normalizeWeddingRows(ready);
@@ -1344,7 +1344,7 @@ function boot() {
   $("#btn-wedding-import")?.addEventListener("click", async () => {
     busy(true, "Importing & scoring Bay Area planners…");
     try {
-      const r = await api("/wedding/library/import?limit=10000&rescore=true", { method: "POST" });
+      const r = await api("/wedding/library/import?limit=40&rescore=true", { method: "POST" });
       await refreshWeddingChannel(state.weddingChannel || null);
       toast(
         `Wedding desk: +${r.imported || 0} new · ${r.rescored || 0} rescored · `
