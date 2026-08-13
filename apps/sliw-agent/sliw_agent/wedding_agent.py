@@ -29,81 +29,17 @@ def load_wedding_library() -> list[dict[str, Any]]:
     return json.loads(LIBRARY_PATH.read_text(encoding="utf-8"))
 
 
-def _norm_company(value: str) -> str:
-    return (value or "").strip().lower()
-
-
-def _norm_host(website: str) -> str:
-    w = (website or "").strip().lower()
-    if not w:
-        return ""
-    w = w.replace("https://", "").replace("http://", "")
-    w = w.split("/")[0]
-    if w.startswith("www."):
-        w = w[4:]
-    return w
-
-
-def _norm_email(value: str) -> str:
-    return (value or "").strip().lower()
-
-
 def _seed_contacts(row: dict[str, Any]) -> list[dict[str, str]]:
-    """Personal inbox from the seed list — never invent; skip empty."""
-    if row.get("contacts"):
-        out = []
-        for c in row["contacts"]:
-            email = _norm_email(c.get("email") or "")
-            if not email or "@" not in email:
-                continue
-            out.append({
-                "name": (c.get("name") or row.get("contact_name") or "").strip(),
-                "email": email,
-                "title": (c.get("title") or "").strip(),
-                "source": c.get("source") or "seed",
-            })
-        if out:
-            return out
-    email = _norm_email(row.get("email") or "")
+    """Named personal inbox from the seed list — never invent; skip empty."""
+    email = (row.get("email") or "").strip()
+    name = (row.get("contact_name") or "").strip()
     if not email or "@" not in email:
         return []
-    return [{
-        "name": (row.get("contact_name") or "").strip(),
-        "email": email,
-        "title": (row.get("contact_title") or "Planner").strip(),
-        "source": "seed",
-    }]
-
-
-def _seed_match_keys(row: dict[str, Any]) -> set[str]:
-    keys: set[str] = set()
-    company = _norm_company(row.get("company") or "")
-    if company:
-        keys.add(f"company:{company}")
-    host = _norm_host(row.get("website") or "")
-    if host:
-        keys.add(f"website:{host}")
-    email = _norm_email(row.get("email") or "")
-    if email:
-        keys.add(f"email:{email}")
-    for c in row.get("contacts") or []:
-        em = _norm_email(c.get("email") or "")
-        if em:
-            keys.add(f"email:{em}")
-    return keys
-
-
-def _prospect_match_keys(p: dict[str, Any]) -> set[str]:
-    keys = _seed_match_keys(p)
-    for c in p.get("contacts") or []:
-        em = _norm_email(c.get("email") or "")
-        if em:
-            keys.add(f"email:{em}")
-    return keys
+    return [{"name": name, "email": email, "source": "seed"}]
 
 
 def import_wedding_library(
-    limit: int = 10_000,
+    limit: int = 40,
     *,
     draft_email: bool = False,
     rescore_existing: bool = True,
@@ -111,10 +47,10 @@ def import_wedding_library(
 ) -> dict[str, Any]:
     """
     Import library seeds into wedding CRM with real scores.
-    - New rows: upsert + score (+ optional draft / sales agent)
+    - New rows: upsert + score; seed email is the primary contact
     - Existing: rescore so old flat 70s get real tiers
-    Dedup by company / website host / email so growing the seed list
-    creates only the new cards (original 20 stay unique).
+    Dedup by lowercase company so the original 20 / Contagious stay unique
+    and growing the list creates only the new cards.
     """
     lib = load_wedding_library()
     # Prefer planners, then high priority, then rest
@@ -124,10 +60,10 @@ def import_wedding_library(
         return (is_planner, -(row.get("priority") or 0), row.get("company") or "")
 
     lib_sorted = sorted(lib, key=sort_key)
-    existing_keys: dict[str, dict[str, Any]] = {}
-    for p in crm.list_prospects(book="wedding"):
-        for k in _prospect_match_keys(p):
-            existing_keys.setdefault(k, p)
+    existing = {
+        (p.get("company") or "").lower(): p
+        for p in crm.list_prospects(book="wedding")
+    }
     results: list[dict[str, Any]] = []
     rescored = 0
     imported = 0
@@ -136,14 +72,10 @@ def import_wedding_library(
         name = (row.get("company") or "").strip()
         if not name:
             continue
-        hit = None
-        for k in _seed_match_keys(row):
-            hit = existing_keys.get(k)
-            if hit:
-                break
-        if hit:
+        key = name.lower()
+        if key in existing:
             if rescore_existing:
-                r = rescore_wedding_prospect(hit["id"], row=row)
+                r = rescore_wedding_prospect(existing[key]["id"], row=row)
                 rescored += 1
                 results.append(r)
             continue
@@ -163,14 +95,7 @@ def import_wedding_library(
             run_sales_agent=run_agent,
         )
         imported += 1
-        created = {
-            "id": r["prospect_id"],
-            "company": name,
-            "website": row.get("website", ""),
-            "contacts": _seed_contacts(row),
-        }
-        for k in _prospect_match_keys(created):
-            existing_keys.setdefault(k, created)
+        existing[key] = {"id": r["prospect_id"], "company": name}
         results.append(r)
 
     # Also rescore any CRM rows not in this library pass (stale scores)
@@ -441,6 +366,9 @@ def run_wedding_sales_agent(
 
     contacts = p.get("contacts") or []
     primary_contact = next(
+        (c for c in contacts if c.get("email") and (c.get("source") or "").lower() == "seed"),
+        None,
+    ) or next(
         (c for c in contacts if c.get("email") and c.get("source") != "role_inbox_guess"),
         None,
     ) or next((c for c in contacts if c.get("email")), None) or (contacts[0] if contacts else {})
@@ -776,9 +704,10 @@ def _best_contact_email(p: dict[str, Any]) -> str:
         e, src = item
         el = e.lower()
         domain = el.split("@")[-1] if "@" in el else ""
+        is_seed = src == "seed"
         is_hunter = src == "hunter.io" or "couple" in domain.replace("-", "").replace(".", "")
         is_personal = domain in personal
-        return (0 if is_personal else 1, 1 if is_hunter else 0, 0 if is_personal else 1)
+        return (0 if is_seed else 1, 0 if is_personal else 1, 1 if is_hunter else 0, 0 if is_personal else 1)
 
     emails_sorted = sorted(emails, key=rank)
     return emails_sorted[0][0]
