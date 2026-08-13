@@ -468,6 +468,20 @@ a:hover { text-decoration: underline; }
   width: 100%;
   font-size: 14px;
 }
+.ws-to-fields {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.ws-to-fields input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+.ws-to-fields .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 
 .ws-form {
   margin-top: 14px;

@@ -51,6 +51,44 @@ function workToEmail() {
   );
 }
 
+async function persistWorkToEmail(email) {
+  const id = state.focusId;
+  const addr = (email || "").trim();
+  if (!id || !addr) return null;
+  return api(`/prospects/${encodeURIComponent(id)}/last-contacted`, {
+    method: "POST",
+    body: JSON.stringify({ email: addr }),
+  });
+}
+
+async function refreshWorkstreamAfterToSave() {
+  const id = state.focusId;
+  if (!id) return;
+  state.workstream = await api(`/prospects/${encodeURIComponent(id)}/workstream`);
+  await renderWorkstream();
+}
+
+/** Persist To: without mark-contacted / stage change. */
+async function saveWorkToEmail() {
+  const id = state.focusId;
+  if (!id) return;
+  const email = workToEmail();
+  if (!email) {
+    toast("Enter a To: address first");
+    return;
+  }
+  try {
+    busy(true);
+    await persistWorkToEmail(email);
+    await refreshWorkstreamAfterToSave();
+    toast(`Saved To: ${email}`);
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    busy(false);
+  }
+}
+
 /** Stable Work deep link: #lead=<id> or ?lead=<id>. */
 function leadDeepLinkId() {
   try {
@@ -927,6 +965,12 @@ async function runAction(act) {
       await navigator.clipboard.writeText((subj ? `Subject: ${subj}\n\n` : "") + body);
       const to = workToEmail() || state._lastAgent?.primary_contact?.email || state.workstream?.primary_contact?.email || "";
       toast(to ? `Email 1 (first touch) copied → ${to}` : "Email 1 (first touch) copied");
+      if (to) {
+        try {
+          await persistWorkToEmail(to);
+          await refreshWorkstreamAfterToSave();
+        } catch (_) { /* best-effort — copy already succeeded */ }
+      }
     } else if (act === "copy_follow") {
       const email = state._followEmail;
       if (!email?.body) return toast("No follow-up yet — create one after marking contacted");
@@ -939,6 +983,12 @@ async function runAction(act) {
       busy(true, "Creating follow-up (only after cold was sent)…");
       const out = await api(`/prospects/${encodeURIComponent(id)}/followup`, { method: "POST" });
       state._followEmail = { ...out.email_preview, sequence_step: "follow_2" };
+      const to = workToEmail();
+      if (to) {
+        try {
+          await persistWorkToEmail(to);
+        } catch (_) { /* best-effort — follow-up already created */ }
+      }
       state.workstream = await api(`/prospects/${encodeURIComponent(id)}/workstream`);
       await renderWorkstream();
       toast("Email 2 (follow-up) ready — different from first touch");
@@ -1194,6 +1244,7 @@ function boot() {
   if (!ensureAuth()) return;
 
   $$(".nav-item").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+  $("#ws-save-to")?.addEventListener("click", () => saveWorkToEmail());
 
   $("#btn-sync-all")?.addEventListener("click", async () => {
     busy(true, "Importing all pending…");

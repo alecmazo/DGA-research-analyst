@@ -190,6 +190,10 @@ class StageRequest(BaseModel):
     last_contacted_email: str = ""
 
 
+class LastContactedRequest(BaseModel):
+    email: str = ""
+
+
 class DisqualifyRequest(BaseModel):
     reason: str = ""
 
@@ -369,6 +373,21 @@ def create_api_router() -> APIRouter:
             raise HTTPException(404, "Prospect not found") from None
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @r.post("/prospects/{prospect_id}/last-contacted")
+    def set_last_contacted(
+        prospect_id: str, body: LastContactedRequest, request: Request
+    ) -> dict[str, Any]:
+        """Persist To: address without changing stage (no mark-contacted required)."""
+        require_sliw_access(request)
+        email = crm.clean_email(body.email)
+        if not email:
+            raise HTTPException(400, "email is empty or invalid")
+        try:
+            p = crm.record_last_contacted(prospect_id, email=email)
+        except KeyError:
+            raise HTTPException(404, "Prospect not found") from None
+        return {**p, "last_contacted_email": p.get("last_contacted_email") or email}
 
     @r.post("/prospects/{prospect_id}/interested")
     def mark_lead(prospect_id: str, body: InterestedRequest, request: Request) -> dict[str, Any]:

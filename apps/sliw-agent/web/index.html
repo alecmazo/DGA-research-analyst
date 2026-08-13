@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=wedding2" />
+  <link rel="stylesheet" href="style.css?v=save-to1" />
   <script>
     (function () {
       var host = (location.hostname || "").toLowerCase();
@@ -101,7 +101,10 @@
                   <p class="muted" id="ws-next-detail"></p>
                   <div id="ws-to-row" class="ws-to-row">
                     <label for="ws-to-email">To:</label>
-                    <input id="ws-to-email" type="email" autocomplete="off" placeholder="name@company.com" />
+                    <div class="ws-to-fields">
+                      <input id="ws-to-email" type="email" autocomplete="off" placeholder="name@company.com" />
+                      <button type="button" class="btn ghost sm" id="ws-save-to">Save To:</button>
+                    </div>
                     <p class="muted" id="ws-last-emailed" hidden></p>
                   </div>
                   <div id="ws-actions" class="ws-actions"></div>
@@ -324,6 +327,6 @@
 
   <div class="toast" id="toast" hidden></div>
   <div class="busy" id="busy" hidden><div class="busy-card">Working…</div></div>
-  <script src="app.js?v=disqualify-reason1"></script>
+  <script src="app.js?v=save-to1"></script>
 </body>
 </html>
