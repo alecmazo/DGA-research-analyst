@@ -17,6 +17,7 @@ export type CardId =
   | 'strategist'
   | 'markets'
   | 'wire'
+  | 'mpulse'
   | 'ideas'
   | 'analyze'
   | 'health'
@@ -45,7 +46,8 @@ const LEGACY_KEYS = [
 /** Defaults only for first visit or brand-new cards the user never placed. */
 const DEFAULT_LAYOUT: DeskLayoutMap = {
   watchlist: { x: 0, y: 0, w: 340, h: 420 },
-  pulse: { x: 0, y: 436, w: 340, h: 280 },
+  pulse: { x: 0, y: 436, w: 340, h: 240 },
+  mpulse: { x: 0, y: 692, w: 340, h: 400 },
   reports: { x: 356, y: 0, w: 400, h: 420 },
   analyst: { x: 356, y: 436, w: 400, h: 420 },
   strategist: { x: 356, y: 872, w: 400, h: 380 },
@@ -53,7 +55,7 @@ const DEFAULT_LAYOUT: DeskLayoutMap = {
   wire: { x: 772, y: 296, w: 400, h: 380 },
   ideas: { x: 772, y: 692, w: 400, h: 280 },
   analyze: { x: 772, y: 988, w: 400, h: 220 },
-  health: { x: 0, y: 732, w: 340, h: 180 },
+  health: { x: 0, y: 1108, w: 340, h: 180 },
 }
 
 const ALL_IDS = Object.keys(DEFAULT_LAYOUT) as CardId[]

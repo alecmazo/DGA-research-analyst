@@ -9,6 +9,7 @@ import { SavedReports } from '@/components/desk/SavedReports'
 import { DeskBoard } from '@/components/desk/DeskBoard'
 import { EarningsCard } from '@/components/desk/EarningsCard'
 import { MarketWire } from '@/components/desk/MarketWire'
+import { MarketPulse } from '@/components/desk/MarketPulse'
 import {
   api,
   type DailyBrief,
@@ -361,6 +362,14 @@ export function DeskPage() {
           <p>No pulse yet. Run Daily Pulse for a morning read on your book.</p>
         </div>
       ),
+    },
+    {
+      id: 'mpulse' as const,
+      title: 'Market Pulse',
+      badge: 'Scan',
+      flush: true,
+      action: <span className={styles.meta}>Watchlist · live web/X</span>,
+      children: <MarketPulse watchlist={wl?.tickers || []} bare />,
     },
     {
       id: 'reports' as const,

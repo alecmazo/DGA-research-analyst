@@ -1419,3 +1419,171 @@
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-subtle);
 }
+
+/* ── Market Pulse (watchlist scan) ── */
+.pulseEmbed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.pulseToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  flex-shrink: 0;
+}
+
+.pulseActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pulseInfoBtn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-weight: 800;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pulseInfo {
+  padding: 8px 12px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pulseStatus {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pulseList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pulseRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.pulseRow:hover {
+  background: var(--bg-hover);
+}
+
+.pulseRowStale {
+  opacity: 0.88;
+}
+
+.pulseTk {
+  font-weight: 800;
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  min-width: 46px;
+}
+
+.pulsePill {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.sentBull {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+}
+
+.sentBear {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
+.sentFlat {
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+
+.sentUnk {
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
+}
+
+.pulseDay {
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.pulseAge {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.pulseStale {
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #991b1b;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.pulseSum {
+  flex: 1 1 100%;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pulseDetail {
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+}
+
+.pulseStaleBanner {
+  margin: 0 0 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 11px;
+  font-weight: 700;
+}
