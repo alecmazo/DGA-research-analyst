@@ -36,16 +36,5 @@
         "ascAppId": "6764731342"
       }
     }
-  },
-  "update": {
-    "production": {
-      "channel": "production"
-    },
-    "preview": {
-      "channel": "preview"
-    },
-    "development": {
-      "channel": "development"
-    }
   }
 }
