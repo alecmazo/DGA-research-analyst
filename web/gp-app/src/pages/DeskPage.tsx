@@ -8,6 +8,7 @@ import { IdeaGenerator } from '@/components/desk/IdeaGenerator'
 import { SavedReports } from '@/components/desk/SavedReports'
 import { DeskBoard } from '@/components/desk/DeskBoard'
 import { EarningsCard } from '@/components/desk/EarningsCard'
+import { MarketWire } from '@/components/desk/MarketWire'
 import {
   api,
   type DailyBrief,
@@ -398,6 +399,14 @@ export function DeskPage() {
       flush: true,
       action: <span className={styles.meta}>TradingView</span>,
       children: <LiveMarkets bare />,
+    },
+    {
+      id: 'wire' as const,
+      title: 'Market Wire',
+      badge: 'FREE',
+      flush: true,
+      action: <span className={styles.meta}>Official + wires</span>,
+      children: <MarketWire bare />,
     },
     {
       id: 'ideas' as const,

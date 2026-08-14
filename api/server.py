@@ -2308,15 +2308,22 @@ _FILINGS_TTL = 1800
 _CIK_SUB_CACHE: dict = {}  # cik → {ts, recent_rows}
 _CIK_SUB_TTL = 2700  # 45 min
 
-# Curated macro / policy wires only — NOT per-ticker Google news (that would
-# collide with Fund Filings and add retail noise).
+# Curated official + wire-service RSS only. No paid APIs, no LLM, no
+# retail aggregators (Yahoo/CNBC clickbait). Google News site: queries
+# are free public RSS that surface Reuters / AP headlines.
 _MARKET_WIRE_FEEDS: list[tuple[str, str]] = [
     ("Fed", "https://www.federalreserve.gov/feeds/press_all.xml"),
-    ("SEC press", "https://www.sec.gov/news/pressreleases.rss"),
-    ("Yahoo Finance", "https://finance.yahoo.com/news/rssindex"),
-    ("MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_topstories"),
-    ("CNBC Top", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"),
-    ("CNBC Economy", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"),
+    ("Treasury", "https://home.treasury.gov/rss/press-releases"),
+    ("BLS", "https://www.bls.gov/feed/bls_latest.rss"),
+    ("SEC", "https://www.sec.gov/news/pressreleases.rss"),
+    ("Reuters",
+     "https://news.google.com/rss/search?q=site:reuters.com+(economy+OR+markets+OR+%22federal+reserve%22+OR+inflation)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+    ("AP",
+     "https://news.google.com/rss/search?q=site:apnews.com+(economy+OR+markets+OR+inflation+OR+fed)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+    ("BBC", "https://feeds.bbci.co.uk/news/business/rss.xml"),
+    ("NPR", "https://feeds.npr.org/1006/rss.xml"),
+    ("NYT", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"),
+    ("WSJ", "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain.xml"),
 ]
 
 # Boost = more "desk-relevant"; block = pure noise / retail clickbait.
@@ -2456,12 +2463,16 @@ def _market_wire_score(item: dict, now_ts: float) -> float:
         score += max(0.0, 30.0 - age_h)  # fresher → higher
     else:
         score -= 5.0
-    # Prefer policy wires slightly over general finance noise
-    feed = (item.get("feed") or "").lower()
-    if "fed" in feed:
+    # Official releases first, then wire services, then broadsheet headlines.
+    feed = (item.get("feed") or item.get("publisher") or "").lower()
+    if feed in ("fed", "treasury", "bls"):
+        score += 16.0
+    elif feed in ("sec", "sec press"):
+        score += 10.0
+    elif feed in ("reuters", "ap"):
         score += 12.0
-    elif "sec press" in feed:
-        score += 8.0
+    elif feed in ("bbc", "npr", "nyt", "wsj"):
+        score += 6.0
     return score
 
 
@@ -2513,7 +2524,7 @@ def _build_market_wire(limit: int = 14) -> dict:
         "feeds_ok": len(_MARKET_WIRE_FEEDS) - len(errors),
         "feeds_total": len(_MARKET_WIRE_FEEDS),
         "errors": errors[:6],
-        "note": "Macro/policy wire only — company filings live on Fund Filings.",
+        "note": "Free official + wire RSS (Fed, Treasury, BLS, SEC, Reuters, AP, BBC, NPR, NYT, WSJ). No tokens.",
         "cached": False,
     }
     c["data"] = data
@@ -2895,13 +2906,16 @@ def _cross_dedupe_market_vs_filings(market: dict, filings: dict) -> dict:
 
 
 @app.get("/api/v2/news/market-wire")
-def news_market_wire(request: Request, limit: int = 14):
+def news_market_wire(request: Request, limit: int = 14, refresh: int = 0):
     """Free macro Market Wire (RSS). No LLM. No paid news API.
 
     Auth: any session that passed middleware (v1 HMAC or v2 JWT). Do NOT use
     _claims_or_401 here — that rejects mobile clients that only carry a v1
     password token, which left the Research-tab Market Wire empty.
     """
+    if refresh:
+        _MARKET_WIRE_CACHE["ts"] = 0.0
+        _MARKET_WIRE_CACHE["data"] = None
     return _build_market_wire(limit=limit)
 
 
@@ -7081,7 +7095,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui463-20260813-fund-table-scroll"
+WEB_BUILD_VERSION = "ui464-20260814-desk-market-wire"
 
 
 @app.get("/api/build")

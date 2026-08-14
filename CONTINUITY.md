@@ -77,7 +77,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **SnapTrade uninvested cash** | **`ui461-20260813-snaptrade-uninvested-cash`** | Sale proceeds sit in balances.cash minus SPAXX — inject residual CASH lot |
 | **Cash / MM always $1** | **`ui462-20260813-cash-par-price`** | Never Yahoo-price CASH (listed ~$86) — NAV/positions force par |
 | **Fund table scroll** | **`ui463-20260813-fund-table-scroll`** | Equal-height Positions/Rebalance cards scroll inside the table |
-| **Next deploy after this** | **`ui464-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Desk Market Wire restored** | **`ui464-20260814-desk-market-wire`** | Free official + wire RSS card back on React Desk |
+| **Next deploy after this** | **`ui465-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

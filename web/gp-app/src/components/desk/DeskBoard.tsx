@@ -16,6 +16,7 @@ export type CardId =
   | 'analyst'
   | 'strategist'
   | 'markets'
+  | 'wire'
   | 'ideas'
   | 'analyze'
   | 'health'
@@ -48,9 +49,10 @@ const DEFAULT_LAYOUT: DeskLayoutMap = {
   reports: { x: 356, y: 0, w: 400, h: 420 },
   analyst: { x: 356, y: 436, w: 400, h: 420 },
   strategist: { x: 356, y: 872, w: 400, h: 380 },
-  markets: { x: 772, y: 0, w: 400, h: 360 },
-  ideas: { x: 772, y: 376, w: 400, h: 300 },
-  analyze: { x: 772, y: 692, w: 400, h: 220 },
+  markets: { x: 772, y: 0, w: 400, h: 280 },
+  wire: { x: 772, y: 296, w: 400, h: 380 },
+  ideas: { x: 772, y: 692, w: 400, h: 280 },
+  analyze: { x: 772, y: 988, w: 400, h: 220 },
   health: { x: 0, y: 732, w: 340, h: 180 },
 }
 
