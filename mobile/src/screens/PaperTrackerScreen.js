@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAppResume } from '../hooks/useAppResume';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../api/client';
 import { Skeleton, useTheme } from '../design';
@@ -55,6 +56,7 @@ export default function PaperTrackerScreen({ navigation }) {
   };
 
   useFocusEffect(useCallback(() => { load(); }, []));
+  useAppResume(() => { load(); });
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 

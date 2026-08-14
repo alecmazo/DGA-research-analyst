@@ -106,17 +106,34 @@ function LPTabs({ onLogout, isDemo, onSwitchToAdmin }) {
 }
 
 // ── Auto-OTA: cold launch + return-to-foreground ────────────────────────────
-// LPs stay on TestFlight binaries; JS UI ships via the production channel.
-// Without a foreground re-check they can sit on a stale bundle for days.
+// Native ON_LOAD + fallbackToCacheTimeout:0 downloads in the background but
+// does NOT apply until the next process start. If we only call
+// checkForUpdateAsync(), Expo returns isAvailable=false once the bundle is
+// already sitting in isUpdatePending — so a warm reopen stayed stale until
+// a force-quit. Always apply a pending update first.
 let _otaInFlight = false;
 let _otaLastCheckMs = 0;
-const OTA_MIN_INTERVAL_MS = 60_000; // don't hammer Expo on every blur/focus
+const OTA_MIN_INTERVAL_MS = 45_000;
+
+async function applyPendingUpdate(reason) {
+  try {
+    if (Updates.isUpdatePending) {
+      console.log('[OTA] applying pending update (' + reason + ')');
+      await Updates.reloadAsync();
+      return true;
+    }
+  } catch (e) {
+    console.log('[OTA] pending apply failed:', e?.message || e);
+  }
+  return false;
+}
 
 async function checkForOtaUpdate(reason = 'launch') {
   try {
     if (__DEV__) return;
     if (!Updates.isEnabled) return;
     if (_otaInFlight) return;
+    if (await applyPendingUpdate(reason)) return;
     const now = Date.now();
     if (now - _otaLastCheckMs < OTA_MIN_INTERVAL_MS) return;
     _otaInFlight = true;
@@ -169,8 +186,8 @@ export default function App() {
     bootstrap();
   }, [bootstrap]);
 
-  // When an LP re-opens the app from background, pull the latest OTA so they
-  // don't stay on a 2-day-old production bundle.
+  // Warm reopen: apply a bundle already downloaded by native ON_LOAD, then
+  // check Expo for a newer one. Data screens also refresh via useAppResume.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       const prev = appStateRef.current;

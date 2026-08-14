@@ -5,6 +5,7 @@ import {
   Linking, Platform, Modal, ScrollView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAppResume } from '../hooks/useAppResume';
 import { Ionicons } from '@expo/vector-icons';
 import {
   api, getGammaEnabled, setGammaEnabled as saveGamma, getBaseUrl,
@@ -206,6 +207,12 @@ export default function HomeScreen({ navigation, route }) {
       }
     }, [route?.params?.prefillTicker, route?.params?.ticker])
   );
+
+  useAppResume(() => {
+    loadReports();
+    loadMarketWire();
+    loadEarnings();
+  });
 
   const onRefresh = async () => {
     setRefreshing(true);

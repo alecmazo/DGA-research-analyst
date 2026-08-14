@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAppResume } from '../hooks/useAppResume';
 import { Ionicons } from '@expo/vector-icons';
 import { v2Fetch, getV2User, api } from '../api/client';
 import { colors } from '../components/theme';
@@ -388,6 +389,8 @@ export default function WatchlistScreen({ navigation }) {
       return () => { if (timerRef.current) clearInterval(timerRef.current); };
     }, [fetchPositions])
   );
+
+  useAppResume(() => { fetchPositions(false); });
 
   // ── Row press ─────────────────────────────────────────────────────────────
 

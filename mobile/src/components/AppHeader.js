@@ -70,8 +70,8 @@ export default function AppHeader({
 const styles = StyleSheet.create({
   header: {
     backgroundColor: colors.navy,
-    paddingBottom: 18,
-    paddingHorizontal: 18,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

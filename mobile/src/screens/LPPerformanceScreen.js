@@ -13,6 +13,7 @@ import {
   TouchableOpacity, ActivityIndicator, Dimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAppResume } from '../hooks/useAppResume';
 import { v2Fetch, getV2User, logoutV2 } from '../api/client';
 import AppHeader from '../components/AppHeader';
 import { haptics, useTheme } from '../design';
@@ -446,6 +447,7 @@ export default function LPPerformanceScreen({ onLogout, isDemo, onSwitchToAdmin 
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  useAppResume(() => { load(); });
 
   const onRefresh = async () => {
     haptics.onPressTab?.();

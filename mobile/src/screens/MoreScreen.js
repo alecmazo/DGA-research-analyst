@@ -4,7 +4,7 @@
  * when the mode changes.
  */
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
@@ -33,11 +33,14 @@ export default function MoreScreen({ navigation }) {
         {/* Destinations */}
         <View style={s.card}>
           {ITEMS.map((it, i) => (
-            <TouchableOpacity
+            <Pressable
               key={it.route}
-              activeOpacity={0.7}
               onPress={() => navigation.navigate(it.route)}
-              style={[s.row, i === ITEMS.length - 1 && { borderBottomWidth: 0 }]}
+              style={({ pressed }) => [
+                s.row,
+                i === ITEMS.length - 1 && { borderBottomWidth: 0 },
+                pressed && { opacity: 0.65 },
+              ]}
             >
               <View style={s.iconWrap}>
                 <MaterialCommunityIcons name={it.icon} size={20} color={t.primary} />
@@ -47,7 +50,7 @@ export default function MoreScreen({ navigation }) {
                 <Text style={s.sub}>{it.sub}</Text>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={22} color={t.textDim} />
-            </TouchableOpacity>
+            </Pressable>
           ))}
         </View>
 
@@ -57,10 +60,10 @@ export default function MoreScreen({ navigation }) {
           {MODES.map((m) => {
             const on = mode === m.key;
             return (
-              <TouchableOpacity key={m.key} style={[s.seg, on && s.segOn]} activeOpacity={0.8} onPress={() => setMode(m.key)}>
+              <Pressable key={m.key} style={({ pressed }) => [s.seg, on && s.segOn, pressed && { opacity: 0.8 }]} onPress={() => setMode(m.key)}>
                 <MaterialCommunityIcons name={m.icon} size={16} color={on ? t.onAccent : t.textSecondary} />
                 <Text style={[s.segTxt, { color: on ? t.onAccent : t.textSecondary }]}>{m.label}</Text>
-              </TouchableOpacity>
+              </Pressable>
             );
           })}
         </View>

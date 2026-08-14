@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Alert, ScrollView, ActivityIndicator, Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Updates from 'expo-updates';
+import { useAppResume } from '../hooks/useAppResume';
 import {
   api, getBaseUrl, setBaseUrl, resetBaseUrlToProd,
   getStoredPassword, login, logoutV2, getV2User,
@@ -17,7 +19,7 @@ import { useTheme } from '../design';
 import AppHeader from '../components/AppHeader';
 
 // Bump on every JS / OTA push so the user can verify what's running.
-const APP_BUILD = 'mobile-ui18-ai-analyst-20260528';
+const APP_BUILD = 'mobile-ui19-resume-ota-20260814';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtNextRun(secs) {
@@ -116,17 +118,24 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
   const [pulseMinute, setPulseMinute]       = useState('00');
   const [pulseNextRun, setPulseNextRun]     = useState(null);
 
+  const refreshServerBuild = useCallback(() => {
+    api.getBuild().then(j => setServerBuild(j?.build || 'unknown')).catch(() => setServerBuild('offline'));
+  }, []);
+
   useEffect(() => {
     getBaseUrl().then(setBaseUrlState);
     getStoredPassword().then(pw => setPassword(pw || ''));
-    api.getBuild().then(j => setServerBuild(j?.build || 'unknown')).catch(() => setServerBuild('offline'));
+    refreshServerBuild();
     loadAutomationSettings();
     (async () => {
       setBioAvailable(await isBiometricAvailable());
       setBioEnabled(await isBiometricEnabled());
       setBioLabel(await getBiometricLabel());
     })();
-  }, []);
+  }, [refreshServerBuild]);
+
+  useFocusEffect(useCallback(() => { refreshServerBuild(); }, [refreshServerBuild]));
+  useAppResume(() => { refreshServerBuild(); });
 
   // Toggle the biometric lock. We don't have the user's v2 password here
   // (loginV2 never stores it), so a Settings-enable gates the *current* session
@@ -216,10 +225,21 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
         setUpdateMessage('Updates only work in TestFlight / App Store builds, not Expo Go.');
         return;
       }
+      if (!Updates.isEnabled) {
+        setUpdateState('error');
+        setUpdateMessage('OTA is off on this binary. Reinstall from TestFlight.');
+        return;
+      }
+      if (Updates.isUpdatePending) {
+        setUpdateState('reloading');
+        setUpdateMessage('Update already downloaded — restarting now…');
+        setTimeout(() => Updates.reloadAsync(), 350);
+        return;
+      }
       const result = await Updates.checkForUpdateAsync();
       if (!result.isAvailable) {
         setUpdateState('uptodate');
-        setUpdateMessage('You\'re on the latest version.');
+        setUpdateMessage('You\'re on the latest version. Reopen the app anytime — pending updates apply without a force-quit.');
         return;
       }
       setUpdateState('downloading');
@@ -227,7 +247,7 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
       await Updates.fetchUpdateAsync();
       setUpdateState('reloading');
       setUpdateMessage('Restarting to apply update…');
-      setTimeout(() => Updates.reloadAsync(), 600);
+      setTimeout(() => Updates.reloadAsync(), 400);
     } catch (e) {
       setUpdateState('error');
       setUpdateMessage(e?.message || String(e));
@@ -291,7 +311,7 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
   return (
     <View style={s.wrapper}>
       <AppHeader title="Settings" />
-      <ScrollView style={s.container} contentContainerStyle={s.content}>
+      <ScrollView style={s.container} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
 
         {/* ── Demo Mode Banner + View Switch ── */}
         {isDemo && (
@@ -484,8 +504,14 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
         <View style={s.section}>
           <Text style={s.sectionTitle}>APP UPDATES</Text>
           <Text style={s.sectionHint}>
-            Tap to pull the latest UI fixes over-the-air. No TestFlight reinstall needed.
+            Production OTA (channel: {Updates.channel || 'production'}). Opening the app from the switcher now applies a downloaded update — no force-quit.
           </Text>
+          {Updates.isUpdatePending ? (
+            <View style={s.pendingBanner}>
+              <Ionicons name="sparkles" size={16} color={t.chromeNavy} />
+              <Text style={s.pendingBannerText}>Update ready — tap below to apply now.</Text>
+            </View>
+          ) : null}
           <View style={s.versionRow}>
             <Text style={s.versionKey}>App build</Text>
             <Text style={s.versionVal}>{APP_BUILD}</Text>
@@ -502,6 +528,12 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
             <Text style={s.versionKey}>Runtime</Text>
             <Text style={s.versionVal}>{Updates.runtimeVersion || '—'}</Text>
           </View>
+          <View style={s.versionRow}>
+            <Text style={s.versionKey}>Update id</Text>
+            <Text style={s.versionVal}>
+              {Updates.updateId ? String(Updates.updateId).slice(0, 8) : 'embedded'}
+            </Text>
+          </View>
 
           <TouchableOpacity
             style={[s.saveBtn, s.saveBtnGold, isUpdating && s.disabledBtn]}
@@ -510,11 +542,12 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
           >
             {isUpdating
               ? <ActivityIndicator size="small" color={t.chromeNavy} />
-              : <Ionicons name="refresh" size={16} color={t.chromeNavy} />}
+              : <Ionicons name={Updates.isUpdatePending ? 'checkmark-circle' : 'refresh'} size={16} color={t.chromeNavy} />}
             <Text style={s.saveBtnGoldText}>
               {updateState === 'checking'    ? 'Checking…'
               : updateState === 'downloading' ? 'Downloading…'
               : updateState === 'reloading'   ? 'Restarting…'
+              : Updates.isUpdatePending     ? 'Apply Update'
               : 'Check for Updates'}
             </Text>
           </TouchableOpacity>
@@ -641,6 +674,17 @@ function makeStyles(t) {
     maxWidth: '60%', textAlign: 'right',
   },
   updateStatusText: { fontSize: 12, color: t.textSecondary, marginTop: 8, lineHeight: 16 },
+  pendingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: t.primary,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  pendingBannerText: { flex: 1, fontSize: 13, fontWeight: '700', color: t.chromeNavy },
   resetBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingVertical: 8, marginTop: 8,

@@ -9,6 +9,7 @@ import {
   ActivityIndicator, StyleSheet, Linking, Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAppResume } from '../hooks/useAppResume';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import { api } from '../api/client';
@@ -196,6 +197,11 @@ export default function MarketsScreen({ navigation }) {
       }
     };
   }, [loadAll, loadQuotes]));
+
+  useAppResume(() => {
+    loadQuotes().catch(() => {});
+    setSessionTick((n) => n + 1);
+  });
 
   // Keep session label fresh even between quote polls.
   useEffect(() => {

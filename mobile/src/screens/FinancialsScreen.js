@@ -16,6 +16,7 @@ import {
   RefreshControl, StyleSheet, Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAppResume } from '../hooks/useAppResume';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AppHeader from '../components/AppHeader';
@@ -313,6 +314,10 @@ export default function FinancialsScreen() {
       }
     })();
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  useAppResume(() => {
+    if (ticker) loadTicker(ticker, range, periodType);
+  });
 
   const onRange = (rng) => { setRange(rng); loadHistory(ticker, rng); };
 

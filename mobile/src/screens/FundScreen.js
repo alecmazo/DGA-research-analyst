@@ -20,6 +20,7 @@ import {
   KeyboardAvoidingView, Platform, Alert, Switch, Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAppResume } from '../hooks/useAppResume';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -188,6 +189,13 @@ export default function FundScreen({ navigation }) {
       loadManagedAccList(null);
     }
   }, [locked])); // eslint-disable-line
+
+  useAppResume(() => {
+    if (locked) return;
+    loadFundList();
+    loadYtdSnapshots();
+    loadManagedAccList(null);
+  });
 
   // ── Live SPY YTD: fetch whenever a YTD result is displayed ──────────────
   useEffect(() => {

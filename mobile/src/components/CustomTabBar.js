@@ -10,7 +10,7 @@
  */
 import React from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
+  View, Text, Pressable, StyleSheet,
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -107,17 +107,16 @@ export default function CustomTabBar({ state, navigation }) {
           };
 
           return (
-            <TouchableOpacity
+            <Pressable
               key={route.key}
-              style={styles.tab}
               onPress={onPress}
-              activeOpacity={0.75}
+              hitSlop={4}
+              style={({ pressed }) => [styles.tab, pressed && styles.tabPressed]}
             >
-              {/* Gold pill + glow behind the active icon */}
               <View style={[styles.pill, focused && styles.pillActive]}>
                 <TabIcon
                   name={iconCfg?.name || 'circle'}
-                  size={focused ? 26 : 23}
+                  size={focused ? 24 : 22}
                   color={focused ? colors.navy : colors.midGray}
                 />
               </View>
@@ -125,9 +124,8 @@ export default function CustomTabBar({ state, navigation }) {
               <Text numberOfLines={1} style={[styles.label, focused && styles.labelActive]}>
                 {LABEL_OVERRIDE[route.name] || route.name}
               </Text>
-              {/* Glow dot below active label */}
               {focused && <View style={styles.glowDot} />}
-            </TouchableOpacity>
+            </Pressable>
           );
         })}
       </View>
@@ -162,23 +160,27 @@ const styles = StyleSheet.create({
 
   row: {
     flexDirection: 'row',
-    paddingTop: 8,
+    paddingTop: 6,
   },
 
   tab: {
     flex: 1,
     alignItems: 'center',
-    paddingBottom: 4,
+    paddingBottom: 2,
+  },
+  tabPressed: {
+    opacity: 0.72,
+    transform: [{ scale: 0.96 }],
   },
 
   // ── Inactive pill (just a transparent hit-target) ──
   pill: {
-    width: 52,
-    height: 38,
-    borderRadius: 19,
+    width: 46,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 3,
+    marginBottom: 2,
   },
 
   // ── Active pill: gold fill + multi-layer glow ──
@@ -201,10 +203,10 @@ const styles = StyleSheet.create({
   // Same fontSize / letterSpacing for active and inactive so activation
   // doesn't shift surrounding tabs by 1px. Color + weight handle the delta.
   label: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
     color: colors.midGray,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   labelActive: {
     color: colors.gold,

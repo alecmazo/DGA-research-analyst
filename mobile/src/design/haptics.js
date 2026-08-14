@@ -49,21 +49,22 @@ const _longPressTap = _impact(Haptics?.ImpactFeedbackStyle?.Medium);
 // keep compiling, but produces no physical feedback.
 const _silent = () => {};
 
+function _selection() {
+  return () => {
+    if (!Haptics?.selectionAsync) return;
+    safe(() => Haptics.selectionAsync());
+  };
+}
+
 export const haptics = {
   // ── Active ──
   onLongPress: _longPressTap,
+  onPressTab: _selection(),
+  onPressPrimary: _impact(Haptics?.ImpactFeedbackStyle?.Light),
+  onToggle: _selection(),
 
-  // ── Silent (preserve API surface) ──
-  // Re-enable any of these by swapping _silent for one of:
-  //   _impact(Haptics.ImpactFeedbackStyle.Light)   — barely-there tap
-  //   _impact(Haptics.ImpactFeedbackStyle.Medium)  — standard confirm
-  //   _impact(Haptics.ImpactFeedbackStyle.Heavy)   — assertive, use sparingly
-  //   () => Haptics.selectionAsync()               — tab/picker selection
-  //   () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-  onPressTab:     _silent,
-  onPressPrimary: _silent,
-  onSuccess:      _silent,
-  onError:        _silent,
-  onToggle:       _silent,
-  onWarn:         _silent,
+  // ── Quiet (preserve API; avoid firing on every poll/success toast) ──
+  onSuccess: _silent,
+  onError:   _silent,
+  onWarn:    _silent,
 };
