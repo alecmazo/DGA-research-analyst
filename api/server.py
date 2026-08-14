@@ -7095,7 +7095,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui465-20260814-desk-market-pulse"
+WEB_BUILD_VERSION = "ui466-20260814-transcript-topup"
 
 
 @app.get("/api/build")
@@ -28631,6 +28631,8 @@ def _store_call_chunks(ticker: str, qtag: str, call_date, transcript: str,
         return 0, f"embed failed {e!s:.100}"
     n = 0
     src = (source or "unknown").strip()[:40] or "unknown"
+    if not call_date:
+        call_date = _quarter_end_iso(qtag)
     try:
         with _fund_conn() as conn, conn.cursor() as cur:
             for idx, (ch, emb) in enumerate(zip(chunks, embs)):
@@ -28639,7 +28641,8 @@ def _store_call_chunks(ticker: str, qtag: str, call_date, transcript: str,
                         (ticker, quarter, call_date, speaker, chunk_idx, chunk_text, embedding, source)
                     VALUES (%s,%s,%s,NULL,%s,%s,%s,%s)
                     ON CONFLICT (ticker, quarter, chunk_idx) DO UPDATE
-                       SET source = COALESCE(EXCLUDED.source, call_chunks.source)
+                       SET source = COALESCE(EXCLUDED.source, call_chunks.source),
+                           call_date = COALESCE(call_chunks.call_date, EXCLUDED.call_date)
                 """, (ticker, qtag, call_date, idx, ch, json.dumps(emb), src))
                 n += 1
             conn.commit()
@@ -29933,6 +29936,28 @@ def _call_date_str(v) -> str | None:
     return s or None
 
 
+def _quarter_end_iso(qtag: str | None) -> str | None:
+    """Calendar end-date for a YYYYQn tag — used when call_date was never stored."""
+    m = re.fullmatch(r"(\d{4})Q([1-4])", (qtag or "").strip().upper())
+    if not m:
+        return None
+    y, q = int(m.group(1)), int(m.group(2))
+    return f"{y}-" + {1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31"}[q]
+
+
+def _effective_latest_call(latest_iso: str | None, latest_quarter: str | None) -> str | None:
+    """Prefer a real call_date, but never hide a newer indexed quarter.
+
+    HuggingFace / Alpha Vantage rows often have quarter=2026Q2 and call_date
+    NULL, so MAX(call_date) stayed in 2025 and the UI said '500d stale'.
+    """
+    dated = _call_date_str(latest_iso)
+    inferred = _quarter_end_iso(latest_quarter)
+    if dated and inferred:
+        return dated if dated >= inferred else inferred
+    return dated or inferred
+
+
 def _call_freshness(latest_iso: str | None, today=None) -> dict:
     """Bucket indexed calls so GP can see latest vs historical at a glance.
 
@@ -30044,7 +30069,8 @@ def transcripts_calls_coverage(request: Request):
         coverage = []
         by_bucket = {"fresh": 0, "recent": 0, "aging": 0, "stale": 0}
         for r in rows:
-            latest = _call_date_str(r.get("latest_call"))
+            latest = _effective_latest_call(
+                _call_date_str(r.get("latest_call")), r.get("latest_quarter"))
             oldest = _call_date_str(r.get("oldest_call"))
             fr = _call_freshness(latest)
             by_bucket[fr["bucket"]] = by_bucket.get(fr["bucket"], 0) + 1
@@ -30102,7 +30128,7 @@ def transcripts_calls_coverage(request: Request):
             "coverage": coverage,
             "freshness_summary": by_bucket,
             "source_summary": source_summary,
-            "needs_topup": needs_topup[:60],
+            "needs_topup": needs_topup[:120],
             "needs_topup_count": len(needs_topup),
             "universe": {
                 "saved_reports": len(universe),

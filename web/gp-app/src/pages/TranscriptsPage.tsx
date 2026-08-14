@@ -24,6 +24,7 @@ type Coverage = {
   freshness_summary?: Record<string, number>
   source_summary?: Record<string, { transcripts?: number; chunks?: number }>
   needs_topup_count?: number
+  needs_topup?: string[]
   universe?:
     | number
     | {
@@ -75,7 +76,7 @@ export function TranscriptsPage() {
 
   const [backfillYears, setBackfillYears] = useState(3)
   const [syncQuarters, setSyncQuarters] = useState(4)
-  const [syncMax, setSyncMax] = useState(40)
+  const [syncMax, setSyncMax] = useState(80)
   const [jobBusy, setJobBusy] = useState(false)
 
   const load = useCallback(async () => {
@@ -106,8 +107,10 @@ export function TranscriptsPage() {
   }, [load])
 
   const pollJob = async (jobId: string, pathPrefix: string) => {
-    for (let i = 0; i < 120; i++) {
-      await new Promise((r) => setTimeout(r, 2500))
+    // 58-name top-up can run 20–40 min. Old 5-minute cap claimed "finished"
+    // while the worker was still on ticker 8.
+    for (let i = 0; i < 480; i++) {
+      await new Promise((r) => setTimeout(r, 5000))
       try {
         const j = await api<{
           status?: string
@@ -121,12 +124,14 @@ export function TranscriptsPage() {
           if (st !== 'done') {
             setErr(j.error || j.label || 'Job failed')
           }
-          return
+          return st
         }
       } catch {
         /* keep */
       }
     }
+    setStatus('Still running on the server — tap Refresh in a few minutes.')
+    return 'timeout'
   }
 
   const ingestYt = async () => {
@@ -149,7 +154,8 @@ export function TranscriptsPage() {
         },
       )
       if (j.job_id) {
-        await pollJob(j.job_id, '/api/transcripts/jobs')
+        const st = await pollJob(j.job_id, '/api/transcripts/jobs')
+        if (st === 'timeout') return
       }
       setStatus('✓ Ingest finished — refreshing…')
       setYtUrl('')
@@ -173,7 +179,10 @@ export function TranscriptsPage() {
           body: JSON.stringify({ years: backfillYears }),
         },
       )
-      if (j.job_id) await pollJob(j.job_id, '/api/transcripts/calls/sync')
+      if (j.job_id) {
+        const st = await pollJob(j.job_id, '/api/transcripts/calls/sync')
+        if (st === 'timeout') return
+      }
       setStatus('✓ Backfill finished')
       await load()
     } catch (e) {
@@ -183,21 +192,29 @@ export function TranscriptsPage() {
     }
   }
 
-  const runSync = async (mode: 'gap' | 'latest') => {
+  const runSync = async (mode: 'gap' | 'latest' | 'topup') => {
     setJobBusy(true)
     setErr(null)
-    setStatus(mode === 'gap' ? 'Fill gap (free)…' : 'Latest calls…')
+    setStatus(
+      mode === 'gap' ? 'Fill gap (free)…' : mode === 'topup' ? 'Topping up stale calls…' : 'Latest calls…',
+    )
     try {
+      const topup = (data?.needs_topup || []).filter(Boolean)
       const j = await api<{ job_id?: string }>('/api/transcripts/calls/sync', {
         method: 'POST',
         body: JSON.stringify({
           mode: mode === 'gap' ? 'gap' : 'latest',
           max_quarters: syncQuarters,
-          max_names: syncMax,
-          allow_grok: mode === 'latest' ? 1 : 0,
+          max_names: mode === 'topup' ? Math.max(syncMax, topup.length || 80) : syncMax,
+          allow_grok: mode === 'gap' ? 0 : 1,
+          prefer_stale: true,
+          tickers: mode === 'topup' && topup.length ? topup : undefined,
         }),
       })
-      if (j.job_id) await pollJob(j.job_id, '/api/transcripts/calls/sync')
+      if (j.job_id) {
+        const st = await pollJob(j.job_id, '/api/transcripts/calls/sync')
+        if (st === 'timeout') return
+      }
       setStatus('✓ Sync finished')
       await load()
     } catch (e) {
@@ -334,11 +351,19 @@ export function TranscriptsPage() {
               <div className={styles.actions}>
                 <Button
                   size="sm"
+                  variant="primary"
+                  disabled={jobBusy}
+                  onClick={() => void runSync('topup')}
+                >
+                  ⚡ Top up stale
+                </Button>
+                <Button
+                  size="sm"
                   variant="secondary"
                   disabled={jobBusy}
                   onClick={() => void runSync('latest')}
                 >
-                  ⚡ Latest calls
+                  Latest calls
                 </Button>
                 <label className={styles.lbl}>
                   qtrs
