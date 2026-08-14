@@ -80,7 +80,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Desk Market Wire restored** | **`ui464-20260814-desk-market-wire`** | Free official + wire RSS card back on React Desk |
 | **Desk Market Pulse restored** | **`ui465-20260814-desk-market-pulse`** | Watchlist scan card back on React Desk (no auto-run) |
 | **Transcript freshness + top-up** | **`ui466-20260814-transcript-topup`** | Use latest quarter when call_date is blank; top-up stale names |
-| **Next deploy after this** | **`ui467-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Transcript top-up is free** | **`ui467-20260814-transcript-topup-free`** | Fool/FMP/AV only; skip unreported current quarter; no Grok |
+| **Next deploy after this** | **`ui468-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

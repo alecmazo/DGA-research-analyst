@@ -7095,7 +7095,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui466-20260814-transcript-topup"
+WEB_BUILD_VERSION = "ui467-20260814-transcript-topup-free"
 
 
 @app.get("/api/build")
@@ -28545,12 +28545,19 @@ _GROK_CALL_Q_SYSTEM = (
 )
 
 
-def _recent_quarters(n: int) -> list[tuple]:
-    """The `n` most recent calendar quarters, newest first, starting from the
-    quarter we are currently in (which may not have reported yet)."""
+def _recent_quarters(n: int, include_current: bool = False) -> list[tuple]:
+    """The `n` most recent calendar quarters, newest first.
+
+    Default skips the in-progress quarter (Aug → start at Q2). Probing the
+    live quarter first burned Grok on names that have not reported yet.
+    """
     from datetime import datetime as _dt
     now = _dt.utcnow()
     y, q = now.year, (now.month - 1) // 3 + 1
+    if not include_current:
+        q -= 1
+        if q == 0:
+            q, y = 4, y - 1
     out = []
     for _ in range(max(1, n)):
         out.append((y, q))
@@ -29710,7 +29717,8 @@ def transcripts_calls_sync(req: Request, background_tasks: BackgroundTasks):
         body = _request_json_sync(req)
     except Exception:
         body = {}
-    allow_grok = bool((body or {}).get("allow_grok", True))
+    # Default OFF — a 50-name top-up with Grok on every miss is not cheap.
+    allow_grok = bool((body or {}).get("allow_grok", False))
     if _CALL_SOURCE == "free":
         allow_grok = False
     if allow_grok and _CALL_SOURCE in ("grok", "cascade", "auto", ""):

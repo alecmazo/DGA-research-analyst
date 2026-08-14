@@ -206,7 +206,7 @@ export function TranscriptsPage() {
           mode: mode === 'gap' ? 'gap' : 'latest',
           max_quarters: syncQuarters,
           max_names: mode === 'topup' ? Math.max(syncMax, topup.length || 80) : syncMax,
-          allow_grok: mode === 'gap' ? 0 : 1,
+          allow_grok: 0,
           prefer_stale: true,
           tickers: mode === 'topup' && topup.length ? topup : undefined,
         }),
@@ -314,8 +314,8 @@ export function TranscriptsPage() {
 
             <Panel title="Earnings-call index" badge={uniBadge}>
               <p className={styles.hint}>
-                Index earnings calls for saved-report tickers. Backfill = free
-                history. Fill gap = free sources. Latest = free → Grok cascade.
+                Index earnings calls for saved-report tickers. Backfill, gap
+                fill, and top-up all use free sources (Fool / FMP / AV). $0 Grok.
               </p>
               <div className={styles.actions}>
                 <Button
@@ -355,7 +355,7 @@ export function TranscriptsPage() {
                   disabled={jobBusy}
                   onClick={() => void runSync('topup')}
                 >
-                  ⚡ Top up stale
+                  ⚡ Top up stale · free
                 </Button>
                 <Button
                   size="sm"
@@ -363,7 +363,7 @@ export function TranscriptsPage() {
                   disabled={jobBusy}
                   onClick={() => void runSync('latest')}
                 >
-                  Latest calls
+                  Latest calls · free
                 </Button>
                 <label className={styles.lbl}>
                   qtrs
