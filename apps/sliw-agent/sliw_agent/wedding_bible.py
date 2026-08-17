@@ -47,7 +47,7 @@ WEDDING_PACKAGES: dict[str, WeddingPackage] = {
     "dream": WeddingPackage(
         id="dream",
         name="Dream Wedding Dance",
-        price_label="From $2,800 · custom proposal",
+        price_label="Custom",
         one_liner="Personalized choreography + private lessons with Edyta, venue coordination, and day-of support on request.",
         includes=[
             "Personalized choreography + private lessons with Edyta (lesson count scoped to date & song)",
