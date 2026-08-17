@@ -453,9 +453,17 @@ export const api = {
   deleteReport: (ticker) => request(`/api/report/${ticker}`, { method: 'DELETE' }),
 
   downloadUrl: async (ticker, type) => {
-    const [base, token] = await Promise.all([getBaseUrl(), getToken()]);
-    const t = token ? `?token=${encodeURIComponent(token)}` : '';
-    return `${base}/api/download/${ticker}/${type}${t}`;
+    // Linking.openURL cannot send headers. Mobile is a v2 (email) session;
+    // the old ?token= HMAC is often empty/invalid now, so Safari got
+    // {"detail":"Unauthorized"} on the Word / PPT buttons.
+    const [base, v1, v2] = await Promise.all([getBaseUrl(), getToken(), getV2Token()]);
+    const qs = new URLSearchParams();
+    if (v2) qs.set('v2_token', v2);
+    if (v1) qs.set('token', v1);
+    const q = qs.toString();
+    const tk = encodeURIComponent(String(ticker || '').trim().toUpperCase());
+    const fmt = String(type || 'docx').replace(/[^a-z0-9]/gi, '') || 'docx';
+    return `${base}/api/download/${tk}/${fmt}${q ? `?${q}` : ''}`;
   },
 
   // ---------- Portfolio ----------
@@ -481,9 +489,12 @@ export const api = {
 
   getPortfolioJob: (jobId) => request(`/api/portfolio/${jobId}`),
   portfolioDownloadUrl: async (jobId) => {
-    const [base, token] = await Promise.all([getBaseUrl(), getToken()]);
-    const t = token ? `?token=${encodeURIComponent(token)}` : '';
-    return `${base}/api/portfolio/${jobId}/download${t}`;
+    const [base, v1, v2] = await Promise.all([getBaseUrl(), getToken(), getV2Token()]);
+    const qs = new URLSearchParams();
+    if (v2) qs.set('v2_token', v2);
+    if (v1) qs.set('token', v1);
+    const q = qs.toString();
+    return `${base}/api/portfolio/${jobId}/download${q ? `?${q}` : ''}`;
   },
   getLastPortfolio:    () => request('/api/portfolio/last'),
   // Full payload of the last completed rebalance (synced via Dropbox on server).

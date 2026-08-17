@@ -19,7 +19,7 @@ import { useTheme } from '../design';
 import AppHeader from '../components/AppHeader';
 
 // Bump on every JS / OTA push so the user can verify what's running.
-const APP_BUILD = 'mobile-ui19-resume-ota-20260814';
+const APP_BUILD = 'mobile-ui20-download-v2-auth-20260817';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtNextRun(secs) {
