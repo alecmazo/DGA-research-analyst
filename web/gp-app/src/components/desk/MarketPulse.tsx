@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '@/lib/api'
+import { api, type Quote } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { fmtPct, pctClass } from '@/lib/format'
 import { renderMd } from '@/lib/md'
@@ -69,6 +69,15 @@ function pulseSummary(md?: string): string {
   return ''
 }
 
+function quotePct(q?: Quote | null, pulsePct?: number | null): number | null {
+  if (q) {
+    const v = q.pct ?? q.pct_change
+    if (v != null && !Number.isNaN(Number(v))) return Number(v)
+  }
+  if (pulsePct != null && !Number.isNaN(Number(pulsePct))) return Number(pulsePct)
+  return null
+}
+
 function sentClass(raw?: string): string {
   const s = String(raw || '').toUpperCase()
   if (s === 'BULLISH') return styles.sentBull
@@ -79,9 +88,11 @@ function sentClass(raw?: string): string {
 
 export function MarketPulse({
   watchlist = [],
+  quotes = {},
   bare = false,
 }: {
   watchlist?: string[]
+  quotes?: Record<string, Quote>
   bare?: boolean
 }) {
   const [data, setData] = useState<LatestScan | null>(null)
@@ -121,18 +132,21 @@ export function MarketPulse({
     const filtered = wlSet.size
       ? all.filter(([tk]) => wlSet.has(tk.toUpperCase()))
       : all
-    const rows = (filtered.length ? filtered : all).map(([tk, res]) => ({
-      tk,
-      res: res || {},
-      stale: ageMs(res) > STALE_MS,
-    }))
-    rows.sort((a, b) => {
-      if (a.stale !== b.stale) return a.stale ? 1 : -1
-      if (a.stale) return ageMs(b.res) - ageMs(a.res)
-      return a.tk.localeCompare(b.tk)
+    const rows = (filtered.length ? filtered : all).map(([tk, res]) => {
+      const q = quotes[tk] || quotes[tk.toUpperCase()]
+      const pct = quotePct(q, res?.pct_change)
+      return {
+        tk,
+        res: res || {},
+        pct,
+        abs: pct == null ? -1 : Math.abs(pct),
+        stale: ageMs(res) > STALE_MS,
+      }
     })
+    // Same ranking as Desk watchlist: biggest |day %| first.
+    rows.sort((a, b) => b.abs - a.abs || a.tk.localeCompare(b.tk))
     return rows
-  }, [data, wlSet])
+  }, [data, wlSet, quotes])
 
   const newest = useMemo(() => {
     let best = 0
@@ -264,7 +278,7 @@ export function MarketPulse({
             No pulse yet — click Run Pulse to scan your watchlist.
           </div>
         )}
-        {entries.map(({ tk, res, stale }) => {
+        {entries.map(({ tk, res, pct, stale }) => {
           const sent = String(res.sentiment || 'UNKNOWN').toUpperCase()
           const line = res.error
             ? `⚠ ${res.error}`
@@ -285,9 +299,9 @@ export function MarketPulse({
                     ? sent
                     : '—'}
                 </span>
-                {res.pct_change != null && (
-                  <span className={`tabular ${styles.pulseDay} ${pctClass(res.pct_change)}`}>
-                    {fmtPct(res.pct_change)}
+                {pct != null && (
+                  <span className={`tabular ${styles.pulseDay} ${pctClass(pct)}`}>
+                    {fmtPct(pct)}
                   </span>
                 )}
                 {stale ? (

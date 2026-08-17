@@ -370,8 +370,14 @@ export function DeskPage() {
       title: 'Market Pulse',
       badge: 'Scan',
       flush: true,
-      action: <span className={styles.meta}>Watchlist · live web/X</span>,
-      children: <MarketPulse watchlist={wl?.tickers || []} bare />,
+      action: <span className={styles.meta}>Biggest movers first</span>,
+      children: (
+        <MarketPulse
+          watchlist={wl?.tickers || []}
+          quotes={wl?.quotes || {}}
+          bare
+        />
+      ),
     },
     {
       id: 'reports' as const,
