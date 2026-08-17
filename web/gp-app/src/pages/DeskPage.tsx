@@ -4,7 +4,6 @@ import { LiveMarkets } from '@/components/desk/LiveMarkets'
 import { AnalyzeCard } from '@/components/desk/AnalyzeCard'
 import { AnalystCard } from '@/components/desk/AnalystCard'
 import { StrategistCard } from '@/components/desk/StrategistCard'
-import { IdeaGenerator } from '@/components/desk/IdeaGenerator'
 import { SavedReports } from '@/components/desk/SavedReports'
 import { DeskBoard } from '@/components/desk/DeskBoard'
 import { EarningsCard } from '@/components/desk/EarningsCard'
@@ -147,27 +146,6 @@ export function DeskPage() {
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Remove failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const runPulse = async () => {
-    setBusy(true)
-    setErr(null)
-    try {
-      await api('/api/daily-brief', { method: 'POST', body: '{}' })
-      for (let i = 0; i < 40; i++) {
-        await new Promise((r) => setTimeout(r, 3000))
-        const b = await api<DailyBrief>('/api/daily-brief/latest')
-        if (b?.markdown && b.generated_at !== brief?.generated_at) {
-          setBrief(b)
-          break
-        }
-      }
-      await load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Pulse failed')
     } finally {
       setBusy(false)
     }
@@ -361,7 +339,7 @@ export function DeskPage() {
         </div>
       ) : (
         <div className={styles.emptyBlock}>
-          <p>No pulse yet. Run Daily Pulse for a morning read on your book.</p>
+          <p>No pulse yet. It runs on the Settings schedule.</p>
         </div>
       ),
     },
@@ -426,12 +404,6 @@ export function DeskPage() {
       children: <MarketWire bare />,
     },
     {
-      id: 'ideas' as const,
-      title: 'Idea Generator',
-      flush: true,
-      children: <IdeaGenerator onAnalyze={focusAnalyze} bare />,
-    },
-    {
       id: 'analyze' as const,
       title: 'Analyze Ticker',
       flush: true,
@@ -482,14 +454,9 @@ export function DeskPage() {
         title="Desk"
         meta={`${rows.length} watch · ${Object.keys(wl?.reports || {}).length} reports`}
         extraActions={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => void load()} disabled={busy}>
-              Refresh
-            </Button>
-            <Button variant="primary" size="sm" onClick={() => void runPulse()} disabled={busy}>
-              Run Daily Pulse
-            </Button>
-          </>
+          <Button variant="secondary" size="sm" onClick={() => void load()} disabled={busy}>
+            Refresh
+          </Button>
         }
         cards={cards}
       />
