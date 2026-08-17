@@ -75,14 +75,14 @@
             id: "single_lesson",
             name: "Private wedding lesson ×1",
             price_label: "$150",
-            one_liner: "One focused private session to start with confidence.",
+            one_liner: "One focused private session to start with confidence. Lessons after that are $200 each.",
             includes: ["Customized to your level", "Style exploration", "DWTS pro coaching"],
             best_for: ["Testing the waters"],
           },
           {
             id: "package_10",
             name: "Wedding lesson package ×10",
-            price_label: "$1,450",
+            price_label: "$1,900",
             one_liner: "Full prep arc for a polished first dance.",
             includes: ["10 private sessions", "Flexible scheduling", "Detailed feedback"],
             best_for: ["Show-stopping first dance"],
@@ -229,7 +229,7 @@
           <strong>First dances, zero fear</strong>
           <span>San Rafael · private · DWTS pro</span>
           <div class="hero-media-ctas">
-            <a class="btn primary" data-stripe="package_10" href="${esc(pkgUrl)}" ${pkgUrl.startsWith("http") ? 'target="_blank" rel="noopener"' : ""}>$1,450 package</a>
+            <a class="btn primary" data-stripe="package_10" href="${esc(pkgUrl)}" ${pkgUrl.startsWith("http") ? 'target="_blank" rel="noopener"' : ""}>$1,900 package</a>
             <a class="btn ghost" data-stripe="single_lesson" href="${esc(singleUrl)}" ${singleUrl.startsWith("http") ? 'target="_blank" rel="noopener"' : ""}>$150 trial</a>
           </div>
         </div>

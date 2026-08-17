@@ -23,7 +23,7 @@ WEDDING_PACKAGES: dict[str, WeddingPackage] = {
         id="single_lesson",
         name="Private wedding lesson ×1",
         price_label="$150",
-        one_liner="One focused private session to start your first dance with confidence.",
+        one_liner="One focused private session to start your first dance with confidence. Lessons after that are $200 each.",
         includes=[
             "Customized to your skill level",
             "Style exploration (waltz, contemporary, cha-cha, mix)",
@@ -34,7 +34,7 @@ WEDDING_PACKAGES: dict[str, WeddingPackage] = {
     "package_10": WeddingPackage(
         id="package_10",
         name="Wedding lesson package ×10",
-        price_label="$1,450",
+        price_label="$1,900",
         one_liner="Full prep arc — technique, style, and emotional expression for a polished first dance.",
         includes=[
             "10 private sessions with flexible scheduling",
