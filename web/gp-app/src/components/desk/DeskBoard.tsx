@@ -183,9 +183,12 @@ type CardDef = {
 
 type Props = {
   cards: CardDef[]
+  title?: ReactNode
+  meta?: ReactNode
+  extraActions?: ReactNode
 }
 
-export function DeskBoard({ cards }: Props) {
+export function DeskBoard({ cards, title, meta, extraActions }: Props) {
   const [layout, setLayout] = useState<DeskLayoutMap>(() => loadLayout())
   const boardRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
@@ -342,11 +345,15 @@ export function DeskBoard({ cards }: Props) {
   return (
     <div className={styles.wrap}>
       <div className={styles.hintBar}>
-        <span>
-          Drag ⠿ to move · corner to resize · chevron or title to collapse/expand ·
-          layout saved automatically
-        </span>
+        <div className={styles.hintLeft}>
+          {title != null && <strong className={styles.deskTitle}>{title}</strong>}
+          {meta != null && <span className={styles.deskMeta}>{meta}</span>}
+          <span className={styles.hintText}>
+            Drag to move · resize corner · click title to collapse
+          </span>
+        </div>
         <div className={styles.hintActions}>
+          {extraActions}
           <button
             type="button"
             className={styles.resetBtn}

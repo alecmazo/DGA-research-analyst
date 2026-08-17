@@ -17,6 +17,7 @@ import {
   type WatchlistEarning,
   type WatchlistResponse,
 } from '@/lib/api'
+import { subscribeQuoteRefresh } from '@/lib/quoteRefresh'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
 import styles from './DeskPage.module.css'
@@ -97,8 +98,9 @@ export function DeskPage() {
 
   useEffect(() => {
     void load()
-    const id = window.setInterval(() => void load(), 45_000)
-    return () => window.clearInterval(id)
+    return subscribeQuoteRefresh(() => {
+      void load()
+    })
   }, [load])
 
   const rows = useMemo(() => {
@@ -468,26 +470,23 @@ export function DeskPage() {
 
   return (
     <div className={styles.desk} data-desk-board>
-      <div className={styles.toolbar}>
-        <div className={styles.toolbarLeft}>
-          <strong className={styles.toolbarTitle}>Desk</strong>
-          <span className={styles.toolbarMeta}>
-            {rows.length} watch · {Object.keys(wl?.reports || {}).length} reports
-          </span>
-        </div>
-        <div className={styles.toolbarActions}>
-          <Button variant="secondary" size="sm" onClick={() => void load()} disabled={busy}>
-            Refresh
-          </Button>
-          <Button variant="primary" size="sm" onClick={() => void runPulse()} disabled={busy}>
-            Run Daily Pulse
-          </Button>
-        </div>
-      </div>
-
       {err && <div className={styles.bannerErr}>{err}</div>}
 
-      <DeskBoard cards={cards} />
+      <DeskBoard
+        title="Desk"
+        meta={`${rows.length} watch · ${Object.keys(wl?.reports || {}).length} reports`}
+        extraActions={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => void load()} disabled={busy}>
+              Refresh
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => void runPulse()} disabled={busy}>
+              Run Daily Pulse
+            </Button>
+          </>
+        }
+        cards={cards}
+      />
 
       {earningsTk && (
         <EarningsCard

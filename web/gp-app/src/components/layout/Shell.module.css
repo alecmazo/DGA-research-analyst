@@ -13,6 +13,10 @@
   padding: var(--space-3) var(--space-4) var(--space-8);
 }
 
+.main:has([data-desk-board]) {
+  padding-top: 4px;
+}
+
 .inner {
   max-width: var(--content-max);
   margin: 0 auto;

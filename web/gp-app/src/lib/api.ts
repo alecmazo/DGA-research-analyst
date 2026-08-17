@@ -179,6 +179,7 @@ export type EarningsCardPayload = {
 export type IndexRow = {
   symbol?: string
   name?: string
+  label?: string
   price?: number | null
   pct?: number | null
   pct_change?: number | null
