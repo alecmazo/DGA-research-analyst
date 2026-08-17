@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=save-to1" />
+  <link rel="stylesheet" href="style.css?v=desk-mail2" />
   <script>
     (function () {
       var host = (location.hostname || "").toLowerCase();
@@ -43,12 +43,17 @@
         <button class="nav-item" data-view="edyta"><span class="nav-icon">★</span> Edyta
           <span class="nav-badge" id="leads-badge" hidden>0</span>
         </button>
+        <button class="nav-item" data-view="contacted"><span class="nav-icon">✉</span> Contacted
+          <span class="nav-badge" id="contacted-badge" hidden>0</span>
+        </button>
+        <button class="nav-item" data-view="drafts"><span class="nav-icon">✎</span> Email Drafts</button>
         <button class="nav-item" data-view="weddings"><span class="nav-icon">♡</span> Weddings</button>
         <button class="nav-item" data-view="partners"><span class="nav-icon">⚭</span> Partners</button>
         <button class="nav-item" data-view="materials"><span class="nav-icon">▤</span> Materials</button>
       </nav>
       <div class="sidebar-foot">
         <p class="sidebar-quote">Free-flow desk — pick a lead, finish the next step.</p>
+        <button class="btn ghost sm" id="btn-logout" type="button">Log out</button>
       </div>
     </aside>
 
@@ -62,6 +67,7 @@
           <button class="btn ghost" id="btn-sync-all" type="button">Sync all to CRM</button>
           <button class="btn ghost" id="btn-agent-batch" type="button">▶ Agent: top 5</button>
           <button class="btn primary" id="btn-refresh-leads" type="button">↻ Refresh leads</button>
+          <button class="btn ghost sm topbar-logout" id="btn-logout-top" type="button">Log out</button>
         </div>
       </header>
 
@@ -164,6 +170,67 @@
             <p id="edyta-message">Only interested prospects with briefs.</p>
           </div>
           <div id="edyta-list" class="leads-list"></div>
+        </section>
+
+        <!-- CONTACTED -->
+        <section class="view" id="view-contacted">
+          <div class="panel callout">
+            <h3>Reached out</h3>
+            <p>Every company, planner, venue, or couple marked contacted — plus anyone with a sent-email trail.</p>
+          </div>
+          <div class="lib-toolbar">
+            <input class="search" id="contacted-search" type="search" placeholder="Filter by company or email…" />
+            <select id="contacted-book">
+              <option value="">All books</option>
+              <option value="corporate">Companies</option>
+              <option value="wedding">Weddings</option>
+            </select>
+            <span class="muted" id="contacted-summary">—</span>
+          </div>
+          <div id="contacted-grid" class="prospect-grid"></div>
+        </section>
+
+        <!-- EMAIL DRAFTS -->
+        <section class="view" id="view-drafts">
+          <div class="panel callout">
+            <h3>Edyta’s email drafts</h3>
+            <p>Your own templates — save as many as you like, edit any time. These are not auto-sent.</p>
+          </div>
+          <div class="drafts-layout">
+            <div class="panel drafts-list-panel">
+              <div class="panel-head">
+                <h3>Saved options</h3>
+                <button class="btn primary sm" id="btn-draft-new" type="button">+ New draft</button>
+              </div>
+              <div id="drafts-list" class="drafts-list"></div>
+            </div>
+            <div class="panel drafts-editor-panel">
+              <div class="panel-head">
+                <h3 id="draft-editor-title">Draft</h3>
+                <div class="ws-actions">
+                  <button class="btn ghost sm" id="btn-draft-copy" type="button">Copy</button>
+                  <button class="btn ghost sm" id="btn-draft-delete" type="button">Delete</button>
+                  <button class="btn primary sm" id="btn-draft-save" type="button">Save</button>
+                </div>
+              </div>
+              <div id="draft-editor-empty" class="empty-state">
+                <h3>Pick a draft</h3>
+                <p>Or create a new one to start writing.</p>
+              </div>
+              <div id="draft-editor" hidden>
+                <label class="field-label">Name
+                  <input type="text" id="draft-title" maxlength="120" placeholder="e.g. Planner first touch" />
+                </label>
+                <label class="field-label">Subject
+                  <input type="text" id="draft-subject" maxlength="300" placeholder="Subject line" />
+                </label>
+                <label class="field-label">Body
+                  <textarea id="draft-body" rows="16" placeholder="Hi —"></textarea>
+                </label>
+                <p class="muted" id="draft-updated"></p>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- WEDDINGS -->
@@ -327,6 +394,6 @@
 
   <div class="toast" id="toast" hidden></div>
   <div class="busy" id="busy" hidden><div class="busy-card">Working…</div></div>
-  <script src="app.js?v=save-to1"></script>
+  <script src="app.js?v=desk-mail2"></script>
 </body>
 </html>

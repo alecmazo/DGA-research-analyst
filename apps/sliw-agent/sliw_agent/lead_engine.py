@@ -94,6 +94,9 @@ def list_library_with_status() -> list[dict[str, Any]]:
             "prospect_id": in_crm.get("id") if in_crm else None,
             "crm_stage": in_crm.get("stage") if in_crm else None,
             "crm_score": in_crm.get("score") if in_crm else None,
+            "email_log": (in_crm.get("email_log") or []) if in_crm else [],
+            "last_contacted_at": (in_crm.get("last_contacted_at") or "") if in_crm else "",
+            "last_contacted_email": (in_crm.get("last_contacted_email") or "") if in_crm else "",
         })
     out.sort(
         key=lambda r: (

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -188,6 +189,22 @@ class StageRequest(BaseModel):
     note: str = ""
     email: str = ""
     last_contacted_email: str = ""
+    subject: str = ""
+    body: str = ""
+
+
+class EmailLogRequest(BaseModel):
+    to: str = ""
+    subject: str = ""
+    body: str = ""
+    kind: str = "sent"
+    note: str = ""
+
+
+class EmailDraftRequest(BaseModel):
+    title: str = "Untitled draft"
+    subject: str = ""
+    body: str = ""
 
 
 class LastContactedRequest(BaseModel):
@@ -368,6 +385,26 @@ def create_api_router() -> APIRouter:
             if body.stage == "contacted":
                 override = body.last_contacted_email or body.email or ""
                 p = crm.record_last_contacted(prospect_id, email=override)
+                subj = (body.subject or "").strip()
+                bod = (body.body or "").strip()
+                if not subj and not bod:
+                    op = p.get("outreach_path")
+                    if op and Path(op).exists():
+                        try:
+                            data = json.loads(Path(op).read_text(encoding="utf-8"))
+                            em = data.get("email") or {}
+                            subj = em.get("subject") or data.get("subject") or ""
+                            bod = em.get("body") or data.get("body") or ""
+                        except Exception:
+                            pass
+                p = crm.append_email_log(
+                    prospect_id,
+                    to=override,
+                    subject=subj,
+                    body=bod,
+                    kind="sent",
+                    note=body.note or "Marked contacted",
+                )
             return p
         except KeyError:
             raise HTTPException(404, "Prospect not found") from None
@@ -405,6 +442,108 @@ def create_api_router() -> APIRouter:
     def leads(request: Request, book: str = "corporate") -> list[dict[str, Any]]:
         require_sliw_access(request)
         return crm.interested_leads(book=book)
+
+    @r.get("/contacted")
+    def contacted(request: Request) -> dict[str, Any]:
+        """All corporate + wedding leads that were reached out to."""
+        require_sliw_access(request)
+        rows = crm.contacted_prospects()
+        slim = []
+        for p in rows:
+            log = p.get("email_log") or []
+            slim.append({
+                "id": p.get("id"),
+                "company": p.get("company"),
+                "book": p.get("book") or "corporate",
+                "industry": p.get("industry") or "",
+                "geo": p.get("geo") or "",
+                "stage": p.get("stage"),
+                "tier": p.get("tier"),
+                "score": p.get("score"),
+                "website": p.get("website") or "",
+                "last_contacted_at": p.get("last_contacted_at"),
+                "last_contacted_email": p.get("last_contacted_email"),
+                "email_log": log,
+                "email_count": len(log),
+            })
+        return {"ok": True, "count": len(slim), "items": slim}
+
+    @r.post("/prospects/{prospect_id}/email-log")
+    def add_email_log(
+        prospect_id: str, body: EmailLogRequest, request: Request
+    ) -> dict[str, Any]:
+        require_sliw_access(request)
+        try:
+            return crm.append_email_log(
+                prospect_id,
+                to=body.to,
+                subject=body.subject,
+                body=body.body,
+                kind=body.kind,
+                note=body.note,
+            )
+        except KeyError:
+            raise HTTPException(404, "Prospect not found") from None
+
+    def _drafts_blob() -> dict[str, Any]:
+        data = crm.load_kv("email_drafts") or {}
+        drafts = data.get("drafts") if isinstance(data.get("drafts"), list) else []
+        return {"drafts": drafts}
+
+    @r.get("/email-drafts")
+    def list_email_drafts(request: Request) -> dict[str, Any]:
+        require_sliw_access(request)
+        blob = _drafts_blob()
+        return {"ok": True, "drafts": blob["drafts"]}
+
+    @r.post("/email-drafts")
+    def create_email_draft(body: EmailDraftRequest, request: Request) -> dict[str, Any]:
+        require_sliw_access(request)
+        blob = _drafts_blob()
+        item = {
+            "id": f"draft-{uuid.uuid4().hex[:8]}",
+            "title": (body.title or "Untitled draft").strip()[:120],
+            "subject": (body.subject or "").strip()[:300],
+            "body": body.body or "",
+            "updated_at": crm._now(),
+        }
+        blob["drafts"].insert(0, item)
+        crm.save_kv("email_drafts", blob)
+        return {"ok": True, "draft": item, "drafts": blob["drafts"]}
+
+    @r.put("/email-drafts/{draft_id}")
+    def update_email_draft(
+        draft_id: str, body: EmailDraftRequest, request: Request
+    ) -> dict[str, Any]:
+        require_sliw_access(request)
+        blob = _drafts_blob()
+        found = None
+        for i, d in enumerate(blob["drafts"]):
+            if d.get("id") == draft_id:
+                blob["drafts"][i] = {
+                    **d,
+                    "title": (body.title or d.get("title") or "Untitled draft").strip()[:120],
+                    "subject": (body.subject or "").strip()[:300],
+                    "body": body.body if body.body is not None else d.get("body") or "",
+                    "updated_at": crm._now(),
+                }
+                found = blob["drafts"][i]
+                break
+        if not found:
+            raise HTTPException(404, "Draft not found")
+        crm.save_kv("email_drafts", blob)
+        return {"ok": True, "draft": found, "drafts": blob["drafts"]}
+
+    @r.delete("/email-drafts/{draft_id}")
+    def delete_email_draft(draft_id: str, request: Request) -> dict[str, Any]:
+        require_sliw_access(request)
+        blob = _drafts_blob()
+        before = len(blob["drafts"])
+        blob["drafts"] = [d for d in blob["drafts"] if d.get("id") != draft_id]
+        if len(blob["drafts"]) == before:
+            raise HTTPException(404, "Draft not found")
+        crm.save_kv("email_drafts", blob)
+        return {"ok": True, "drafts": blob["drafts"]}
 
     @r.post("/seed")
     def seed(request: Request) -> dict[str, Any]:

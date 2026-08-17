@@ -43,6 +43,15 @@ WEDDING_OUTREACH_DIR = DATA_DIR / "wedding_outreach"
 WEDDING_DECKS_DIR = DATA_DIR / "wedding_decks"
 WEDDING_BRIEFS_DIR = DATA_DIR / "wedding_briefs"
 
+CONTACTED_STAGES = (
+    "contacted",
+    "replied",
+    "interested",
+    "discovery_booked",
+    "won",
+    "nurture",
+)
+
 STAGES = [
     "research",
     "scored",
@@ -627,6 +636,71 @@ def record_last_contacted(
     if chosen:
         fields["last_contacted_email"] = chosen
     return update_prospect(prospect_id, book=p.get("book") or book, **fields)
+
+
+def append_email_log(
+    prospect_id: str,
+    *,
+    to: str = "",
+    subject: str = "",
+    body: str = "",
+    kind: str = "sent",
+    note: str = "",
+    book: str | None = None,
+) -> dict[str, Any]:
+    """Append a sent/copied email to the prospect trail (never auto-sends)."""
+    p, book = _find_prospect(prospect_id, book)
+    chosen = clean_email(to) or resolved_send_to(p)
+    log = list(p.get("email_log") or [])
+    subject_s = (subject or "").strip()[:300]
+    body_s = (body or "").strip()
+    kind_s = (kind or "sent").strip()[:32] or "sent"
+    note_s = (note or "").strip()[:400]
+    if log:
+        last = log[-1] or {}
+        if (
+            (last.get("to") or "") == chosen
+            and (last.get("subject") or "") == subject_s
+            and (last.get("body") or "") == body_s
+            and (last.get("kind") or "") == kind_s
+        ):
+            return p
+    log.append({
+        "id": uuid.uuid4().hex[:10],
+        "at": _now(),
+        "to": chosen,
+        "subject": subject_s,
+        "body": body_s,
+        "kind": kind_s,
+        "note": note_s,
+    })
+    return update_prospect(
+        prospect_id,
+        book=book,
+        email_log=log,
+        last_contacted_at=_now(),
+        last_contacted_email=chosen or p.get("last_contacted_email"),
+    )
+
+
+def contacted_prospects() -> list[dict[str, Any]]:
+    """Every corporate + wedding lead that was reached out to."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for book in BOOKS:
+        for p in list_prospects(book=book):
+            pid = p.get("id") or ""
+            if pid in seen:
+                continue
+            stage = p.get("stage") or ""
+            if stage in CONTACTED_STAGES or p.get("email_log"):
+                seen.add(pid)
+                out.append(p)
+    out.sort(
+        key=lambda p: p.get("last_contacted_at") or p.get("updated_at") or "",
+        reverse=True,
+    )
+    return out
 
 
 def list_prospects(

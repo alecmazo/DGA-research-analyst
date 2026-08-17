@@ -16,6 +16,9 @@ const state = {
   wedding: [],
   partners: [],
   materials: null,
+  contacted: [],
+  drafts: [],
+  draftId: null,
 };
 
 function toast(msg, ms = 3200) {
@@ -269,6 +272,14 @@ function loginRedirectUrl() {
   );
 }
 
+function logoutSliw() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch (_) {}
+  window.location.replace(loginRedirectUrl());
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(`${API}${path.startsWith("/") ? path : "/" + path}`, {
     ...opts,
@@ -327,6 +338,8 @@ function showView(name) {
     weddings: ["Weddings", "Parallel book"],
     partners: ["Partners", "Channels"],
     materials: ["Materials", "Master PDF & package links"],
+    contacted: ["Contacted", "Everyone you reached out to"],
+    drafts: ["Email Drafts", "Edyta’s saved copy"],
   };
   const [t, e] = titles[name] || [name, ""];
   $("#view-title").textContent = t;
@@ -346,6 +359,8 @@ function showView(name) {
   if (name === "partners") renderPartners();
   if (name === "materials") loadMaterials();
   if (name === "work") renderReady();
+  if (name === "contacted") loadContacted();
+  if (name === "drafts") loadDrafts();
 }
 
 async function loadMaterials() {
@@ -872,10 +887,12 @@ async function loadEmailSequence(prospectId) {
     if (full.brief_md) {
       html += `<div class="brief-box" style="margin-top:12px">${esc(full.brief_md)}</div>`;
     }
+    html += emailTrailHtml(full.email_log);
     panel.innerHTML = html;
     panel.querySelectorAll("[data-act]").forEach((btn) => {
       btn.addEventListener("click", () => runAction(btn.dataset.act));
     });
+    bindEmailTrail(panel);
   } catch (_) {
     panel.innerHTML = "";
   }
@@ -940,6 +957,7 @@ async function runAction(act) {
     } else if (act === "mark_contacted") {
       busy(true);
       const to = workToEmail();
+      const email = state._coldEmail || state._lastAgent?.email_preview || state._lastEmail || {};
       await api(`/prospects/${encodeURIComponent(id)}/stage`, {
         method: "POST",
         body: JSON.stringify({
@@ -947,11 +965,14 @@ async function runAction(act) {
           note: "Sent by desk",
           email: to,
           last_contacted_email: to,
+          subject: email.subject || "",
+          body: email.body || "",
         }),
       });
       state.workstream = await api(`/prospects/${encodeURIComponent(id)}/workstream`);
       toast("Marked contacted — waiting on reply");
       renderWorkstream();
+      loadContacted({ silent: true });
       await softRefresh();
     } else if (act === "copy_cold" || act === "copy_draft") {
       const email = state._coldEmail || state._lastAgent?.email_preview || state._lastEmail;
@@ -981,6 +1002,20 @@ async function runAction(act) {
       );
       const to = workToEmail();
       toast(to ? `Email 2 (follow-up) copied → ${to}` : "Email 2 (follow-up) copied");
+      try {
+        await api(`/prospects/${encodeURIComponent(id)}/email-log`, {
+          method: "POST",
+          body: JSON.stringify({
+            to,
+            subject: email.subject || "",
+            body: email.body || "",
+            kind: "copied",
+            note: "Follow-up copied — send from Gmail",
+          }),
+        });
+        await loadEmailSequence(id);
+        loadContacted({ silent: true });
+      } catch (_) { /* trail is best-effort — copy already succeeded */ }
     } else if (act === "prepare_followup") {
       busy(true, "Creating follow-up (only after cold was sent)…");
       const out = await api(`/prospects/${encodeURIComponent(id)}/followup`, { method: "POST" });
@@ -1062,6 +1097,64 @@ async function runAction(act) {
   }
 }
 
+function fmtWhen(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16);
+    return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  } catch {
+    return String(iso).slice(0, 16);
+  }
+}
+
+function emailTrailHtml(log, { compact = false, fallback = "" } = {}) {
+  const items = Array.isArray(log) ? log.slice().reverse() : [];
+  if (!items.length) {
+    if (compact && !fallback) return "";
+    return `<div class="email-trail"><p class="muted">${esc(fallback || "No sent emails logged yet.")}</p></div>`;
+  }
+  return `<div class="email-trail">
+    <p class="eyebrow">Sent email trail</p>
+    ${items.map((e) => `
+      <details class="email-trail-item">
+        <summary>
+          <strong data-subj>${esc(e.subject || "(no subject)")}</strong>
+          <span class="muted">${esc(fmtWhen(e.at))}${e.to ? " · " + esc(e.to) : ""}${e.kind && e.kind !== "sent" ? " · " + esc(e.kind) : ""}</span>
+          <button type="button" class="btn ghost sm email-trail-copy">Copy</button>
+        </summary>
+        <div class="email-trail-body">
+          ${e.to ? `<p class="muted">To: ${esc(e.to)}</p>` : ""}
+          ${e.note ? `<p class="muted">${esc(e.note)}</p>` : ""}
+          <pre>${esc(e.body || "")}</pre>
+        </div>
+      </details>`).join("")}
+  </div>`;
+}
+
+function bindEmailTrail(root) {
+  if (!root) return;
+  root.querySelectorAll(".email-trail").forEach((trail) => {
+    trail.addEventListener("click", (ev) => ev.stopPropagation());
+  });
+  root.querySelectorAll(".email-trail-copy").forEach((btn) => {
+    btn.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const item = btn.closest(".email-trail-item");
+      const subj = item?.querySelector("[data-subj]")?.textContent || "";
+      const body = item?.querySelector("pre")?.textContent || "";
+      if (!subj && !body) return toast("Nothing to copy");
+      try {
+        await navigator.clipboard.writeText((subj && subj !== "(no subject)" ? `Subject: ${subj}\n\n` : "") + body);
+        toast("Email copy copied");
+      } catch (e) {
+        toast(e.message || "Copy failed");
+      }
+    });
+  });
+}
+
 /* ── Library ─────────────────────────────────────────────────────────────── */
 
 function renderLibrary() {
@@ -1078,7 +1171,7 @@ function renderLibrary() {
   tbody.innerHTML = rows.map((r) => {
     const qual = r.qualification || {};
     return `<tr>
-      <td class="company-cell">${esc(r.company)}</td>
+      <td class="company-cell">${esc(r.company)}${emailTrailHtml(r.email_log, { compact: true })}</td>
       <td><span class="${tierClass(qual.tier)}">${esc(qual.tier || "—")}</span></td>
       <td>${qual.score ?? "—"}</td>
       <td>${esc(qual.primary_package || "—")}</td>
@@ -1096,6 +1189,7 @@ function renderLibrary() {
       focusLead(b.dataset.work);
     });
   });
+  bindEmailTrail(tbody);
 }
 
 function renderEdyta() {
@@ -1119,10 +1213,12 @@ function renderEdyta() {
       <h4>${esc(p.company)}</h4>
       <p class="muted">${esc(p.stage)} · score ${p.score ?? "—"}</p>
       <p style="margin-top:8px;color:var(--cream)">${esc(p.reply_summary || p.agent_note || "")}</p>
+      ${emailTrailHtml(p.email_log, { compact: true })}
       <button class="btn primary sm" style="margin-top:10px" data-work="${esc(p.id)}">Open in Work</button>
     </article>`).join("");
   list.querySelectorAll("[data-work]").forEach((b) =>
     b.addEventListener("click", () => { showView("work"); focusLead(b.dataset.work); }));
+  bindEmailTrail(list);
 }
 
 function renderWeddings() {
@@ -1177,6 +1273,7 @@ function renderWeddings() {
         <div class="score-ring" title="ICP score">${p.score ?? "—"}</div>
       </div>
       <p class="wedding-card-pkg">${esc(p.package || "—")}${isCouple ? " · <strong>call today</strong>" : ""}</p>
+      ${emailTrailHtml(p.email_log, { compact: true, fallback: p.last_contacted_at ? "Reached out — copy not stored" : "" })}
       <div class="foot">
         <span>${p.stage === "disqualified"
           ? `<span class="pill">wrong geo</span> disqualified`
@@ -1185,13 +1282,207 @@ function renderWeddings() {
       </div>
     </article>`;
   }).join("");
+  bindEmailTrail(grid);
+}
+
+async function loadContacted({ silent = false } = {}) {
+  try {
+    const data = await api("/contacted");
+    state.contacted = data.items || [];
+    const badge = $("#contacted-badge");
+    if (badge) {
+      if (state.contacted.length) {
+        badge.hidden = false;
+        badge.textContent = state.contacted.length;
+      } else badge.hidden = true;
+    }
+    if ($("#view-contacted")?.classList.contains("active")) renderContacted();
+    else if (!silent) renderContacted();
+  } catch (e) {
+    if (!silent) toast(e.message);
+  }
+}
+
+function renderContacted() {
+  const q = ($("#contacted-search")?.value || "").toLowerCase();
+  const book = $("#contacted-book")?.value || "";
+  let rows = state.contacted || [];
+  if (book) rows = rows.filter((p) => (p.book || "") === book);
+  if (q) {
+    rows = rows.filter((p) =>
+      `${p.company || ""} ${p.last_contacted_email || ""} ${(p.industry || "")}`.toLowerCase().includes(q)
+    );
+  }
+  const sum = $("#contacted-summary");
+  if (sum) sum.textContent = `${rows.length} reached`;
+  const grid = $("#contacted-grid");
+  if (!grid) return;
+  if (!rows.length) {
+    grid.innerHTML = `<div class="panel empty-state" style="grid-column:1/-1"><h3>No contacted leads yet</h3><p>Mark contacted in Work after you send — they land here with the email copy.</p></div>`;
+    return;
+  }
+  grid.innerHTML = rows.map((p) => {
+    const kind = p.book === "wedding"
+      ? (/planner/i.test(p.industry || "") ? "Planner" : /venue|winery|hotel/i.test(p.industry || "") ? "Venue" : "Wedding")
+      : "Company";
+    return `
+    <article class="prospect-card wedding-card">
+      <div class="wedding-card-top">
+        ${brandMarkHtml(p.company, p.website, { size: "md" })}
+        <div class="wedding-card-copy">
+          <div class="top">
+            <h4>${esc(p.company)}</h4>
+            <span class="${tierClass(p.tier)}">${esc(p.tier || "—")}</span>
+          </div>
+          <p class="meta">${esc(kind)} · ${esc((p.stage || "").replace(/_/g, " "))}${p.last_contacted_email ? " · " + esc(p.last_contacted_email) : ""}</p>
+        </div>
+      </div>
+      <p class="muted">${p.last_contacted_at ? "Last reach-out " + esc(fmtWhen(p.last_contacted_at)) : ""} · ${p.email_count || (p.email_log || []).length} email${(p.email_count || (p.email_log || []).length) === 1 ? "" : "s"}</p>
+      ${emailTrailHtml(p.email_log)}
+      <div class="foot">
+        <span>${esc(p.geo || "")}</span>
+        <button type="button" class="btn primary sm" data-work="${esc(p.id)}">Open in Work →</button>
+      </div>
+    </article>`;
+  }).join("");
+  grid.querySelectorAll("[data-work]").forEach((b) => {
+    b.addEventListener("click", () => { showView("work"); focusLead(b.dataset.work); });
+  });
+  bindEmailTrail(grid);
+}
+
+async function loadDrafts() {
+  try {
+    const data = await api("/email-drafts");
+    state.drafts = data.drafts || [];
+    renderDraftsList();
+    if (state.draftId) selectDraft(state.draftId);
+    else if (state.drafts[0]) selectDraft(state.drafts[0].id);
+    else showDraftEditor(null);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function renderDraftsList() {
+  const list = $("#drafts-list");
+  if (!list) return;
+  if (!state.drafts.length) {
+    list.innerHTML = `<p class="muted" style="padding:12px">No drafts yet.</p>`;
+    return;
+  }
+  list.innerHTML = state.drafts.map((d) => `
+    <button type="button" class="draft-row ${state.draftId === d.id ? "active" : ""}" data-draft="${esc(d.id)}">
+      <strong>${esc(d.title || "Untitled")}</strong>
+      <span class="muted">${esc(d.subject || "No subject")}</span>
+    </button>`).join("");
+  list.querySelectorAll("[data-draft]").forEach((b) => {
+    b.addEventListener("click", () => selectDraft(b.dataset.draft));
+  });
+}
+
+function showDraftEditor(d) {
+  const empty = $("#draft-editor-empty");
+  const ed = $("#draft-editor");
+  if (!d) {
+    if (empty) empty.hidden = false;
+    if (ed) ed.hidden = true;
+    return;
+  }
+  if (empty) empty.hidden = true;
+  if (ed) ed.hidden = false;
+  $("#draft-editor-title").textContent = d.title || "Draft";
+  $("#draft-title").value = d.title || "";
+  $("#draft-subject").value = d.subject || "";
+  $("#draft-body").value = d.body || "";
+  $("#draft-updated").textContent = d.updated_at ? `Saved ${fmtWhen(d.updated_at)}` : "";
+}
+
+function selectDraft(id) {
+  state.draftId = id;
+  const d = (state.drafts || []).find((x) => x.id === id) || null;
+  renderDraftsList();
+  showDraftEditor(d);
+}
+
+async function newDraft() {
+  try {
+    busy(true);
+    const r = await api("/email-drafts", {
+      method: "POST",
+      body: JSON.stringify({ title: "Untitled draft", subject: "", body: "" }),
+    });
+    state.drafts = r.drafts || [];
+    selectDraft(r.draft.id);
+    toast("New draft");
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    busy(false);
+  }
+}
+
+async function saveDraft() {
+  if (!state.draftId) return toast("Pick a draft first");
+  try {
+    busy(true);
+    const r = await api(`/email-drafts/${encodeURIComponent(state.draftId)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: $("#draft-title")?.value || "Untitled draft",
+        subject: $("#draft-subject")?.value || "",
+        body: $("#draft-body")?.value || "",
+      }),
+    });
+    state.drafts = r.drafts || [];
+    selectDraft(r.draft.id);
+    toast("Draft saved");
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    busy(false);
+  }
+}
+
+async function deleteDraft() {
+  if (!state.draftId) return;
+  if (!confirm("Delete this draft?")) return;
+  try {
+    busy(true);
+    const r = await api(`/email-drafts/${encodeURIComponent(state.draftId)}`, { method: "DELETE" });
+    state.drafts = r.drafts || [];
+    state.draftId = state.drafts[0]?.id || null;
+    renderDraftsList();
+    showDraftEditor(state.drafts[0] || null);
+    toast("Draft deleted");
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    busy(false);
+  }
+}
+
+async function copyDraft() {
+  const subj = $("#draft-subject")?.value || "";
+  const body = $("#draft-body")?.value || "";
+  if (!body && !subj) return toast("Nothing to copy");
+  await navigator.clipboard.writeText((subj ? `Subject: ${subj}\n\n` : "") + body);
+  toast("Draft copied");
 }
 
 function renderPartners() {
   const rows = state.partners || [];
-  $("#partner-list").innerHTML = rows.length
-    ? rows.map((p) => `<article class="lead-card"><h4>${esc(p.name)}</h4><p class="muted">${esc(p.type)} · ${esc(p.geo)}</p><p style="margin-top:6px;color:var(--cream)">${esc(p.notes || "")}</p></article>`).join("")
-    : `<div class="panel empty-state"><h3>No partners</h3></div>`;
+  const list = $("#partner-list");
+  if (!list) return;
+  list.innerHTML = rows.length
+    ? rows.map((p) => `<article class="lead-card">
+        <h4>${esc(p.name)}</h4>
+        <p class="muted">${esc(p.type)} · ${esc(p.geo || "")}${p.status ? " · " + esc(p.status) : ""}</p>
+        <p style="margin-top:6px;color:var(--cream)">${esc(p.notes || "")}</p>
+        ${emailTrailHtml(p.email_log, { compact: true, fallback: p.last_contacted_at ? "Reached out — copy not stored" : "" })}
+      </article>`).join("")
+    : `<div class="panel empty-state"><h3>No partners</h3><p>Planner and venue outreach lives on <strong>Weddings</strong> and <strong>Contacted</strong>.</p></div>`;
+  bindEmailTrail(list);
 }
 
 async function softRefresh() {
@@ -1210,6 +1501,7 @@ async function softRefresh() {
     state.wedding = await loadWeddingRows(state.weddingChannel || undefined);
     renderWeddings();
   } catch (_) {}
+  loadContacted({ silent: true });
 }
 
 async function fullRefresh() {
@@ -1235,6 +1527,7 @@ async function fullRefresh() {
     renderReady();
     renderEdyta();
     renderWeddings();
+    loadContacted({ silent: true });
   } catch (e) {
     toast(e.message);
   } finally {
@@ -1247,6 +1540,14 @@ function boot() {
 
   $$(".nav-item").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
   $("#ws-save-to")?.addEventListener("click", () => saveWorkToEmail());
+  $("#btn-logout")?.addEventListener("click", logoutSliw);
+  $("#btn-logout-top")?.addEventListener("click", logoutSliw);
+  $("#btn-draft-new")?.addEventListener("click", newDraft);
+  $("#btn-draft-save")?.addEventListener("click", saveDraft);
+  $("#btn-draft-delete")?.addEventListener("click", deleteDraft);
+  $("#btn-draft-copy")?.addEventListener("click", copyDraft);
+  $("#contacted-search")?.addEventListener("input", renderContacted);
+  $("#contacted-book")?.addEventListener("change", renderContacted);
 
   $("#btn-sync-all")?.addEventListener("click", async () => {
     busy(true, "Importing all pending…");
@@ -1300,6 +1601,7 @@ function boot() {
   if (weddingGrid && !weddingGrid.dataset.bound) {
     weddingGrid.dataset.bound = "1";
     weddingGrid.addEventListener("click", (ev) => {
+      if (ev.target.closest(".email-trail, details, summary, a, input, textarea, select")) return;
       const hit = ev.target.closest("[data-work]");
       if (!hit || !weddingGrid.contains(hit)) return;
       const id = hit.getAttribute("data-work") || hit.dataset.work;
