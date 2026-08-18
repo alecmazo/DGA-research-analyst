@@ -3733,8 +3733,8 @@ def _format_watchlist_earnings(tickers: list[str], raw: dict) -> dict[str, dict]
     return out
 
 
-def _fetch_earnings_calendar_raw(horizon_days: int = 5,
-                                 include_past_days: int = 1) -> dict:
+def _fetch_earnings_calendar_raw(horizon_days: int = 14,
+                                 include_past_days: int = 2) -> dict:
     """Full SYMBOL→event map for the horizon window (cached by market_data)."""
     from market_data import earnings_upcoming
     return earnings_upcoming(
@@ -3748,7 +3748,7 @@ def _bg_refresh_watchlist_earnings() -> None:
     """Background calendar fill so the next watchlist paint has chips."""
     global _WL_EARNINGS_BG_RUNNING
     try:
-        raw = _fetch_earnings_calendar_raw(5, 1)
+        raw = _fetch_earnings_calendar_raw(14, 2)
         if raw:
             _WL_EARNINGS_CACHE["raw"] = raw
             _WL_EARNINGS_CACHE["ts"] = time.time()
@@ -3779,7 +3779,7 @@ def _watchlist_earnings_for(tickers: list[str],
         return _format_watchlist_earnings(tickers, cached_raw)
 
     raw = _run_with_timeout(
-        lambda: _fetch_earnings_calendar_raw(5, 1),
+        lambda: _fetch_earnings_calendar_raw(14, 2),
         budget_s,
         default=None,
     )
@@ -3902,7 +3902,7 @@ def watchlist_get(request: Request):
 
     Always returns the ticker list even if quotes fail. Quote path:
     process cache → market_quotes store → Yahoo chart (hard 6s wall).
-    Earnings chips: process-cached Nasdaq calendar, ≤4s budget, never hangs
+    Earnings chips: process-cached Nasdaq calendar, ≤8s budget, never hangs
     the list (stale-while-revalidate + background refresh).
     YTD %: bulk from price_history (calendar year first close vs live last).
     """
@@ -4009,7 +4009,7 @@ def watchlist_get(request: Request):
         # stripped them for login speed. Cache + budget keep Desk snappy.
         if tickers:
             try:
-                earnings_map = _watchlist_earnings_for(tickers, budget_s=4.0) or {}
+                earnings_map = _watchlist_earnings_for(tickers, budget_s=8.0) or {}
                 for tk in list(earnings_map.keys()):
                     earnings_map[tk]["has_report"] = bool(reports_map.get(tk))
             except Exception as e:
@@ -4059,7 +4059,7 @@ def watchlist_get(request: Request):
         "quotes": quotes,
         "earnings": earnings_map,
         "reports": reports_map,
-        "earnings_horizon_days": 5,
+        "earnings_horizon_days": 14,
         "timing_ms": elapsed_ms,
     }
 
@@ -7095,7 +7095,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui471-20260818-no-free-badges"
+WEB_BUILD_VERSION = "ui472-20260818-watchlist-earn-14d"
 
 
 @app.get("/api/build")

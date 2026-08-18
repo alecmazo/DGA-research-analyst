@@ -994,16 +994,25 @@ def nasdaq_earnings_for_day(day_iso: str) -> list[dict]:
     if hit and _time.time() - hit[0] < _EARNINGS_TTL_S:
         return hit[1]
     rows_out: list[dict] = []
+    ok = False
     try:
         import requests
         r = requests.get(
             "https://api.nasdaq.com/api/calendar/earnings",
             params={"date": day_iso},
             headers={
-                "User-Agent": "Mozilla/5.0 (compatible; DGA-Capital/1.0)",
-                "Accept": "application/json",
+                # Nasdaq 403s / stalls the generic bot UA from some clouds.
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json,text/plain,*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Origin": "https://www.nasdaq.com",
+                "Referer": "https://www.nasdaq.com/market-activity/earnings",
             },
-            timeout=4,
+            timeout=8,
         )
         if r.status_code == 200:
             data = (r.json() or {}).get("data") or {}
@@ -1019,11 +1028,15 @@ def nasdaq_earnings_for_day(day_iso: str) -> list[dict]:
                     "eps_forecast": row.get("epsForecast") or "",
                     "date": day_iso,
                 })
+            ok = True
         else:
             print(f"[market_data] nasdaq earnings {day_iso} HTTP {r.status_code}", flush=True)
     except Exception as e:
         print(f"[market_data] nasdaq earnings {day_iso} failed: {e!s:.120}", flush=True)
-    _EARNINGS_CACHE[day_iso] = (_time.time(), rows_out)
+    # Only cache real calendar days (incl. empty weekends). Never cache a
+    # timeout/403 as [] — that wiped watchlist chips for the 4h TTL.
+    if ok:
+        _EARNINGS_CACHE[day_iso] = (_time.time(), rows_out)
     return rows_out
 
 
