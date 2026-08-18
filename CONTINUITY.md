@@ -86,7 +86,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Desk trim pulse + ideas** | **`ui470-20260817-desk-trim-pulse-ideas`** | Drop toolbar Daily Pulse; hide Idea Generator card |
 | **No FREE badges** | **`ui471-20260818-no-free-badges`** | Price only when LLM is used; drop “free” on wire/financials/reports |
 | **Watchlist earnings 14d** | **`ui472-20260818-watchlist-earn-14d`** | Chips look 14 days ahead; don’t cache failed Nasdaq days as empty |
-| **Next deploy after this** | **`ui473-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Desk watchlist peek card** | **`ui473-20260818-desk-watchlist-peek`** | Click a Desk ticker → same stock-info card as mobile |
+| **Next deploy after this** | **`ui474-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

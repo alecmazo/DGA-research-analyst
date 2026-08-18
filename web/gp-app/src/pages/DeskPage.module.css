@@ -140,6 +140,10 @@
   background: var(--bg-hover);
 }
 
+.rowClick {
+  cursor: pointer;
+}
+
 .tkBtn {
   background: none;
   border: none;

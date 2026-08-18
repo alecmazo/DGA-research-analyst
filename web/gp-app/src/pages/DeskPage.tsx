@@ -7,6 +7,7 @@ import { StrategistCard } from '@/components/desk/StrategistCard'
 import { SavedReports } from '@/components/desk/SavedReports'
 import { DeskBoard } from '@/components/desk/DeskBoard'
 import { EarningsCard } from '@/components/desk/EarningsCard'
+import { StockPeek } from '@/components/layout/StockPeek'
 import { MarketWire } from '@/components/desk/MarketWire'
 import { MarketPulse } from '@/components/desk/MarketPulse'
 import {
@@ -78,6 +79,7 @@ export function DeskPage() {
   const [runToken, setRunToken] = useState(0)
   const [reportsKey, setReportsKey] = useState(0)
   const [earningsTk, setEarningsTk] = useState<string | null>(null)
+  const [peekTk, setPeekTk] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -156,15 +158,9 @@ export function DeskPage() {
     if (autoRun) setRunToken((n) => n + 1)
   }
 
-  /** Open GuruFocus stock summary for a watchlist ticker (new tab). */
-  const openGuruFocus = (tk: string) => {
+  const openPeek = (tk: string) => {
     const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
-    if (!sym) return
-    window.open(
-      `https://www.gurufocus.com/stock/${encodeURIComponent(sym)}/summary`,
-      '_blank',
-      'noopener,noreferrer',
-    )
+    if (sym) setPeekTk(sym)
   }
 
   // Topbar stock peek → “Run AI analysis” dispatches this event.
@@ -252,15 +248,19 @@ export function DeskPage() {
                 {rows.map(({ tk, q, pct, ytd, earn }) => (
                   <tr
                     key={tk}
-                    className={earn ? styles.rowEarn : undefined}
+                    className={`${styles.rowClick} ${earn ? styles.rowEarn : ''}`}
+                    onClick={() => openPeek(tk)}
                   >
                     <td>
                       <div className={styles.tkCell}>
                         <button
                           type="button"
                           className={styles.tkBtn}
-                          title={`Open ${tk} on GuruFocus`}
-                          onClick={() => openGuruFocus(tk)}
+                          title={`Snapshot for ${tk}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openPeek(tk)
+                          }}
                         >
                           <span className={styles.tk}>{tk}</span>
                         </button>
@@ -460,6 +460,14 @@ export function DeskPage() {
         cards={cards}
       />
 
+      {peekTk && (
+        <StockPeek
+          key={peekTk}
+          ticker={peekTk}
+          alreadyOnWatchlist
+          onClose={() => setPeekTk(null)}
+        />
+      )}
       {earningsTk && (
         <EarningsCard
           ticker={earningsTk}

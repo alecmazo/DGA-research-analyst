@@ -98,16 +98,18 @@ export function focusAnalyzeTicker(ticker: string, autoRun = false) {
 type Props = {
   ticker: string
   onClose: () => void
+  /** Hide “+ Watchlist” when opened from the Desk list. */
+  alreadyOnWatchlist?: boolean
 }
 
-export function StockPeek({ ticker, onClose }: Props) {
+export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props) {
   const navigate = useNavigate()
   const tk = ticker.trim().toUpperCase()
   const [data, setData] = useState<StockInfo | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [wlBusy, setWlBusy] = useState(false)
-  const [wlDone, setWlDone] = useState(false)
+  const [wlDone, setWlDone] = useState(alreadyOnWatchlist)
 
   useEffect(() => {
     let alive = true
@@ -290,7 +292,15 @@ export function StockPeek({ ticker, onClose }: Props) {
 
         <div className={styles.foot}>
           <span className={styles.footHint}>
-            Yahoo / local store. Run analysis if you want a full report.
+            <a
+              href={`https://www.gurufocus.com/stock/${encodeURIComponent(tk)}/summary`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              GuruFocus
+            </a>
+            {' · '}
+            Yahoo / local store
           </span>
           {sr?.exists && (
             <Button
