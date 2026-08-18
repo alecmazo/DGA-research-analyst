@@ -246,7 +246,9 @@ export function Topbar({ user, build }: Props) {
                 >
                   <span className={styles.srTk}>{h.ticker || '—'}</span>
                   <span className={styles.srName}>{h.name || ''}</span>
-                  <span className={styles.srEx}>{h.exchange || 'FREE'}</span>
+                  {h.exchange ? (
+                    <span className={styles.srEx}>{h.exchange}</span>
+                  ) : null}
                 </button>
               ))}
             </div>

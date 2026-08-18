@@ -262,7 +262,6 @@ export function EarningsCard({ ticker, onClose }: Props) {
                     {notes?.vs_analysts && (
                       <strong>{notes.vs_analysts}</strong>
                     )}
-                    <span className={styles.free}>free · no AI</span>
                   </div>
                   {bullets.length > 0 && (
                     <ul>
@@ -396,7 +395,7 @@ export function EarningsCard({ ticker, onClose }: Props) {
               )}
 
               <div className={styles.disclaimer}>
-                Not investment advice. EPS from Nasdaq/Yahoo · notes free · call Q&amp;A
+                Not investment advice. EPS from Nasdaq/Yahoo · call Q&amp;A
                 from indexed transcripts
                 {data.source ? ` · EPS source ${data.source}` : ''}.
               </div>
@@ -405,7 +404,7 @@ export function EarningsCard({ ticker, onClose }: Props) {
         </div>
 
         <footer className={styles.foot}>
-          <span className={styles.footHint}>EPS free · call Q&amp;A from indexed transcripts</span>
+          <span className={styles.footHint}>EPS · call Q&amp;A from indexed transcripts</span>
           {data?.investor_relations_url && (
             <Button
               size="sm"

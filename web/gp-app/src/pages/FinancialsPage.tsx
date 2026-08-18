@@ -52,8 +52,8 @@ export function FinancialsPage() {
             Full PM desk: company dashboard (DGA Score &amp; Value, ranks, peers,
             TTM), Value Line sheet, SEC store pull/settings, company history, and
             cross-name screen. Data from{' '}
-            <strong>Postgres company_financials</strong> (EDGAR XBRL) + free
-            quotes — no LLM. Coverage:{' '}
+            <strong>Postgres company_financials</strong> (EDGAR XBRL) + quotes.
+            Coverage:{' '}
             {coverage.length ? (
               <strong>{coverage.length.toLocaleString()}</strong>
             ) : (

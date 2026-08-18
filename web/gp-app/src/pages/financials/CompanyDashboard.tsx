@@ -204,11 +204,6 @@ export function CompanyDashboard({
     <CollapsibleCard
       id="fin-dash-panel"
       title="📊 Company Dashboard"
-      badge={
-        <span className={styles.badgeFree} title="SEC XBRL store + saved report targets — no LLM">
-          FREE · NO TOKENS
-        </span>
-      }
       action={action}
       defaultOpen
     >
@@ -218,7 +213,7 @@ export function CompanyDashboard({
       {!loading && !dash && !err && (
         <Empty
           title="Enter a ticker"
-          sub="Type a name (e.g. MSFT) and hit View — peer comps, rank cards, DGA Score & Value from the free SEC store."
+          sub="Type a name (e.g. MSFT) and hit View — peer comps, rank cards, DGA Score & Value from the SEC store."
         />
       )}
 
@@ -535,8 +530,7 @@ export function CompanyDashboard({
                 <span className={styles.mutedSm}>
                   {[pMeta.industry || pMeta.group_id, pMeta.sector]
                     .filter(Boolean)
-                    .join(' · ') || 'covered names'}{' '}
-                  · free store
+                    .join(' · ') || 'covered names'}
                 </span>
               </div>
               <div className={styles.tableWrap}>

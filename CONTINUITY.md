@@ -84,7 +84,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Desk static tape + compact chrome** | **`ui468-20260817-desk-static-tape`** | SUP_20260817_fc0ccc2a — no marquee; ribbon+watchlist same 45s clock; Desk+watchlist one row |
 | **Market Pulse movers first** | **`ui469-20260817-pulse-movers-first`** | Pulse list ranked by |day %| like the watchlist |
 | **Desk trim pulse + ideas** | **`ui470-20260817-desk-trim-pulse-ideas`** | Drop toolbar Daily Pulse; hide Idea Generator card |
-| **Next deploy after this** | **`ui471-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **No FREE badges** | **`ui471-20260818-no-free-badges`** | Price only when LLM is used; drop “free” on wire/financials/reports |
+| **Next deploy after this** | **`ui472-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

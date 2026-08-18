@@ -398,7 +398,6 @@ export function DeskPage() {
     {
       id: 'wire' as const,
       title: 'Market Wire',
-      badge: 'FREE',
       flush: true,
       action: <span className={styles.meta}>Official + wires</span>,
       children: <MarketWire bare />,

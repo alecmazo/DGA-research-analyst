@@ -139,11 +139,7 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
     <CollapsibleCard
       id="fin-vl-panel"
       title="📈 Financials"
-      badge={
-        <span className={styles.badgeFree} title="Reads the SEC store only">
-          VALUE LINE · FREE
-        </span>
-      }
+      badge="VALUE LINE"
       action={action}
       defaultOpen
     >
@@ -151,7 +147,7 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
         <strong>Value Line–style statistical array</strong> — same ticker as
         Company Dashboard above (auto-fills when you View a name). Full income /
         cash flow / balance sheet / margins from the store.{' '}
-        <em>No SEC re-pull, no LLM.</em>
+        Reads the SEC store already on file.
       </p>
 
       <div className={styles.chipRow}>
@@ -203,7 +199,7 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
               )}
             </div>
             <div className={styles.vlHeadRight}>
-              Value Line–style · SEC store · {sheet.cost || 'zero tokens'}
+              Value Line–style · SEC store
               <br />
               Synced with Company Dashboard ·{' '}
               <button
@@ -263,7 +259,7 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
           )}
           <div className={styles.mutedSm}>
             Source: {sheet.source || 'company_financials'}. Print / Save PDF uses
-            your browser (no server cost). Download PDF is generated on click only.
+            your browser. Download PDF is generated on click only.
             Not investment advice.
           </div>
         </div>

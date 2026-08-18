@@ -196,7 +196,7 @@ export function TranscriptsPage() {
     setJobBusy(true)
     setErr(null)
     setStatus(
-      mode === 'gap' ? 'Fill gap (free)…' : mode === 'topup' ? 'Topping up stale calls…' : 'Latest calls…',
+      mode === 'gap' ? 'Filling gap…' : mode === 'topup' ? 'Topping up stale calls…' : 'Latest calls…',
     )
     try {
       const topup = (data?.needs_topup || []).filter(Boolean)
@@ -315,7 +315,7 @@ export function TranscriptsPage() {
             <Panel title="Earnings-call index" badge={uniBadge}>
               <p className={styles.hint}>
                 Index earnings calls for saved-report tickers. Backfill, gap
-                fill, and top-up all use free sources (Fool / FMP / AV). $0 Grok.
+                fill, and top-up use Fool / FMP / AV.
               </p>
               <div className={styles.actions}>
                 <Button
@@ -324,7 +324,7 @@ export function TranscriptsPage() {
                   disabled={jobBusy}
                   onClick={() => void runBackfill()}
                 >
-                  📚 Backfill · free
+                  📚 Backfill
                 </Button>
                 <label className={styles.lbl}>
                   years
@@ -345,7 +345,7 @@ export function TranscriptsPage() {
                   disabled={jobBusy}
                   onClick={() => void runSync('gap')}
                 >
-                  🕳 Fill gap · free
+                  🕳 Fill gap
                 </Button>
               </div>
               <div className={styles.actions}>
@@ -355,7 +355,7 @@ export function TranscriptsPage() {
                   disabled={jobBusy}
                   onClick={() => void runSync('topup')}
                 >
-                  ⚡ Top up stale · free
+                  ⚡ Top up stale
                 </Button>
                 <Button
                   size="sm"
@@ -363,7 +363,7 @@ export function TranscriptsPage() {
                   disabled={jobBusy}
                   onClick={() => void runSync('latest')}
                 >
-                  Latest calls · free
+                  Latest calls
                 </Button>
                 <label className={styles.lbl}>
                   qtrs

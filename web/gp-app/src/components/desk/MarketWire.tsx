@@ -103,8 +103,7 @@ export function MarketWire({ bare = false }: { bare?: boolean }) {
         })}
       </div>
       <div className={styles.wireFoot}>
-        Fed · Treasury · BLS · SEC · Reuters · AP · BBC · NPR · NYT · WSJ · free
-        RSS · no tokens
+        Fed · Treasury · BLS · SEC · Reuters · AP · BBC · NPR · NYT · WSJ
       </div>
     </div>
   )

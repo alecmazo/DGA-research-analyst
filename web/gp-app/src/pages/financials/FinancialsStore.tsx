@@ -96,7 +96,7 @@ export function FinancialsStore({
       if (u.us_backfill)
         bits.push(`US backfill ${u.us_backfill.enabled ? 'ON' : 'OFF'}`)
       setMetaLine(
-        `${bits.join(' · ')} · free SEC · zero LLM tokens · browse = free`,
+        bits.join(' · ') || 'SEC store',
       )
       if (u.nightly?.last) setNightlyLast(u.nightly.last)
     } catch {

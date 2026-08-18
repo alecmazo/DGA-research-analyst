@@ -174,7 +174,7 @@ export function StockPeek({ ticker, onClose }: Props) {
       className={styles.overlay}
       role="dialog"
       aria-modal="true"
-      aria-label={`${tk} free snapshot`}
+      aria-label={`${tk} snapshot`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -182,7 +182,6 @@ export function StockPeek({ ticker, onClose }: Props) {
       <div className={styles.dialog}>
         <div className={styles.head}>
           <span className={styles.tk}>{tk}</span>
-          <span className={styles.freeBadge}>NO AI</span>
           {q.price != null && (
             <span className={styles.price}>
               {fmtPx(q.price)}{' '}
@@ -212,7 +211,7 @@ export function StockPeek({ ticker, onClose }: Props) {
         </div>
 
         <div className={styles.body}>
-          {loading && <div className={styles.loading}>↻ Loading free snapshot…</div>}
+          {loading && <div className={styles.loading}>↻ Loading snapshot…</div>}
           {err && !loading && <div className={styles.error}>Could not load {tk}: {err}</div>}
           {!loading && !err && data && (
             <>
@@ -291,7 +290,7 @@ export function StockPeek({ ticker, onClose }: Props) {
 
         <div className={styles.foot}>
           <span className={styles.footHint}>
-            Yahoo / local store · $0 tokens. AI only if you click Run analysis.
+            Yahoo / local store. Run analysis if you want a full report.
           </span>
           {sr?.exists && (
             <Button
