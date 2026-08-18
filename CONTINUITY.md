@@ -87,7 +87,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **No FREE badges** | **`ui471-20260818-no-free-badges`** | Price only when LLM is used; drop “free” on wire/financials/reports |
 | **Watchlist earnings 14d** | **`ui472-20260818-watchlist-earn-14d`** | Chips look 14 days ahead; don’t cache failed Nasdaq days as empty |
 | **Desk watchlist peek card** | **`ui473-20260818-desk-watchlist-peek`** | Click a Desk ticker → same stock-info card as mobile |
-| **Next deploy after this** | **`ui474-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Snapshot fact sheet** | **`ui474-20260818-snapshot-factsheet`** | Watchlist peek: range bar + labeled rows, no stat boxes |
+| **Next deploy after this** | **`ui475-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

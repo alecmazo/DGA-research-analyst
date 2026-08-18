@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -56,8 +56,8 @@ export type StockInfo = {
   }
 }
 
-function compact(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(Number(v))) return '—'
+function compact(v: number | null | undefined): string | null {
+  if (v == null || Number.isNaN(Number(v))) return null
   const n = Number(v)
   const abs = Math.abs(n)
   if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`
@@ -67,17 +67,79 @@ function compact(v: number | null | undefined): string {
   return `$${n.toFixed(0)}`
 }
 
-function signedPct(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(Number(v))) return '—'
+function signedPct(v: number | null | undefined): string | null {
+  if (v == null || Number.isNaN(Number(v))) return null
   return fmtPct(v)
 }
 
-function Stat({ label, value }: { label: string; value: string | null }) {
-  if (!value || value === '—') return null
+function marginPct(v: number | null | undefined): string | null {
+  if (v == null || Number.isNaN(Number(v))) return null
+  const n = Number(v)
+  const pct = Math.abs(n) <= 1.5 ? n * 100 : n
+  return `${pct.toFixed(1)}%`
+}
+
+function toneClass(v: number | null | undefined): string {
+  const c = pctClass(v)
+  if (c === 'pos') return styles.up
+  if (c === 'neg') return styles.dn
+  return ''
+}
+
+function Row({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string | null
+  tone?: number | null
+}) {
+  if (!value) return null
   return (
-    <div className={styles.stat}>
-      <div className={styles.statLbl}>{label}</div>
-      <div className={styles.statVal}>{value}</div>
+    <div className={styles.row}>
+      <span className={styles.rowLbl}>{label}</span>
+      <span className={`${styles.rowVal} ${tone != null ? toneClass(tone) : ''}`}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  const items = Array.isArray(children) ? children : [children]
+  if (!items.some(Boolean)) return null
+  return (
+    <section className={styles.section}>
+      <h4 className={styles.secTitle}>{title}</h4>
+      <div className={styles.rows}>{children}</div>
+    </section>
+  )
+}
+
+function RangeBar({
+  low,
+  high,
+  last,
+}: {
+  low?: number | null
+  high?: number | null
+  last?: number | null
+}) {
+  if (low == null || high == null || high <= low) return null
+  const px = last != null && last > 0 ? last : (low + high) / 2
+  const pos = Math.max(0, Math.min(1, (px - low) / (high - low)))
+  return (
+    <div className={styles.range}>
+      <div className={styles.rangeMeta}>
+        <span>{fmtPx(low)}</span>
+        <span className={styles.rangeCap}>52-week range</span>
+        <span>{fmtPx(high)}</span>
+      </div>
+      <div className={styles.rangeTrack} aria-hidden>
+        <div className={styles.rangeFill} style={{ width: `${pos * 100}%` }} />
+        <div className={styles.rangeDot} style={{ left: `${pos * 100}%` }} />
+      </div>
     </div>
   )
 }
@@ -98,7 +160,6 @@ export function focusAnalyzeTicker(ticker: string, autoRun = false) {
 type Props = {
   ticker: string
   onClose: () => void
-  /** Hide “+ Watchlist” when opened from the Desk list. */
   alreadyOnWatchlist?: boolean
 }
 
@@ -144,10 +205,10 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
   const dv = data?.derived || {}
   const fin = data?.financials || {}
   const name = m.name || fin.entity_name || tk
-  const chips = [m.sector, m.industry].filter(Boolean).join(' · ')
+  const sector = [m.sector, m.industry].filter(Boolean).join(' · ')
   const sr = data?.saved_report
   const pct = q.pct_change
-  const fy = fin.fy ? ` FY${String(fin.fy).slice(-2)}` : ''
+  const fy = fin.fy ? `FY${String(fin.fy).slice(-2)}` : 'Operations'
 
   const addWatchlist = async () => {
     setWlBusy(true)
@@ -167,7 +228,6 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
   const runAi = () => {
     onClose()
     navigate('/')
-    // Defer so Desk mounts / is active before it listens
     window.setTimeout(() => focusAnalyzeTicker(tk, false), 50)
   }
 
@@ -182,115 +242,89 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
       }}
     >
       <div className={styles.dialog}>
-        <div className={styles.head}>
-          <span className={styles.tk}>{tk}</span>
-          {q.price != null && (
-            <span className={styles.price}>
-              {fmtPx(q.price)}{' '}
-              {pct != null && (
-                <span
-                  className={
-                    pctClass(pct) === 'pos'
-                      ? styles.up
-                      : pctClass(pct) === 'neg'
-                        ? styles.dn
-                        : ''
-                  }
-                >
-                  {fmtPct(pct)}
-                </span>
-              )}
-            </span>
-          )}
-          <div className={styles.headActions}>
-            <Button size="sm" disabled={wlBusy || wlDone} onClick={() => void addWatchlist()}>
-              {wlDone ? '✓ On watchlist' : wlBusy ? '…' : '+ Watchlist'}
-            </Button>
+        <header className={styles.hero}>
+          <div className={styles.heroLeft}>
+            <div className={styles.tk}>{tk}</div>
+            {name && name !== tk && <div className={styles.name}>{name}</div>}
+            {sector && <div className={styles.sector}>{sector}</div>}
+          </div>
+          <div className={styles.heroRight}>
+            {q.price != null && (
+              <div className={styles.quote}>
+                <span className={styles.px}>{fmtPx(q.price)}</span>
+                {pct != null && (
+                  <span className={`${styles.chg} ${toneClass(pct)}`}>{fmtPct(pct)}</span>
+                )}
+              </div>
+            )}
             <button type="button" className={styles.closeBtn} onClick={onClose} aria-label="Close">
               ✕
             </button>
           </div>
-        </div>
+        </header>
 
         <div className={styles.body}>
-          {loading && <div className={styles.loading}>↻ Loading snapshot…</div>}
+          {loading && <div className={styles.loading}>Loading snapshot…</div>}
           {err && !loading && <div className={styles.error}>Could not load {tk}: {err}</div>}
           {!loading && !err && data && (
             <>
-              <div className={styles.nameRow}>
-                <span className={styles.name}>{name}</span>
-                {chips && <span className={styles.chip}>{chips}</span>}
-              </div>
-              <div className={styles.grid}>
-                <Stat label="52w High" value={w.high != null ? fmtPx(w.high) : null} />
-                <Stat label="52w Low" value={w.low != null ? fmtPx(w.low) : null} />
-                <Stat label="Off High" value={signedPct(w.off_high_pct)} />
-                <Stat label="YTD" value={signedPct(w.ytd_pct)} />
-                <Stat label="1Y" value={signedPct(w.one_year_pct)} />
-                <Stat
-                  label="Realized Vol"
+              <RangeBar low={w.low} high={w.high} last={q.price} />
+              {w.off_high_pct != null && (
+                <p className={styles.rangeNote}>
+                  <span className={toneClass(w.off_high_pct)}>{fmtPct(w.off_high_pct)}</span>
+                  {' '}from 52-week high
+                </p>
+              )}
+
+              <Section title="Market">
+                <Row label="Year to date" value={signedPct(w.ytd_pct)} tone={w.ytd_pct} />
+                <Row label="One year" value={signedPct(w.one_year_pct)} tone={w.one_year_pct} />
+                <Row
+                  label="Realized vol"
                   value={q.realized_vol != null ? `${Number(q.realized_vol).toFixed(1)}%` : null}
                 />
-                <Stat label="Mkt Cap" value={compact(dv.market_cap)} />
-                <Stat label="P/E" value={dv.pe != null ? Number(dv.pe).toFixed(1) : null} />
-                <Stat
-                  label="FCF Yield"
+                <Row label="Market cap" value={compact(dv.market_cap)} />
+                <Row label="P/E" value={dv.pe != null ? Number(dv.pe).toFixed(1) : null} />
+              </Section>
+
+              <Section title="Capital">
+                <Row
+                  label="FCF yield"
                   value={
                     dv.fcf_yield_pct != null ? `${Number(dv.fcf_yield_pct).toFixed(2)}%` : null
                   }
                 />
-                <Stat label="Net Cash" value={compact(dv.net_cash)} />
-                <Stat
-                  label="Debt/Equity"
-                  value={
-                    dv.debt_to_equity != null ? Number(dv.debt_to_equity).toFixed(2) : null
-                  }
+                <Row label="Net cash" value={compact(dv.net_cash)} />
+                <Row
+                  label="Debt / equity"
+                  value={dv.debt_to_equity != null ? Number(dv.debt_to_equity).toFixed(2) : null}
                 />
-                <Stat label={`Revenue${fy}`} value={compact(fin.revenue)} />
-                <Stat label={`Net Income${fy}`} value={compact(fin.net_income)} />
-                <Stat label={`EBITDA${fy}`} value={compact(fin.ebitda)} />
-                <Stat
-                  label="Gross Margin"
-                  value={
-                    fin.gross_margin != null
-                      ? `${(Number(fin.gross_margin) * 100).toFixed(1)}%`
-                      : null
-                  }
-                />
-                <Stat
-                  label="Op Margin"
-                  value={
-                    fin.operating_margin != null
-                      ? `${(Number(fin.operating_margin) * 100).toFixed(1)}%`
-                      : null
-                  }
-                />
-                <Stat
-                  label="Net Margin"
-                  value={
-                    fin.net_margin != null
-                      ? `${(Number(fin.net_margin) * 100).toFixed(1)}%`
-                      : null
-                  }
-                />
-                <Stat
+              </Section>
+
+              <Section title={fy}>
+                <Row label="Revenue" value={compact(fin.revenue)} />
+                <Row label="Net income" value={compact(fin.net_income)} />
+                <Row label="EBITDA" value={compact(fin.ebitda)} />
+                <Row label="Gross margin" value={marginPct(fin.gross_margin)} />
+                <Row label="Operating margin" value={marginPct(fin.operating_margin)} />
+                <Row label="Net margin" value={marginPct(fin.net_margin)} />
+                <Row
                   label="Diluted EPS"
-                  value={
-                    fin.diluted_eps != null ? `$${Number(fin.diluted_eps).toFixed(2)}` : null
-                  }
+                  value={fin.diluted_eps != null ? `$${Number(fin.diluted_eps).toFixed(2)}` : null}
                 />
-                <Stat label={`FCF${fy}`} value={compact(fin.free_cash_flow)} />
-              </div>
+                <Row label="Free cash flow" value={compact(fin.free_cash_flow)} />
+              </Section>
+
               {!data.quote?.price && !m.name && (
                 <p className={styles.muted}>
-                  No stored data for {tk} yet — market-data store syncs on demand.
+                  No stored data for {tk} yet — the market-data store syncs on demand.
                 </p>
               )}
             </>
           )}
         </div>
 
-        <div className={styles.foot}>
+        <footer className={styles.foot}>
           <span className={styles.footHint}>
             <a
               href={`https://www.gurufocus.com/stock/${encodeURIComponent(tk)}/summary`}
@@ -299,9 +333,12 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
             >
               GuruFocus
             </a>
-            {' · '}
-            Yahoo / local store
           </span>
+          {!alreadyOnWatchlist && (
+            <Button size="sm" disabled={wlBusy || wlDone} onClick={() => void addWatchlist()}>
+              {wlDone ? 'On watchlist' : wlBusy ? '…' : 'Add to watchlist'}
+            </Button>
+          )}
           {sr?.exists && (
             <Button
               size="sm"
@@ -309,14 +346,13 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
                 openReportWindow(tk, 'grok')
               }}
             >
-              📄 Open report
-              {sr.rating ? ` · ${sr.rating}` : ''}
+              Open report{sr.rating ? ` · ${sr.rating}` : ''}
             </Button>
           )}
           <Button size="sm" variant="primary" onClick={runAi}>
-            ⚡ Run AI analysis
+            Run analysis
           </Button>
-        </div>
+        </footer>
       </div>
     </div>
   )
