@@ -411,6 +411,7 @@ export function DeskPage() {
           ticker={analyzeTk}
           onTickerChange={setAnalyzeTk}
           runToken={runToken}
+          onStart={() => setReportsKey((k) => k + 1)}
           onComplete={() => setReportsKey((k) => k + 1)}
           bare
         />

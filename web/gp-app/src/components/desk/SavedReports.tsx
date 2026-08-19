@@ -6,20 +6,36 @@ import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
 import styles from './deskWidgets.module.css'
 
+function tsMs(v?: string | null): number {
+  if (!v) return 0
+  const t = new Date(v).getTime()
+  return !Number.isNaN(t) && t > 0 ? t : 0
+}
+
 function freshnessMs(rep: SavedReport): number {
-  const ms = (v?: string | null) => {
-    if (!v) return 0
-    const t = new Date(v).getTime()
-    return !Number.isNaN(t) && t > 0 ? t : 0
-  }
   return Math.max(
-    ms(rep.generated_at),
-    ms(rep.claude_generated_at),
-    ms(rep.kimi_generated_at),
-    ms(rep.deepseek_generated_at),
-    ms(rep.last_attempt_at),
-    ms(rep.report_date),
+    tsMs(rep.generated_at),
+    tsMs(rep.claude_generated_at),
+    tsMs(rep.kimi_generated_at),
+    tsMs(rep.deepseek_generated_at),
+    tsMs(rep.last_attempt_at),
+    tsMs(rep.report_date),
   )
+}
+
+/** Open the engine that actually just ran, not always Grok. */
+function preferredProvider(rep: SavedReport): string {
+  const available = new Set(rep.providers || [])
+  const cands: Array<[string, number]> = [
+    ['claude', tsMs(rep.claude_generated_at)],
+    ['kimi', tsMs(rep.kimi_generated_at)],
+    ['deepseek', tsMs(rep.deepseek_generated_at)],
+    ['grok', tsMs(rep.generated_at)],
+  ]
+  const ranked = cands
+    .filter(([p, t]) => t > 0 && (available.size === 0 || available.has(p)))
+    .sort((a, b) => b[1] - a[1])
+  return ranked[0]?.[0] || (rep.providers || [])[0] || 'grok'
 }
 
 type Props = {
@@ -49,10 +65,16 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
       const tickers = arr.map((r) => r.ticker).filter(Boolean)
       if (tickers.length) {
         try {
-          const q = await api<Record<string, Quote>>(
-            `/api/quotes?tickers=${encodeURIComponent(tickers.join(','))}`,
-          )
-          setQuotes(q || {})
+          const q: Record<string, Quote> = {}
+          const chunk = 80
+          for (let i = 0; i < tickers.length; i += chunk) {
+            const part = tickers.slice(i, i + chunk)
+            const got = await api<Record<string, Quote>>(
+              `/api/quotes?tickers=${encodeURIComponent(part.join(','))}`,
+            )
+            Object.assign(q, got || {})
+          }
+          setQuotes(q)
         } catch {
           /* keep seed prices on reports */
         }
@@ -67,6 +89,17 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
   useEffect(() => {
     void load()
   }, [load, refreshKey])
+
+  const anyRunning = reports.some(
+    (r) =>
+      r.last_attempt_status === 'running' ||
+      r.last_attempt_status === 'in_progress',
+  )
+  useEffect(() => {
+    const ms = anyRunning ? 4000 : 25000
+    const id = window.setInterval(() => void load(), ms)
+    return () => window.clearInterval(id)
+  }, [load, anyRunning])
 
   const sorted = useMemo(
     () =>
@@ -155,19 +188,36 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
               const runIso = runMs ? new Date(runMs).toISOString() : rep.last_attempt_at
               const providers = rep.providers || []
               const failed = rep.last_attempt_status === 'failed'
+              const running =
+                rep.last_attempt_status === 'running' ||
+                rep.last_attempt_status === 'in_progress'
 
               return (
                 <tr
                   key={rep.ticker}
                   className={styles.repRow}
-                  onClick={() => openRep(rep.ticker, providers[0] || 'grok')}
+                  onClick={() => openRep(rep.ticker, preferredProvider(rep))}
                 >
                     <td>
                       <div className={styles.repTkRow}>
-                        {failed ? (
+                        {running ? (
+                          <span title="Analyze in progress">⏳</span>
+                        ) : providers.length ? (
+                          <>
+                            <span title="OK">✅</span>
+                            {failed && (
+                              <span
+                                title={
+                                  rep.last_attempt_error ||
+                                  'Last refresh failed — prior report still available'
+                                }
+                              >
+                                ⚠
+                              </span>
+                            )}
+                          </>
+                        ) : failed ? (
                           <span title={rep.last_attempt_error || 'Failed'}>❌</span>
-                        ) : rep.generated_at || providers.length ? (
-                          <span title="OK">✅</span>
                         ) : null}
                         <span className={styles.repTk}>{rep.ticker}</span>
                         {Number(rep.version_count || 1) > 1 && (

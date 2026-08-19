@@ -6062,6 +6062,10 @@ def _run_analysis_both(job_id: str, ticker: str, generate_gamma: bool) -> None:
         _jobs[job_id]["providers"]    = {"grok": "queued", "claude": "queued"}
         _jobs[job_id]["progress"]     = {"step": "queued", "pct": 0.0,
                                           "label": "Both: starting Grok…"}
+    try:
+        _db_record_attempt_start(ticker)
+    except Exception:
+        pass
 
     def _phase(step, pct, label):
         with _jobs_lock:
@@ -6135,6 +6139,12 @@ def _run_analysis_both(job_id: str, ticker: str, generate_gamma: bool) -> None:
     )
     with _jobs_lock:
         _jobs[job_id]["providers"]["claude"] = "done" if persisted_c else "failed"
+    if not persisted_c:
+        try:
+            _db_record_attempt_failure(
+                ticker, "Claude: " + (result_c.get("error") or "persist failed"))
+        except Exception:
+            pass
 
     # ── Final job state ───────────────────────────────────────────────
     with _jobs_lock:
@@ -6187,6 +6197,10 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
         _jobs[job_id]["progress"] = {"step": "queued", "pct": 0.0,
                                       "label": f"Starting {provider.title()}…"}
         _jobs[job_id]["llm_provider"] = provider
+    try:
+        _db_record_attempt_start(ticker)
+    except Exception:
+        pass
 
     # Progress callback — runs on the worker thread, mutates the shared job dict.
     # Wrapped so a slow lock acquisition can't slow down the analysis itself.
@@ -7095,7 +7109,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui475-20260819-builder-boards-first"
+WEB_BUILD_VERSION = "ui476-20260819-tickets-claude-spy"
 
 
 @app.get("/api/build")
@@ -7746,12 +7760,18 @@ def get_job_status(job_id: str):
             except Exception:
                 return False
 
-        check_order = [provider] + [p for p in ("grok", "claude", "deepseek") if p != provider]
+        # Recover ONLY the engine this job asked for. Falling through to a
+        # prior Grok file made a lost Claude job look "done" with no Claude
+        # report — Analyze Ticker then appeared to skip Claude entirely.
         found_prov = None
-        for p in check_order:
-            if _fs_has(p) or _db_has(p):
-                found_prov = p
-                break
+        if provider == "both":
+            grok_ok = _fs_has("grok") or _db_has("grok")
+            claude_ok = _fs_has("claude") or _db_has("claude")
+            if grok_ok and claude_ok:
+                found_prov = "both"
+        elif provider in ("grok", "claude", "kimi", "deepseek"):
+            if _fs_has(provider) or _db_has(provider):
+                found_prov = provider
 
         if found_prov:
             has_docx = (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report.docx").exists()
@@ -12473,6 +12493,35 @@ def _db_record_attempt_failure(ticker: str, error: str) -> None:
         print(f"[analyst_reports] failure-record failed for {ticker} (non-fatal): {_e!s:.200}")
 
 
+def _db_record_attempt_start(ticker: str) -> None:
+    """Clear a stale ❌ as soon as Analyze starts (before the LLM finishes).
+
+    last_attempt_status used to stay 'failed' for the whole Claude/Grok run,
+    so Saved Reports painted a red X while the new report was still writing.
+    Only touches attempt columns — never wipes an existing report body.
+    """
+    if not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+        return
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        return
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO analyst_reports
+                    (ticker, generated_at, report_md, has_docx, has_pptx,
+                     last_attempt_at, last_attempt_status, last_attempt_error)
+                VALUES (%s, NOW(), '', FALSE, FALSE,
+                        NOW(), 'running', NULL)
+                ON CONFLICT (ticker) DO UPDATE SET
+                    last_attempt_at     = NOW(),
+                    last_attempt_status = 'running',
+                    last_attempt_error  = NULL
+            """, (tk,))
+    except Exception as _e:
+        print(f"[analyst_reports] start-record failed for {tk} (non-fatal): {_e!s:.200}")
+
+
 def _extract_summary_cached(md_file: Path) -> dict:
     """Return {rating, price_target, upside_pct} for a saved report.
 
@@ -13029,7 +13078,19 @@ def list_reports(request: Request = None):
             if rows:
                 out = []
                 for r in rows:
-                    has_grok   = bool(r.get("generated_at"))
+                    # generated_at is NOT NULL DEFAULT NOW(), and Claude/Kimi/
+                    # DeepSeek first-inserts stamp it with an empty report_md.
+                    # Treat Grok as present only when a real Grok Analyze
+                    # left rating / PT / as-of / docs — otherwise the GROK
+                    # pill opens a blank report.
+                    has_grok = bool(
+                        r.get("report_date")
+                        or r.get("rating")
+                        or r.get("price_target") is not None
+                        or r.get("has_docx")
+                        or r.get("has_pptx")
+                        or r.get("gamma_url")
+                    )
                     has_claude = bool(r.get("claude_generated_at"))
                     has_kimi   = bool(r.get("kimi_generated_at"))
                     has_ds     = bool(r.get("deepseek_generated_at"))
@@ -13917,7 +13978,22 @@ def _tiingo_single(sym: str) -> dict:
     result = _tiingo_batch([sym])
     return result.get(sym.upper(), {})
 
+
 @app.get("/api/quotes")
+def get_quotes(tickers: str = ""):
+    """Batch quotes for desk / mobile. Clients send ?tickers=AAPL,MSFT.
+
+    Fast path only (cache + Yahoo chart). The full cascade lives in
+    batch_quotes() for server-side callers that can wait.
+    """
+    originals = [
+        t.strip().upper().rstrip("*")
+        for t in (tickers or "").split(",")
+        if t.strip()
+    ][:100]
+    return _batch_quotes_fast(originals)
+
+
 def _batch_quotes_fast(symbols: list[str]) -> dict:
     """Watchlist / login path — cache + Yahoo chart only, no yfinance cascade.
 
@@ -16971,6 +17047,18 @@ def get_account_ytd_cache(fund_id: str, request: Request):
             except Exception:
                 pass  # non-fatal — return whatever result_json already had
 
+        # Fill monthly SPY column on already-cached YTD (no re-import needed).
+        try:
+            mc = ((rj.get("monthly_chart") or {}).get("monthly") or [])
+            spy = rj.get("spy_monthly")
+            if mc and not spy:
+                spy = get_spy_monthly_data()
+                if spy:
+                    rj["spy_monthly"] = spy
+            _overlay_spy_ytd_on_monthly(mc, spy)
+        except Exception:
+            pass
+
         return {
             "fund_id":     str(row["fund_id"]),
             "nav":         float(row["nav"] or 0),
@@ -19204,6 +19292,51 @@ def get_spy_monthly(ticker: str = "SPY"):
         raise HTTPException(status_code=503, detail=f"{sym} monthly fetch failed: {exc}")
 
 
+def _overlay_spy_ytd_on_monthly(monthly: list | None, spy) -> None:
+    """Copy spy_monthly.points[].ytd_pct onto monthly_chart[].spy_ytd_pct.
+
+    Balance-history YTD attached spy_monthly for the KPI tile but never filled
+    per-month spy_ytd_pct — Fund Monthly Performance then rendered SPY as "—".
+    Mutates `monthly` in place. No-op when already populated.
+    """
+    if not monthly or not spy:
+        return
+    points = spy.get("points") if isinstance(spy, dict) else None
+    if not points:
+        return
+
+    def _month_int(raw) -> int | None:
+        try:
+            if isinstance(raw, int):
+                mi = int(raw)
+            else:
+                s = str(raw or "")
+                mi = int(s.split("-")[1]) if "-" in s else int(s)
+            return mi if 1 <= mi <= 12 else None
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    by_m: dict[int, float] = {}
+    for pt in points:
+        if not isinstance(pt, dict) or pt.get("ytd_pct") is None:
+            continue
+        mi = _month_int(pt.get("month"))
+        if mi is None:
+            continue
+        try:
+            by_m[mi] = float(pt["ytd_pct"])
+        except (TypeError, ValueError):
+            continue
+    if not by_m:
+        return
+    for row in monthly:
+        if not isinstance(row, dict) or row.get("spy_ytd_pct") is not None:
+            continue
+        mi = _month_int(row.get("month"))
+        if mi in by_m:
+            row["spy_ytd_pct"] = by_m[mi]
+
+
 def get_spy_monthly_data():
     """Internal helper — returns SPY monthly dict (same shape as the endpoint)."""
     try:
@@ -19346,7 +19479,9 @@ def _account_overview_from_balance(records: list) -> dict | None:
     # Attach the SPY (benchmark) overlay so the chart line + alpha tile render.
     # Best-effort: never let a benchmark fetch failure block the import.
     try:
-        payload["spy_monthly"] = get_spy_monthly_data()
+        spy = get_spy_monthly_data()
+        payload["spy_monthly"] = spy
+        _overlay_spy_ytd_on_monthly(mc_monthly, spy)
     except Exception:
         payload["spy_monthly"] = None
     return payload
@@ -19630,6 +19765,8 @@ def fund_account_ytd_run(
     try:
         spy = get_spy_monthly_data()
         result["spy_monthly"] = spy
+        _overlay_spy_ytd_on_monthly(
+            ((result.get("monthly_chart") or {}).get("monthly") or []), spy)
     except Exception:
         result["spy_monthly"] = None
 

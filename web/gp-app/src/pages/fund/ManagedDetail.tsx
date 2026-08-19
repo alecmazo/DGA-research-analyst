@@ -185,14 +185,33 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
     twrr != null && benchYtd != null ? twrr - benchYtd : null
 
   const monthlyRaw = ytd?.monthly_chart?.monthly || []
-  // Chart points: inject alternate-bench ytd when user picks non-SPY
+  // Chart points: fill SPY from spy_monthly.points when monthly_chart omitted
+  // spy_ytd_pct (balance-history YTD path), then overlay a non-SPY bench.
   const monthlyChartPts: MonthlyChartPoint[] = useMemo(() => {
-    if (!altBenchYtd || bench === 'SPY') return monthlyRaw
-    return monthlyRaw.map((m, i) => ({
+    const spyPts = ytd?.spy_monthly?.points || []
+    const spyByMonth: Record<number, number> = {}
+    for (const p of spyPts) {
+      const raw = String(p.month || '')
+      const mi = Number(raw.includes('-') ? raw.split('-')[1] : raw)
+      if (Number.isFinite(mi) && p.ytd_pct != null) spyByMonth[mi] = Number(p.ytd_pct)
+    }
+    const filled = monthlyRaw.map((m, i) => {
+      if (m.spy_ytd_pct != null) return m
+      const mi =
+        typeof m.month === 'number'
+          ? m.month
+          : Number(String(m.month || '').split('-').pop())
+      const fromSpy = Number.isFinite(mi) ? spyByMonth[mi] : undefined
+      const aligned = spyPts[i]?.ytd_pct
+      const v = fromSpy ?? aligned ?? null
+      return v == null ? m : { ...m, spy_ytd_pct: v }
+    })
+    if (!altBenchYtd || bench === 'SPY') return filled
+    return filled.map((m, i) => ({
       ...m,
       spy_ytd_pct: altBenchYtd[i] ?? m.spy_ytd_pct,
     }))
-  }, [monthlyRaw, altBenchYtd, bench])
+  }, [monthlyRaw, altBenchYtd, bench, ytd])
 
   const attr = [...(ytd?.attribution || [])].sort(
     (a, b) => (b.contribution_pct || 0) - (a.contribution_pct || 0),

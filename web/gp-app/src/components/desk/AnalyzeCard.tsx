@@ -44,6 +44,8 @@ type Props = {
   ticker?: string
   onTickerChange?: (t: string) => void
   onComplete?: () => void
+  /** Fired when an analyze job is queued so Saved Reports can show in-progress. */
+  onStart?: () => void
   /** Increment to auto-run with current ticker (optional). */
   runToken?: number
   /** When true, omit the outer label chrome (Desk board supplies the header). */
@@ -54,6 +56,7 @@ export function AnalyzeCard({
   ticker: controlled,
   onTickerChange,
   onComplete,
+  onStart,
   runToken,
   bare = false,
 }: Props) {
@@ -125,7 +128,7 @@ export function AnalyzeCard({
   }, [engines, costMap, gamma])
 
   const runAnalysis = useCallback(async () => {
-    const tk = ticker.trim().toUpperCase().replace(/[^A-Z.]/g, '')
+    const tk = ticker.trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
     if (!tk) {
       setHintTone('err')
       setHint('Enter a ticker first.')
@@ -176,6 +179,7 @@ export function AnalyzeCard({
         const jobId = job.job_id
         if (!jobId) throw new Error(`No job_id from analyze (${eng})`)
         setActiveJobId(jobId)
+        onStart?.()
 
         const outcome = await pollJob(jobId, {
           onProgress: (pctInt, lbl) => {
@@ -234,7 +238,7 @@ export function AnalyzeCard({
       setRunning(false)
       setCanceling(false)
     }
-  }, [ticker, engines, gamma, onComplete])
+  }, [ticker, engines, gamma, onComplete, onStart])
 
   // External run trigger (Idea Generator / Prioritize → Report)
   useEffect(() => {
