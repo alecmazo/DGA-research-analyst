@@ -96,7 +96,7 @@ const METHOD_HELP: Record<Method, string> = {
 /* ── page ──────────────────────────────────────────────────────── */
 
 export function BuilderPage() {
-  const [tab, setTab] = useState<Tab>('construct')
+  const [tab, setTab] = useState<Tab>('boards')
 
   /* boards */
   const [lists, setLists] = useState<BoardList[]>([])
@@ -446,17 +446,17 @@ export function BuilderPage() {
           <div className={styles.tabs}>
             <button
               type="button"
-              className={`${styles.tab} ${tab === 'construct' ? styles.tabOn : ''}`}
-              onClick={() => setTab('construct')}
-            >
-              Construct basket
-            </button>
-            <button
-              type="button"
               className={`${styles.tab} ${tab === 'boards' ? styles.tabOn : ''}`}
               onClick={() => setTab('boards')}
             >
               Track boards
+            </button>
+            <button
+              type="button"
+              className={`${styles.tab} ${tab === 'construct' ? styles.tabOn : ''}`}
+              onClick={() => setTab('construct')}
+            >
+              Construct basket
             </button>
           </div>
         </div>
