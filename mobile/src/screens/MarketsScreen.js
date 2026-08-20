@@ -14,7 +14,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import { api } from '../api/client';
 import AppHeader from '../components/AppHeader';
-import StockInfoCard from '../components/StockInfoCard';
+import { StockSnapshotSheet } from '../components/StockInfoCard';
 import { spacing, radius, fontSize, Card, haptics, makeMdStyles, useTheme } from '../design';
 
 const QUOTE_POLL_MS = 30_000;
@@ -136,7 +136,7 @@ export default function MarketsScreen({ navigation }) {
   const [movers, setMovers]     = useState(null);   // null = loading
   const [moversAsOf, setAsOf]   = useState('');
   const [expanded, setExpanded] = useState({});     // ticker → bool
-  const [wlExpanded, setWlExpanded] = useState({}); // watchlist ticker → bool (stock-info card)
+  const [peekTk, setPeekTk] = useState(null); // watchlist snapshot sheet
   const [watch, setWatch]       = useState(null);   // { tickers, quotes }
   const [brief, setBrief]       = useState(undefined); // undefined=loading, null=none, obj=brief
   const [briefOpen, setBriefOpen] = useState(false);
@@ -542,12 +542,12 @@ export default function MarketsScreen({ navigation }) {
         )}
 
         {/* ── 3. Watchlist (sorted by |day %|) ───────────────────────── */}
-        {/* Tap row → free stock-info card (desktop top-ticker expand), not the saved report. */}
+        {/* Tap row → same fact-sheet snapshot as desktop StockPeek. */}
         <SectionHeader
           icon="star-outline"
           t={t}
           s={s}
-          right={<Text style={s.asOf}>tap for card · by day %</Text>}
+          right={<Text style={s.asOf}>tap for snapshot · by day %</Text>}
         >Watchlist</SectionHeader>
         {watch == null ? (
           <Card style={cardStyle}><ActivityIndicator color={t.primary} /></Card>
@@ -560,12 +560,11 @@ export default function MarketsScreen({ navigation }) {
               const up = pct == null || isNaN(pct) ? null : pct >= 0;
               const pxColor = up == null ? t.textSecondary : up ? t.pillUpFg : t.pillDownFg;
               const ytdUp = ytd == null || isNaN(ytd) ? null : ytd >= 0;
-              const open = !!wlExpanded[tk];
               return (
                 <View
                   key={tk}
                   style={[
-                    i < watchRows.length - 1 && !open && s.divider,
+                    i < watchRows.length - 1 && s.divider,
                     up != null && Math.abs(pct) >= 1.5 && {
                       backgroundColor: up
                         ? (t.isDark ? 'rgba(74,222,128,0.06)' : 'rgba(22,163,74,0.04)')
@@ -578,23 +577,10 @@ export default function MarketsScreen({ navigation }) {
                     activeOpacity={0.7}
                     onPress={() => {
                       haptics.onPressPrimary?.();
-                      setWlExpanded((e) => {
-                        // Accordion: only one open at a time (matches desktop)
-                        if (e[tk]) return { ...e, [tk]: false };
-                        return { [tk]: true };
-                      });
+                      setPeekTk(tk);
                     }}
                   >
-                    <TouchableOpacity
-                      onPress={() => {
-                        haptics.onPressPrimary?.();
-                        const url = `https://www.gurufocus.com/stock/${encodeURIComponent(tk)}/summary`;
-                        Linking.openURL(url).catch(() => {});
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                    >
-                      <Text style={s.wlTk}>{tk}</Text>
-                    </TouchableOpacity>
+                    <Text style={s.wlTk}>{tk}</Text>
                     <Text style={[s.wlPx, { color: pxColor }]}>${fmtPx(q.price)}</Text>
                     <View style={{ width: 72, alignItems: 'flex-end' }}><PctPill p={pct} t={t} /></View>
                     <View style={{ width: 64, alignItems: 'flex-end', marginLeft: 4 }}>
@@ -614,53 +600,12 @@ export default function MarketsScreen({ navigation }) {
                       <Text style={s.wlYtdLbl}>YTD</Text>
                     </View>
                     <Ionicons
-                      name={open ? 'chevron-up' : 'chevron-down'}
+                      name="chevron-forward"
                       size={16}
                       color={t.textDim}
                       style={{ marginLeft: 6 }}
                     />
                   </TouchableOpacity>
-                  {open ? (
-                    <View style={{ paddingHorizontal: 10, paddingBottom: 12 }}>
-                      <StockInfoCard
-                        ticker={tk}
-                        compact
-                        onOpenReport={() => {
-                          try {
-                            navigation?.navigate('Research', {
-                              screen: 'Report',
-                              params: { ticker: tk },
-                            });
-                          } catch {}
-                        }}
-                        onRunAnalysis={() => {
-                          Alert.alert(
-                            'Run AI analysis?',
-                            `${tk} full equity report costs tokens (Grok). This is deliberate — not automatic.`,
-                            [
-                              { text: 'Cancel', style: 'cancel' },
-                              {
-                                text: 'Run',
-                                onPress: async () => {
-                                  try {
-                                    haptics.onPressPrimary?.();
-                                    const job = await api.startAnalysis(tk, false, 'grok');
-                                    navigation?.navigate('Research', {
-                                      screen: 'Analysis',
-                                      params: { jobId: job.job_id, ticker: tk },
-                                    });
-                                  } catch (e) {
-                                    Alert.alert('Analysis failed', e.message || String(e));
-                                  }
-                                },
-                              },
-                            ],
-                          );
-                        }}
-                      />
-                    </View>
-                  ) : null}
-                  {i < watchRows.length - 1 && open ? <View style={s.divider} /> : null}
                 </View>
               );
             })}
@@ -782,6 +727,47 @@ export default function MarketsScreen({ navigation }) {
           )}
         </Card>
       </ScrollView>
+      <StockSnapshotSheet
+        ticker={peekTk}
+        visible={!!peekTk}
+        onClose={() => setPeekTk(null)}
+        onOpenReport={peekTk ? () => {
+          const tk = peekTk;
+          setPeekTk(null);
+          try {
+            navigation?.navigate('Research', {
+              screen: 'Report',
+              params: { ticker: tk },
+            });
+          } catch { /* ignore */ }
+        } : undefined}
+        onRunAnalysis={peekTk ? () => {
+          const tk = peekTk;
+          Alert.alert(
+            'Run AI analysis?',
+            `${tk} full equity report costs tokens (Grok). This is deliberate — not automatic.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Run',
+                onPress: async () => {
+                  try {
+                    haptics.onPressPrimary?.();
+                    setPeekTk(null);
+                    const job = await api.startAnalysis(tk, false, 'grok');
+                    navigation?.navigate('Research', {
+                      screen: 'Analysis',
+                      params: { jobId: job.job_id, ticker: tk },
+                    });
+                  } catch (e) {
+                    Alert.alert('Analysis failed', e.message || String(e));
+                  }
+                },
+              },
+            ],
+          );
+        } : undefined}
+      />
     </View>
   );
 }

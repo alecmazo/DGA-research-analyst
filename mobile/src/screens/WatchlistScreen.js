@@ -183,6 +183,7 @@ function PositionSheet({ p, t, onClose, onReport, onAnalyze }) {
           <StockInfoCard
             ticker={p.symbol}
             positionCtx={posCtx}
+            hideHero
             onOpenReport={onReport ? () => onReport(p) : undefined}
             onRunAnalysis={onAnalyze ? () => onAnalyze(p) : undefined}
           />
