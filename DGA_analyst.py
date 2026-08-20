@@ -1079,6 +1079,15 @@ def call_volume_llm(system_prompt: str, user_content: str,
                     pass
             return text_one
         else:
+            s = str(exc)
+            sl = s.lower()
+            if prov_id == "deepseek" and (
+                "402" in s or "insufficient balance" in sl or "insufficient_quota" in sl
+            ):
+                raise RuntimeError(
+                    "DeepSeek wallet is empty (HTTP 402). Add credits at "
+                    "https://platform.deepseek.com then re-run Analyze with DeepSeek selected."
+                ) from exc
             raise
 
     text = "".join(parts).strip()
@@ -9295,6 +9304,8 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     """
     ticker = ticker.strip().upper()
     result = {"ticker": ticker, "ok": False}
+    _prov = (llm_provider or "grok").lower().strip()
+    _is_deepseek = _prov == "deepseek"
 
     def _ck() -> None:
         if should_cancel is not None:

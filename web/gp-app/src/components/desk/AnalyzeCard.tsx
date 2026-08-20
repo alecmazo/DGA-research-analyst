@@ -157,13 +157,17 @@ export function AnalyzeCard({
           ? `${engines[0]} · 1/${engines.length} queued…`
           : `${engines[0]} queued…`,
       )
+      const order: LlmProvider[] = ['grok', 'claude', 'kimi', 'deepseek']
+      const ordered = [...engines].sort(
+        (a, b) => order.indexOf(a) - order.indexOf(b),
+      )
       const job = await api<JobStatus>('/api/analyze', {
         method: 'POST',
         body: JSON.stringify({
           ticker: tk,
           generate_gamma: gamma,
-          llm_provider: engines[0],
-          llm_providers: engines,
+          llm_provider: ordered[0],
+          llm_providers: ordered,
         }),
       })
       const jobId = job.job_id

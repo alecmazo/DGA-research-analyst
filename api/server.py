@@ -7213,7 +7213,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui479-20260820-multi-engine-analyze"
+WEB_BUILD_VERSION = "ui480-20260820-claude-nameerror"
 
 
 @app.get("/api/build")
@@ -7800,6 +7800,9 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
             )
         if p in allowed and p != "both" and p not in providers:
             providers.append(p)
+    # Grok first so Claude/Kimi can reuse its user_msg cache.
+    _ord = ("grok", "claude", "kimi", "deepseek")
+    providers.sort(key=lambda p: _ord.index(p) if p in _ord else 99)
     provider = (req.llm_provider or "grok").lower().strip()
     if provider == "volume":
         # Legacy alias → Kimi when configured, else DeepSeek
