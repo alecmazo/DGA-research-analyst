@@ -1595,6 +1595,21 @@ async def _demo_sandbox_check(request: Request):
 # In-memory job store: { job_id: { status, ticker, result, error, created_at } }
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
+# One Analyze at a time per ticker so Grok + Claude + DeepSeek cannot
+# race the same SEC files / user_msg cache (WMT 2026-08-20: Claude/DeepSeek
+# crashed with empty text while Grok+Gamma was still writing).
+_analyze_ticker_locks: dict[str, threading.Lock] = {}
+_analyze_ticker_locks_guard = threading.Lock()
+
+
+def _analyze_lock_for(ticker: str) -> threading.Lock:
+    k = (ticker or "").strip().upper()
+    with _analyze_ticker_locks_guard:
+        lk = _analyze_ticker_locks.get(k)
+        if lk is None:
+            lk = threading.Lock()
+            _analyze_ticker_locks[k] = lk
+        return lk
 
 # ---------------------------------------------------------------------------
 # Persistent job-index — survives server restarts on Railway.
@@ -1645,6 +1660,8 @@ class AnalyzeRequest(BaseModel):
     ticker: str
     generate_gamma: bool = False
     llm_provider:   str  = "grok"   # 'grok' | 'claude' | 'deepseek' | 'kimi' | 'both'
+    # Desk Analyze Ticker: all selected engines in ONE job (sequential).
+    llm_providers: list[str] | None = None
 
 
 class JobStatus(BaseModel):
@@ -1658,6 +1675,8 @@ class JobStatus(BaseModel):
     # while status='running'. Frontend uses this to drive a real progress bar
     # instead of simulated step transitions.
     progress: dict | None = None
+    warning: str | None = None
+    llm_provider: str | None = None
 
 
 class PortfolioJobStatus(BaseModel):
@@ -6170,7 +6189,7 @@ def _run_analysis_both(job_id: str, ticker: str, generate_gamma: bool) -> None:
 
 
 def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
-                  llm_provider: str = "grok") -> None:
+                  llm_provider: str = "grok", *, finalize: bool = True) -> bool:
     """Run a single-ticker analysis.
 
     llm_provider:
@@ -6190,7 +6209,7 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
     # Dispatch 'both' to the dedicated runner
     if provider == "both":
         _run_analysis_both(job_id, ticker, generate_gamma)
-        return
+        return True
 
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
@@ -6219,49 +6238,62 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
             return bool(_jobs.get(job_id, {}).get("cancel_requested"))
 
     result: dict = {}
-    try:
-        system_prompt = analyst.load_system_prompt()
-        # Claude/Kimi reuse Grok's cached user_msg for fair same-input A/B.
-        # DeepSeek re-gathers (independent EDGAR pull for cross-check).
-        result = analyst.analyze_ticker(
-            ticker,
-            system_prompt=system_prompt,
-            generate_gamma=generate_gamma,
-            verbose=False,
-            on_progress=_record_progress,
-            llm_provider=provider,
-            reuse_user_msg=(provider in ("claude", "kimi")),
-            should_cancel=_cancel_requested,
-        )
-    except analyst.ClaudeCancelled:
-        print(f"[run_analysis] job {job_id} ({ticker}) cancelled by user", flush=True)
-        with _jobs_lock:
-            if _jobs.get(job_id):
-                _jobs[job_id]["status"] = "canceled"
-                _jobs[job_id]["progress"] = {"step": "canceled", "pct": 1.0,
-                                              "label": "Canceled — no report saved"}
-        return
-    except BaseException as exc:  # noqa: BLE001
-        tb_str = traceback.format_exc()
-        print(f"\n❌ Single-ticker job {job_id} ({ticker}) analyze_ticker raised:\n{tb_str}", flush=True)
-        result = {"ok": False, "error": str(exc)[:300]}
+    persisted = False
+    _persist_chars = 0
+    with _analyze_lock_for(ticker):
+        try:
+            system_prompt = analyst.load_system_prompt()
+            # Claude/Kimi reuse Grok's cached user_msg for fair same-input A/B.
+            # DeepSeek re-gathers (independent EDGAR pull for cross-check).
+            result = analyst.analyze_ticker(
+                ticker,
+                system_prompt=system_prompt,
+                generate_gamma=generate_gamma,
+                verbose=False,
+                on_progress=_record_progress,
+                llm_provider=provider,
+                reuse_user_msg=(provider in ("claude", "kimi")),
+                should_cancel=_cancel_requested,
+            )
+        except analyst.ClaudeCancelled:
+            print(f"[run_analysis] job {job_id} ({ticker}) cancelled by user", flush=True)
+            with _jobs_lock:
+                if _jobs.get(job_id):
+                    _jobs[job_id]["status"] = "canceled"
+                    _jobs[job_id]["progress"] = {"step": "canceled", "pct": 1.0,
+                                                  "label": "Canceled — no report saved"}
+            return False
+        except BaseException as exc:  # noqa: BLE001
+            tb_str = traceback.format_exc()
+            print(f"\n❌ Single-ticker job {job_id} ({ticker}) analyze_ticker raised:\n{tb_str}", flush=True)
+            result = {"ok": False, "error": str(exc)[:300]}
 
-    # ── Unified persist (outside the lock, runs even if analyze_ticker failed
-    #    downstream of the LLM call) ─────────────────────────────────────
-    print(f"[run_analysis] post-LLM persist starting for {ticker}/{provider} "
-          f"(result.ok={result.get('ok')}, has_report_text={bool(result.get('report_text'))})", flush=True)
-    persisted, _persist_chars = _persist_analysis_text(
-        ticker=ticker, provider=provider, result=result,
-        job_id=job_id, generate_gamma=generate_gamma,
-    )
-    print(f"[run_analysis] post-LLM persist done for {ticker}/{provider} "
-          f"(persisted={persisted}, chars={_persist_chars})", flush=True)
+        # ── Unified persist (outside the jobs lock, runs even if analyze_ticker
+        #    failed downstream of the LLM call) ──────────────────────────────
+        print(f"[run_analysis] post-LLM persist starting for {ticker}/{provider} "
+              f"(result.ok={result.get('ok')}, has_report_text={bool(result.get('report_text'))})", flush=True)
+        persisted, _persist_chars = _persist_analysis_text(
+            ticker=ticker, provider=provider, result=result,
+            job_id=job_id, generate_gamma=generate_gamma,
+        )
+        print(f"[run_analysis] post-LLM persist done for {ticker}/{provider} "
+              f"(persisted={persisted}, chars={_persist_chars})", flush=True)
 
     # ── Final job state ────────────────────────────────────────────────
+    ok_run = bool(result.get("ok") or persisted)
     with _jobs_lock:
         if not _jobs.get(job_id):
-            return
-        if result.get("ok") or persisted:
+            return ok_run
+        if not finalize:
+            # Multi-engine parent owns terminal status.
+            if not ok_run:
+                try:
+                    _db_record_attempt_failure(
+                        ticker, f"{provider}: " + (result.get("error") or "persist failed"))
+                except Exception:
+                    pass
+            return ok_run
+        if ok_run:
             # Treat persisted-without-ok as a success too: the user got their
             # report. Surface the downstream warning via _jobs[job_id]["warning"]
             # so the UI can optionally show it, but don't mark the job 'failed'.
@@ -6296,7 +6328,79 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
                 _db_record_attempt_failure(ticker, result.get("error") or "Unknown error")
             except Exception:
                 pass
-    return
+    return ok_run
+
+
+def _run_analysis_multi(job_id: str, ticker: str, generate_gamma: bool,
+                        providers: list[str]) -> None:
+    """Run each selected engine sequentially in one job.
+
+    Analyze Ticker used to POST one job per engine. The browser started the
+    next engine after 4 missed polls (~6s), so Claude/DeepSeek overlapped
+    Grok's SEC pull and crashed with empty text — only GROK landed in
+    Saved Reports (WMT SUP_20260820_ccd5596d).
+    """
+    n = len(providers)
+    statuses = {p: "queued" for p in providers}
+    with _jobs_lock:
+        if job_id in _jobs:
+            _jobs[job_id]["status"] = "running"
+            _jobs[job_id]["llm_provider"] = "+".join(providers)
+            _jobs[job_id]["providers"] = dict(statuses)
+            _jobs[job_id]["progress"] = {
+                "step": "queued", "pct": 0.0,
+                "label": f"Starting {providers[0]} (1/{n})…",
+            }
+    any_ok = False
+    for i, p in enumerate(providers):
+        with _jobs_lock:
+            j = _jobs.get(job_id) or {}
+            if j.get("cancel_requested"):
+                _jobs[job_id]["status"] = "canceled"
+                _jobs[job_id]["progress"] = {
+                    "step": "canceled", "pct": 1.0,
+                    "label": "Canceled — finished engines were saved",
+                }
+                return
+            statuses[p] = "running"
+            _jobs[job_id]["providers"] = dict(statuses)
+            _jobs[job_id]["progress"] = {
+                "step": p, "pct": i / max(n, 1),
+                "label": f"{p} writing… ({i + 1}/{n})",
+            }
+        ok = _run_analysis(
+            job_id, ticker,
+            generate_gamma=(bool(generate_gamma) and p == "grok"),
+            llm_provider=p, finalize=False,
+        )
+        statuses[p] = "done" if ok else "failed"
+        any_ok = any_ok or ok
+        with _jobs_lock:
+            if job_id in _jobs:
+                _jobs[job_id]["providers"] = dict(statuses)
+    failed = [p for p, s in statuses.items() if s != "done"]
+    saved = [p for p, s in statuses.items() if s == "done"]
+    with _jobs_lock:
+        if not _jobs.get(job_id):
+            return
+        _jobs[job_id]["status"] = "done" if any_ok else "failed"
+        _jobs[job_id]["progress"] = {
+            "step": "done", "pct": 1.0,
+            "label": (
+                f"Saved {', '.join(saved)}" + (f" · failed {', '.join(failed)}" if failed else "")
+            ),
+        }
+        _jobs[job_id]["result"] = {
+            "ok": any_ok,
+            "providers": dict(statuses),
+            "has_report": any_ok,
+            "persisted_to_db": any_ok,
+        }
+        if failed and any_ok:
+            _jobs[job_id]["warning"] = f"Failed: {', '.join(failed)}"
+        if not any_ok:
+            _jobs[job_id]["error"] = f"All engines failed: {failed}"
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Bulk re-analyze: re-run analysis for every saved report, sequentially, in
@@ -7109,7 +7213,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui478-20260820-healthcheck-syntax"
+WEB_BUILD_VERSION = "ui479-20260820-multi-engine-analyze"
 
 
 @app.get("/api/build")
@@ -7684,6 +7788,18 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
     if not ticker or len(ticker) > 12 or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,11}", ticker):
         raise HTTPException(status_code=422, detail="Invalid ticker symbol")
 
+    allowed = ("grok", "claude", "deepseek", "kimi", "both")
+    raw_list = req.llm_providers if isinstance(req.llm_providers, list) else []
+    providers: list[str] = []
+    for p in raw_list:
+        p = (p or "").lower().strip()
+        if p == "volume":
+            p = (
+                "kimi" if getattr(analyst, "kimi_configured", lambda: False)()
+                else "deepseek"
+            )
+        if p in allowed and p != "both" and p not in providers:
+            providers.append(p)
     provider = (req.llm_provider or "grok").lower().strip()
     if provider == "volume":
         # Legacy alias → Kimi when configured, else DeepSeek
@@ -7691,11 +7807,13 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
             "kimi" if getattr(analyst, "kimi_configured", lambda: False)()
             else "deepseek"
         )
-    if provider not in ("grok", "claude", "deepseek", "kimi", "both"):
-        raise HTTPException(
-            status_code=422,
-            detail="llm_provider must be 'grok' | 'claude' | 'deepseek' | 'kimi' | 'both'",
-        )
+    if not providers:
+        if provider not in allowed:
+            raise HTTPException(
+                status_code=422,
+                detail="llm_provider must be 'grok' | 'claude' | 'deepseek' | 'kimi' | 'both'",
+            )
+        providers = [provider]
 
     # DEMO: no paid LLM call ever — synthesize a sample report instantly.
     if request is not None and _request_is_demo(request):
@@ -7703,6 +7821,8 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
 
     job_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
+    multi = len(providers) > 1 and "both" not in providers
+    label_p = "+".join(providers) if multi else providers[0]
     with _jobs_lock:
         _jobs[job_id] = {
             "job_id": job_id,
@@ -7711,16 +7831,22 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
             "created_at": now,
             "error": None,
             "result": None,
-            "llm_provider": provider,
+            "llm_provider": label_p,
+            "providers": {p: "queued" for p in providers} if multi else None,
             "progress": {"step": "queued", "pct": 0.0,
-                          "label": f"Queued — {provider.title()} starting shortly…"},
+                          "label": f"Queued — {label_p} starting shortly…"},
         }
 
     # Persist mapping so we can recover after a server restart.
     _save_job_index_entry(job_id, {"ticker": ticker, "type": "analysis",
-                                    "provider": provider, "created_at": now})
+                                    "provider": label_p, "created_at": now})
 
-    background_tasks.add_task(_run_analysis, job_id, ticker, req.generate_gamma, provider)
+    if multi:
+        background_tasks.add_task(
+            _run_analysis_multi, job_id, ticker, req.generate_gamma, providers)
+    else:
+        background_tasks.add_task(
+            _run_analysis, job_id, ticker, req.generate_gamma, providers[0])
     return _jobs[job_id]
 
 
@@ -7773,11 +7899,17 @@ def get_job_status(job_id: str):
         # prior Grok file made a lost Claude job look "done" with no Claude
         # report — Analyze Ticker then appeared to skip Claude entirely.
         found_prov = None
+        parts = [p for p in provider.split("+") if p in ("grok", "claude", "kimi", "deepseek")]
         if provider == "both":
             grok_ok = _fs_has("grok") or _db_has("grok")
             claude_ok = _fs_has("claude") or _db_has("claude")
             if grok_ok and claude_ok:
                 found_prov = "both"
+        elif len(parts) > 1:
+            # Multi-engine job: only recover when EVERY requested engine
+            # has a report. Partial completion must not look "done".
+            if all(_fs_has(p) or _db_has(p) for p in parts):
+                found_prov = provider
         elif provider in ("grok", "claude", "kimi", "deepseek"):
             if _fs_has(provider) or _db_has(provider):
                 found_prov = provider

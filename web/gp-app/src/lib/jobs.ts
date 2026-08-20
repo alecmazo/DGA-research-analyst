@@ -25,7 +25,7 @@ export function pollJob(
         const job = await api<JobStatus>(`/api/jobs/${encodeURIComponent(jobId)}`)
         if (!job || !job.status) {
           miss += 1
-          if (miss >= 4) {
+          if (miss >= 25) {
             window.clearInterval(iv)
             const failed: JobStatus = {
               status: 'failed',
@@ -75,7 +75,7 @@ export function pollJob(
         }
       } catch (e) {
         miss += 1
-        if (miss >= 4) {
+        if (miss >= 25) {
           window.clearInterval(iv)
           const failed: JobStatus = {
             status: 'failed',

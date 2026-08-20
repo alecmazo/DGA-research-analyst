@@ -147,86 +147,69 @@ export function AnalyzeCard({
     setHintTone('mid')
     setHint(
       `Running ${engines.length} engine${engines.length > 1 ? 's' : ''} · ${engines.join(' + ')}${
-        gamma ? ' · Gamma on first (Grok only)' : ''
-      } · each saved separately`,
+        gamma ? ' · Gamma on Grok' : ''
+      } · one job, each engine saved`,
     )
 
-    const results: Array<{ eng: string; ok?: boolean; failed?: boolean; canceled?: boolean; cost?: number }> =
-      []
-    let aborted = false
-    let totalCost = 0
-
     try {
-      for (let i = 0; i < engines.length; i++) {
-        if (aborted) break
-        const eng = engines[i]
-        const n = i + 1
-        const label = `${eng} · ${n}/${engines.length}`
-        setProgPct(null)
-        setProgLbl(`${label} · queued…`)
-        setHintTone('mid')
-        setHint(`Running ${label}${engines.length > 1 ? ' (each engine → own Saved Report)' : ''}`)
+      setProgLbl(
+        engines.length > 1
+          ? `${engines[0]} · 1/${engines.length} queued…`
+          : `${engines[0]} queued…`,
+      )
+      const job = await api<JobStatus>('/api/analyze', {
+        method: 'POST',
+        body: JSON.stringify({
+          ticker: tk,
+          generate_gamma: gamma,
+          llm_provider: engines[0],
+          llm_providers: engines,
+        }),
+      })
+      const jobId = job.job_id
+      if (!jobId) throw new Error('No job_id from analyze')
+      setActiveJobId(jobId)
+      onStart?.()
 
-        const wantGamma = gamma && eng === 'grok'
-        const job = await api<JobStatus>('/api/analyze', {
-          method: 'POST',
-          body: JSON.stringify({
-            ticker: tk,
-            generate_gamma: wantGamma,
-            llm_provider: eng,
-          }),
-        })
-        const jobId = job.job_id
-        if (!jobId) throw new Error(`No job_id from analyze (${eng})`)
-        setActiveJobId(jobId)
-        onStart?.()
-
-        const outcome = await pollJob(jobId, {
-          onProgress: (pctInt, lbl) => {
-            const base = Math.round((i / engines.length) * 100)
-            const slice = Math.round((pctInt == null ? 0 : pctInt) / engines.length)
-            setProgPct(pctInt == null ? null : Math.min(99, base + slice))
-            setProgLbl(`${lbl || '…'} · ${label}`)
-          },
-        })
-        setActiveJobId(null)
-
-        if (outcome.status === 'canceled' || outcome.status === 'cancelled') {
-          aborted = true
-          results.push({ eng, canceled: true })
-          break
-        }
-        if (outcome.status !== 'done') {
-          const errMsg = outcome.error || outcome.detail || `${eng} failed`
-          results.push({ eng, failed: true })
-          setHintTone('err')
-          setHint(String(errMsg).slice(0, 220))
-          continue
-        }
-        const c = outcome.result?.cost_usd
-        if (c != null && !Number.isNaN(Number(c))) totalCost += Number(c)
-        results.push({ eng, ok: true, cost: c })
-        onComplete?.()
-      }
+      const outcome = await pollJob(jobId, {
+        onProgress: (pctInt, lbl) => {
+          setProgPct(pctInt == null ? null : Math.min(99, pctInt))
+          setProgLbl(lbl || '…')
+        },
+      })
+      setActiveJobId(null)
+      onComplete?.()
 
       setProgPct(100)
       setProgLbl('Complete')
       setTimeout(() => setShowProg(false), 650)
-      onComplete?.()
 
-      if (aborted) {
+      if (outcome.status === 'canceled' || outcome.status === 'cancelled') {
         setHintTone('mid')
-        setHint(
-          `Canceled after ${results.filter((x) => x.ok).length} of ${engines.length} — completed engines were saved.`,
-        )
+        setHint('Canceled — any finished engines were saved to Saved Reports.')
       } else {
-        const okN = results.filter((x) => x.ok).length
-        const failN = results.filter((x) => x.failed).length
-        setHintTone(failN && !okN ? 'err' : 'ok')
+        const provs = (outcome.result?.providers || {}) as Record<string, string>
+        const names = Object.keys(provs)
+        const okN = names.length
+          ? names.filter((k) => provs[k] === 'done').length
+          : outcome.status === 'done'
+            ? engines.length
+            : 0
+        const failN = names.length
+          ? names.filter((k) => provs[k] !== 'done').length
+          : outcome.status === 'done'
+            ? 0
+            : engines.length
+        const failNames = names.filter((k) => provs[k] !== 'done')
+        const c = outcome.result?.cost_usd
+        const warn = outcome.warning || outcome.error || outcome.detail
+        setHintTone(failN && !okN ? 'err' : failN ? 'mid' : 'ok')
         setHint(
           `${okN ? `✅ ${okN} report${okN > 1 ? 's' : ''} saved` : '❌ none saved'}${
-            failN ? ` · ${failN} failed` : ''
-          }${totalCost > 0 ? ` · $${totalCost.toFixed(2)}` : ''} — see Saved Reports`,
+            failN ? ` · ${failN} failed${failNames.length ? ` (${failNames.join(', ')})` : ''}` : ''
+          }${c != null && !Number.isNaN(Number(c)) ? ` · $${Number(c).toFixed(2)}` : ''} — see Saved Reports${
+            warn && failN ? ` · ${String(warn).slice(0, 140)}` : ''
+          }`,
         )
       }
     } catch (e) {

@@ -274,9 +274,13 @@ export type JobStatus = {
     provider?: string
     price_target?: number | null
     markdown?: string
+    providers?: Record<string, string>
+    persisted_to_db?: boolean
+    has_report?: boolean
   }
   error?: string
   detail?: string
+  warning?: string
   model?: string
   provider?: string
 }
