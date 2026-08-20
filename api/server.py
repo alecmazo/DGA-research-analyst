@@ -7109,7 +7109,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui477-20260820-pulse-deepseek-only"
+WEB_BUILD_VERSION = "ui478-20260820-healthcheck-syntax"
 
 
 @app.get("/api/build")
@@ -7408,7 +7408,7 @@ def _load_volume_llm_override_from_db() -> None:
         except Exception as _pe:
             print(f"[model-routing] deepseek pin failed: {_pe!s:.120}", flush=True)
     except Exception as e:
-        print(f"[model-routing] load failed: {e!s:.120}", flush=True
+        print(f"[model-routing] load failed: {e!s:.120}", flush=True)
 
 
 def _persist_volume_llm_settings() -> None:
