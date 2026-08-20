@@ -287,6 +287,10 @@ VOLUME_LLM_JOBS: tuple[str, ...] = (
     "prioritize",     # Idea Generator Prioritize
     "market_pulse",   # Market pulse + per-ticker scan
 )
+# Desk morning jobs: Settings designate DeepSeek. A DeepSeek miss must FAIL
+# the job — never silently spend Grok 4.6 + live search (Aug 20 2026: 55
+# pulse names fell back and billed ~$3 on xAI).
+NO_GROK_FALLBACK_TASKS: frozenset[str] = frozenset({"daily_brief", "market_pulse"})
 _VOLUME_JOB_LABELS: dict[str, str] = {
     "daily_brief": "Daily Pulse (morning brief)",
     "intelligence": "Sector intelligence",
@@ -325,9 +329,9 @@ MODEL_TASKS: dict[str, dict] = {
     "daily_brief": {
         "label": "Daily Pulse (morning brief)",
         "group": "Desk",
-        "allowed": ("kimi", "deepseek", "grok"),
-        "default": "kimi",
-        "note": "Kimi or DeepSeek = cheap; Grok = live search.",
+        "allowed": ("deepseek",),
+        "default": "deepseek",
+        "note": "DeepSeek only. Free headlines + book prices. Failures surface — no Grok fallback.",
         "volume": True,
     },
     "intelligence": {
@@ -346,11 +350,11 @@ MODEL_TASKS: dict[str, dict] = {
         "volume": True,
     },
     "market_pulse": {
-        "label": "Market pulse / ticker scan",
+        "label": "Market Pulse (ticker scan)",
         "group": "Desk",
-        "allowed": ("kimi", "deepseek", "grok"),
-        "default": "kimi",
-        "note": "Per-ticker. Grok path uses live search (higher cost).",
+        "allowed": ("deepseek",),
+        "default": "deepseek",
+        "note": "DeepSeek only — same engine as Daily Pulse. Per-ticker. Failures stay failed; no Grok fallback.",
         "volume": True,
     },
     "agentic": {
@@ -552,9 +556,15 @@ def set_volume_llm_jobs(jobs: dict | None) -> dict[str, bool]:
             if bool(v):
                 cur = (_task_route_runtime.get(kid) or "").lower()
                 if cur not in ("kimi", "deepseek"):
-                    _task_route_runtime[kid] = cheap_default
+                    _task_route_runtime[kid] = (
+                        "deepseek" if kid in NO_GROK_FALLBACK_TASKS else cheap_default
+                    )
             else:
-                _task_route_runtime[kid] = "grok"
+                # Daily Pulse / Market Pulse stay on DeepSeek even if the
+                # volume-job toggle is off — never rewrite them to Grok.
+                _task_route_runtime[kid] = (
+                    "deepseek" if kid in NO_GROK_FALLBACK_TASKS else "grok"
+                )
     return get_volume_llm_jobs()
 
 
@@ -676,16 +686,26 @@ def providers_catalog() -> dict[str, dict]:
 def default_task_route(task_id: str) -> str:
     meta = MODEL_TASKS.get(task_id) or {}
     d = str(meta.get("default") or "grok")
+    allowed = tuple(meta.get("allowed") or ())
+    no_grok = (task_id or "").strip().lower() in NO_GROK_FALLBACK_TASKS
     if d == "kimi" and not kimi_configured():
-        if deepseek_configured() and "deepseek" in (meta.get("allowed") or ()):
+        if deepseek_configured() and "deepseek" in allowed:
+            return "deepseek"
+        return "deepseek" if no_grok else "grok"
+    if d == "deepseek" and not deepseek_configured():
+        if (not no_grok) and kimi_configured() and "kimi" in allowed:
+            return "kimi"
+        if no_grok or "grok" not in allowed:
             return "deepseek"
         return "grok"
-    if d == "deepseek" and not deepseek_configured():
-        if kimi_configured() and "kimi" in (meta.get("allowed") or ()):
-            return "kimi"
-        return "grok"
     if d == "volume":
-        return "kimi" if kimi_configured() else ("deepseek" if deepseek_configured() else "grok")
+        if kimi_configured() and not no_grok:
+            return "kimi"
+        if deepseek_configured() or no_grok:
+            return "deepseek"
+        return "grok"
+    if no_grok and d == "grok":
+        return "deepseek"
     return d
 
 
@@ -698,16 +718,22 @@ def _cheap_provider_ok(prov: str) -> bool:
 
 
 def get_task_route(task_id: str) -> str:
-    """Resolved provider for a task (settings override → default → safe fallback)."""
+    """Resolved provider for a task (settings override → default → safe fallback).
+
+    Daily Pulse (`daily_brief`) and Market Pulse (`market_pulse`) never
+    resolve to Grok — they are DeepSeek-only. A missing key fails the run
+    instead of silently billing xAI.
+    """
     kid = (task_id or "").strip().lower()
     meta = MODEL_TASKS.get(kid)
     if not meta:
         return "grok"
     allowed = tuple(meta.get("allowed") or ("grok",))
+    no_grok = kid in NO_GROK_FALLBACK_TASKS
     if kid in _task_route_runtime:
         r = str(_task_route_runtime[kid] or "").lower().strip()
     else:
-        if kid in VOLUME_LLM_JOBS:
+        if kid in VOLUME_LLM_JOBS and not no_grok:
             if not volume_llm_enabled():
                 r = "grok"
             elif not bool(_volume_job_runtime.get(kid, True)):
@@ -717,13 +743,16 @@ def get_task_route(task_id: str) -> str:
         else:
             r = default_task_route(kid)
     if r == "volume":
-        r = "kimi" if kimi_configured() else "deepseek"
+        r = "kimi" if kimi_configured() and not no_grok else "deepseek"
+    if no_grok and r == "grok":
+        r = "deepseek"
     if r not in allowed:
         r = default_task_route(kid)
         if r not in allowed:
             r = allowed[0]
-    # Cheap providers need key + master
-    if r in ("kimi", "deepseek") and not _cheap_provider_ok(r):
+    # Cheap providers need key + master — except locked desk jobs, which
+    # keep their designation so the caller can fail visibly.
+    if r in ("kimi", "deepseek") and not _cheap_provider_ok(r) and not no_grok:
         # Prefer the other cheap host, else Grok
         if r == "kimi" and deepseek_configured() and "deepseek" in allowed and volume_llm_enabled():
             r = "deepseek"
@@ -748,7 +777,10 @@ def set_task_routes(routes: dict | None) -> dict[str, str]:
             prov = "kimi" if kimi_configured() else "deepseek"
         allowed = tuple(MODEL_TASKS[kid].get("allowed") or ())
         if prov not in allowed:
-            continue
+            if kid in NO_GROK_FALLBACK_TASKS:
+                prov = "deepseek"
+            else:
+                continue
         _task_route_runtime[kid] = prov
         if kid in VOLUME_LLM_JOBS:
             _volume_job_runtime[kid] = prov in ("kimi", "deepseek")
@@ -1085,28 +1117,53 @@ def call_volume_or_grok(system_prompt: str, user_content: str,
                         live_search: bool = False,
                         grok_model: str | None = None,
                         volume_model: str | None = None,
-                        grok_live_on_fallback: bool = True,
+                        grok_live_on_fallback: bool = False,
+                        allow_grok_fallback: bool | None = None,
                         usage_capture=None) -> tuple[str, str]:
-    """Route a volume job: Kimi/DeepSeek when that job's route says so, else Grok.
+    """Call the Settings-designated engine for ``job``.
+
+    Daily Pulse and Market Pulse are DeepSeek-only: a DeepSeek error
+    propagates. Other volume jobs still fall back to Grok only when
+    ``allow_grok_fallback`` is True (default for non-locked jobs).
 
     Returns (text, provider_label) where provider_label is
     'kimi' | 'deepseek' | 'grok'.
     """
-    route = get_task_route(job) if job else (
+    kid = (job or "").strip().lower() or None
+    no_fb = kid in NO_GROK_FALLBACK_TASKS if kid else False
+    if allow_grok_fallback is None:
+        # Locked desk jobs never fall back. Other volume jobs keep the old
+        # Grok safety net unless the caller opts out.
+        allow_grok_fallback = not no_fb
+    route = get_task_route(kid) if kid else (
         "kimi" if volume_llm_enabled() and kimi_configured() else "grok"
     )
+    if no_fb:
+        route = "deepseek"
     if route in ("kimi", "deepseek", "volume"):
+        prov = "kimi" if route == "volume" else route
         try:
             text = call_volume_llm(
                 system_prompt, user_content,
                 model=volume_model,
-                provider="kimi" if route == "volume" else route,
+                provider=prov,
                 usage_capture=usage_capture,
             )
-            return text, ("kimi" if route == "volume" else route)
+            return text, prov
         except Exception as e:
-            print(f"⚠️  {route} LLM failed ({e!s:.160}); falling back to Grok…", flush=True)
+            if not allow_grok_fallback:
+                print(
+                    f"❌ {prov} LLM failed for {kid or 'job'} — no Grok fallback: "
+                    f"{e!s:.200}",
+                    flush=True,
+                )
+                raise
+            print(f"⚠️  {prov} LLM failed ({e!s:.160}); falling back to Grok…", flush=True)
             live_search = bool(grok_live_on_fallback)
+    if no_fb or allow_grok_fallback is False:
+        raise RuntimeError(
+            f"{kid or 'task'} is designated {route}; Grok is not allowed"
+        )
     text = call_grok(
         system_prompt, user_content,
         model=grok_model or GROK_INTEL_MODEL,
@@ -2558,32 +2615,31 @@ def scan_ticker_news(ticker: str, verbose: bool = True) -> dict:
     sign = "+" if (pct_change or 0) >= 0 else ""
     pct_abs = abs(pct_change) if pct_change is not None else 0.0
 
-    use_vol = volume_llm_enabled_for("market_pulse")
-    evidence_block = ""
-    if use_vol:
-        headlines = _free_ticker_headlines(ticker, limit=6)
-        if headlines:
-            lines = [
-                "FREE HEADLINES (ground truth — do not invent beyond these).",
-                f"Scan DATE is {today}. Prefer items with pub dates on/near that day.",
-            ]
-            for h in headlines:
-                pub = (h.get("pub") or "").strip()
-                pub_bit = ""
-                if pub:
-                    # Keep RSS pubDate readable; LLM must not invent dates.
-                    pub_bit = f"  [pub={pub}]"
-                lines.append(
-                    f"  · {h.get('title', '')}"
-                    + pub_bit
-                    + (f"  ({h.get('publisher')})" if h.get("publisher") else "")
-                    + (f"  {h.get('url')}" if h.get("url") else "")
-                )
-            evidence_block = "\n".join(lines) + "\n"
-        else:
-            evidence_block = (
-                "FREE HEADLINES: (none fetched — say so explicitly; do not invent.)\n"
+    # Market Pulse is DeepSeek-only (same engine as Daily Pulse). Free
+    # headlines are the ground truth — never Grok live search.
+    headlines = _free_ticker_headlines(ticker, limit=6)
+    if headlines:
+        lines = [
+            "FREE HEADLINES (ground truth — do not invent beyond these).",
+            f"Scan DATE is {today}. Prefer items with pub dates on/near that day.",
+        ]
+        for h in headlines:
+            pub = (h.get("pub") or "").strip()
+            pub_bit = ""
+            if pub:
+                # Keep RSS pubDate readable; LLM must not invent dates.
+                pub_bit = f"  [pub={pub}]"
+            lines.append(
+                f"  · {h.get('title', '')}"
+                + pub_bit
+                + (f"  ({h.get('publisher')})" if h.get("publisher") else "")
+                + (f"  {h.get('url')}" if h.get("url") else "")
             )
+        evidence_block = "\n".join(lines) + "\n"
+    else:
+        evidence_block = (
+            "FREE HEADLINES: (none fetched — say so explicitly; do not invent.)\n"
+        )
 
     user_msg = _SCAN_USER_TEMPLATE.format(
         today=today,
@@ -2594,47 +2650,36 @@ def scan_ticker_news(ticker: str, verbose: bool = True) -> dict:
         pct_change=f"{pct_change:.2f}" if pct_change is not None else "N/A",
         sign=sign,
         pct_change_abs=f"{pct_abs:.2f}",
-        evidence_block=evidence_block or (
-            "Using live web and X search for this run.\n"
-        ),
+        evidence_block=evidence_block,
     )
 
-    _route_hint = get_task_route("market_pulse") if use_vol else "grok"
+    _route_hint = get_task_route("market_pulse")
     if verbose:
-        _rm = model_for_provider(_route_hint) if use_vol else GROK_MODEL
-        route = f"{_route_hint}/{_rm}" if use_vol else f"grok/{GROK_MODEL}+live"
-        print(f"   📡 Scanning {ticker} via {route} "
+        _rm = model_for_provider(_route_hint)
+        print(f"   📡 Scanning {ticker} via {_route_hint}/{_rm} "
               f"(${price}, {sign}{pct_abs:.2f}%)…")
 
-    provider = "grok"
-    model_used = GROK_MODEL
+    provider = "deepseek"
+    model_used = model_for_provider(_route_hint)
     _usage: dict = {}
     def _cap(u):
         if isinstance(u, dict):
             _usage.update(u)
     try:
-        if use_vol:
-            sys_p = SCAN_SYSTEM_PROMPT + (
-                "\n\nNOTE: You do not have live X/web tools on this volume run. "
-                "Use FREE HEADLINES + price data only. Do not invent catalysts."
-            )
-            markdown, provider = call_volume_or_grok(
-                sys_p, user_msg, job="market_pulse",
-                live_search=False, grok_live_on_fallback=True,
-                usage_capture=_cap,
-            )
-            # Use the provider actually called — never stamp kimi-k3 when
-            # Settings routed market_pulse → deepseek (VOLUME_LLM_MODEL is
-            # still the Kimi alias when both keys exist).
-            model_used = (
-                (_usage.get("model") if isinstance(_usage.get("model"), str) else None)
-                or model_for_provider(provider)
-            )
-        else:
-            markdown = call_grok(SCAN_SYSTEM_PROMPT, user_msg, live_search=True,
-                                 usage_capture=_cap)
-            provider = "grok"
-            model_used = GROK_MODEL
+        sys_p = SCAN_SYSTEM_PROMPT + (
+            "\n\nNOTE: You do not have live X/web tools on this run. "
+            "Use FREE HEADLINES + price data only. Do not invent catalysts."
+        )
+        markdown, provider = call_volume_or_grok(
+            sys_p, user_msg, job="market_pulse",
+            live_search=False, grok_live_on_fallback=False,
+            allow_grok_fallback=False,
+            usage_capture=_cap,
+        )
+        model_used = (
+            (_usage.get("model") if isinstance(_usage.get("model"), str) else None)
+            or model_for_provider(provider)
+        )
     except Exception as exc:  # noqa: BLE001
         error_msg = str(exc)
         if verbose:
@@ -2705,8 +2750,7 @@ def run_portfolio_scan(
 
     ``is_cancelled()`` is an optional zero-arg callable that returns True when
     the user has requested the scan stop. Checked BEFORE each ticker so any
-    in-flight Grok call finishes naturally (cheaper than killing mid-call,
-    and xAI bills the call either way once started). When cancelled, the
+    in-flight DeepSeek call finishes naturally. When cancelled, the
     scan returns with the partial results gathered so far and
     ``cancelled: True`` set on the payload.
 
@@ -2724,8 +2768,8 @@ def run_portfolio_scan(
     was_cancelled = False
 
     for ticker in tickers:
-        # Cancellation check between tickers — current in-flight Grok call
-        # (if any) completes; we just don't start the next one.
+        # Cancellation check between tickers — current in-flight DeepSeek
+        # call (if any) completes; we just don't start the next one.
         if is_cancelled is not None:
             try:
                 if is_cancelled():
@@ -3642,41 +3686,30 @@ def run_daily_brief(book_tickers: list[str] | None = None,
             + "\n── END EVIDENCE ──\n"
         )
 
-    use_vol = volume_llm_enabled_for("daily_brief")
-    _route_p = get_task_route("daily_brief") if use_vol else "grok"
-    route = (
-        f"{_route_p}/{model_for_provider(_route_p)}" if use_vol
-        else f"grok/{GROK_INTEL_MODEL}+live"
-    )
-    print(f"📰 Running Daily Brief via {route}…")
+    _route_p = get_task_route("daily_brief")
+    route = f"{_route_p}/{model_for_provider(_route_p)}"
+    print(f"📰 Running Daily Pulse via {route} (DeepSeek-only, no Grok fallback)…")
 
     _usage: dict = {}
     def _cap(u):
         if isinstance(u, dict):
             _usage.update(u)
     try:
-        if use_vol:
-            # No live X on open hosts — evidence pack + book is the ground truth
-            markdown, provider = call_volume_or_grok(
-                DAILY_BRIEF_SYSTEM_PROMPT + (
-                    "\n\nNOTE: You do not have live X search on this run. "
-                    "Use the FREE EVIDENCE PACK and DGA BOOK above as primary sources. "
-                    "Do not invent overnight headlines not supported by evidence."
-                ),
-                user_msg,
-                job="daily_brief",
-                live_search=False,
-                usage_capture=_cap,
-            )
-        else:
-            markdown = call_grok(
-                DAILY_BRIEF_SYSTEM_PROMPT,
-                user_msg,
-                model=GROK_INTEL_MODEL,
-                live_search=True,
-                usage_capture=_cap,
-            )
-            provider = "grok"
+        # Same engine + fail-hard rule as Market Pulse. Evidence pack + book
+        # is the ground truth — no live X, no Grok fallback.
+        markdown, provider = call_volume_or_grok(
+            DAILY_BRIEF_SYSTEM_PROMPT + (
+                "\n\nNOTE: You do not have live X search on this run. "
+                "Use the FREE EVIDENCE PACK and DGA BOOK above as primary sources. "
+                "Do not invent overnight headlines not supported by evidence."
+            ),
+            user_msg,
+            job="daily_brief",
+            live_search=False,
+            grok_live_on_fallback=False,
+            allow_grok_fallback=False,
+            usage_capture=_cap,
+        )
     except Exception as exc:  # noqa: BLE001
         print(f"❌ Daily Brief failed: {exc}")
         return {

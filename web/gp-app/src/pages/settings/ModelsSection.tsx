@@ -251,7 +251,7 @@ export function ModelsSection() {
           onClick={() => {
             if (
               !confirm(
-                'Turn volume master OFF?\n\nDesk jobs routed to Kimi or DeepSeek will fall back to Grok.\nFull reports / agentic / podcasts are unchanged.',
+                'Turn volume master OFF?\n\nDaily Pulse and Market Pulse stay on DeepSeek (no Grok fallback).\nOther volume jobs may fall back to Grok.\nFull reports / agentic / podcasts are unchanged.',
               )
             )
               return

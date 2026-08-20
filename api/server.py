@@ -7109,7 +7109,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui476-20260819-tickets-claude-spy"
+WEB_BUILD_VERSION = "ui477-20260820-pulse-deepseek-only"
 
 
 @app.get("/api/build")
@@ -7398,8 +7398,17 @@ def _load_volume_llm_override_from_db() -> None:
                 print(f"[model-routing] routes from DB: {analyst.get_task_routes()}", flush=True)
             if "volume_enabled" in raw2 and raw2["volume_enabled"] is not None:
                 analyst.set_volume_llm_runtime(bool(raw2["volume_enabled"]))
+        # Pin Daily Pulse + Market Pulse to DeepSeek even if an older kv
+        # row still says grok/kimi.
+        try:
+            locked = getattr(analyst, "NO_GROK_FALLBACK_TASKS", ()) or ()
+            pin = {t: "deepseek" for t in locked}
+            if pin and hasattr(analyst, "set_task_routes"):
+                analyst.set_task_routes(pin)
+        except Exception as _pe:
+            print(f"[model-routing] deepseek pin failed: {_pe!s:.120}", flush=True)
     except Exception as e:
-        print(f"[model-routing] load failed: {e!s:.120}", flush=True)
+        print(f"[model-routing] load failed: {e!s:.120}", flush=True
 
 
 def _persist_volume_llm_settings() -> None:
@@ -13468,8 +13477,8 @@ def _run_scan(job_id: str, tickers: list[str]) -> None:
             print(f"[scan] streaming kv persist failed for {ticker}: {_pe}")
 
     # Cancellation predicate — checked between tickers by analyst.run_portfolio_scan.
-    # The in-flight Grok call (if any) completes naturally; we just don't
-    # start the next one. xAI charges for any call we already initiated.
+    # The in-flight DeepSeek call (if any) completes naturally; we just don't
+    # start the next one.
     def _is_cancelled() -> bool:
         with _sjobs_lock:
             j = _sjobs.get(job_id) or {}
@@ -15348,7 +15357,7 @@ def _auto_market_pulse_worker() -> None:
             if not cfg2.get("enabled", True):
                 print("[pulse-scheduler] disabled after wake — skipping")
                 continue
-            print(f"[pulse-scheduler] {h:02d}:{m:02d} Pacific — running market pulse scan on saved reports…")
+            print(f"[pulse-scheduler] {h:02d}:{m:02d} Pacific — DeepSeek-only market pulse on saved reports…")
             # Collect tickers from DB
             tickers = []
             if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):

@@ -143,10 +143,18 @@ function AutomationCard() {
 
   return (
     <CollapsibleCard title="Automation Schedule" badge="Pacific" defaultOpen>
-      {row('🌐 Daily Pulse', 'Live X market pulse — book + tape', briefOn, setBriefOn, briefTime, setBriefTime, briefNext)}
+      {row(
+        '🌐 Daily Pulse',
+        'DeepSeek morning brief — book + tape. No Grok.',
+        briefOn,
+        setBriefOn,
+        briefTime,
+        setBriefTime,
+        briefNext,
+      )}
       {row(
         '⚡ Market Pulse Scan',
-        'Saved-report tickers → Pulse',
+        'DeepSeek per-ticker scan. Failures stay failed — no Grok.',
         pulseOn,
         setPulseOn,
         pulseTime,
