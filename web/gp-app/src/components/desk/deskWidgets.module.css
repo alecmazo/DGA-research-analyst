@@ -23,7 +23,6 @@
   min-height: 0;
 }
 
-.ideaEmbed,
 .reportsEmbed {
   display: flex;
   flex-direction: column;
@@ -31,7 +30,6 @@
   min-height: 0;
 }
 
-.ideaToolbar,
 .reportsToolbar {
   display: flex;
   align-items: center;

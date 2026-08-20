@@ -68,7 +68,7 @@ export function SettingsPage() {
       </div>
 
       <h3 className={styles.groupHead} id="set-models">
-        Models · routing
+        Models · routing &amp; schedule
       </h3>
       <div className={styles.grid}>
         <ModelsSection />

@@ -7213,7 +7213,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui480-20260820-claude-nameerror"
+WEB_BUILD_VERSION = "ui481-20260820-models-schedule"
 
 
 @app.get("/api/build")

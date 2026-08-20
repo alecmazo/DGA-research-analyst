@@ -29,6 +29,82 @@ type Task = {
   note?: string
 }
 
+type JobCfg = {
+  enabled?: boolean
+  hour?: number
+  minute?: number
+  next_run_secs?: number | null
+}
+
+type AutoSettings = {
+  daily_brief?: JobCfg
+  market_pulse?: JobCfg
+  snaptrade_sync?: JobCfg
+}
+
+/** Task ids that can run on a Pacific schedule. */
+const SCHEDULED_TASKS: Record<string, keyof AutoSettings> = {
+  daily_brief: 'daily_brief',
+  market_pulse: 'market_pulse',
+}
+
+const CLOCK_DEFAULTS: Record<keyof AutoSettings, { hour: number; minute: number }> = {
+  daily_brief: { hour: 8, minute: 0 },
+  market_pulse: { hour: 8, minute: 15 },
+  snaptrade_sync: { hour: 6, minute: 0 },
+}
+
+function fmtClock(h?: number, m?: number) {
+  return `${String(h ?? 0).padStart(2, '0')}:${String(m ?? 0).padStart(2, '0')}`
+}
+
+function fmtNext(cfg?: JobCfg) {
+  if (!cfg?.enabled) return 'Off'
+  const secs = cfg.next_run_secs
+  if (secs == null) return '—'
+  const h = Math.floor(secs / 3600)
+  const min = Math.floor((secs % 3600) / 60)
+  return h === 0 ? `in ${min}m` : `in ${h}h ${min}m`
+}
+
+function ScheduleControls({
+  job,
+  cfg,
+  busy,
+  onEnabled,
+  onClock,
+}: {
+  job: keyof AutoSettings
+  cfg?: JobCfg
+  busy: boolean
+  onEnabled: (on: boolean) => void
+  onClock: (value: string) => void
+}) {
+  const d = CLOCK_DEFAULTS[job]
+  return (
+    <div className={styles.routeSched}>
+      <label className={styles.routeAuto}>
+        <input
+          type="checkbox"
+          checked={!!cfg?.enabled}
+          disabled={busy}
+          onChange={(e) => onEnabled(e.target.checked)}
+        />
+        Auto
+      </label>
+      <input
+        type="time"
+        className={styles.autoTime}
+        value={fmtClock(cfg?.hour ?? d.hour, cfg?.minute ?? d.minute)}
+        disabled={busy}
+        onChange={(e) => onClock(e.target.value)}
+        aria-label={`${job} Pacific time`}
+      />
+      <span className={styles.autoNext}>{fmtNext(cfg)}</span>
+    </div>
+  )
+}
+
 type Routing = {
   providers?: Record<string, Provider>
   tasks?: Task[]
@@ -64,6 +140,7 @@ function rateLine(rates?: Rates): string {
 export function ModelsSection() {
   const [routing, setRouting] = useState<Routing | null>(null)
   const [vol, setVol] = useState<VolumeCfg | null>(null)
+  const [auto, setAuto] = useState<AutoSettings>({})
   const [status, setStatus] = useState('Loading…')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -82,6 +159,12 @@ export function ModelsSection() {
         v = await api<VolumeCfg>('/api/config/volume-llm')
       } catch {
         /* optional */
+      }
+      try {
+        const a = await api<AutoSettings>('/api/automation/settings')
+        setAuto(a || {})
+      } catch {
+        /* schedule is optional if routing loaded */
       }
       if (!r && !v) throw new Error('routing + volume endpoints failed')
       if (!r) r = { volume: v || undefined, providers: {}, tasks: [], routes: v?.task_routes || {} }
@@ -141,11 +224,47 @@ export function ModelsSection() {
     void setRoutingConfig({ routes: { [taskId]: provider } })
   }
 
+  const patchAuto = async (job: keyof AutoSettings, patch: JobCfg) => {
+    setBusy(true)
+    setErr(null)
+    try {
+      const defs = CLOCK_DEFAULTS[job]
+      const cur = auto[job] || {}
+      const s = await api<AutoSettings>('/api/automation/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          [job]: {
+            enabled: patch.enabled ?? cur.enabled ?? true,
+            hour: patch.hour ?? cur.hour ?? defs.hour,
+            minute: patch.minute ?? cur.minute ?? defs.minute,
+          },
+        }),
+      })
+      try {
+        const fresh = await api<AutoSettings>('/api/automation/settings')
+        setAuto(fresh || s || {})
+      } catch {
+        setAuto(s || {})
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Schedule save failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onClock = (job: keyof AutoSettings, value: string) => {
+    const [hs, ms] = value.split(':')
+    const hour = Math.max(0, Math.min(23, parseInt(hs || '0', 10) || 0))
+    const minute = Math.max(0, Math.min(59, parseInt(ms || '0', 10) || 0))
+    void patchAuto(job, { hour, minute })
+  }
+
   const providers = routing?.providers || {}
-  const tasks = routing?.tasks || []
+  const tasks = (routing?.tasks || []).filter((t) => t.id !== 'prioritize')
   const jobs = vol?.jobs || {}
-  const nOn = Object.keys(jobs).filter((k) => jobs[k] !== false).length
-  const nAll = Object.keys(jobs).length || 4
+  const nOn = Object.keys(jobs).filter((k) => k !== 'prioritize' && jobs[k] !== false).length
+  const nAll = Object.keys(jobs).filter((k) => k !== 'prioritize').length || 3
   const nTasks = Object.keys(routing?.routes || vol?.task_routes || {}).length
   const en = !!vol?.enabled
   const cfg = !!vol?.configured
@@ -176,11 +295,9 @@ export function ModelsSection() {
       }
     >
       <p className={styles.hint}>
-        Every wired provider below. Assign a model to <strong>each task</strong> — those choices
-        drive labels and costs on the desk (Market Pulse, Prioritize, Daily Pulse, Agents, etc.).
-        Desk jobs: <strong>Kimi K3</strong> / <strong>DeepSeek</strong> (cheap) or{' '}
-        <strong>Grok</strong> (live search). Full reports + Agents: Grok 4.6 · Claude Opus 5 ·
-        DeepSeek. Costs tracked per call. Survives redeploys.
+        Assign a model to each task. For Daily Pulse and Market Pulse, tick <strong>Auto</strong> and
+        set a Pacific time — that is the schedule (no separate Automation card). Idea Generator is
+        retired. Full reports + Agents: Grok · Claude · DeepSeek.
       </p>
 
       <div className={styles.provGrid}>
@@ -295,8 +412,13 @@ export function ModelsSection() {
                   const single = allowed.length <= 1
                   const modelRes =
                     t.model_resolved || providers[route]?.model || '—'
+                  const schedJob = SCHEDULED_TASKS[t.id]
+                  const sched = schedJob ? auto[schedJob] : undefined
                   return (
-                    <div key={t.id} className={styles.routeRow}>
+                    <div
+                      key={t.id}
+                      className={`${styles.routeRow}${schedJob ? ` ${styles.routeRowSched}` : ''}`}
+                    >
                       <div>
                         <div className={styles.routeTitle}>{t.label || t.id}</div>
                         <div className={styles.routeNote}>
@@ -328,6 +450,15 @@ export function ModelsSection() {
                           </select>
                         )}
                       </div>
+                      {schedJob ? (
+                        <ScheduleControls
+                          job={schedJob}
+                          cfg={sched}
+                          busy={busy}
+                          onEnabled={(on) => void patchAuto(schedJob, { enabled: on })}
+                          onClock={(v) => onClock(schedJob, v)}
+                        />
+                      ) : null}
                     </div>
                   )
                 })}
@@ -335,6 +466,25 @@ export function ModelsSection() {
             )
           })
         )}
+        <div className={styles.routeGroup}>Integrations</div>
+        <div className={`${styles.routeRow} ${styles.routeRowSched}`}>
+          <div>
+            <div className={styles.routeTitle}>SnapTrade Sync</div>
+            <div className={styles.routeNote}>
+              Fidelity → Positions &amp; NAV. No LLM — schedule only.
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ fontSize: 11.5, fontWeight: 800 }}>—</span>
+          </div>
+          <ScheduleControls
+            job="snaptrade_sync"
+            cfg={auto.snaptrade_sync}
+            busy={busy}
+            onEnabled={(on) => void patchAuto('snaptrade_sync', { enabled: on })}
+            onClock={(v) => onClock('snaptrade_sync', v)}
+          />
+        </div>
       </div>
 
       <div className={styles.help}>

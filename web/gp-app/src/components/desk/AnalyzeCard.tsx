@@ -227,7 +227,7 @@ export function AnalyzeCard({
     }
   }, [ticker, engines, gamma, onComplete, onStart])
 
-  // External run trigger (Idea Generator / Prioritize → Report)
+  // External run trigger (Desk board / parent → Report)
   useEffect(() => {
     if (runToken && runToken > 0 && ticker.trim()) {
       void runAnalysis()

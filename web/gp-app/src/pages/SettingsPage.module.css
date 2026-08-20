@@ -244,6 +244,30 @@
   border-bottom: 1px solid #eef2f7;
 }
 
+.routeRowSched {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.routeSched {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.routeAuto {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
 .routeTitle {
   font-size: 12.5px;
   font-weight: 800;
@@ -554,6 +578,12 @@
   .autoNext {
     grid-column: 1 / -1;
     text-align: left;
+  }
+  .routeRowSched {
+    grid-template-columns: 1fr;
+  }
+  .routeSched {
+    justify-content: flex-start;
   }
 }
 

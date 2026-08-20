@@ -185,7 +185,7 @@ def _optional_env(name: str, default: str = "") -> str:
 
 # xAI API (Grok) — required at call time (not at import; keeps unit-testability)
 # FULL REPORTS default to Grok. Volume jobs (daily brief, intelligence,
-# prioritize) can use a cheaper OpenAI-compatible open model when enabled.
+# market pulse) can use a cheaper OpenAI-compatible open model when enabled.
 # Override via GROK_MODEL in .env to pin a specific version.
 GROK_MODEL = _optional_env("GROK_MODEL", "grok-4.6")
 # Premium intel path (used when volume LLM is rolled back / disabled).
@@ -284,7 +284,6 @@ _volume_llm_runtime: bool | None = None
 VOLUME_LLM_JOBS: tuple[str, ...] = (
     "daily_brief",    # Daily Pulse / morning digest
     "intelligence",   # Sector / best-mix intelligence
-    "prioritize",     # Idea Generator Prioritize
     "market_pulse",   # Market pulse + per-ticker scan
 )
 # Desk morning jobs: Settings designate DeepSeek. A DeepSeek miss must FAIL
@@ -294,7 +293,6 @@ NO_GROK_FALLBACK_TASKS: frozenset[str] = frozenset({"daily_brief", "market_pulse
 _VOLUME_JOB_LABELS: dict[str, str] = {
     "daily_brief": "Daily Pulse (morning brief)",
     "intelligence": "Sector intelligence",
-    "prioritize": "Idea Generator · Prioritize",
     "market_pulse": "Market pulse / ticker scan",
 }
 # job_id → bool; missing key means True (use volume when master is on)
@@ -340,13 +338,6 @@ MODEL_TASKS: dict[str, dict] = {
         "allowed": ("kimi", "deepseek", "grok"),
         "default": "kimi",
         "note": "Kimi / DeepSeek cheap path; Grok = live search.",
-        "volume": True,
-    },
-    "prioritize": {
-        "label": "Idea Generator · Prioritize",
-        "group": "Desk",
-        "allowed": ("kimi", "deepseek", "grok"),
-        "default": "kimi",
         "volume": True,
     },
     "market_pulse": {

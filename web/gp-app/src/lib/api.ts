@@ -285,53 +285,6 @@ export type JobStatus = {
   provider?: string
 }
 
-export type IdeaMover = {
-  ticker: string
-  pct_change?: number | null
-  price?: number | null
-  reason_class?: string
-  reason_text?: string
-  sources?: string[]
-  sector?: string
-  sector_etf?: string
-  sector_pct_change?: number | null
-  news?: Array<{
-    title?: string
-    url?: string
-    publisher?: string
-    pub_ts?: number
-  }>
-}
-
-export type IdeaFeed = {
-  movers?: IdeaMover[]
-  as_of?: string
-  session_date?: string
-  threshold?: number
-  note?: string
-  error?: string
-}
-
-export type PrioritizePick = {
-  ticker?: string
-  priority?: string
-  score?: number | null
-  reason?: string
-  bucket?: string
-}
-
-export type PrioritizeResult = {
-  ok?: boolean
-  error?: string
-  note?: string
-  picks?: PrioritizePick[]
-  considered?: number
-  skipped?: Array<{ ticker?: string; reason?: string }>
-  bucket_counts?: { active?: number; stale?: number; fresh?: number }
-  model?: string
-  provider?: string
-}
-
 export type ReportHistoryVersion = {
   id: number | string
   provider?: string

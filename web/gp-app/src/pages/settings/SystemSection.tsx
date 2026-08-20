@@ -5,33 +5,6 @@ import { api } from '@/lib/api'
 import { fmtUsd } from '@/lib/format'
 import styles from '../SettingsPage.module.css'
 
-type JobCfg = {
-  enabled?: boolean
-  hour?: number
-  minute?: number
-  next_run_secs?: number | null
-}
-
-type AutoSettings = {
-  daily_brief?: JobCfg
-  market_pulse?: JobCfg
-  snaptrade_sync?: JobCfg
-}
-
-function fmtTime(h: number, m: number) {
-  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0')
-}
-
-function fmtNext(cfg: JobCfg): string {
-  if (!cfg.enabled) return '🔴 Off'
-  const secs = cfg.next_run_secs
-  if (secs == null) return '—'
-  const h = Math.floor(secs / 3600)
-  const min = Math.floor((secs % 3600) / 60)
-  if (h === 0) return `▶ in ${min}m`
-  return `▶ in ${h}h ${min}m`
-}
-
 function rwDur(s?: number | null): string {
   if (s == null) return '—'
   const n = s
@@ -39,145 +12,6 @@ function rwDur(s?: number | null): string {
   const h = Math.floor((n % 86400) / 3600)
   const m = Math.floor((n % 3600) / 60)
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`
-}
-
-/* ── Automation ───────────────────────────────────────────────── */
-
-function AutomationCard() {
-  const [briefOn, setBriefOn] = useState(true)
-  const [briefTime, setBriefTime] = useState('08:00')
-  const [briefNext, setBriefNext] = useState('—')
-  const [pulseOn, setPulseOn] = useState(true)
-  const [pulseTime, setPulseTime] = useState('08:15')
-  const [pulseNext, setPulseNext] = useState('—')
-  const [snapOn, setSnapOn] = useState(false)
-  const [snapTime, setSnapTime] = useState('06:00')
-  const [snapNext, setSnapNext] = useState('—')
-  const [msg, setMsg] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const apply = (s: AutoSettings) => {
-    const brief = s.daily_brief || {}
-    const pulse = s.market_pulse || {}
-    const snap = s.snaptrade_sync || {}
-    setBriefOn(brief.enabled !== false)
-    setBriefTime(fmtTime(brief.hour ?? 8, brief.minute ?? 0))
-    setBriefNext(fmtNext(brief))
-    setPulseOn(pulse.enabled !== false)
-    setPulseTime(fmtTime(pulse.hour ?? 8, pulse.minute ?? 15))
-    setPulseNext(fmtNext(pulse))
-    setSnapOn(snap.enabled === true)
-    setSnapTime(fmtTime(snap.hour ?? 6, snap.minute ?? 0))
-    setSnapNext(fmtNext(snap))
-  }
-
-  useEffect(() => {
-    void api<AutoSettings>('/api/automation/settings')
-      .then(apply)
-      .catch(() => {})
-  }, [])
-
-  const save = async () => {
-    setBusy(true)
-    setMsg('')
-    const bt = briefTime.split(':')
-    const pt = pulseTime.split(':')
-    const st = snapTime.split(':')
-    try {
-      const s = await api<AutoSettings>('/api/automation/settings', {
-        method: 'POST',
-        body: JSON.stringify({
-          daily_brief: {
-            enabled: briefOn,
-            hour: parseInt(bt[0], 10),
-            minute: parseInt(bt[1], 10),
-          },
-          market_pulse: {
-            enabled: pulseOn,
-            hour: parseInt(pt[0], 10),
-            minute: parseInt(pt[1], 10),
-          },
-          snaptrade_sync: {
-            enabled: snapOn,
-            hour: parseInt(st[0], 10),
-            minute: parseInt(st[1], 10),
-          },
-        }),
-      })
-      apply(s)
-      setMsg('✅ Saved')
-      setTimeout(() => setMsg(''), 3000)
-    } catch (e) {
-      setMsg('❌ ' + (e instanceof Error ? e.message : e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const row = (
-    label: string,
-    sub: string,
-    on: boolean,
-    setOn: (v: boolean) => void,
-    time: string,
-    setTime: (v: string) => void,
-    next: string,
-  ) => (
-    <div className={styles.autoRow}>
-      <div className={styles.autoLabel}>
-        <strong>{label}</strong>
-        <span>{sub}</span>
-      </div>
-      <label>
-        <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} />
-      </label>
-      <input
-        type="time"
-        className={styles.autoTime}
-        value={time}
-        onChange={(e) => setTime(e.target.value)}
-      />
-      <span className={styles.autoNext}>{next}</span>
-    </div>
-  )
-
-  return (
-    <CollapsibleCard title="Automation Schedule" badge="Pacific" defaultOpen>
-      {row(
-        '🌐 Daily Pulse',
-        'DeepSeek morning brief — book + tape. No Grok.',
-        briefOn,
-        setBriefOn,
-        briefTime,
-        setBriefTime,
-        briefNext,
-      )}
-      {row(
-        '⚡ Market Pulse Scan',
-        'DeepSeek per-ticker scan. Failures stay failed — no Grok.',
-        pulseOn,
-        setPulseOn,
-        pulseTime,
-        setPulseTime,
-        pulseNext,
-      )}
-      {row(
-        '🔗 SnapTrade Sync',
-        'Fidelity → Positions & NAV',
-        snapOn,
-        setSnapOn,
-        snapTime,
-        setSnapTime,
-        snapNext,
-      )}
-      <div className={styles.row} style={{ marginTop: 10 }}>
-        <Button size="sm" variant="primary" disabled={busy} onClick={() => void save()}>
-          Save Schedule
-        </Button>
-        {msg && <span className={styles.meta}>{msg}</span>}
-      </div>
-    </CollapsibleCard>
-  )
 }
 
 /* ── Railway ──────────────────────────────────────────────────── */
@@ -717,7 +551,6 @@ function SystemInfoCard() {
 export function SystemSection() {
   return (
     <>
-      <AutomationCard />
       <RailwayCard />
       <EmailCard />
       <DemoCard />
