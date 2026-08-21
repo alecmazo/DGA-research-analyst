@@ -288,60 +288,36 @@
     const frame = document.getElementById("featured-video-frame");
     if (!section || !frame) return;
 
-    function show(kind, src, poster) {
-      section.hidden = false;
-      if (kind === "iframe") {
-        frame.innerHTML =
+    function itemHtml(v) {
+      const embed = toEmbedSrc(v.src);
+      if (!embed) return "";
+      const cap = v.caption ? '<p class="video-caption">' + esc(v.caption) + "</p>" : "";
+      let body = "";
+      if (embed.kind === "iframe") {
+        body =
           '<iframe src="' +
-          esc(src) +
+          esc(embed.src) +
           '" title="Wedding first dance" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe>';
       } else {
-        const p = poster ? ' poster="' + esc(mediaSrc(poster)) + '"' : "";
-        frame.innerHTML = '<video src="' + esc(src) + '"' + p + " controls playsinline preload=\"metadata\"></video>";
+        const p = v.poster ? ' poster="' + esc(mediaSrc(v.poster)) + '"' : "";
+        body = '<video src="' + esc(embed.src) + '"' + p + " controls playsinline preload=\"metadata\"></video>";
       }
-    }
-
-    const files = [
-      "media/wedding-first-dance.mp4",
-      "media/wedding-dance.mp4",
-      "media/first-dance.mp4",
-      "media/wedding-first-dance.webm",
-    ];
-
-    const fromHero =
-      hero && hero.src && /video|embed/i.test(hero.type || "")
-        ? hero
-        : null;
-    if (fromHero) {
-      const embed = toEmbedSrc(fromHero.src);
-      if (embed) show(embed.kind, embed.src, fromHero.poster);
-      return;
+      return '<div class="video-item"><div class="video-frame">' + body + "</div>" + cap + "</div>";
     }
 
     fetch("media/site-media.json", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : {}))
       .catch(() => ({}))
       .then((cfg) => {
-        const v = (cfg && cfg.weddingVideo) || {};
-        if (v.src) {
-          const embed = toEmbedSrc(v.src);
-          if (embed) show(embed.kind, embed.src, v.poster);
+        let list = Array.isArray(cfg.weddingVideos) ? cfg.weddingVideos.filter((v) => v && v.src) : [];
+        if (!list.length && cfg.weddingVideo && cfg.weddingVideo.src) list = [cfg.weddingVideo];
+        if (!list.length && hero && hero.src) list = [hero];
+        if (!list.length) {
+          section.hidden = true;
           return;
         }
-        let i = 0;
-        function tryNext() {
-          if (i >= files.length) {
-            section.hidden = true;
-            return;
-          }
-          const src = mediaSrc(files[i++]);
-          const probe = document.createElement("video");
-          probe.preload = "metadata";
-          probe.onloadedmetadata = () => show("file", src, v.poster);
-          probe.onerror = tryNext;
-          probe.src = src;
-        }
-        tryNext();
+        section.hidden = false;
+        frame.innerHTML = list.map(itemHtml).join("");
       });
   }
 
@@ -363,7 +339,7 @@
               '<div class="stars">' +
               stars(rev.stars || 5) +
               "</div><p>“" +
-              esc(rev.text) +
+              esc(rev.text).replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>") +
               "”</p><footer><span>" +
               esc(when) +
               '</span><span class="review-source">' +

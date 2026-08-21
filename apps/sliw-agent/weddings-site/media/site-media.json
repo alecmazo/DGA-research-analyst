@@ -1,8 +1,17 @@
 {
   "weddingVideo": {
-    "src": "media/wedding-first-dance.mp4",
-    "poster": "media/wedding-first-dance.jpg",
-    "title": "Watch a first dance",
-    "caption": "Matthew & Shannen’s reception reel — a first dance Edyta built for a real couple."
-  }
+    "title": "Watch a first dance"
+  },
+  "weddingVideos": [
+    {
+      "src": "media/wedding-first-dance.mp4",
+      "poster": "media/wedding-first-dance.jpg",
+      "caption": "Matthew & Shannen — reception reel"
+    },
+    {
+      "src": "media/wedding-first-dance-2.mp4",
+      "poster": "media/wedding-first-dance-2.jpg",
+      "caption": "Matthew & Shannen — first dance"
+    }
+  ]
 }
