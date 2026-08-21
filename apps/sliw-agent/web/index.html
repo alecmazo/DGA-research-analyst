@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=wed-simple1" />
+  <link rel="stylesheet" href="style.css?v=wed-open1" />
   <script>
     (function () {
       var host = (location.hostname || "").toLowerCase();
@@ -38,7 +38,8 @@
         </div>
       </div>
       <nav class="nav">
-        <button class="nav-item active" data-view="work"><span class="nav-icon">▶</span> Work</button>
+        <p class="nav-label">Corporate</p>
+        <button class="nav-item active" data-view="work"><span class="nav-icon">▶</span> Companies</button>
         <button class="nav-item" data-view="library"><span class="nav-icon">☰</span> Lead library</button>
         <button class="nav-item" data-view="edyta"><span class="nav-icon">★</span> Edyta
           <span class="nav-badge" id="leads-badge" hidden>0</span>
@@ -47,12 +48,14 @@
           <span class="nav-badge" id="contacted-badge" hidden>0</span>
         </button>
         <button class="nav-item" data-view="drafts"><span class="nav-icon">✎</span> Email Drafts</button>
-        <button class="nav-item" data-view="weddings"><span class="nav-icon">♡</span> Weddings</button>
-        <button class="nav-item" data-view="partners"><span class="nav-icon">⚭</span> Partners</button>
+        <p class="nav-label">Weddings</p>
+        <button class="nav-item" data-view="weddings"><span class="nav-icon">♡</span> Planners, venues &amp; couples</button>
+        <button class="nav-item" data-view="partners"><span class="nav-icon">⚭</span> Other partners</button>
+        <p class="nav-label">Desk</p>
         <button class="nav-item" data-view="materials"><span class="nav-icon">▤</span> Materials</button>
       </nav>
       <div class="sidebar-foot">
-        <p class="sidebar-quote">Free-flow desk — pick a lead, finish the next step.</p>
+        <p class="sidebar-quote">Corporate companies on the left. Wedding planners under Weddings.</p>
         <button class="btn ghost sm" id="btn-logout" type="button">Log out</button>
       </div>
     </aside>
@@ -64,9 +67,9 @@
           <h1 class="page-title" id="view-title">Work</h1>
         </div>
         <div class="topbar-actions">
-          <button class="btn ghost" id="btn-sync-all" type="button">Sync all to CRM</button>
-          <button class="btn ghost" id="btn-agent-batch" type="button">▶ Agent: top 5</button>
-          <button class="btn primary" id="btn-refresh-leads" type="button">↻ Refresh leads</button>
+          <button class="btn ghost corp-only" id="btn-sync-all" type="button">Sync all to CRM</button>
+          <button class="btn ghost corp-only" id="btn-agent-batch" type="button">▶ Agent: top 5</button>
+          <button class="btn primary corp-only" id="btn-refresh-leads" type="button">↻ Refresh leads</button>
           <button class="btn ghost sm topbar-logout" id="btn-logout-top" type="button">Log out</button>
         </div>
       </header>
@@ -80,15 +83,15 @@
                 <h3>Ready now</h3>
                 <span class="muted">Top A/B — free flow</span>
               </div>
-              <p class="hint-line">Pick a lead. The <strong>sales agent</strong> finds buyers, builds the pitch (portfolio / light Gamma / full), and drafts outreach. You only send + escalate warm replies to Edyta.</p>
+              <p class="hint-line"><span class="book-chip corporate">Corporate</span> Company pipeline only. Wedding planners and venues are under <strong>Weddings</strong>.</p>
               <div id="ready-list" class="ready-list"></div>
             </div>
 
             <div class="work-focus panel" id="work-focus">
               <div class="empty-state" id="work-empty">
                 <div class="empty-icon">▶</div>
-                <h3>Select a lead</h3>
-                <p>Choose one of the top-scored companies on the left — or open anyone from the Lead library.</p>
+                <h3>Select a company</h3>
+                <p>Corporate pipeline. Wedding planners and venues are under <strong>Weddings</strong>.</p>
               </div>
               <div id="work-panel" hidden>
                 <div class="work-client-head" id="work-client-head">
@@ -176,14 +179,14 @@
         <section class="view" id="view-contacted">
           <div class="panel callout">
             <h3>Reached out</h3>
-            <p>Every company, planner, venue, or couple marked contacted — plus anyone with a sent-email trail.</p>
+            <p>Filter by book. <strong>Corporate</strong> = companies. <strong>Weddings</strong> = planners, venues, and couples.</p>
           </div>
           <div class="lib-toolbar">
             <input class="search" id="contacted-search" type="search" placeholder="Filter by company or email…" />
             <select id="contacted-book">
-              <option value="">All books</option>
-              <option value="corporate">Companies</option>
-              <option value="wedding">Weddings</option>
+              <option value="">All</option>
+              <option value="corporate">Corporate companies</option>
+              <option value="wedding">Wedding desk</option>
             </select>
             <span class="muted" id="contacted-summary">—</span>
           </div>
@@ -236,12 +239,11 @@
         <!-- WEDDINGS -->
         <section class="view" id="view-weddings">
           <div class="panel callout">
-            <h3>Wedding desk — couples + planners</h3>
+            <h3><span class="book-chip wedding">Weddings</span> Planners, venues &amp; couples</h3>
             <p>
-              <strong>Couples inbox</strong> = form leads from
+              Open a card for contact + email. Mark Contacted / Not contacted, or Delete.
+              Couples inbox is form leads from
               <a href="https://weddings.edytasliwinska.com/" target="_blank" rel="noopener">weddings.edytasliwinska.com</a>.
-              Call / text same day.
-              <strong>Planners &amp; venues</strong> = mark Contacted or Not contacted, or Delete to remove.
             </p>
           </div>
           <div class="toolbar wedding-toolbar">
@@ -252,9 +254,24 @@
             <span class="muted" id="wedding-summary">—</span>
           </div>
           <p class="hint-line" id="wedding-hint">
-            Each planner or venue: mark <strong>Contacted</strong> or <strong>Not contacted</strong>. <strong>Delete</strong> removes them from the list.
+            Click a card to open contact and the email. Corporate companies stay under <strong>Companies</strong>.
           </p>
-          <div class="prospect-grid" id="wedding-grid"></div>
+          <div class="work-layout wedding-desk">
+            <div class="work-queue panel">
+              <div class="panel-head">
+                <h3 id="wedding-list-title">Planners &amp; venues</h3>
+              </div>
+              <div class="prospect-grid wedding-list" id="wedding-grid"></div>
+            </div>
+            <div class="work-focus panel" id="wedding-focus">
+              <div class="empty-state" id="wedding-empty">
+                <div class="empty-icon">♡</div>
+                <h3>Select a card</h3>
+                <p>Contact, email draft, and notes open here — this is the wedding desk, not corporate.</p>
+              </div>
+              <div id="wedding-detail" hidden></div>
+            </div>
+          </div>
 
           <!-- Storefront media — paste URLs, save once, live site updates -->
           <div class="panel" id="wedding-media-panel" style="margin-top:18px">
@@ -393,6 +410,6 @@
 
   <div class="toast" id="toast" hidden></div>
   <div class="busy" id="busy" hidden><div class="busy-card">Working…</div></div>
-  <script src="app.js?v=wed-simple1"></script>
+  <script src="app.js?v=wed-open1"></script>
 </body>
 </html>

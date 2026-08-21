@@ -116,6 +116,44 @@ a:hover { text-decoration: underline; }
   flex: 1;
 }
 
+.nav-label {
+  margin: 14px 14px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--warm-gray);
+}
+
+.nav-label:first-child {
+  margin-top: 0;
+}
+
+.book-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.book-chip.corporate {
+  color: #d7e4f5;
+  background: rgba(90, 140, 190, 0.28);
+}
+
+.book-chip.wedding {
+  color: #f3e0c8;
+  background: rgba(201, 168, 76, 0.28);
+}
+
+body[data-desk="wedding"] .corp-only {
+  display: none !important;
+}
+
 .nav-item {
   display: flex;
   align-items: center;
@@ -689,6 +727,13 @@ a:hover { text-decoration: underline; }
   .materials-pdf-layout { grid-template-columns: 1fr; }
 }
 
+.contact-card .contact-name {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
 .contact-primary .contact-name {
   font-family: var(--font-display);
   font-size: 26px;
@@ -1225,12 +1270,20 @@ select:focus, .search:focus, input:focus, textarea:focus {
   outline-offset: 2px;
 }
 
-.partner-card {
-  cursor: default;
+.wedding-list {
+  grid-template-columns: 1fr;
+  max-height: 70vh;
+  overflow-y: auto;
 }
 
-.partner-card:hover {
-  transform: none;
+.partner-card {
+  cursor: pointer;
+}
+
+.partner-card.active,
+.wedding-card.active {
+  border-color: rgba(201, 168, 76, 0.55);
+  background: rgba(201, 168, 76, 0.08);
 }
 
 .partner-card.is-contacted {
