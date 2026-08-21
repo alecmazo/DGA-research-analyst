@@ -110,18 +110,22 @@ export function BuilderPage() {
   const [peekTk, setPeekTk] = useState<string | null>(null)
   const hoverTimer = useRef<number | null>(null)
   const skipPeek = useRef(false)
+  const peekOpen = useRef(false)
 
   const openPeek = (tk: string) => {
     const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
-    if (sym) setPeekTk(sym)
+    if (!sym) return
+    peekOpen.current = true
+    setPeekTk(sym)
   }
 
   const onBoardEnter = (tk: string) => {
     skipPeek.current = false
     if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
+    const delay = peekOpen.current ? 50 : 220
     hoverTimer.current = window.setTimeout(() => {
       if (!skipPeek.current) openPeek(tk)
-    }, 280)
+    }, delay)
   }
 
   const onBoardLeave = () => {
@@ -139,6 +143,7 @@ export function BuilderPage() {
       window.clearTimeout(hoverTimer.current)
       hoverTimer.current = null
     }
+    peekOpen.current = false
     setPeekTk(null)
     navigate(`/financials?ticker=${encodeURIComponent(sym)}`)
   }
@@ -1067,9 +1072,12 @@ export function BuilderPage() {
       )}
       {peekTk && (
         <StockPeek
-          key={peekTk}
           ticker={peekTk}
-          onClose={() => setPeekTk(null)}
+          passThrough
+          onClose={() => {
+            peekOpen.current = false
+            setPeekTk(null)
+          }}
         />
       )}
     </div>

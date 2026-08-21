@@ -163,9 +163,16 @@ type Props = {
   ticker: string
   onClose: () => void
   alreadyOnWatchlist?: boolean
+  /** Let the page under the dim receive hover/click (Builder boards). */
+  passThrough?: boolean
 }
 
-export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props) {
+export function StockPeek({
+  ticker,
+  onClose,
+  alreadyOnWatchlist = false,
+  passThrough = false,
+}: Props) {
   const navigate = useNavigate()
   const tk = ticker.trim().toUpperCase()
   const [data, setData] = useState<StockInfo | null>(null)
@@ -240,12 +247,12 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
 
   return (
     <div
-      className={styles.overlay}
+      className={`${styles.overlay} ${passThrough ? styles.overlayPass : ''}`}
       role="dialog"
-      aria-modal="true"
+      aria-modal={!passThrough}
       aria-label={`${tk} snapshot`}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (!passThrough && e.target === e.currentTarget) onClose()
       }}
     >
       <div className={styles.dialog}>

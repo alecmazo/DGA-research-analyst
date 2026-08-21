@@ -10,6 +10,13 @@
   overflow: auto;
 }
 
+.overlayPass {
+  pointer-events: none;
+  background: rgba(10, 22, 40, 0.12);
+  justify-content: flex-end;
+  padding: 72px 20px 20px;
+}
+
 .dialog {
   width: min(440px, 94vw);
   max-height: 88vh;
@@ -20,6 +27,10 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+.overlayPass .dialog {
+  pointer-events: auto;
 }
 
 .hero {

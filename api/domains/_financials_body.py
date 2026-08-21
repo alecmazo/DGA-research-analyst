@@ -3460,6 +3460,15 @@ def _dash_cash_of(r) -> float | None:
     return (c or 0.0) + (sti or 0.0)
 
 
+_DGA_SCORE_WEIGHTS = {
+    "profitability": 0.30,
+    "growth": 0.25,
+    "financial_strength": 0.20,
+    "predictability": 0.15,
+    "value": 0.10,
+}
+
+
 def _dga_score_from_annuals(annuals: list,
                             price=None,
                             dga_value=None) -> dict:
@@ -3475,6 +3484,7 @@ def _dga_score_from_annuals(annuals: list,
             "profitability": None, "growth": None, "financial_strength": None,
             "predictability": None, "value": None,
         },
+        "weights": dict(_DGA_SCORE_WEIGHTS),
         "g_rev": None, "g_ni": None, "g_cf": None, "l_roic": None,
         "n_op": 0, "n_rev": 0, "revenue": None, "fy": None,
     }
@@ -3566,10 +3576,7 @@ def _dga_score_from_annuals(annuals: list,
         "predictability": predictability,
         "value": value_score,
     }
-    weights = {
-        "profitability": 0.30, "growth": 0.25, "financial_strength": 0.20,
-        "predictability": 0.15, "value": 0.10,
-    }
+    weights = dict(_DGA_SCORE_WEIGHTS)
     avail = {k: v for k, v in comps.items() if v is not None}
     dga_score = (round(sum(v * weights[k] for k, v in avail.items())
                        / sum(weights[k] for k in avail)) if avail else None)
@@ -3578,6 +3585,7 @@ def _dga_score_from_annuals(annuals: list,
     return {
         "total": dga_score,
         "components": comps,
+        "weights": weights,
         "g_rev": g_rev, "g_ni": g_ni, "g_cf": g_cf, "l_roic": l_roic,
         "n_op": n_op,
         "n_rev": sum(1 for v in a_rev if v and v > 0),
@@ -4310,7 +4318,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "peers": peers,
             "rank_cards": rank_cards,
             "dga_score": {"total": dga_score, "components": comps,
-                          "weights": weights},
+                          "weights": scored.get("weights") or dict(_DGA_SCORE_WEIGHTS)},
             "valuation": valuation,
             "metric_history": metric_history,
             # Filing freshness — store is 10-Q/10-K XBRL only (not earnings 8-Ks)
