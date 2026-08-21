@@ -14,6 +14,7 @@ const state = {
   focusId: null,
   edyta: null,
   wedding: [],
+  desk: "corporate",
   weddingChannel: "partner",
   weddingFocusId: null,
   weddingDetail: null,
@@ -331,20 +332,71 @@ function ensureAuth() {
   return true;
 }
 
+function leadKind(p) {
+  const ind = String(p?.industry || "").toLowerCase();
+  const ch = String(p?.lead_channel || "").toLowerCase();
+  const src = String(p?.source || "").toLowerCase();
+  if ((p?.book || "") === "corporate") {
+    return { book: "corporate", type: "company", label: "Company" };
+  }
+  const book = (p?.book || "") === "wedding" || ch === "couple" || ch === "partner"
+    || /planner|venue|couple|winery|hotel|lodge/.test(ind) || src === "web_form"
+    ? "wedding" : "corporate";
+  if (book === "wedding") {
+    if (ch === "couple" || /couple/.test(ind) || src === "web_form") {
+      return { book, type: "couple", label: "Couple" };
+    }
+    if (/planner/.test(ind)) return { book, type: "planner", label: "Planner" };
+    if (/venue|winery|hotel|lodge/.test(ind)) return { book, type: "venue", label: "Venue" };
+    return { book, type: "wedding", label: "Wedding" };
+  }
+  return { book: "corporate", type: "company", label: "Company" };
+}
+
+function setDesk(desk, { enter = true } = {}) {
+  state.desk = desk === "wedding" ? "wedding" : "corporate";
+  document.body.dataset.desk = state.desk;
+  const corp = $("#nav-corporate");
+  const wed = $("#nav-wedding");
+  if (corp) corp.hidden = state.desk !== "corporate";
+  if (wed) wed.hidden = state.desk !== "wedding";
+  $$(".nav-desk").forEach((b) => b.classList.toggle("active", b.dataset.desk === state.desk));
+  if (!enter) return;
+  if (state.desk === "corporate") showView("work");
+  else {
+    if (state.weddingChannel !== "couple") state.weddingChannel = "partner";
+    showView("weddings");
+  }
+}
+
 function showView(name) {
+  if (name === "weddings" && !state.weddingChannel) state.weddingChannel = "partner";
+  const deskOf = {
+    work: "corporate", library: "corporate", drafts: "corporate",
+    weddings: "wedding", partners: "wedding", storefront: "wedding",
+  };
+  if (deskOf[name]) setDesk(deskOf[name], { enter: false });
+  document.body.dataset.desk = state.desk || "corporate";
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
-  $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
-  const weddingDesk = name === "weddings" || name === "partners";
-  document.body.dataset.desk = weddingDesk ? "wedding" : "corporate";
+  $$(".nav-item").forEach((b) => {
+    const sameView = b.dataset.view === name;
+    const ch = b.dataset.channel;
+    const sameCh = !ch || ch === (state.weddingChannel || "partner");
+    b.classList.toggle("active", sameView && sameCh);
+  });
   const titles = {
-    work: ["Companies", "Corporate — not weddings"],
+    work: ["Companies", "Corporate desk"],
     library: ["Lead library", "Corporate companies"],
-    edyta: ["Edyta’s desk", "Warm leads — corporate & wedding"],
-    weddings: ["Weddings", "Planners, venues & couples"],
-    partners: ["Other partners", "Wedding channels"],
+    edyta: ["Edyta", "Full workflow — corporate & weddings"],
+    weddings: [
+      state.weddingChannel === "couple" ? "Couples inbox" : "Planners & venues",
+      "Wedding desk",
+    ],
+    partners: ["Other partners", "Wedding desk"],
+    storefront: ["Storefront", "Wedding website media"],
     materials: ["Materials", "PDFs for both desks"],
-    contacted: ["Contacted", "Filter corporate vs wedding"],
-    drafts: ["Email Drafts", "Edyta’s saved copy"],
+    contacted: ["Contacted", "Corporate & weddings"],
+    drafts: ["Email drafts", "Corporate desk"],
   };
   const [t, e] = titles[name] || [name, ""];
   $("#view-title").textContent = t;
@@ -352,17 +404,15 @@ function showView(name) {
   if (name === "library") renderLibrary();
   if (name === "edyta") renderEdyta();
   if (name === "weddings") {
-    if (!state.weddingChannel) state.weddingChannel = "partner";
-    if (!state.wedding?.length) {
-      loadWeddingRows(state.weddingChannel).then((rows) => {
-        state.wedding = rows;
-        renderWeddings();
-      });
-    } else {
+    loadWeddingRows(state.weddingChannel || "partner").then((rows) => {
+      state.wedding = rows;
       renderWeddings();
-    }
+    });
   }
   if (name === "partners") renderPartners();
+  if (name === "storefront" && typeof window.__loadWeddingMedia === "function") {
+    window.__loadWeddingMedia();
+  }
   if (name === "materials") loadMaterials();
   if (name === "work") renderReady();
   if (name === "contacted") loadContacted();
@@ -521,7 +571,7 @@ function renderReady() {
   const list = $("#ready-list");
   const items = state.ready || [];
   if (!items.length) {
-    list.innerHTML = `<p class="muted">No corporate A/B companies yet. Open <strong>Lead library</strong> or hit <strong>Refresh leads</strong>. Wedding leads are under <strong>Weddings</strong>.</p>`;
+    list.innerHTML = `<p class="muted">No corporate A/B companies yet. Open <strong>Lead library</strong> or hit <strong>Refresh leads</strong>.</p>`;
     return;
   }
   list.innerHTML = items.map((p) => `
@@ -555,13 +605,16 @@ async function focusLead(id, { autoAgent = true } = {}) {
   try {
     const peek = await api(`/prospects/${encodeURIComponent(id)}`);
     if ((peek.book || "") === "wedding") {
+      const couple = /couple/i.test(peek.industry || "") || peek.source === "web_form";
+      state.weddingChannel = couple ? "couple" : "partner";
+      setDesk("wedding", { enter: false });
       showView("weddings");
       state.weddingFocusId = id;
       state.weddingDetail = peek;
       renderWeddingDetail();
-      renderWeddings();
       return;
     }
+    setDesk("corporate", { enter: false });
     showView("work");
     renderReady();
     let ws = await api(`/prospects/${encodeURIComponent(id)}/workstream`);
@@ -1424,30 +1477,38 @@ function renderLibrary() {
 function renderEdyta() {
   const home = state.edyta || {};
   $("#edyta-message").textContent = home.message || "";
-  const corp = home.corporate_leads || [];
-  const wed = home.wedding_leads || [];
-  const all = [...corp, ...wed];
+  const corp = (home.corporate_leads || []).map((p) => ({ ...p, book: "corporate" }));
+  const wed = (home.wedding_leads || []).map((p) => ({ ...p, book: "wedding" }));
+  let all = [...corp, ...wed];
   const badge = $("#leads-badge");
   if (all.length) { badge.hidden = false; badge.textContent = all.length; }
   else badge.hidden = true;
 
+  const bookF = $("#edyta-book")?.value || "";
+  const typeF = $("#edyta-type")?.value || "";
+  if (bookF) all = all.filter((p) => leadKind(p).book === bookF);
+  if (typeF) all = all.filter((p) => leadKind(p).type === typeF);
+
   const list = $("#edyta-list");
   if (!all.length) {
-    list.innerHTML = `<div class="panel empty-state"><h3>No warm leads</h3><p>When a reply is interested, it lands here with a brief.</p></div>`;
+    list.innerHTML = `<div class="panel empty-state"><h3>No warm leads</h3><p>When a reply is interested, it lands here with a brief. Corporate and wedding both show here.</p></div>`;
     return;
   }
-  const card = (p, book) => `
+  list.innerHTML = all.map((p) => {
+    const k = leadKind(p);
+    return `
     <article class="lead-card">
-      <h4>${esc(p.company)} <span class="book-chip ${book}">${book === "wedding" ? "Wedding" : "Corporate"}</span></h4>
-      <p class="muted">${esc(p.stage)} · score ${p.score ?? "—"}</p>
+      <h4>${esc(p.company)}</h4>
+      <p class="muted">
+        <span class="book-chip ${k.book}">${k.book === "wedding" ? "Wedding" : "Corporate"}</span>
+        <span class="status-pill off">${esc(k.label)}</span>
+        · ${esc(p.stage)} · score ${p.score ?? "—"}
+      </p>
       <p style="margin-top:8px;color:var(--cream)">${esc(p.reply_summary || p.agent_note || "")}</p>
       ${emailTrailHtml(p.email_log, { compact: true })}
       <button class="btn primary sm" style="margin-top:10px" data-work="${esc(p.id)}">Open</button>
     </article>`;
-  list.innerHTML = [
-    corp.length ? `<p class="nav-label" style="margin:8px 0">Corporate</p>` + corp.map((p) => card(p, "corporate")).join("") : "",
-    wed.length ? `<p class="nav-label" style="margin:16px 0 8px">Weddings</p>` + wed.map((p) => card(p, "wedding")).join("") : "",
-  ].join("");
+  }).join("");
   list.querySelectorAll("[data-work]").forEach((b) =>
     b.addEventListener("click", () => { focusLead(b.dataset.work); }));
   bindEmailTrail(list);
@@ -1477,16 +1538,14 @@ function renderWeddings() {
         ? "New form leads first — call / text same day. Paid couples stay until lessons are scheduled."
         : "Daily: Couples inbox first, then planner / venue outreach.";
   }
-  const media = $("#wedding-media-panel");
-  if (media) media.hidden = ch === "partner";
-  $("#btn-wedding-couples")?.classList.toggle("primary", ch === "couple");
-  $("#btn-wedding-couples")?.classList.toggle("ghost", ch !== "couple");
-  $("#btn-wedding-partners")?.classList.toggle("primary", ch === "partner");
-  $("#btn-wedding-partners")?.classList.toggle("ghost", ch !== "partner");
   const listTitle = $("#wedding-list-title");
   if (listTitle) {
     listTitle.textContent = ch === "couple" ? "Couples inbox" : "Planners & venues";
   }
+  const heading = $("#wedding-heading");
+  if (heading) heading.textContent = ch === "couple" ? "Couples inbox" : "Planners & venues";
+  const importBtn = $("#btn-wedding-import");
+  if (importBtn) importBtn.hidden = ch === "couple";
   if (!rows.length) {
     grid.innerHTML = `<div class="panel empty-state" style="grid-column:1/-1">
       <h3>${ch === "couple" ? "No couple leads yet" : ch === "partner" ? "No planners or venues yet" : "No wedding leads scored yet"}</h3>
@@ -1579,11 +1638,13 @@ async function loadContacted({ silent = false } = {}) {
 function renderContacted() {
   const q = ($("#contacted-search")?.value || "").toLowerCase();
   const book = $("#contacted-book")?.value || "";
+  const typeF = $("#contacted-type")?.value || "";
   let rows = state.contacted || [];
-  if (book) rows = rows.filter((p) => (p.book || "") === book);
+  if (book) rows = rows.filter((p) => leadKind(p).book === book);
+  if (typeF) rows = rows.filter((p) => leadKind(p).type === typeF);
   if (q) {
     rows = rows.filter((p) =>
-      `${p.company || ""} ${p.last_contacted_email || ""} ${(p.industry || "")}`.toLowerCase().includes(q)
+      `${p.company || ""} ${p.last_contacted_email || ""} ${(p.industry || "")} ${leadKind(p).label}`.toLowerCase().includes(q)
     );
   }
   const sum = $("#contacted-summary");
@@ -1591,14 +1652,11 @@ function renderContacted() {
   const grid = $("#contacted-grid");
   if (!grid) return;
   if (!rows.length) {
-    grid.innerHTML = `<div class="panel empty-state" style="grid-column:1/-1"><h3>No contacted leads yet</h3><p>Mark contacted in Work after you send — they land here with the email copy.</p></div>`;
+    grid.innerHTML = `<div class="panel empty-state" style="grid-column:1/-1"><h3>No contacted leads yet</h3><p>Mark contacted on a company or a wedding card — they land here, tagged Corporate or Wedding.</p></div>`;
     return;
   }
   grid.innerHTML = rows.map((p) => {
-    const isWed = (p.book || "") === "wedding";
-    const kind = isWed
-      ? (/planner/i.test(p.industry || "") ? "Planner" : /venue|winery|hotel/i.test(p.industry || "") ? "Venue" : "Wedding")
-      : "Company";
+    const k = leadKind(p);
     return `
     <article class="prospect-card wedding-card">
       <div class="wedding-card-top">
@@ -1606,9 +1664,9 @@ function renderContacted() {
         <div class="wedding-card-copy">
           <div class="top">
             <h4>${esc(p.company)}</h4>
-            <span class="book-chip ${isWed ? "wedding" : "corporate"}">${isWed ? "Wedding" : "Corporate"}</span>
+            <span class="book-chip ${k.book}">${k.book === "wedding" ? "Wedding" : "Corporate"}</span>
           </div>
-          <p class="meta">${esc(kind)} · ${esc((p.stage || "").replace(/_/g, " "))}${p.last_contacted_email ? " · " + esc(p.last_contacted_email) : ""}</p>
+          <p class="meta"><span class="status-pill off">${esc(k.label)}</span> · ${esc((p.stage || "").replace(/_/g, " "))}${p.last_contacted_email ? " · " + esc(p.last_contacted_email) : ""}</p>
         </div>
       </div>
       <p class="muted">${p.last_contacted_at ? "Last reach-out " + esc(fmtWhen(p.last_contacted_at)) : ""} · ${p.email_count || (p.email_log || []).length} email${(p.email_count || (p.email_log || []).length) === 1 ? "" : "s"}</p>
@@ -1812,7 +1870,11 @@ async function fullRefresh() {
 function boot() {
   if (!ensureAuth()) return;
 
-  $$(".nav-item").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+  $$(".nav-desk").forEach((b) => b.addEventListener("click", () => setDesk(b.dataset.desk)));
+  $$(".nav-item").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.channel) state.weddingChannel = b.dataset.channel;
+    showView(b.dataset.view);
+  }));
   $("#ws-save-to")?.addEventListener("click", () => saveWorkToEmail());
   $("#btn-logout")?.addEventListener("click", logoutSliw);
   $("#btn-logout-top")?.addEventListener("click", logoutSliw);
@@ -1822,6 +1884,9 @@ function boot() {
   $("#btn-draft-copy")?.addEventListener("click", copyDraft);
   $("#contacted-search")?.addEventListener("input", renderContacted);
   $("#contacted-book")?.addEventListener("change", renderContacted);
+  $("#contacted-type")?.addEventListener("change", renderContacted);
+  $("#edyta-book")?.addEventListener("change", renderEdyta);
+  $("#edyta-type")?.addEventListener("change", renderEdyta);
 
   $("#btn-sync-all")?.addEventListener("click", async () => {
     busy(true, "Importing all pending…");
@@ -1921,19 +1986,6 @@ function boot() {
     renderWeddings();
   }
 
-  $("#btn-wedding-couples")?.addEventListener("click", async () => {
-    try {
-      await refreshWeddingChannel("couple");
-      toast(`Couples inbox · ${state.wedding.length} lead(s)`);
-    } catch (e) { toast(e.message); }
-  });
-  $("#btn-wedding-partners")?.addEventListener("click", async () => {
-    try {
-      await refreshWeddingChannel("partner");
-      toast(`Planners & venues · ${state.wedding.length}`);
-    } catch (e) { toast(e.message); }
-  });
-
   $("#btn-wedding-import")?.addEventListener("click", async () => {
     busy(true, "Importing & scoring Bay Area planners…");
     try {
@@ -2003,6 +2055,7 @@ function boot() {
       if (st) st.textContent = e.message || "Could not load media";
     }
   }
+  window.__loadWeddingMedia = loadWeddingMedia;
 
   function collectMediaPayload() {
     const heroSrc = ($("#media-hero-src")?.value || "").trim();
