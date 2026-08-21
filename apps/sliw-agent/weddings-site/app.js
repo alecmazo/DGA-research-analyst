@@ -355,8 +355,11 @@
         grid.innerHTML = (data.reviews || [])
           .map((rev) => {
             const when = [rev.author, rev.date].filter(Boolean).join(" · ");
+            const cls = rev.featured ? "review-card featured" : "review-card";
             return (
-              "<blockquote class=\"review-card\">" +
+              "<blockquote class=\"" +
+              cls +
+              "\">" +
               '<div class="stars">' +
               stars(rev.stars || 5) +
               "</div><p>“" +

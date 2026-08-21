@@ -295,6 +295,16 @@ blockquote footer { font-size: 12px; color: var(--muted); font-weight: 600; }
 .review-card footer { font-size: 12px; color: var(--muted); font-weight: 700; display: flex; flex-wrap: wrap; gap: 8px; }
 .review-source { text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--gold); }
 .stars { color: #e6a817; letter-spacing: 0.04em; }
+.review-card.featured {
+  grid-column: 1 / -1;
+  padding: 22px 24px;
+  border-color: var(--rose);
+}
+.review-card.featured p {
+  font-family: var(--display);
+  font-size: 1.45rem;
+  line-height: 1.35;
+}
 
 .planners { text-align: center; }
 .foot {
