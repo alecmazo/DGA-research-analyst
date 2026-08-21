@@ -27,6 +27,8 @@ export type StockInfo = {
     low?: number | null
     off_high_pct?: number | null
     ytd_pct?: number | null
+    ytd_status?: string | null
+    ytd_label?: string | null
     one_year_pct?: number | null
   }
   derived?: {
@@ -277,7 +279,15 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
               )}
 
               <Section title="Market">
-                <Row label="Year to date" value={signedPct(w.ytd_pct)} tone={w.ytd_pct} />
+                <Row
+                  label="Year to date"
+                  value={
+                    w.ytd_status === 'ipo' || w.ytd_label === 'IPO'
+                      ? 'IPO'
+                      : signedPct(w.ytd_pct)
+                  }
+                  tone={w.ytd_status === 'ipo' ? null : w.ytd_pct}
+                />
                 <Row label="One year" value={signedPct(w.one_year_pct)} tone={w.one_year_pct} />
                 <Row
                   label="Realized vol"

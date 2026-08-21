@@ -95,6 +95,9 @@ export type Quote = {
   /** Calendar year-to-date % (first close of year → live last). */
   ytd?: number | null
   ytd_pct?: number | null
+  /** ``ipo`` when the name listed this calendar year — show IPO, not a dash. */
+  ytd_status?: 'ok' | 'ipo' | string | null
+  ytd_label?: string | null
   as_of?: string | null
   prev?: number | null
 }

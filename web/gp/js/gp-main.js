@@ -2121,7 +2121,7 @@
             <div class="wl-px">${pxHtml}</div>
             <div class="wl-chg-row">
               <span class="wl-chg ${cssClass(q.pct)}" title="Day %">${fmtPct(q.pct)}</span>
-              <span class="wl-ytd ${cssClass(q.ytd != null ? q.ytd : q.ytd_pct)}" title="YTD %">${fmtPct(q.ytd != null ? q.ytd : q.ytd_pct)}</span>
+              <span class="wl-ytd ${q.ytd_status === 'ipo' || q.ytd_label === 'IPO' ? '' : cssClass(q.ytd != null ? q.ytd : q.ytd_pct)}" title="${q.ytd_status === 'ipo' || q.ytd_label === 'IPO' ? 'IPO this year' : 'YTD %'}">${q.ytd_status === 'ipo' || q.ytd_label === 'IPO' ? 'IPO' : fmtPct(q.ytd != null ? q.ytd : q.ytd_pct)}</span>
             </div>
           </div>
           <button type="button" class="wl-remove" data-remove="${tk}" title="Remove">×</button>

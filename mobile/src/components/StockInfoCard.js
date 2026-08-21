@@ -225,7 +225,17 @@ export default function StockInfoCard({
       ) : null}
 
       <Section title="Market" t={t} s={s}>
-        <Row label="Year to date" value={fmtPct(w.ytd_pct)} color={tone(w.ytd_pct)} t={t} s={s} />
+        <Row
+          label="Year to date"
+          value={
+            w.ytd_status === 'ipo' || w.ytd_label === 'IPO'
+              ? 'IPO'
+              : fmtPct(w.ytd_pct)
+          }
+          color={w.ytd_status === 'ipo' ? t.textDim : tone(w.ytd_pct)}
+          t={t}
+          s={s}
+        />
         <Row label="One year" value={fmtPct(w.one_year_pct)} color={tone(w.one_year_pct)} t={t} s={s} />
         <Row
           label="Realized vol"

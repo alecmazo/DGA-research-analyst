@@ -136,6 +136,14 @@
   opacity: 0.95;
 }
 
+.ytdIpo {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  opacity: 0.9;
+}
+
 .table tbody tr:hover td {
   background: var(--bg-hover);
 }

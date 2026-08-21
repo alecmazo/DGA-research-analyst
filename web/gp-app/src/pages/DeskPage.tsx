@@ -112,13 +112,15 @@ export function DeskPage() {
       .map((tk) => {
         const q = quotes[tk] || quotes[String(tk || '').toUpperCase()] || {}
         const pct = quotePct(q)
+        const ytdStatus =
+          q.ytd_status === 'ipo' || q.ytd_label === 'IPO' ? 'ipo' : q.ytd_status
         const ytdRaw = q.ytd ?? q.ytd_pct
         const ytd =
-          ytdRaw == null || Number.isNaN(Number(ytdRaw))
+          ytdStatus === 'ipo' || ytdRaw == null || Number.isNaN(Number(ytdRaw))
             ? null
             : Number(ytdRaw)
         const earn = earnings[tk] || null
-        return { tk, q, pct, ytd, earn, abs: pct == null ? -1 : Math.abs(pct) }
+        return { tk, q, pct, ytd, ytdStatus, earn, abs: pct == null ? -1 : Math.abs(pct) }
       })
       .sort((a, b) => b.abs - a.abs)
   }, [wl])
@@ -245,7 +247,7 @@ export function DeskPage() {
                     </td>
                   </tr>
                 )}
-                {rows.map(({ tk, q, pct, ytd, earn }) => (
+                {rows.map(({ tk, q, pct, ytd, ytdStatus, earn }) => (
                   <tr
                     key={tk}
                     className={`${styles.rowClick} ${earn ? styles.rowEarn : ''}`}
@@ -297,14 +299,18 @@ export function DeskPage() {
                       {fmtPct(pct)}
                     </td>
                     <td
-                      className={`tabular ${styles.colYtd} ${pctClass(ytd)}`}
+                      className={`tabular ${styles.colYtd} ${
+                        ytdStatus === 'ipo' ? styles.ytdIpo : pctClass(ytd)
+                      }`}
                       title={
-                        ytd == null
-                          ? 'YTD unavailable (no Jan price in store)'
-                          : 'Calendar year-to-date %'
+                        ytdStatus === 'ipo'
+                          ? 'IPO this year — no full calendar YTD'
+                          : ytd == null
+                            ? 'YTD unavailable (no Jan price in store)'
+                            : 'Calendar year-to-date %'
                       }
                     >
-                      {fmtPct(ytd)}
+                      {ytdStatus === 'ipo' ? 'IPO' : fmtPct(ytd)}
                     </td>
                     <td className={styles.actions}>
                       <button
