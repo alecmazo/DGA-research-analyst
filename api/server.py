@@ -3908,6 +3908,7 @@ def _watchlist_earnings_for(tickers: list[str],
 # Per-ticker calendar YTD % for watchlist chips (process cache, free DB only).
 _WL_YTD_CACHE: dict = {}          # symbol -> (epoch, ytd_pct | None)
 _WL_YTD_TTL_S = 15 * 60
+_WL_YTD_BACKFILL_RUNNING = False
 
 
 def _watchlist_ytd_pcts(tickers: list[str],
@@ -3916,80 +3917,138 @@ def _watchlist_ytd_pcts(tickers: list[str],
 
     Uses first available close on/after Jan 1 of the current year vs the
     latest live (or store) price. Pure Postgres — no Yahoo on the request
-    path so Desk stays snappy. Missing history → ticker omitted.
+    path so Desk stays snappy. Missing history → ticker omitted (and a
+    background Yahoo backfill is kicked so the next poll can fill it).
     """
     out: dict[str, float] = {}
     if not tickers:
         return out
     now = time.time()
     need: list[str] = []
+    seen: set[str] = set()
     for tk in tickers:
         sym = (tk or "").strip().upper()
-        if not sym:
+        if not sym or sym in seen:
             continue
+        seen.add(sym)
         hit = _WL_YTD_CACHE.get(sym)
-        if hit and (now - float(hit[0])) < _WL_YTD_TTL_S:
-            if hit[1] is not None:
-                out[sym] = hit[1]
+        if hit and (now - float(hit[0])) < _WL_YTD_TTL_S and hit[1] is not None:
+            out[sym] = hit[1]
         else:
             need.append(sym)
     if not need or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return out
+    live_u: dict[str, float] = {}
+    for k, v in (live_prices or {}).items():
+        ku = (str(k) if k is not None else "").strip().upper()
+        if not ku:
+            continue
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if fv > 0:
+            live_u[ku] = fv
+    # Query aliases too (BRKB → BRK-B) so a watchlist spelling still hits history.
+    query_syms: list[str] = []
+    alias_to_orig: dict[str, str] = {}
+    for sym in need:
+        query_syms.append(sym)
+        alias_to_orig.setdefault(sym, sym)
+        try:
+            al = (_resolve_ticker_alias(sym) or "").strip().upper()
+        except Exception:
+            al = ""
+        if al and al != sym:
+            query_syms.append(al)
+            alias_to_orig.setdefault(al, sym)
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
             # First close of current calendar year + latest close, bulk.
+            # upper() so WMT/wmt and alias spellings match the store.
             cur.execute("""
                 WITH t AS (
                     SELECT unnest(%s::text[]) AS symbol
                 ),
                 firsts AS (
-                    SELECT DISTINCT ON (p.symbol)
-                           p.symbol, p.close AS jan_close, p.d AS jan_d
+                    SELECT DISTINCT ON (upper(p.symbol))
+                           upper(p.symbol) AS symbol, p.close AS jan_close
                       FROM price_history p
-                      JOIN t ON t.symbol = p.symbol
+                      JOIN t ON upper(p.symbol) = t.symbol
                      WHERE p.d >= date_trunc('year', CURRENT_DATE)::date
                        AND p.close IS NOT NULL AND p.close > 0
-                     ORDER BY p.symbol, p.d ASC
+                     ORDER BY upper(p.symbol), p.d ASC
                 ),
                 lasts AS (
-                    SELECT DISTINCT ON (p.symbol)
-                           p.symbol, p.close AS last_close
+                    SELECT DISTINCT ON (upper(p.symbol))
+                           upper(p.symbol) AS symbol, p.close AS last_close
                       FROM price_history p
-                      JOIN t ON t.symbol = p.symbol
+                      JOIN t ON upper(p.symbol) = t.symbol
                      WHERE p.close IS NOT NULL AND p.close > 0
-                     ORDER BY p.symbol, p.d DESC
+                     ORDER BY upper(p.symbol), p.d DESC
                 )
                 SELECT f.symbol, f.jan_close, l.last_close
                   FROM firsts f
                   JOIN lasts  l USING (symbol)
-            """, (need,))
+            """, (query_syms,))
             rows = cur.fetchall() or []
-        live = live_prices or {}
         found: set[str] = set()
         for r in rows:
-            sym = (r.get("symbol") or "").upper()
+            raw = (r.get("symbol") or "").upper()
+            orig = alias_to_orig.get(raw, raw)
             try:
                 jan = float(r.get("jan_close") or 0)
             except (TypeError, ValueError):
                 jan = 0.0
-            if not sym or jan <= 0:
+            if not orig or jan <= 0:
                 continue
-            px = live.get(sym)
+            px = live_u.get(orig)
+            if px is None:
+                px = live_u.get(raw)
             if px is None:
                 try:
                     px = float(r.get("last_close") or 0) or None
                 except (TypeError, ValueError):
                     px = None
-            if px is None or float(px) <= 0:
+            try:
+                px_f = float(px) if px is not None else 0.0
+            except (TypeError, ValueError):
+                px_f = 0.0
+            if px_f <= 0:
                 continue
-            ytd = round((float(px) / jan - 1.0) * 100.0, 2)
-            out[sym] = ytd
-            _WL_YTD_CACHE[sym] = (now, ytd)
-            found.add(sym)
-        # Cache misses so we don't re-query empty names every 45s poll
-        for sym in need:
-            if sym not in found and sym not in _WL_YTD_CACHE:
-                _WL_YTD_CACHE[sym] = (now, None)
+            ytd = round((px_f / jan - 1.0) * 100.0, 2)
+            out[orig] = ytd
+            _WL_YTD_CACHE[orig] = (now, ytd)
+            found.add(orig)
+        missing = [s for s in need if s not in found]
+        if missing:
+            print(f"[watchlist] ytd miss n={len(missing)} {missing[:8]}", flush=True)
+            global _WL_YTD_BACKFILL_RUNNING
+            if not _WL_YTD_BACKFILL_RUNNING:
+                _WL_YTD_BACKFILL_RUNNING = True
+
+                def _bg_ytd_backfill(names: list[str]) -> None:
+                    global _WL_YTD_BACKFILL_RUNNING
+                    try:
+                        sync = globals().get("_sync_price_history")
+                        if not callable(sync):
+                            return
+                        for s in names[:16]:
+                            try:
+                                sync(s)
+                                _WL_YTD_CACHE.pop(s, None)
+                            except Exception as e:
+                                print(f"[watchlist] ytd backfill {s}: {e!s:.120}",
+                                      flush=True)
+                    finally:
+                        _WL_YTD_BACKFILL_RUNNING = False
+
+                threading.Thread(
+                    target=_bg_ytd_backfill,
+                    args=(missing,),
+                    name="wl-ytd-backfill",
+                    daemon=True,
+                ).start()
     except Exception as e:
         print(f"[watchlist] ytd bulk failed: {e!s:.160}", flush=True)
     return out
@@ -4135,11 +4194,20 @@ def watchlist_get(request: Request, fresh: bool = False):
                     if (quotes.get(tk) or {}).get("price") is not None
                 }
                 ytd_map = _watchlist_ytd_pcts(tickers, live_prices=live_px) or {}
-                for tk, ytd in ytd_map.items():
-                    if tk not in quotes:
-                        quotes[tk] = {}
-                    quotes[tk]["ytd"] = ytd
-                    quotes[tk]["ytd_pct"] = ytd
+                # Stamp onto the original ticker key the UI looks up (and
+                # uppercase) so a spelling/case mismatch can't hide YTD.
+                for orig in tickers:
+                    sym = (orig or "").strip().upper()
+                    ytd = ytd_map.get(sym)
+                    if ytd is None:
+                        continue
+                    for key in {orig, sym}:
+                        if not key:
+                            continue
+                        if key not in quotes:
+                            quotes[key] = {}
+                        quotes[key]["ytd"] = ytd
+                        quotes[key]["ytd_pct"] = ytd
             except Exception as e:
                 print(f"[watchlist] ytd attach failed: {e!s:.160}", flush=True)
 
@@ -7304,7 +7372,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui482-20260821-wl-fresh"
+WEB_BUILD_VERSION = "ui483-20260821-wmt-ytd"
 
 
 @app.get("/api/build")
@@ -8959,15 +9027,38 @@ def get_stock_info(ticker: str):
                  WHERE symbol IN (%s, %s) AND d >= (CURRENT_DATE - INTERVAL '370 days')
                  ORDER BY d
             """, (tk, alias))
-            bars = [(r["d"], float(r["close"])) for r in cur.fetchall() if r["close"] is not None]
+            def _as_bar_date(d):
+                if d is None:
+                    return None
+                if hasattr(d, "year") and hasattr(d, "month"):
+                    return d
+                s = str(d)[:10]
+                try:
+                    return datetime.strptime(s, "%Y-%m-%d").date()
+                except ValueError:
+                    return None
+            bars = []
+            for r in cur.fetchall():
+                if r["close"] is None:
+                    continue
+                dd = _as_bar_date(r["d"])
+                if dd is None:
+                    continue
+                try:
+                    bars.append((dd, float(r["close"])))
+                except (TypeError, ValueError):
+                    continue
             if bars:
                 closes = [c for _, c in bars]
                 px_now = (out.get("quote") or {}).get("price") or closes[-1]
-                jan1 = [c for (d, c) in bars if d.month == 1 and d.year == datetime.utcnow().year]
+                year = datetime.now().year
+                ytd_closes = [c for (d, c) in bars if d.year == year]
+                jan_close = ytd_closes[0] if ytd_closes else None
                 out["range52w"] = {
                     "high": round(max(closes), 2), "low": round(min(closes), 2),
                     "off_high_pct": round((px_now / max(closes) - 1) * 100, 2) if max(closes) else None,
-                    "ytd_pct": round((px_now / jan1[0] - 1) * 100, 2) if jan1 and jan1[0] else None,
+                    "ytd_pct": (round((float(px_now) / jan_close - 1) * 100, 2)
+                                if jan_close else None),
                     "one_year_pct": round((px_now / closes[0] - 1) * 100, 2) if closes[0] else None,
                 }
                 # ~weekly points for a small sparkline
@@ -9019,6 +9110,8 @@ def get_stock_info(ticker: str):
                 SELECT generated_at, rating, price_target, upside_pct
                   FROM analyst_reports
                  WHERE ticker = %s AND archived IS NOT TRUE AND report_md IS NOT NULL
+                 ORDER BY generated_at DESC NULLS LAST
+                 LIMIT 1
             """, (tk,))
             r = cur.fetchone()
             out["saved_report"] = ({
@@ -9089,11 +9182,33 @@ def get_stock_info(ticker: str):
                             "high": float(hi), "low": float(lo),
                             "off_high_pct": (round((px / float(hi) - 1) * 100, 2)
                                              if px and hi else None),
-                            "ytd_pct": None,
-                            "one_year_pct": None,
+                            "ytd_pct": (out.get("range52w") or {}).get("ytd_pct"),
+                            "one_year_pct": (out.get("range52w") or {}).get("one_year_pct"),
                         }
         except Exception as e:
             out["live_warning"] = str(e)[:120]
+    # Calendar YTD from price_history (same path as the watchlist column).
+    # Yahoo 52w fallback used to stamp ytd_pct=None and hide Year to date
+    # on names like WMT that clearly have a tape.
+    try:
+        px = (out.get("quote") or {}).get("price")
+        live = {tk: px} if px is not None else None
+        ytd = (_watchlist_ytd_pcts([tk], live_prices=live) or {}).get(tk)
+        if ytd is None:
+            sync = globals().get("_sync_price_history")
+            if callable(sync):
+                try:
+                    sync(tk)
+                    _WL_YTD_CACHE.pop(tk, None)
+                    ytd = (_watchlist_ytd_pcts([tk], live_prices=live) or {}).get(tk)
+                except Exception as e:
+                    print(f"[stock-info] ytd sync {tk}: {e!s:.120}", flush=True)
+        if ytd is not None:
+            r52 = dict(out.get("range52w") or {})
+            r52["ytd_pct"] = ytd
+            out["range52w"] = r52
+    except Exception as e:
+        print(f"[stock-info] ytd {tk}: {e!s:.120}", flush=True)
     if "saved_report" not in out:
         out["saved_report"] = {"exists": False}
     out["free"] = True

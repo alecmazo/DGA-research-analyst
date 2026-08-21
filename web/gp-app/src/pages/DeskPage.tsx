@@ -110,7 +110,7 @@ export function DeskPage() {
     const earnings = wl?.earnings || {}
     return [...tickers]
       .map((tk) => {
-        const q = quotes[tk] || {}
+        const q = quotes[tk] || quotes[String(tk || '').toUpperCase()] || {}
         const pct = quotePct(q)
         const ytdRaw = q.ytd ?? q.ytd_pct
         const ytd =

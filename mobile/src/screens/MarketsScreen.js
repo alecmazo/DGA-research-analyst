@@ -387,7 +387,7 @@ export default function MarketsScreen({ navigation }) {
     const quotes = (watch && watch.quotes) || {};
     return tks
       .map((tk) => {
-        const q = quotes[tk] || {};
+        const q = quotes[tk] || quotes[String(tk || '').toUpperCase()] || {};
         const pct = q.pct != null ? Number(q.pct) : (q.pct_change != null ? Number(q.pct_change) : null);
         const ytdRaw = q.ytd != null ? q.ytd : q.ytd_pct;
         const ytd = ytdRaw != null && !isNaN(Number(ytdRaw)) ? Number(ytdRaw) : null;
