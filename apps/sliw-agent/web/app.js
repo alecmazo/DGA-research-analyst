@@ -1872,6 +1872,109 @@ async function fullRefresh() {
   }
 }
 
+function bindSiteSearch() {
+  const input = $("#site-search-input");
+  const box = $("#site-search-results");
+  const wrap = $("#site-search");
+  if (!input || !box || !wrap) return;
+  let timer = 0;
+  let hits = [];
+  let active = -1;
+
+  const close = () => {
+    box.hidden = true;
+    hits = [];
+    active = -1;
+  };
+
+  const paint = (items, q, keepActive = false) => {
+    hits = items || [];
+    if (!keepActive) active = hits.length ? 0 : -1;
+    else if (active >= hits.length) active = hits.length ? hits.length - 1 : -1;
+    if (!q || q.length < 2) {
+      box.innerHTML = `<div class="site-search-empty">Type 2+ letters to search both desks.</div>`;
+      box.hidden = false;
+      return;
+    }
+    if (!hits.length) {
+      box.innerHTML = `<div class="site-search-empty">No matches for “${esc(q)}”.</div>`;
+      box.hidden = false;
+      return;
+    }
+    box.innerHTML = hits.map((p, i) => {
+      const k = leadKind(p);
+      return `<button type="button" class="site-search-hit ${i === active ? "active" : ""}" data-id="${esc(p.id)}" data-idx="${i}">
+        <strong>${esc(p.company || "—")}</strong>
+        <span><span class="book-chip ${k.book}">${k.book === "wedding" ? "Wedding" : "Corporate"}</span> ${esc(k.label)}${p.email ? " · " + esc(p.email) : ""}${p.geo ? " · " + esc(p.geo) : ""}</span>
+      </button>`;
+    }).join("");
+    box.hidden = false;
+    box.querySelectorAll("[data-id]").forEach((b) => {
+      b.addEventListener("click", () => openSearchHit(b.dataset.id));
+    });
+  };
+
+  const openSearchHit = (id) => {
+    close();
+    input.blur();
+    if (id) focusLead(id);
+  };
+
+  const run = async () => {
+    const q = (input.value || "").trim();
+    if (q.length < 2) {
+      paint([], q);
+      return;
+    }
+    try {
+      const data = await api(`/search?q=${encodeURIComponent(q)}&limit=18`);
+      if ((input.value || "").trim() !== q) return;
+      paint(data.items || [], q);
+    } catch (e) {
+      box.innerHTML = `<div class="site-search-empty">${esc(e.message)}</div>`;
+      box.hidden = false;
+    }
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = window.setTimeout(run, 180);
+  });
+  input.addEventListener("focus", () => {
+    const q = (input.value || "").trim();
+    if (q.length >= 2 || !box.hidden) run();
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") {
+      close();
+      input.blur();
+      return;
+    }
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      if (!hits.length) return;
+      active = (active + 1) % hits.length;
+      paint(hits, input.value.trim(), true);
+      return;
+    }
+    if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      if (!hits.length) return;
+      active = (active - 1 + hits.length) % hits.length;
+      paint(hits, input.value.trim(), true);
+      return;
+    }
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      const id = hits[active]?.id || hits[0]?.id;
+      if (id) openSearchHit(id);
+    }
+  });
+  document.addEventListener("click", (ev) => {
+    if (!wrap.contains(ev.target)) close();
+  });
+}
+
 function boot() {
   if (!ensureAuth()) return;
 
@@ -1883,6 +1986,7 @@ function boot() {
   $("#ws-save-to")?.addEventListener("click", () => saveWorkToEmail());
   $("#btn-logout")?.addEventListener("click", logoutSliw);
   $("#btn-logout-top")?.addEventListener("click", logoutSliw);
+  bindSiteSearch();
   $("#btn-draft-new")?.addEventListener("click", newDraft);
   $("#btn-draft-save")?.addEventListener("click", saveDraft);
   $("#btn-draft-delete")?.addEventListener("click", deleteDraft);

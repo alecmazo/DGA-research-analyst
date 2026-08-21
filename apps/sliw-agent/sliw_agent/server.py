@@ -328,6 +328,46 @@ def create_api_router() -> APIRouter:
         require_sliw_access(request)
         return crm.list_prospects(stage=stage, min_score=min_score, book=book)
 
+    @r.get("/search")
+    def search_desk(request: Request, q: str = "", limit: int = 20) -> dict[str, Any]:
+        """Find companies / planners / venues / couples across both desks."""
+        require_sliw_access(request)
+        needle = (q or "").strip().lower()
+        if len(needle) < 2:
+            return {"ok": True, "q": q, "items": []}
+        cap = max(1, min(int(limit or 20), 40))
+        items: list[dict[str, Any]] = []
+        for book in crm.BOOKS:
+            for p in crm.list_prospects(book=book):
+                bits = [
+                    p.get("company") or "",
+                    p.get("industry") or "",
+                    p.get("geo") or "",
+                    p.get("last_contacted_email") or "",
+                    p.get("website") or "",
+                ]
+                for c in p.get("contacts") or []:
+                    bits.append(c.get("name") or "")
+                    bits.append(c.get("email") or "")
+                    bits.append(c.get("phone") or "")
+                hay = " ".join(bits).lower()
+                if needle not in hay:
+                    continue
+                email = crm.primary_contact_email(p) or (p.get("last_contacted_email") or "")
+                items.append({
+                    "id": p.get("id"),
+                    "company": p.get("company"),
+                    "book": book,
+                    "industry": p.get("industry") or "",
+                    "geo": p.get("geo") or "",
+                    "stage": p.get("stage") or "",
+                    "website": p.get("website") or "",
+                    "email": email,
+                    "score": p.get("score"),
+                })
+        items.sort(key=lambda r: (0 if needle in (r.get("company") or "").lower() else 1, r.get("company") or ""))
+        return {"ok": True, "q": q, "items": items[:cap]}
+
     @r.get("/prospects/{prospect_id}")
     def get_prospect(prospect_id: str, request: Request) -> dict[str, Any]:
         require_sliw_access(request)

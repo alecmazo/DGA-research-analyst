@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=wed-scroll1" />
+  <link rel="stylesheet" href="style.css?v=site-search1" />
   <script>
     (function () {
       var host = (location.hostname || "").toLowerCase();
@@ -78,6 +78,10 @@
           <button class="btn ghost corp-only" id="btn-sync-all" type="button">Sync all to CRM</button>
           <button class="btn ghost corp-only" id="btn-agent-batch" type="button">▶ Agent: top 5</button>
           <button class="btn primary corp-only" id="btn-refresh-leads" type="button">↻ Refresh leads</button>
+          <div class="site-search" id="site-search">
+            <input id="site-search-input" type="search" placeholder="Search companies, planners…" autocomplete="off" />
+            <div class="site-search-results" id="site-search-results" hidden></div>
+          </div>
           <button class="btn ghost sm topbar-logout" id="btn-logout-top" type="button">Log out</button>
         </div>
       </header>
@@ -437,6 +441,6 @@
 
   <div class="toast" id="toast" hidden></div>
   <div class="busy" id="busy" hidden><div class="busy-card">Working…</div></div>
-  <script src="app.js?v=wed-scroll1"></script>
+  <script src="app.js?v=site-search1"></script>
 </body>
 </html>
