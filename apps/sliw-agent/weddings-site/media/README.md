@@ -3,6 +3,14 @@
 Drop images / short clips here so the site feels visual, not text-heavy.
 The gallery **only appears when assets are listed** in `manifest.json`.
 
+## Front-and-center first-dance video
+
+Drop the customer wedding video in this folder as **`wedding-first-dance.mp4`**
+(or `wedding-dance.mp4` / `first-dance.mp4`). It appears on the storefront
+immediately under the hero.
+
+Or paste a YouTube / Vimeo URL in `media/site-media.json` → `weddingVideo.src`.
+
 ## Quick start
 
 1. Add files to this folder (keep each video under ~15 MB for fast mobile).

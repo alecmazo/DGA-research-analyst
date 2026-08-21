@@ -91,8 +91,8 @@
             id: "dream",
             name: "Dream Wedding Dance",
             price_label: "Custom",
-            one_liner: "Personalized choreography + private lessons with Edyta, venue coordination, and day-of support on request.",
-            includes: ["Personalized choreography + private lessons with Edyta (lesson count scoped to date & song)", "Venue / floor / music coordination (Marin studio base; SF & venue sessions available)", "Day-of performance support on request"],
+            one_liner: "Choreography, venue coordination, day-of support.",
+            includes: ["Personalized choreography", "Rehearsal space", "Performance day support"],
             best_for: ["Full production"],
           },
         ];
@@ -266,6 +266,113 @@
       .join("");
   }
 
+  function stars(n) {
+    const s = Math.max(0, Math.min(5, Number(n) || 0));
+    return "★★★★★".slice(0, s) + "☆☆☆☆☆".slice(s);
+  }
+
+  function toEmbedSrc(url) {
+    if (!url) return null;
+    const u = String(url).trim();
+    const yt =
+      u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{6,})/) ||
+      u.match(/youtube\.com\/shorts\/([A-Za-z0-9_-]{6,})/);
+    if (yt) return { kind: "iframe", src: "https://www.youtube.com/embed/" + yt[1] + "?rel=0" };
+    const vimeo = u.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+    if (vimeo) return { kind: "iframe", src: "https://player.vimeo.com/video/" + vimeo[1] };
+    return { kind: "file", src: mediaSrc(u) };
+  }
+
+  function mountFeaturedVideo(hero) {
+    const section = document.getElementById("first-dance");
+    const frame = document.getElementById("featured-video-frame");
+    if (!section || !frame) return;
+
+    function show(kind, src, poster) {
+      section.hidden = false;
+      if (kind === "iframe") {
+        frame.innerHTML =
+          '<iframe src="' +
+          esc(src) +
+          '" title="Wedding first dance" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe>';
+      } else {
+        const p = poster ? ' poster="' + esc(mediaSrc(poster)) + '"' : "";
+        frame.innerHTML = '<video src="' + esc(src) + '"' + p + " controls playsinline preload=\"metadata\"></video>";
+      }
+    }
+
+    const files = [
+      "media/wedding-first-dance.mp4",
+      "media/wedding-dance.mp4",
+      "media/first-dance.mp4",
+      "media/wedding-first-dance.webm",
+    ];
+
+    const fromHero =
+      hero && hero.src && /video|embed/i.test(hero.type || "")
+        ? hero
+        : null;
+    if (fromHero) {
+      const embed = toEmbedSrc(fromHero.src);
+      if (embed) show(embed.kind, embed.src, fromHero.poster);
+      return;
+    }
+
+    fetch("media/site-media.json", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : {}))
+      .catch(() => ({}))
+      .then((cfg) => {
+        const v = (cfg && cfg.weddingVideo) || {};
+        if (v.src) {
+          const embed = toEmbedSrc(v.src);
+          if (embed) show(embed.kind, embed.src, v.poster);
+          return;
+        }
+        let i = 0;
+        function tryNext() {
+          if (i >= files.length) {
+            section.hidden = true;
+            return;
+          }
+          const src = mediaSrc(files[i++]);
+          const probe = document.createElement("video");
+          probe.preload = "metadata";
+          probe.onloadedmetadata = () => show("file", src, v.poster);
+          probe.onerror = tryNext;
+          probe.src = src;
+        }
+        tryNext();
+      });
+  }
+
+  function mountReviews() {
+    const grid = document.getElementById("review-grid");
+    if (!grid) return;
+    fetch("reviews.json", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        grid.innerHTML = (data.reviews || [])
+          .map((rev) => {
+            const when = [rev.author, rev.date].filter(Boolean).join(" · ");
+            return (
+              "<blockquote class=\"review-card\">" +
+              '<div class="stars">' +
+              stars(rev.stars || 5) +
+              "</div><p>“" +
+              esc(rev.text) +
+              "”</p><footer><span>" +
+              esc(when) +
+              '</span><span class="review-source">' +
+              esc(rev.source || "") +
+              "</span></footer></blockquote>"
+            );
+          })
+          .join("");
+      })
+      .catch(() => {});
+  }
+
   async function loadConfig() {
     try {
       const r = await fetch(API + "/public/wedding-config", { credentials: "omit" });
@@ -277,12 +384,16 @@
       const media = cfg.media || {};
       renderHeroMedia(media.hero, cfg.stripe);
       renderClips(media.clips);
+      mountFeaturedVideo(media.hero);
+      mountReviews();
       // Re-wire stripe on any newly injected CTAs
       wireStripe(cfg.stripe);
       return cfg;
     } catch (e) {
       console.warn("[weddings] config fallback", e);
       renderPackages(null);
+      mountFeaturedVideo(null);
+      mountReviews();
       return null;
     }
   }

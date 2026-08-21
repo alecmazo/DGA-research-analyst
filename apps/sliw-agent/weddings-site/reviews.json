@@ -1,0 +1,41 @@
+{
+  "listing": {
+    "name": "Dance Sport classes - Edyta Sliwinska from DWTS",
+    "rating": 5.0,
+    "count": 1,
+    "address": "1133 Francisco Blvd E, San Rafael, CA 94901",
+    "mapsQuery": "Dance Sport classes - Edyta Sliwinska from DWTS, 1133 Francisco Blvd E, San Rafael, CA 94901",
+    "googleUrl": "https://www.google.com/maps/search/?api=1&query=Dance%20Sport%20classes%20-%20Edyta%20Sliwinska%20from%20DWTS%2C%201133%20Francisco%20Blvd%20E%2C%20San%20Rafael%2C%20CA%2094901",
+    "yelpUrl": "https://www.yelp.com/biz/dance-sport-classes-edyta-sliwinska-from-dwts-san-rafael"
+  },
+  "reviews": [
+    {
+      "author": "Tatiana K.",
+      "date": "April 2023",
+      "stars": 5,
+      "source": "Google / Yelp",
+      "text": "I didn't know I was into dancing before I tried these classes. Absolutely love it! Edyta is such a great coach!"
+    },
+    {
+      "author": "Bay Area couple · tech",
+      "date": "",
+      "stars": 5,
+      "source": "Client",
+      "text": "We had zero dance experience. Edyta made us look like we’d been practicing for years — our guests still talk about it."
+    },
+    {
+      "author": "First-time dancers",
+      "date": "",
+      "stars": 5,
+      "source": "Client",
+      "text": "She broke everything down the way she does on TV. Patient, fun, and the studio felt private and calm."
+    },
+    {
+      "author": "SF wedding planner",
+      "date": "",
+      "stars": 5,
+      "source": "Client",
+      "text": "As a planner, I send every couple who wants a first dance to Edyta. Professional, reliable, unforgettable."
+    }
+  ]
+}
