@@ -722,6 +722,13 @@ function openWeddingLead(id) {
   loadWeddingDetail(id);
 }
 
+function contactChoiceHtml(id, on) {
+  return `<div class="choice-pair" role="group" aria-label="Contact status">
+    <button type="button" class="choice ${on ? "chosen on" : ""}" data-contacted="1" data-id="${id}" aria-pressed="${on ? "true" : "false"}">Contacted</button>
+    <button type="button" class="choice ${on ? "" : "chosen off"}" data-contacted="0" data-id="${id}" aria-pressed="${on ? "false" : "true"}">Not contacted</button>
+  </div>`;
+}
+
 function weddingKind(p) {
   if (!p) return "Wedding";
   if (p.lead_channel === "couple" || /couple/i.test(p.industry || "") || p.source === "web_form") {
@@ -834,8 +841,7 @@ function renderWeddingDetail() {
     ${full.agent_note ? `<p class="muted" style="margin-top:8px">${esc(full.agent_note)}</p>` : ""}
     ${emailTrailHtml(full.email_log)}
     <div class="lead-actions">
-      <button type="button" class="btn ${on ? "ghost" : "primary"} sm" data-contacted="1" data-id="${id}">Contacted</button>
-      <button type="button" class="btn ${on ? "primary" : "ghost"} sm" data-contacted="0" data-id="${id}">Not contacted</button>
+      ${contactChoiceHtml(id, on)}
       <button type="button" class="btn ghost sm lead-delete" data-delete="${id}">Delete</button>
     </div>
   `;
@@ -1586,8 +1592,7 @@ function renderWeddings() {
           </div>
         </div>
         <div class="lead-actions">
-          <button type="button" class="btn ${on ? "ghost" : "primary"} sm" data-contacted="1" data-id="${id}">Contacted</button>
-          <button type="button" class="btn ${on ? "primary" : "ghost"} sm" data-contacted="0" data-id="${id}">Not contacted</button>
+          ${contactChoiceHtml(id, on)}
           <button type="button" class="btn ghost sm lead-delete" data-delete="${id}">Delete</button>
         </div>
       </article>`;
@@ -1957,7 +1962,7 @@ function boot() {
         );
         return;
       }
-      if (ev.target.closest(".email-trail, details, summary, a, input, textarea, select, .lead-actions")) return;
+      if (ev.target.closest(".email-trail, details, summary, a, input, textarea, select, .lead-actions, .choice-pair")) return;
       const hit = ev.target.closest("[data-open]");
       if (!hit || !weddingGrid.contains(hit)) return;
       const id = hit.getAttribute("data-open") || hit.dataset.open;
