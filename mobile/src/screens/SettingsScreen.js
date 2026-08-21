@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, ScrollView, ActivityIndicator, Switch,
+  Alert, ScrollView, ActivityIndicator, Switch, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -9,7 +9,7 @@ import * as Updates from 'expo-updates';
 import { useAppResume } from '../hooks/useAppResume';
 import {
   api, getBaseUrl, setBaseUrl, resetBaseUrlToProd,
-  getStoredPassword, login, logoutV2, getV2User,
+  getStoredPassword, login, logoutV2, getV2User, getV2Token,
 } from '../api/client';
 import {
   isBiometricAvailable, isBiometricEnabled, getBiometricLabel,
@@ -19,7 +19,10 @@ import { useTheme } from '../design';
 import AppHeader from '../components/AppHeader';
 
 // Bump on every JS / OTA push so the user can verify what's running.
-const APP_BUILD = 'mobile-ui20-download-v2-auth-20260817';
+const APP_BUILD = 'mobile-ui21-sliw-desk-20260821';
+
+const SLIW_EMAILS = ['alecmazo1@gmail.com', 'edytasliw@gmail.com'];
+const SLIW_PORTAL = 'https://sliw.edytasliwinska.com/';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtNextRun(secs) {
@@ -104,6 +107,7 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
   const [serverBuild, setServerBuild]       = useState(null);
   const [updateState, setUpdateState]       = useState('idle');
   const [updateMessage, setUpdateMessage]   = useState('');
+  const [v2User, setV2User]                 = useState(null);
 
   // Automation settings
   const [autoLoading, setAutoLoading]       = useState(false);
@@ -125,6 +129,7 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
   useEffect(() => {
     getBaseUrl().then(setBaseUrlState);
     getStoredPassword().then(pw => setPassword(pw || ''));
+    getV2User().then(u => setV2User(u || null)).catch(() => setV2User(null));
     refreshServerBuild();
     loadAutomationSettings();
     (async () => {
@@ -307,6 +312,22 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
   };
 
   const isUpdating = updateState === 'checking' || updateState === 'downloading' || updateState === 'reloading';
+  const sliwEmail = String(v2User?.email || '').trim().toLowerCase();
+  const canOpenSliw = SLIW_EMAILS.includes(sliwEmail);
+
+  const openSliwDesk = async () => {
+    try {
+      const tok = await getV2Token();
+      const url = tok
+        ? `${SLIW_PORTAL}#v2_token=${encodeURIComponent(tok)}`
+        : SLIW_PORTAL;
+      const ok = await Linking.canOpenURL(url);
+      if (!ok) throw new Error('Cannot open browser');
+      await Linking.openURL(url);
+    } catch (e) {
+      Alert.alert('Sliw desk', e?.message || 'Could not open the Sliw portal.');
+    }
+  };
 
   return (
     <View style={s.wrapper}>
@@ -328,6 +349,23 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
             </TouchableOpacity>
           </View>
         )}
+
+        {canOpenSliw ? (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>SLIW DESK</Text>
+            <Text style={s.sectionHint}>
+              Edyta Śliwińska outreach — corporate and weddings. Opens the mobile portal signed in as {sliwEmail}.
+            </Text>
+            <TouchableOpacity
+              style={[s.saveBtn, s.saveBtnGold, { marginTop: 8 }]}
+              onPress={openSliwDesk}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="sparkles-outline" size={16} color={t.chromeNavy} />
+              <Text style={s.saveBtnGoldText}>Open Sliw portal</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {/* ── API Server ── */}
         <View style={s.section}>

@@ -302,7 +302,23 @@ async function api(path, opts = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+function ingestMobileToken() {
+  try {
+    const hash = String(location.hash || "").replace(/^#/, "");
+    const hp = new URLSearchParams(hash);
+    const qp = new URLSearchParams(location.search || "");
+    const tok = hp.get("v2_token") || hp.get("token") || qp.get("v2_token") || qp.get("token");
+    if (!tok) return;
+    localStorage.setItem(TOKEN_KEY, tok);
+    let path = location.pathname || "/";
+    let search = (location.search || "").replace(/([?&])(v2_token|token)=[^&]*/g, "$1").replace(/[?&]$/, "").replace(/^&/, "?");
+    if (search === "?") search = "";
+    history.replaceState(null, "", path + search);
+  } catch (_) { /* keep going — login screen still works */ }
+}
+
 function ensureAuth() {
+  ingestMobileToken();
   if (!window.SLIW_REQUIRE_DGA_LOGIN) {
     $("#brand-user").textContent = "Local desk";
     return true;
