@@ -27,13 +27,14 @@ type BoardRow = {
   entry_date?: string | null
   since_entry_pct?: number | null
   note?: string
+  dga_score?: number | null
 }
 
 type Board = {
   ok?: boolean
   rows?: BoardRow[]
   breadth?: { n_up?: number; n_down?: number; avg_pct?: number }
-  list?: { name?: string }
+  list?: { name?: string; source?: string }
 }
 
 type Candidate = {
@@ -127,7 +128,13 @@ export function BuilderPage() {
     const d = await api<{ lists?: BoardList[] }>('/api/v2/builder/lists')
     const arr = d.lists || []
     setLists(arr)
-    setActive((prev) => prev || arr[0]?.id || null)
+    setActive((prev) => {
+      if (prev) return prev
+      const dga = arr.find(
+        (l) => (l.name || '').toLowerCase() === 'dga scored',
+      )
+      return dga?.id || arr[0]?.id || null
+    })
     return arr
   }, [])
 
@@ -405,6 +412,30 @@ export function BuilderPage() {
     }
   }
 
+  const refreshDgaScored = async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      const d = await api<{
+        id?: string
+        n?: number
+        lists?: BoardList[]
+        board?: Board
+      }>('/api/v2/builder/lists/dga-scored', { method: 'POST' })
+      if (d.lists) setLists(d.lists)
+      if (d.id) setActive(d.id)
+      if (d.board) setBoard(d.board)
+      else if (d.id) await loadBoard(d.id)
+      setStatus(
+        `DGA Scored · ${d.n ?? 0} names with score > 90, highest first.`,
+      )
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not refresh DGA Scored')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const addTicker = async () => {
     if (!active || !addTk.trim()) return
     setBusy(true)
@@ -423,11 +454,20 @@ export function BuilderPage() {
     }
   }
 
-  const boardRows = [...(board?.rows || [])].sort(
-    (a, b) => (b.since_entry_pct ?? -999) - (a.since_entry_pct ?? -999),
-  )
+  const scoredBoard = (board?.rows || []).some((r) => r.dga_score != null)
+  const boardRows = [...(board?.rows || [])].sort((a, b) => {
+    if (scoredBoard) {
+      return (b.dga_score ?? -1) - (a.dga_score ?? -1)
+    }
+    return (b.since_entry_pct ?? -999) - (a.since_entry_pct ?? -999)
+  })
   const boardTitle =
     board?.list?.name || lists.find((l) => l.id === active)?.name || 'Board'
+  const activeList = lists.find((l) => l.id === active)
+  const isDgaScored =
+    (activeList?.name || '').toLowerCase() === 'dga scored' ||
+    activeList?.source === 'dga_score' ||
+    scoredBoard
   const constructRows = result?.rows || []
   const sum = result?.summary
 
@@ -843,7 +883,10 @@ export function BuilderPage() {
                 >
                   <div className={split.sideTitle}>{l.name}</div>
                   <div className={split.sideSub}>
-                    {l.n_tickers ?? 0} names · {l.sector || l.source || 'manual'}
+                    {l.n_tickers ?? 0} names ·{' '}
+                    {l.source === 'dga_score'
+                      ? 'score > 90'
+                      : l.sector || l.source || 'manual'}
                   </div>
                 </button>
               ))}
@@ -878,7 +921,22 @@ export function BuilderPage() {
                     </div>
                   </div>
                 )}
-                <Panel title={boardTitle} badge={`${boardRows.length} names`} flush>
+                <Panel
+                  title={boardTitle}
+                  badge={`${boardRows.length} names`}
+                  flush
+                  action={
+                    isDgaScored ? (
+                      <Button
+                        size="sm"
+                        onClick={() => void refreshDgaScored()}
+                        disabled={busy}
+                      >
+                        Refresh scores
+                      </Button>
+                    ) : null
+                  }
+                >
                   <div className={split.addBar}>
                     <input
                       className={split.addInput}
@@ -907,6 +965,11 @@ export function BuilderPage() {
                         <thead>
                           <tr>
                             <th>Ticker</th>
+                            {isDgaScored && (
+                              <th className="tabular" title="DGA Score (0–100)">
+                                DGA
+                              </th>
+                            )}
                             <th className="tabular">Last</th>
                             <th className="tabular">Day %</th>
                             <th className="tabular">Cost basis</th>
@@ -923,6 +986,11 @@ export function BuilderPage() {
                                   <div className={split.name}>{r.name}</div>
                                 )}
                               </td>
+                              {isDgaScored && (
+                                <td className="tabular">
+                                  {r.dga_score != null ? r.dga_score : '—'}
+                                </td>
+                              )}
                               <td className="tabular">{fmtPx(r.price)}</td>
                               <td className={`tabular ${pctClass(r.pct)}`}>
                                 {fmtPct(r.pct)}

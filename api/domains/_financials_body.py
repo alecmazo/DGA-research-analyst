@@ -3460,6 +3460,278 @@ def _dash_cash_of(r) -> float | None:
     return (c or 0.0) + (sti or 0.0)
 
 
+def _dga_score_from_annuals(annuals: list,
+                            price=None,
+                            dga_value=None) -> dict:
+    """DGA Score 0–100 from annual financials (same formula as the dashboard).
+
+    Components: profitability 30%, growth 25%, financial strength 20%,
+    predictability 15%, value 10% (value only when a DGA target exists).
+    Missing components are dropped and remaining weights renormalized.
+    """
+    empty = {
+        "total": None,
+        "components": {
+            "profitability": None, "growth": None, "financial_strength": None,
+            "predictability": None, "value": None,
+        },
+        "g_rev": None, "g_ni": None, "g_cf": None, "l_roic": None,
+        "n_op": 0, "n_rev": 0, "revenue": None, "fy": None,
+    }
+    if not annuals:
+        return empty
+
+    def _col(rs, k):
+        return [_dash_f(x.get(k)) for x in rs]
+
+    a_rev = _col(annuals, "revenue")
+    a_ni = _col(annuals, "net_income")
+    a_fcf = _col(annuals, "free_cash_flow")
+    last = annuals[-1] if annuals else {}
+    l_nm = _dash_f(last.get("net_margin"))
+    if l_nm is None:
+        _lr = _dash_f(last.get("revenue"))
+        _ln = _dash_f(last.get("net_income"))
+        if _lr not in (None, 0) and _ln is not None:
+            l_nm = _ln / _lr
+    if l_nm is not None and abs(l_nm) > 2:
+        l_nm = l_nm / 100.0
+    l_eq = _dash_f(last.get("stockholders_equity"))
+    l_ni = _dash_f(last.get("net_income"))
+    l_opin = _dash_f(last.get("operating_income"))
+    l_cash = _dash_cash_of(last) or 0.0
+    l_debt = _dash_debt_of(last)
+    l_debt_for_score = l_debt if l_debt is not None else 0.0
+    l_fcf = _dash_f(last.get("free_cash_flow"))
+
+    l_roic = None
+    if l_opin is not None and l_eq and (l_debt_for_score + l_eq - l_cash) > 0:
+        l_roic = l_opin * (1 - _DASH_TAX) / (l_debt_for_score + l_eq - l_cash) * 100
+    l_roe = (l_ni / l_eq * 100) if (l_ni is not None and l_eq and l_eq > 0) else None
+    p_parts = [s for s in (_dash_lin(l_nm, 0, 0.20), _dash_lin(l_roic, 0, 18),
+                           _dash_lin(l_roe, 0, 22)) if s is not None]
+    profitability = round(sum(p_parts) / len(p_parts)) if p_parts else None
+
+    def _cagr5(vals):
+        vv = [v for v in vals if v is not None]
+        if len(vv) < 3:
+            return None
+        n = min(6, len(vv))
+        return _dash_cagr(vv[-n], vv[-1], n - 1)
+
+    g_rev = _cagr5(a_rev)
+    g_ni = _cagr5(a_ni)
+    g_cf = _cagr5(a_fcf) if any(v for v in a_fcf if v and v > 0) else g_ni
+    g_parts = [s for s in (_dash_lin(g_rev, 0, 0.15), _dash_lin(g_cf, 0, 0.15))
+               if s is not None]
+    growth = round(sum(g_parts) / len(g_parts)) if g_parts else None
+
+    fs_parts = []
+    if l_debt is None:
+        pass
+    elif l_debt_for_score == 0:
+        fs_parts.append(100.0)
+    else:
+        fs_parts.append(_dash_lin(l_cash / l_debt_for_score, 0, 1.0) or 0)
+        if l_eq and l_eq > 0:
+            fs_parts.append(_dash_lin(2.0 - (l_debt_for_score / l_eq), 0, 2.0) or 0)
+        if l_fcf is not None:
+            fs_parts.append(_dash_lin(l_fcf / l_debt_for_score, 0, 0.5) or 0)
+    financial_strength = round(sum(fs_parts) / len(fs_parts)) if fs_parts else None
+
+    ni_hist = [v for v in a_ni if v is not None][-10:]
+    rev_hist = [v for v in a_rev if v is not None][-10:]
+    pred_parts = []
+    if len(ni_hist) >= 3:
+        pred_parts.append(sum(1 for v in ni_hist if v > 0) / len(ni_hist) * 100)
+    if len(rev_hist) >= 4:
+        ups = sum(1 for i in range(1, len(rev_hist)) if rev_hist[i] >= rev_hist[i - 1])
+        pred_parts.append(ups / (len(rev_hist) - 1) * 100)
+    predictability = round(sum(pred_parts) / len(pred_parts)) if pred_parts else None
+
+    value_score = None
+    try:
+        px = float(price) if price is not None else None
+        dv = float(dga_value) if dga_value is not None else None
+    except (TypeError, ValueError):
+        px, dv = None, None
+    if dv and px and px > 0:
+        upside = dv / px - 1.0
+        value_score = round(_dash_clamp(50 + upside * 100, 0, 100))
+
+    comps = {
+        "profitability": profitability,
+        "growth": growth,
+        "financial_strength": financial_strength,
+        "predictability": predictability,
+        "value": value_score,
+    }
+    weights = {
+        "profitability": 0.30, "growth": 0.25, "financial_strength": 0.20,
+        "predictability": 0.15, "value": 0.10,
+    }
+    avail = {k: v for k, v in comps.items() if v is not None}
+    dga_score = (round(sum(v * weights[k] for k, v in avail.items())
+                       / sum(weights[k] for k in avail)) if avail else None)
+    n_op = sum(1 for k in ("profitability", "growth", "financial_strength",
+                           "predictability") if comps.get(k) is not None)
+    return {
+        "total": dga_score,
+        "components": comps,
+        "g_rev": g_rev, "g_ni": g_ni, "g_cf": g_cf, "l_roic": l_roic,
+        "n_op": n_op,
+        "n_rev": sum(1 for v in a_rev if v and v > 0),
+        "revenue": _dash_f(last.get("revenue")),
+        "fy": last.get("fy"),
+    }
+
+
+_DGA_UNIVERSE_CACHE: dict = {"ts": 0.0, "rows": []}
+_DGA_UNIVERSE_TTL_S = 6 * 3600
+_DGA_SCORED_MIN = 90           # strictly above
+_DGA_SCORED_LIMIT = 30
+_DGA_SCORED_MIN_REV = 500_000_000
+_DGA_SCORED_MIN_PX = 5.0
+_DGA_SCORED_MIN_FY_LAG = 2     # latest FY at least calendar_year - 2
+
+
+def _dga_score_universe(min_score: float = _DGA_SCORED_MIN,
+                        limit: int = _DGA_SCORED_LIMIT,
+                        force: bool = False) -> list[dict]:
+    """Top operating companies with DGA Score strictly above ``min_score``.
+
+    Drops SPACs / thin filings: need a live price, a name in security_meta,
+    ≥$500M latest revenue, ≥4 revenue years, ≥3 score components, and a
+    recent fiscal year. GOOG is folded into GOOGL.
+    """
+    import re as _re
+    import time as _time
+    now = _time.time()
+    cached = _DGA_UNIVERSE_CACHE.get("rows") or []
+    if (not force and cached
+            and now - float(_DGA_UNIVERSE_CACHE.get("ts") or 0) < _DGA_UNIVERSE_TTL_S):
+        return list(cached)[:limit]
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return []
+    from collections import defaultdict as _dd
+    by: dict[str, list] = _dd(list)
+    px: dict[str, float] = {}
+    meta: dict[str, dict] = {}
+    dga_val: dict[str, float] = {}
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT ticker, fy, period_end, revenue, net_income, operating_income,
+                       free_cash_flow, net_margin, stockholders_equity, total_debt,
+                       long_term_debt, short_term_debt, cash, short_term_investments
+                  FROM company_financials
+                 WHERE period_type = 'annual'
+                 ORDER BY ticker, period_end NULLS LAST, fy
+            """)
+            for r in cur.fetchall() or []:
+                tk = (r.get("ticker") or "").strip().upper()
+                if tk:
+                    by[tk].append(dict(r))
+            cur.execute("""
+                SELECT symbol, price FROM market_quotes
+                 WHERE price IS NOT NULL AND price > 0
+            """)
+            for r in cur.fetchall() or []:
+                sym = (r.get("symbol") or "").strip().upper()
+                try:
+                    if sym:
+                        px[sym] = float(r["price"])
+                except (TypeError, ValueError):
+                    pass
+            cur.execute("SELECT symbol, name, sector FROM security_meta")
+            for r in cur.fetchall() or []:
+                sym = (r.get("symbol") or "").strip().upper()
+                if sym:
+                    meta[sym] = dict(r)
+            cur.execute("""
+                SELECT ticker, price_target, claude_price_target
+                  FROM analyst_reports
+                 WHERE archived IS NOT TRUE
+            """)
+            for r in cur.fetchall() or []:
+                tk = (r.get("ticker") or "").strip().upper()
+                tgts = [_dash_f(r.get("price_target")),
+                        _dash_f(r.get("claude_price_target"))]
+                tgts = [t for t in tgts if t and t > 0]
+                if tk and tgts:
+                    dga_val[tk] = sum(tgts) / len(tgts)
+    except Exception as e:
+        print(f"[dga-score] universe load failed: {e!s:.160}", flush=True)
+        return list(cached)[:limit] if cached else []
+
+    from datetime import date as _date
+    min_fy = _date.today().year - _DGA_SCORED_MIN_FY_LAG
+    tk_re = _re.compile(r"^[A-Z]{1,5}$")
+    ranked: list[dict] = []
+    for tk, rows in by.items():
+        if tk == "GOOG":
+            tk_use = "GOOGL"
+        else:
+            tk_use = tk
+        if not tk_re.match(tk_use):
+            continue
+        if len(tk_use) >= 5 and tk_use[-1] in ("U", "W", "R"):
+            continue
+        scored = _dga_score_from_annuals(
+            rows[-12:], price=px.get(tk_use) or px.get(tk),
+            dga_value=dga_val.get(tk_use) or dga_val.get(tk),
+        )
+        total = scored.get("total")
+        if total is None or float(total) <= float(min_score):
+            continue
+        if int(scored.get("n_op") or 0) < 3:
+            continue
+        if (scored.get("components") or {}).get("profitability") is None:
+            continue
+        if int(scored.get("n_rev") or 0) < 4:
+            continue
+        try:
+            fy_i = int(scored.get("fy") or 0)
+        except (TypeError, ValueError):
+            fy_i = 0
+        if fy_i < min_fy:
+            continue
+        price = px.get(tk_use) or px.get(tk)
+        if price is None or float(price) < _DGA_SCORED_MIN_PX:
+            continue
+        rev = scored.get("revenue")
+        if rev is None or float(rev) < _DGA_SCORED_MIN_REV:
+            continue
+        m = meta.get(tk_use) or meta.get(tk) or {}
+        if not (m.get("name") or m.get("sector")):
+            continue
+        ranked.append({
+            "ticker": tk_use,
+            "dga_score": int(total),
+            "name": m.get("name") or "",
+            "sector": m.get("sector") or "",
+            "components": scored.get("components") or {},
+            "price": price,
+            "revenue": rev,
+            "fy": scored.get("fy"),
+        })
+    ranked.sort(key=lambda r: (-int(r["dga_score"]), r["ticker"]))
+    # Dedup GOOGL if both classes survived.
+    seen: set[str] = set()
+    out: list[dict] = []
+    for r in ranked:
+        if r["ticker"] in seen:
+            continue
+        seen.add(r["ticker"])
+        out.append(r)
+        if len(out) >= int(limit):
+            break
+    _DGA_UNIVERSE_CACHE["ts"] = now
+    _DGA_UNIVERSE_CACHE["rows"] = out
+    print(f"[dga-score] universe n={len(out)} min>{min_score}", flush=True)
+    return list(out)
+
+
 def _dash_ttm_from_quarters(quarters: list) -> dict:
     """Sum last ≤4 discrete quarters into a TTM block. Pure arithmetic."""
     qs = [q for q in (quarters or []) if q][-4:]
@@ -3852,68 +4124,20 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     l_ebitda = _dash_f(last.get("ebitda"))
     l_rev = _dash_f(last.get("revenue"))
 
-    # Profitability: net margin + ROIC + ROE
-    l_roic = None
-    if l_opin is not None and l_eq and (l_debt_for_score + l_eq - l_cash) > 0:
+    scored = _dga_score_from_annuals(annuals, price=price, dga_value=dga_value)
+    dga_score = scored.get("total")
+    comps = scored.get("components") or {}
+    profitability = comps.get("profitability")
+    growth = comps.get("growth")
+    financial_strength = comps.get("financial_strength")
+    predictability = comps.get("predictability")
+    value_score = comps.get("value")
+    g_rev = scored.get("g_rev")
+    g_ni = scored.get("g_ni")
+    g_cf = scored.get("g_cf")
+    l_roic = scored.get("l_roic")
+    if l_roic is None and l_opin is not None and l_eq and (l_debt_for_score + l_eq - l_cash) > 0:
         l_roic = l_opin * (1 - _DASH_TAX) / (l_debt_for_score + l_eq - l_cash) * 100
-    l_roe = (l_ni / l_eq * 100) if (l_ni is not None and l_eq and l_eq > 0) else None
-    p_parts = [s for s in (_dash_lin(l_nm, 0, 0.20), _dash_lin(l_roic, 0, 18),
-                           _dash_lin(l_roe, 0, 22)) if s is not None]
-    profitability = round(sum(p_parts) / len(p_parts)) if p_parts else None
-
-    # Growth: 5y revenue + FCF (fallback NI) CAGRs
-    def _cagr5(vals):
-        vv = [v for v in vals if v is not None]
-        if len(vv) < 3:
-            return None
-        n = min(6, len(vv))            # up to 5 intervals
-        return _dash_cagr(vv[-n], vv[-1], n - 1)
-    g_rev = _cagr5(a_rev)
-    g_ni  = _cagr5(a_ni)
-    g_cf  = _cagr5(a_fcf) if any(v for v in a_fcf if v and v > 0) else g_ni
-    g_parts = [s for s in (_dash_lin(g_rev, 0, 0.15), _dash_lin(g_cf, 0, 0.15))
-               if s is not None]
-    growth = round(sum(g_parts) / len(g_parts)) if g_parts else None
-
-    # Financial strength: cash/debt, debt/equity (inverted), FCF coverage
-    fs_parts = []
-    if l_debt is None:
-        pass   # no debt disclosure — don't invent a perfect score
-    elif l_debt_for_score == 0:
-        fs_parts.append(100.0)
-    else:
-        fs_parts.append(_dash_lin(l_cash / l_debt_for_score, 0, 1.0) or 0)
-        if l_eq and l_eq > 0:
-            fs_parts.append(_dash_lin(2.0 - (l_debt_for_score / l_eq), 0, 2.0) or 0)
-        if l_fcf is not None:
-            fs_parts.append(_dash_lin(l_fcf / l_debt_for_score, 0, 0.5) or 0)
-    financial_strength = round(sum(fs_parts) / len(fs_parts)) if fs_parts else None
-
-    # Predictability: positive-NI years + revenue-up years over last ≤10 FYs
-    ni_hist  = [v for v in a_ni if v is not None][-10:]
-    rev_hist = [v for v in a_rev if v is not None][-10:]
-    pred_parts = []
-    if len(ni_hist) >= 3:
-        pred_parts.append(sum(1 for v in ni_hist if v > 0) / len(ni_hist) * 100)
-    if len(rev_hist) >= 4:
-        ups = sum(1 for i in range(1, len(rev_hist)) if rev_hist[i] >= rev_hist[i - 1])
-        pred_parts.append(ups / (len(rev_hist) - 1) * 100)
-    predictability = round(sum(pred_parts) / len(pred_parts)) if pred_parts else None
-
-    # Value: upside of DGA Value vs store price (50 = fairly valued)
-    value_score = None
-    if dga_value and price and price > 0:
-        upside = dga_value / price - 1.0
-        value_score = round(_dash_clamp(50 + upside * 100, 0, 100))
-
-    comps = {"profitability": profitability, "growth": growth,
-             "financial_strength": financial_strength,
-             "predictability": predictability, "value": value_score}
-    weights = {"profitability": 0.30, "growth": 0.25, "financial_strength": 0.20,
-               "predictability": 0.15, "value": 0.10}
-    avail = {k: v for k, v in comps.items() if v is not None}
-    dga_score = (round(sum(v * weights[k] for k, v in avail.items())
-                       / sum(weights[k] for k in avail)) if avail else None)
 
     # ── TTM from last 4 quarters (preferred for trading multiples) ─────
     ttm = _dash_ttm_from_quarters(quarters_all)

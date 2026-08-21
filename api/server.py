@@ -7372,7 +7372,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui483-20260821-wmt-ytd"
+WEB_BUILD_VERSION = "ui484-20260821-dga-scored"
 
 
 @app.get("/api/build")
@@ -10538,6 +10538,117 @@ def _builder_list_id() -> str:
     return "BL_" + _uuid.uuid4().hex[:12]
 
 
+_DGA_SCORED_BOARD_NAME = "DGA Scored"
+
+
+def _builder_parse_dga_note(note: str | None) -> float | None:
+    raw = (note or "").strip()
+    m = re.match(r"DGA\s+(\d+(?:\.\d+)?)\b", raw, flags=re.I)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _builder_sync_dga_scored_board(lp_id: str, force: bool = False) -> dict:
+    """Create or refresh the DGA Scored track board (top 30, score > 90)."""
+    _ensure_builder_lists_tables()
+    score_fn = globals().get("_dga_score_universe")
+    if not callable(score_fn):
+        return {"ok": False, "error": "financials domain not mounted", "rows": []}
+    ranked = score_fn(min_score=90, limit=30, force=force) or []
+    ranked = [r for r in ranked if r.get("dga_score") is not None
+              and float(r["dga_score"]) > 90]
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    lid = None
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT id FROM builder_lists
+             WHERE lp_id=%s AND lower(name)=lower(%s)
+             LIMIT 1
+        """, (lp_id, _DGA_SCORED_BOARD_NAME))
+        row = cur.fetchone()
+        if row:
+            lid = row[0]
+            cur.execute("""
+                UPDATE builder_lists
+                   SET sector=%s, source='dga_score', sort_order=-10, updated_at=now()
+                 WHERE id=%s AND lp_id=%s
+            """, ("DGA Score > 90", lid, lp_id))
+        else:
+            lid = _builder_list_id()
+            cur.execute("""
+                INSERT INTO builder_lists
+                    (id, lp_id, name, sector, source, sort_order)
+                VALUES (%s, %s, %s, %s, 'dga_score', -10)
+            """, (lid, lp_id, _DGA_SCORED_BOARD_NAME, "DGA Score > 90"))
+        cur.execute("SELECT ticker FROM builder_list_tickers WHERE list_id=%s", (lid,))
+        have = {(r[0] or "").upper() for r in (cur.fetchall() or [])}
+        want = [(r.get("ticker") or "").upper() for r in ranked if r.get("ticker")]
+        want_set = set(want)
+        drop = have - want_set
+        if drop:
+            cur.execute(
+                "DELETE FROM builder_list_tickers WHERE list_id=%s AND ticker = ANY(%s)",
+                (lid, list(drop)),
+            )
+        qmap: dict = {}
+        try:
+            if want:
+                raw_q = batch_quotes(",".join(want)) or {}
+                for tk in want:
+                    qmap[tk] = (raw_q.get(tk) or {}).get("price")
+        except Exception:
+            qmap = {}
+        for r in ranked:
+            tk = (r.get("ticker") or "").upper()
+            if not tk:
+                continue
+            note = f"DGA {int(r['dga_score'])}"
+            px = qmap.get(tk)
+            if tk in have:
+                cur.execute("""
+                    UPDATE builder_list_tickers SET note=%s
+                     WHERE list_id=%s AND ticker=%s
+                """, (note, lid, tk))
+            elif px is not None:
+                cur.execute("""
+                    INSERT INTO builder_list_tickers
+                        (list_id, ticker, entry_price, entry_date, note)
+                    VALUES (%s, %s, %s, %s::date, %s)
+                    ON CONFLICT (list_id, ticker) DO UPDATE SET note=EXCLUDED.note
+                """, (lid, tk, float(px), today, note))
+            else:
+                cur.execute("""
+                    INSERT INTO builder_list_tickers
+                        (list_id, ticker, entry_date, note)
+                    VALUES (%s, %s, %s::date, %s)
+                    ON CONFLICT (list_id, ticker) DO UPDATE SET note=EXCLUDED.note
+                """, (lid, tk, today, note))
+        conn.commit()
+    try:
+        snap = globals().get("_snapshot_ticker_metrics")
+        if callable(snap):
+            for r in ranked:
+                tk = (r.get("ticker") or "").upper()
+                if tk:
+                    snap(tk, {"dga_score": r.get("dga_score")},
+                         {"source": "dga_scored_board"})
+    except Exception as e:
+        print(f"[builder-lists] dga snapshot: {e!s:.120}", flush=True)
+    return {
+        "ok": True,
+        "id": lid,
+        "n": len(ranked),
+        "min_score": 90,
+        "tickers": [r.get("ticker") for r in ranked],
+        "scores": {r.get("ticker"): r.get("dga_score") for r in ranked},
+    }
+
+
 def _builder_lists_for_user(lp_id: str) -> list[dict]:
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return []
@@ -10893,6 +11004,7 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
             "ticker": tk,
             "name": names.get(tk) or "",
             "note": rm.get("note") or "",
+            "dga_score": _builder_parse_dga_note(rm.get("note")),
             "entry_price": entry,
             "entry_date": rm.get("entry_date"),  # YYYY-MM-DD
             "fair_value": fv,
@@ -10977,6 +11089,28 @@ def builder_lists_get(request: Request):
     claims = _claims_or_401(request)
     lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
     _ensure_builder_lists_tables()
+    try:
+        stale = True
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT updated_at FROM builder_lists
+                 WHERE lp_id=%s AND lower(name)=lower(%s)
+                 LIMIT 1
+            """, (lp_id, _DGA_SCORED_BOARD_NAME))
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                try:
+                    ua = row[0]
+                    if getattr(ua, "tzinfo", None) is None:
+                        ua = ua.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - ua).total_seconds()
+                    stale = age > 12 * 3600
+                except Exception:
+                    stale = True
+        if stale:
+            _builder_sync_dga_scored_board(lp_id, force=False)
+    except Exception as e:
+        print(f"[builder-lists] dga scored ensure: {e!s:.160}", flush=True)
     lists = _builder_lists_for_user(lp_id)
     return {"ok": True, "lists": lists, "seeded": len(lists) > 0}
 
@@ -11022,6 +11156,10 @@ def builder_lists_seed(request: Request):
             _builder_list_board(lid, lp_id)
         except Exception as e:
             print(f"[builder-lists] seed anchor {lid}: {e!s:.80}", flush=True)
+    try:
+        _builder_sync_dga_scored_board(lp_id, force=True)
+    except Exception as e:
+        print(f"[builder-lists] seed dga scored: {e!s:.120}", flush=True)
     return {"ok": True, "created": created, "lists": _builder_lists_for_user(lp_id)}
 
 
@@ -11055,6 +11193,23 @@ def builder_lists_create(request: Request):
                     (lid, tku, today))
         conn.commit()
     return {"ok": True, "id": lid, "lists": _builder_lists_for_user(lp_id)}
+
+
+@app.post("/api/v2/builder/lists/dga-scored")
+def builder_dga_scored_refresh(request: Request):
+    """Rebuild the DGA Scored board: top 30 companies with DGA Score > 90."""
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    out = _builder_sync_dga_scored_board(lp_id, force=True)
+    if not out.get("ok"):
+        raise HTTPException(503, out.get("error") or "Could not score universe")
+    out["lists"] = _builder_lists_for_user(lp_id)
+    if out.get("id"):
+        try:
+            out["board"] = _builder_list_board(out["id"], lp_id)
+        except Exception as e:
+            print(f"[builder-lists] dga board load: {e!s:.120}", flush=True)
+    return out
 
 
 @app.get("/api/v2/builder/lists/{list_id}")
