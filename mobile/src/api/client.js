@@ -252,7 +252,7 @@ async function request(path, options = {}, _isRetry = false) {
   if (token)   headers['x-auth-token']    = token;
   if (v2Token) headers['x-auth-v2-token'] = v2Token;  // piggyback v2 JWT so server sees demo_mode claims
 
-  const resp = await fetch(url, { ...options, headers });
+  const resp = await fetch(url, { ...options, headers, cache: 'no-store' });
 
   if (resp.status === 401) {
     // Token may be stale — clear it and retry once by re-authenticating
@@ -445,7 +445,7 @@ export const api = {
   },
   // Idea Generator — today's movers ≥ threshold% from the user's universe
   getIdeaFeed: (threshold = 4, limit = 60) =>
-    request(`/api/v2/research/idea-feed?threshold=${threshold}&limit=${limit}`),
+    request(`/api/v2/research/idea-feed?threshold=${threshold}&limit=${limit}&_t=${Date.now()}`),
   // Free per-ticker news (Yahoo → RSS → Google News, non-LLM) for mover expand
   getNews: (tickers, limit = 6) =>
     request(`/api/news?tickers=${encodeURIComponent(tickers)}&limit=${limit}`),
@@ -503,7 +503,8 @@ export const api = {
   getPortfolioSummary: () => request('/api/portfolio/summary'),
 
   // ---------- Watchlist ----------
-  getWatchlist:        ()       => request('/api/watchlist'),
+  getWatchlist: (fresh = false) =>
+    request(fresh ? `/api/watchlist?fresh=1&_t=${Date.now()}` : '/api/watchlist'),
   addToWatchlist:      (ticker) => request(`/api/watchlist/${ticker}`, { method: 'POST' }),
   removeFromWatchlist: (ticker) => request(`/api/watchlist/${ticker}`, { method: 'DELETE' }),
 
@@ -729,11 +730,14 @@ export const api = {
 
   // ---------- Batch quotes (avoids Yahoo rate limits) ----------
   getBatchQuotes: async (tickers) => {
-    // uses v2Fetch so it attaches the v2 token
-    const qs = tickers.map(encodeURIComponent).join(',');
-    const r = await v2Fetch(`/api/quotes?tickers=${qs}`);
+    const list = (tickers || []).map((t) => String(t || '').trim().toUpperCase()).filter(Boolean);
+    if (!list.length) return {};
+    const qs = list.map(encodeURIComponent).join(',');
+    const r = await v2Fetch(`/api/quotes?tickers=${qs}&_t=${Date.now()}`);
     if (!r.ok) throw new Error(`quotes ${r.status}`);
-    return r.json(); // { quotes: { TICKER: { price, pct_change, ... } } }
+    const data = await r.json();
+    if (data && data.quotes && typeof data.quotes === 'object') return data.quotes;
+    return data && typeof data === 'object' ? data : {};
   },
 
   // ---------- Market Scan (independent ticker list) ----------

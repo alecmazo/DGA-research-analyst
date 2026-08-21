@@ -40,6 +40,68 @@ function fmtClock(d) {
   }
 }
 
+/** Active US session date (ET). Before 4am ET still belongs to yesterday. */
+function etSessionDate(now = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: 'numeric',
+      hour12: false,
+    }).formatToParts(now);
+    const g = (t) => parts.find((p) => p.type === t)?.value;
+    let y = Number(g('year'));
+    let m = Number(g('month'));
+    let d = Number(g('day'));
+    const hour = Number(g('hour'));
+    if (hour < 4) {
+      const utc = Date.UTC(y, m - 1, d) - 86400000;
+      const x = new Date(utc);
+      y = x.getUTCFullYear();
+      m = x.getUTCMonth() + 1;
+      d = x.getUTCDate();
+    }
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  } catch {
+    return '';
+  }
+}
+
+function mergeWatchQuotes(base, overlay) {
+  if (!overlay || typeof overlay !== 'object') return base;
+  const quotes = { ...((base && base.quotes) || {}) };
+  let n = 0;
+  Object.keys(overlay).forEach((raw) => {
+    const tk = String(raw || '').trim().toUpperCase();
+    const q = overlay[raw];
+    if (!tk || !q || q.price == null) return;
+    const prev = quotes[tk] || {};
+    const pct = q.pct != null ? q.pct : q.pct_change;
+    quotes[tk] = {
+      ...prev,
+      price: q.price,
+      pct: pct != null ? pct : prev.pct,
+      pct_change: pct != null ? pct : prev.pct_change,
+      as_of: q.as_of || prev.as_of,
+    };
+    n += 1;
+  });
+  if (!n) return base;
+  return { ...(base || { tickers: [], quotes: {} }), quotes };
+}
+
+function overlayFromMovers(movers) {
+  const overlay = {};
+  (movers || []).forEach((m) => {
+    const tk = String(m?.ticker || '').trim().toUpperCase();
+    if (!tk || m.price == null) return;
+    overlay[tk] = { price: m.price, pct: m.pct_change, pct_change: m.pct_change };
+  });
+  return overlay;
+}
+
 /** US equity session label from local clock → America/New_York. */
 function usEquitySession(now = new Date()) {
   let parts;
@@ -152,19 +214,46 @@ export default function MarketsScreen({ navigation }) {
   const moversRef = useRef([]);
   const pollRef = useRef(null);
   const focusedRef = useRef(false);
+  const lastLiveRefreshDateRef = useRef('');
 
   const session = useMemo(() => usEquitySession(new Date()), [sessionTick, lastQuotesAt]);
 
-  const loadQuotes = useCallback(async () => {
+  const loadQuotes = useCallback(async (opts = {}) => {
+    const live = usEquitySession().live;
+    const sdate = etSessionDate();
+    const firstLiveToday = live && lastLiveRefreshDateRef.current !== sdate;
+    const fresh = !!opts.fresh || firstLiveToday;
+    let wl = null;
+    let moversList = [];
     await Promise.all([
       api.getMarketIndices().then(d => setIndices(d.indices || [])).catch(() => {}),
-      api.getWatchlist().then(d => setWatch(d || { tickers: [], quotes: {} }))
-        .catch(() => setWatch({ tickers: [], quotes: {} })),
-      api.getIdeaFeed(4, 60).then(d => {
-        const m = d.movers || [];
-        moversRef.current = m; setMovers(m); setAsOf(d.as_of || '');
+      api.getWatchlist(fresh).then((d) => {
+        wl = d || { tickers: [], quotes: {} };
+        setWatch(wl);
+      }).catch(() => setWatch({ tickers: [], quotes: {} })),
+      api.getIdeaFeed(4, 60).then((d) => {
+        moversList = d.movers || [];
+        moversRef.current = moversList;
+        setMovers(moversList);
+        setAsOf(d.as_of || '');
       }).catch(() => {}),
     ]);
+    // Idea-feed already has today's Yahoo movers; overlay those prices first
+    // so watchlist doesn't sit on yesterday while movers look live.
+    const moverOverlay = overlayFromMovers(moversList);
+    if (Object.keys(moverOverlay).length) {
+      setWatch((prev) => mergeWatchQuotes(prev || wl, moverOverlay));
+    }
+    const tks = ((wl && wl.tickers) || []).map((t) => String(t || '').toUpperCase()).filter(Boolean);
+    if (tks.length && (fresh || live)) {
+      try {
+        const qmap = await api.getBatchQuotes(tks);
+        setWatch((prev) => mergeWatchQuotes(prev || wl, qmap));
+      } catch {
+        /* watchlist already painted */
+      }
+    }
+    if (fresh && sdate) lastLiveRefreshDateRef.current = sdate;
     setLastQuotesAt(new Date());
   }, []);
 
@@ -199,7 +288,7 @@ export default function MarketsScreen({ navigation }) {
   }, [loadAll, loadQuotes]));
 
   useAppResume(() => {
-    loadQuotes().catch(() => {});
+    loadQuotes({ fresh: usEquitySession().live }).catch(() => {});
     setSessionTick((n) => n + 1);
   });
 

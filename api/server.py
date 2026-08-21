@@ -199,6 +199,86 @@ _QUOTE_CACHE: dict = {}
 # often served wrong multi-ticker yfinance closes + bad day-over-day %).
 _QUOTE_TTL = 90    # seconds
 
+
+def _et_now():
+    from datetime import datetime, timezone
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _us_session_date_str() -> str:
+    """Active US equity session date (ET). Before 4am ET = prior calendar day."""
+    try:
+        import market_data as _md
+        return str(_md._us_equity_session_date())
+    except Exception:
+        from datetime import timedelta
+        now = _et_now()
+        if now.hour < 4:
+            return (now.date() - timedelta(days=1)).isoformat()
+        return now.date().isoformat()
+
+
+def _us_session_live() -> bool:
+    """Pre-market 04:00 through after-hours 20:00 ET, weekdays."""
+    now = _et_now()
+    if now.weekday() >= 5:
+        return False
+    mins = now.hour * 60 + now.minute
+    return (4 * 60) <= mins < (20 * 60)
+
+
+def _as_of_et_date(as_of) -> str | None:
+    if not as_of:
+        return None
+    try:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        if hasattr(as_of, "astimezone"):
+            dt = as_of
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(et).date().isoformat()
+        s = str(as_of).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s[:32])
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(et).date().isoformat()
+    except Exception:
+        s = str(as_of)
+        return s[:10] if len(s) >= 10 and s[4:5] == "-" else None
+
+
+def _quote_from_current_session(as_of) -> bool:
+    d = _as_of_et_date(as_of)
+    if not d:
+        return False
+    return d >= _us_session_date_str()
+
+
+def _cache_quote_usable(entry: dict | None, now: float, *, live: bool) -> bool:
+    """True when in-process cache is fresh enough to paint.
+
+    During a live US session, yesterday's close (or a row with no as_of) is a
+    miss — otherwise first morning open serves Friday/overnight prices while
+    idea-feed already shows today's movers.
+    """
+    if not entry or entry.get("price") is None:
+        return False
+    try:
+        age = now - float(entry.get("_ts") or 0)
+    except (TypeError, ValueError):
+        return False
+    if age >= _QUOTE_TTL or age < 0:
+        return False
+    if live and not _quote_from_current_session(entry.get("as_of")):
+        return False
+    return True
+
 # Cache for information_schema column checks (avoid slow system-table hits per request)
 _col_exists_cache: dict = {}   # { "table.column": bool }
 
@@ -3916,11 +3996,14 @@ def _watchlist_ytd_pcts(tickers: list[str],
 
 
 @app.get("/api/watchlist")
-def watchlist_get(request: Request):
+def watchlist_get(request: Request, fresh: bool = False):
     """Fast watchlist for login / desk paint.
 
     Always returns the ticker list even if quotes fail. Quote path:
     process cache → market_quotes store → Yahoo chart (hard 6s wall).
+    During a live US session, previous-session store rows are misses so the
+    first morning open hits Yahoo (idea-feed already does). Weekend/closed
+    still paints last close. ``fresh=1`` skips the process cache.
     Earnings chips: process-cached Nasdaq calendar, ≤8s budget, never hangs
     the list (stale-while-revalidate + background refresh).
     YTD %: bulk from price_history (calendar year first close vs live last).
@@ -3942,11 +4025,11 @@ def watchlist_get(request: Request):
 
         if tickers:
             now = time.time()
+            live = _us_session_live()
             need: list[str] = []
             for tk in tickers:
-                entry = _QUOTE_CACHE.get(tk)
-                if (entry and (now - float(entry.get("_ts") or 0)) < _QUOTE_TTL
-                        and entry.get("price") is not None):
+                entry = None if fresh else _QUOTE_CACHE.get(tk)
+                if _cache_quote_usable(entry, now, live=live):
                     quotes[tk] = {
                         "price": entry.get("price"),
                         "prev": None,
@@ -3956,26 +4039,34 @@ def watchlist_get(request: Request):
                 else:
                     need.append(tk)
 
-            # DB store first (no HTTP) — paint immediately even if Yahoo is down
+            # DB store first (no HTTP) — only current-session rows while live.
+            # Unlimited-age fallback is weekend/closed only (Friday close).
+            # Never stamp yesterday into _QUOTE_CACHE as if it were live.
             if need and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
                     store = _db_quotes(need, max_age_s=300) or {}
-                    if not store:
-                        store = _db_quotes(need, max_age_s=None) or {}
+                    if not live and not fresh:
+                        older = _db_quotes(need, max_age_s=None) or {}
+                        for tk, q in older.items():
+                            store.setdefault(tk, q)
                     still = []
                     for tk in need:
                         q = store.get(tk) or {}
-                        if q.get("price") is not None:
+                        as_of = q.get("as_of")
+                        ok = q.get("price") is not None and (
+                            (not live) or _quote_from_current_session(as_of)
+                        )
+                        if ok:
                             quotes[tk] = {
                                 "price": q.get("price"),
                                 "prev": None,
                                 "pct": q.get("pct_change"),
-                                "as_of": q.get("as_of"),
+                                "as_of": as_of,
                             }
                             _QUOTE_CACHE[tk] = {
                                 "price": q.get("price"),
                                 "pct_change": q.get("pct_change"),
-                                "as_of": q.get("as_of"),
+                                "as_of": as_of,
                                 "_ts": now,
                             }
                         else:
@@ -7213,7 +7304,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui481-20260820-models-schedule"
+WEB_BUILD_VERSION = "ui482-20260821-wl-fresh"
 
 
 @app.get("/api/build")
@@ -14152,10 +14243,10 @@ def _batch_quotes_fast(symbols: list[str]) -> dict:
     result: dict = {}
     now = time.time()
     misses: list = []
+    live = _us_session_live()
     for sym in originals:
         entry = _QUOTE_CACHE.get(sym)
-        if (entry and (now - entry.get("_ts", 0)) < _QUOTE_TTL
-                and entry.get("price") is not None
+        if (_cache_quote_usable(entry, now, live=live)
                 and entry.get("pct_change") is not None):
             result[sym] = {
                 "price": entry["price"],
