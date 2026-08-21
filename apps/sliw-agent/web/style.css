@@ -285,6 +285,26 @@ body[data-desk="wedding"] .corp-only {
   align-items: start;
 }
 
+.wedding-desk {
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.wedding-desk .work-queue {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 230px);
+  overflow: hidden;
+  padding: 20px 10px 16px 20px;
+}
+
+.wedding-desk .work-queue .panel-head {
+  flex-shrink: 0;
+  margin-bottom: 12px;
+  padding-right: 8px;
+}
+
 .work-queue { min-height: 420px; }
 .work-focus { min-height: 520px; }
 
@@ -1321,8 +1341,67 @@ select:focus, .search:focus, input:focus, textarea:focus {
 
 .wedding-list {
   grid-template-columns: 1fr;
-  max-height: 70vh;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  gap: 10px;
   overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 14px 14px 2px;
+  margin: 0;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(201, 168, 76, 0.38) transparent;
+}
+
+.wedding-list::-webkit-scrollbar {
+  width: 9px;
+}
+
+.wedding-list::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 6px 0;
+}
+
+.wedding-list::-webkit-scrollbar-thumb {
+  background: rgba(201, 168, 76, 0.34);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.wedding-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(201, 168, 76, 0.55);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.wedding-list .prospect-card {
+  padding: 14px 14px 12px;
+  border-radius: 14px;
+}
+
+.wedding-list .prospect-card:hover {
+  transform: none;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+}
+
+.wedding-list .prospect-card h4 {
+  font-size: 17px;
+}
+
+.wedding-list .prospect-card .meta {
+  font-size: 12px;
+}
+
+.wedding-list .choice {
+  font-size: 11px;
+  padding: 6px 11px;
+}
+
+.wedding-list .lead-actions {
+  margin-top: 10px;
+  gap: 6px;
 }
 
 .partner-card {
