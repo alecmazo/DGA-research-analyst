@@ -222,9 +222,17 @@ def _merge_crm_books(a: dict[str, Any], b: dict[str, Any], book: str) -> dict[st
     out["book"] = book
     out["version"] = max(int(a.get("version") or 2), int(b.get("version") or 2), 2)
     merged: dict[str, Any] = {}
+    deleted_ids: list[str] = []
+    seen_del: set[str] = set()
+    for src in (a, b):
+        for pid in src.get("deleted_ids") or []:
+            pid = str(pid or "")
+            if pid and pid not in seen_del:
+                seen_del.add(pid)
+                deleted_ids.append(pid)
     for src in (a, b):
         for pid, rec in (src.get("prospects") or {}).items():
-            if not pid or not isinstance(rec, dict):
+            if not pid or not isinstance(rec, dict) or pid in seen_del:
                 continue
             prev = merged.get(pid)
             if not prev or _prospect_ts(rec) >= _prospect_ts(prev):
@@ -233,6 +241,7 @@ def _merge_crm_books(a: dict[str, Any], b: dict[str, Any], book: str) -> dict[st
                 row["book"] = book
                 merged[pid] = row
     out["prospects"] = merged
+    out["deleted_ids"] = deleted_ids[-500:]
     # Prefer newest book-level timestamp
     ta = str(a.get("updated_at") or "")
     tb = str(b.get("updated_at") or "")
@@ -543,6 +552,55 @@ def set_stage(
     return p
 
 
+def delete_prospect(prospect_id: str, book: str | None = None) -> dict[str, Any]:
+    """Erase a lead from the CRM book (file + Postgres)."""
+    p, book = _find_prospect(prospect_id, book)
+    company = p.get("company") or ""
+    crm = load_crm(book)
+    crm["prospects"].pop(prospect_id, None)
+    tomb = [str(x) for x in (crm.get("deleted_ids") or []) if x]
+    if prospect_id not in tomb:
+        tomb.append(prospect_id)
+    crm["deleted_ids"] = tomb[-500:]
+    save_crm(crm, book=book)
+    return {"ok": True, "id": prospect_id, "company": company, "deleted": True, "book": book}
+
+
+def prospect_is_contacted(prospect: dict[str, Any] | None) -> bool:
+    p = prospect or {}
+    if p.get("uncontacted"):
+        return False
+    return (p.get("stage") or "") in CONTACTED_STAGES
+
+
+def set_contacted(
+    prospect_id: str,
+    contacted: bool,
+    *,
+    note: str = "",
+    book: str | None = None,
+) -> dict[str, Any]:
+    """Manual Contacted / Not contacted — no email send."""
+    if contacted:
+        p = set_stage(
+            prospect_id, "contacted",
+            note=note or "Marked contacted",
+            book=book,
+        )
+        p = update_prospect(prospect_id, book=p.get("book") or book, uncontacted=False)
+        try:
+            p = record_last_contacted(prospect_id, book=p.get("book") or book)
+        except Exception:
+            pass
+        return p
+    p = set_stage(
+        prospect_id, "scored",
+        note=note or "Not contacted",
+        book=book,
+    )
+    return update_prospect(prospect_id, book=p.get("book") or book, uncontacted=True)
+
+
 def update_prospect(
     prospect_id: str,
     book: str | None = None,
@@ -691,6 +749,8 @@ def contacted_prospects() -> list[dict[str, Any]]:
         for p in list_prospects(book=book):
             pid = p.get("id") or ""
             if pid in seen:
+                continue
+            if p.get("uncontacted"):
                 continue
             stage = p.get("stage") or ""
             if stage in CONTACTED_STAGES or p.get("email_log"):

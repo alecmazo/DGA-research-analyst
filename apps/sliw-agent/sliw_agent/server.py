@@ -193,6 +193,11 @@ class StageRequest(BaseModel):
     body: str = ""
 
 
+class ContactedToggle(BaseModel):
+    contacted: bool
+    note: str = ""
+
+
 class EmailLogRequest(BaseModel):
     to: str = ""
     subject: str = ""
@@ -383,6 +388,7 @@ def create_api_router() -> APIRouter:
         try:
             p = crm.set_stage(prospect_id, body.stage, note=body.note)
             if body.stage == "contacted":
+                p = crm.update_prospect(prospect_id, uncontacted=False)
                 override = body.last_contacted_email or body.email or ""
                 p = crm.record_last_contacted(prospect_id, email=override)
                 subj = (body.subject or "").strip()
@@ -410,6 +416,30 @@ def create_api_router() -> APIRouter:
             raise HTTPException(404, "Prospect not found") from None
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    @r.post("/prospects/{prospect_id}/contacted")
+    def set_contacted_flag(
+        prospect_id: str, body: ContactedToggle, request: Request
+    ) -> dict[str, Any]:
+        """Edyta's one-tap Contacted / Not contacted. Does not send email."""
+        require_sliw_access(request)
+        try:
+            return crm.set_contacted(
+                prospect_id, bool(body.contacted), note=body.note
+            )
+        except KeyError:
+            raise HTTPException(404, "Prospect not found") from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @r.delete("/prospects/{prospect_id}")
+    def delete_prospect(prospect_id: str, request: Request) -> dict[str, Any]:
+        """Erase a lead (planner/venue/couple) from the desk."""
+        require_sliw_access(request)
+        try:
+            return crm.delete_prospect(prospect_id)
+        except KeyError:
+            raise HTTPException(404, "Prospect not found") from None
 
     @r.post("/prospects/{prospect_id}/last-contacted")
     def set_last_contacted(
@@ -1065,7 +1095,7 @@ def create_api_router() -> APIRouter:
         ch = (channel or "").strip().lower() or None
         if ch not in (None, "couple", "partner"):
             ch = None
-        items = wedding_ready_list(limit=limit, channel=ch)
+        items = wedding_ready_list(limit=max(1, min(int(limit or 80), 200)), channel=ch)
         prospects = crm.list_prospects(book="wedding")
         couples = [p for p in prospects if "couple" in (p.get("industry") or "").lower()
                    or (p.get("lead_channel") or "") == "couple"

@@ -616,7 +616,7 @@ def seed_default_partnerships() -> dict[str, Any]:
 
 
 def wedding_ready_list(limit: int = 12, *, channel: str | None = None) -> list[dict[str, Any]]:
-    """Ranked wedding leads for the Weddings tab (clickable → Work).
+    """Ranked wedding leads for the Weddings tab.
 
     channel: None = all, "couple" = web form couples, "partner" = planners/venues.
     """
@@ -636,12 +636,13 @@ def wedding_ready_list(limit: int = 12, *, channel: str | None = None) -> list[d
         ranked = [p for p in ranked if _is_couple_lead(p)]
     elif channel == "partner":
         ranked = [p for p in ranked if not _is_couple_lead(p)]
-    # Paid first, then couples, then score
+    # Paid first, then couples, then not-yet-contacted partners, then score
     def _sort_key(p: dict[str, Any]) -> tuple:
         paid = 0 if p.get("payment_status") == "paid" else 1
         is_c = 0 if _is_couple_lead(p) else 1
+        done = 1 if crm.prospect_is_contacted(p) else 0
         updated = p.get("updated_at") or p.get("created_at") or ""
-        return (paid, is_c, -(p.get("score") or 0), updated)
+        return (paid, is_c, done, -(p.get("score") or 0), updated)
 
     ranked.sort(key=_sort_key)
     out = []
@@ -666,6 +667,8 @@ def wedding_ready_list(limit: int = 12, *, channel: str | None = None) -> list[d
             "wedding_date": p.get("wedding_date") or "",
             "email": _best_contact_email(p),
             "phone": _best_contact_phone(p),
+            "contact_name": _best_contact_name(p),
+            "contacted": crm.prospect_is_contacted(p),
             "has_draft": bool(p.get("outreach_path") or p.get("sequence_paths")),
             "has_contact": bool(p.get("contacts")),
             "email_log": p.get("email_log") or [],
@@ -721,6 +724,14 @@ def _best_contact_phone(p: dict[str, Any]) -> str:
         ph = (c.get("phone") or "").strip()
         if ph:
             return ph
+    return ""
+
+
+def _best_contact_name(p: dict[str, Any]) -> str:
+    for c in p.get("contacts") or []:
+        n = (c.get("name") or "").strip()
+        if n:
+            return n
     return ""
 
 

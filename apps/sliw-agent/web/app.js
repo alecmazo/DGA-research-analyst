@@ -14,6 +14,7 @@ const state = {
   focusId: null,
   edyta: null,
   wedding: [],
+  weddingChannel: "partner",
   partners: [],
   materials: null,
   contacted: [],
@@ -347,8 +348,9 @@ function showView(name) {
   if (name === "library") renderLibrary();
   if (name === "edyta") renderEdyta();
   if (name === "weddings") {
+    if (!state.weddingChannel) state.weddingChannel = "partner";
     if (!state.wedding?.length) {
-      loadWeddingRows().then((rows) => {
+      loadWeddingRows(state.weddingChannel).then((rows) => {
         state.wedding = rows;
         renderWeddings();
       });
@@ -623,6 +625,10 @@ function normalizeWeddingRows(payload) {
       wedding_date: p.wedding_date || "",
       email: p.email || "",
       phone: p.phone || "",
+      contact_name: p.contact_name || "",
+      contacted: p.contacted != null
+        ? !!p.contacted
+        : ["contacted", "replied", "interested", "discovery_booked", "won", "nurture"].includes(p.stage),
       has_draft: !!(p.has_draft || p.outreach_path || p.sequence_paths),
       has_contact: !!(p.has_contact || (p.contacts && p.contacts.length)),
     };
@@ -631,7 +637,7 @@ function normalizeWeddingRows(payload) {
 
 async function loadWeddingRows(channel) {
   try {
-    const q = channel ? `?limit=50&channel=${encodeURIComponent(channel)}` : "?limit=50";
+    const q = channel ? `?limit=80&channel=${encodeURIComponent(channel)}` : "?limit=80";
     const ready = await api("/wedding/ready" + q);
     state.weddingMeta = ready;
     return normalizeWeddingRows(ready);
@@ -1236,13 +1242,27 @@ function renderWeddings() {
       ? `${rows.length} showing · ${meta.couples != null ? meta.couples + " couples total · " : ""}${couples} couples here · ${planners} planners · ${venues} venues · ${a} A`
       : "No leads — open Couples inbox after a form submit, or Import planner seeds";
   }
+  const ch = state.weddingChannel || "all";
+  const hint = $("#wedding-hint");
+  if (hint) {
+    hint.innerHTML = ch === "partner"
+      ? "Each planner or venue: mark <strong>Contacted</strong> or <strong>Not contacted</strong>. <strong>Delete</strong> removes them from the list."
+      : ch === "couple"
+        ? "New form leads first — call / text same day. Paid couples stay until lessons are scheduled."
+        : "Daily: Couples inbox first, then planner / venue outreach.";
+  }
+  const media = $("#wedding-media-panel");
+  if (media) media.hidden = ch === "partner";
+  $("#btn-wedding-couples")?.classList.toggle("primary", ch === "couple");
+  $("#btn-wedding-couples")?.classList.toggle("ghost", ch !== "couple");
+  $("#btn-wedding-partners")?.classList.toggle("primary", ch === "partner");
+  $("#btn-wedding-partners")?.classList.toggle("ghost", ch !== "partner");
   if (!rows.length) {
-    const ch = state.weddingChannel || "all";
     grid.innerHTML = `<div class="panel empty-state" style="grid-column:1/-1">
-      <h3>${ch === "couple" ? "No couple leads yet" : "No wedding leads scored yet"}</h3>
+      <h3>${ch === "couple" ? "No couple leads yet" : ch === "partner" ? "No planners or venues yet" : "No wedding leads scored yet"}</h3>
       <p class="muted">${ch === "couple"
         ? "When someone submits the form on <a href=\"/weddings-site/\" target=\"_blank\">weddings storefront</a>, they appear here. Call same day."
-        : "Click <strong>Import planner seeds</strong> for Bay Area B2B, or wait for couple form leads."}</p>
+        : "Click <strong>Import planner seeds</strong> for Bay Area planners and venues."}</p>
     </div>`;
     return;
   }
@@ -1250,35 +1270,58 @@ function renderWeddings() {
     const isCouple = p.lead_channel === "couple";
     const isPlanner = /planner/i.test(p.industry || "");
     const isVenue = /venue|winery|hotel|lodge/i.test(p.industry || "");
-    const channel = isCouple
+    const kind = isCouple
       ? ("Couple" + (p.utm_source ? " · " + p.utm_source : " · web"))
-      : isPlanner ? "Planner partner"
-        : isVenue ? "Venue partner"
+      : isPlanner ? "Planner"
+        : isVenue ? "Venue"
           : (p.channel_label || p.industry || "Wedding");
     const id = esc(p.id);
-    const contactLine = isCouple && (p.email || p.phone)
+    if (!isCouple) {
+      const on = !!p.contacted;
+      const bits = [
+        p.contact_name ? esc(p.contact_name) : "",
+        p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : "",
+        p.phone ? esc(p.phone) : "",
+        p.geo ? esc(p.geo) : "",
+      ].filter(Boolean);
+      return `
+      <article class="prospect-card wedding-card partner-card ${on ? "is-contacted" : ""}" data-id="${id}">
+        <div class="wedding-card-top">
+          ${brandMarkHtml(p.company, p.website, { size: "md" })}
+          <div class="wedding-card-copy">
+            <div class="top">
+              <h4>${esc(p.company)}</h4>
+              <span class="status-pill ${on ? "on" : "off"}">${on ? "Contacted" : "Not contacted"}</span>
+            </div>
+            <p class="meta">${esc(kind)}${bits.length ? " · " + bits.join(" · ") : ""}</p>
+          </div>
+        </div>
+        <div class="lead-actions">
+          <button type="button" class="btn ${on ? "ghost" : "primary"} sm" data-contacted="1" data-id="${id}">Contacted</button>
+          <button type="button" class="btn ${on ? "primary" : "ghost"} sm" data-contacted="0" data-id="${id}">Not contacted</button>
+          <button type="button" class="btn ghost sm lead-delete" data-delete="${id}">Delete</button>
+        </div>
+      </article>`;
+    }
+    const contactLine = (p.email || p.phone)
       ? `<p class="meta">${p.email ? `<a href="mailto:${esc(p.email)}" onclick="event.stopPropagation()">${esc(p.email)}</a>` : ""}${p.phone ? " · " + esc(p.phone) : ""}${p.wedding_date ? " · 📅 " + esc(p.wedding_date) : ""}</p>`
-      : `<p class="meta">${esc(channel)} · ${esc(p.geo || "Bay Area")}</p>`;
+      : `<p class="meta">${esc(kind)} · ${esc(p.geo || "Bay Area")}</p>`;
     return `
-    <article class="prospect-card wedding-card ${isCouple ? "couple-lead" : ""} ${state.focusId === p.id ? "active" : ""}" data-work="${id}" role="button" tabindex="0" aria-label="Open ${esc(p.company)} in Work">
+    <article class="prospect-card wedding-card couple-lead ${state.focusId === p.id ? "active" : ""}" data-work="${id}" role="button" tabindex="0" aria-label="Open ${esc(p.company)} in Work">
       <div class="wedding-card-top">
         ${brandMarkHtml(p.company, p.website, { size: "md" })}
         <div class="wedding-card-copy">
           <div class="top">
             <h4>${esc(p.company)}</h4>
-            <span class="${tierClass(p.tier)}">${esc(isCouple ? "♥" : (p.tier || "—"))}</span>
+            <span class="${tierClass(p.tier)}">♥</span>
           </div>
           ${contactLine}
         </div>
-        <div class="score-ring" title="ICP score">${p.score ?? "—"}</div>
       </div>
-      <p class="wedding-card-pkg">${esc(p.package || "—")}${isCouple ? " · <strong>call today</strong>" : ""}</p>
-      ${emailTrailHtml(p.email_log, { compact: true, fallback: p.last_contacted_at ? "Reached out — copy not stored" : "" })}
+      <p class="wedding-card-pkg">${esc(p.package || "—")} · <strong>call today</strong></p>
       <div class="foot">
-        <span>${p.stage === "disqualified"
-          ? `<span class="pill">wrong geo</span> disqualified`
-          : esc(p.stage || "scored")}${p.stage !== "disqualified" && p.has_draft ? " · draft ready" : ""}${p.stage !== "disqualified" && p.has_contact ? " · contacts" : ""}</span>
-        <button type="button" class="btn primary sm wedding-open-btn" data-work="${id}">Open in Work →</button>
+        <span>${esc(p.stage || "new")}</span>
+        <button type="button" class="btn primary sm wedding-open-btn" data-work="${id}">Open →</button>
       </div>
     </article>`;
   }).join("");
@@ -1512,7 +1555,7 @@ async function fullRefresh() {
       api("/work/ready?limit=8"),
       api("/edyta-home"),
       api("/library"),
-      loadWeddingRows(),
+      loadWeddingRows("partner"),
       api("/partnerships").catch(() => []),
       api("/me").catch(() => null),
     ]);
@@ -1596,12 +1639,29 @@ function boot() {
   $("#lib-tier")?.addEventListener("change", renderLibrary);
   $("#lib-status")?.addEventListener("change", renderLibrary);
 
-  // Wedding cards: event delegation (survives re-render; whole card + Open button)
+  // Wedding cards: event delegation (survives re-render)
   const weddingGrid = $("#wedding-grid");
   if (weddingGrid && !weddingGrid.dataset.bound) {
     weddingGrid.dataset.bound = "1";
     weddingGrid.addEventListener("click", (ev) => {
-      if (ev.target.closest(".email-trail, details, summary, a, input, textarea, select")) return;
+      const del = ev.target.closest("[data-delete]");
+      if (del && weddingGrid.contains(del)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        deleteWeddingLead(del.getAttribute("data-delete"));
+        return;
+      }
+      const tog = ev.target.closest("[data-contacted]");
+      if (tog && weddingGrid.contains(tog)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setWeddingContacted(
+          tog.getAttribute("data-id"),
+          tog.getAttribute("data-contacted") === "1",
+        );
+        return;
+      }
+      if (ev.target.closest(".email-trail, details, summary, a, input, textarea, select, .lead-actions")) return;
       const hit = ev.target.closest("[data-work]");
       if (!hit || !weddingGrid.contains(hit)) return;
       const id = hit.getAttribute("data-work") || hit.dataset.work;
@@ -1622,6 +1682,44 @@ function boot() {
       ev.preventDefault();
       openWeddingLead(id);
     });
+  }
+
+  async function setWeddingContacted(id, contacted) {
+    if (!id) return;
+    const lead = (state.wedding || []).find((p) => p.id === id);
+    try {
+      await api(`/prospects/${encodeURIComponent(id)}/contacted`, {
+        method: "POST",
+        body: JSON.stringify({
+          contacted: !!contacted,
+          note: contacted ? "Marked contacted" : "Not contacted",
+        }),
+      });
+      if (lead) lead.contacted = !!contacted;
+      toast(contacted
+        ? `${lead?.company || "Lead"} · contacted`
+        : `${lead?.company || "Lead"} · not contacted`);
+      renderWeddings();
+      loadContacted({ silent: true });
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
+  async function deleteWeddingLead(id) {
+    if (!id) return;
+    const lead = (state.wedding || []).find((p) => p.id === id);
+    const name = lead?.company || "this contact";
+    if (!confirm(`Delete ${name}? They will be removed from this list.`)) return;
+    try {
+      await api(`/prospects/${encodeURIComponent(id)}`, { method: "DELETE" });
+      state.wedding = (state.wedding || []).filter((p) => p.id !== id);
+      toast(`Deleted ${name}`);
+      renderWeddings();
+      loadContacted({ silent: true });
+    } catch (e) {
+      toast(e.message);
+    }
   }
 
   async function refreshWeddingChannel(channel) {

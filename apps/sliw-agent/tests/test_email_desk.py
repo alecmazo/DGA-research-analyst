@@ -100,6 +100,42 @@ class EmailDeskTests(unittest.TestCase):
         planner_p = crm.get_prospect(planner["id"])
         self.assertEqual(len(planner_p.get("email_log") or []), 1)
 
+    def test_manual_contacted_and_delete(self) -> None:
+        planner = crm.upsert_prospect(
+            company="Blissful Events",
+            industry="Wedding planner",
+            contacts=[{"name": "Samar", "email": "samar@blissfuleventplanning.com"}],
+            book="wedding",
+        )
+        pid = planner["id"]
+        on = crm.set_contacted(pid, True)
+        self.assertEqual(on.get("stage"), "contacted")
+        self.assertFalse(on.get("uncontacted"))
+        self.assertTrue(crm.prospect_is_contacted(on))
+        ids = {p["id"] for p in crm.contacted_prospects()}
+        self.assertIn(pid, ids)
+
+        off = crm.set_contacted(pid, False)
+        self.assertEqual(off.get("stage"), "scored")
+        self.assertTrue(off.get("uncontacted"))
+        self.assertFalse(crm.prospect_is_contacted(off))
+        ids = {p["id"] for p in crm.contacted_prospects()}
+        self.assertNotIn(pid, ids)
+
+        gone = crm.delete_prospect(pid)
+        self.assertTrue(gone.get("deleted"))
+        self.assertIsNone(crm.get_prospect(pid))
+        by_name = [p for p in crm.list_prospects(book="wedding") if p.get("company") == "Blissful Events"]
+        self.assertEqual(by_name, [])
+
+        again = crm.upsert_prospect(
+            company="Blissful Events",
+            industry="Wedding planner",
+            book="wedding",
+        )
+        self.assertNotEqual(again["id"], pid)
+        self.assertIsNotNone(crm.get_prospect(again["id"]))
+
     def test_email_drafts_kv(self) -> None:
         blob = {"drafts": []}
         item = {
