@@ -90,7 +90,7 @@ export function CompanyDashboard({
     } catch {
       /* ignore */
     }
-    const t = (last || ticker || 'AAPL').toUpperCase()
+    const t = (ticker || last || 'AAPL').toUpperCase()
     setInput(t)
     void load(t, period)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only

@@ -103,6 +103,19 @@
   background: var(--bg-hover);
 }
 
+.rowClick {
+  cursor: pointer;
+}
+
+.rowClick .tk {
+  color: var(--brand-700, #0f6f8a);
+}
+
+.rowClick:hover .tk {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .tk {
   font-weight: 800;
   font-family: var(--font-display);

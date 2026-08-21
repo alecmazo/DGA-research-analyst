@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '@/lib/api'
 import page from './page.module.css'
 import styles from './FinancialsPage.module.css'
@@ -9,7 +10,9 @@ import { FinancialsStore } from './financials/FinancialsStore'
 import { HistoryScreen } from './financials/HistoryScreen'
 
 export function FinancialsPage() {
-  const [ticker, setTicker] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlTk = (searchParams.get('ticker') || '').trim().toUpperCase()
+  const [ticker, setTicker] = useState(urlTk)
   const [period, setPeriod] = useState<PeriodType>('annual')
   const [coverage, setCoverage] = useState<CoverageRow[]>([])
   const [reloadKey, setReloadKey] = useState(0)
@@ -32,7 +35,29 @@ export function FinancialsPage() {
     if (!t) return
     setTicker(t)
     setReloadKey((k) => k + 1)
-  }, [])
+    const cur = (searchParams.get('ticker') || '').trim().toUpperCase()
+    if (cur !== t) setSearchParams({ ticker: t }, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    const t = (searchParams.get('ticker') || '').trim().toUpperCase()
+    if (t && t !== ticker) {
+      setTicker(t)
+      setReloadKey((k) => k + 1)
+    }
+    // URL is the source when it changes (Builder click, peek Financials).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const d = (e as CustomEvent<{ ticker?: string }>).detail
+      const t = (d?.ticker || '').trim().toUpperCase()
+      if (t) selectTicker(t)
+    }
+    window.addEventListener('dga-open-financials', onOpen)
+    return () => window.removeEventListener('dga-open-financials', onOpen)
+  }, [selectTicker])
 
   // When dashboard views a name, keep parent ticker in sync without double-fetch
   // (CompanyDashboard already loads; parent only needs id for sheet/history).

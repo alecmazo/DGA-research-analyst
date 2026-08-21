@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
+import { StockPeek } from '@/components/layout/StockPeek'
 import { api } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
 import page from './page.module.css'
@@ -97,6 +99,7 @@ const METHOD_HELP: Record<Method, string> = {
 /* ── page ──────────────────────────────────────────────────────── */
 
 export function BuilderPage() {
+  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('boards')
 
   /* boards */
@@ -104,6 +107,41 @@ export function BuilderPage() {
   const [active, setActive] = useState<string | null>(null)
   const [board, setBoard] = useState<Board | null>(null)
   const [addTk, setAddTk] = useState('')
+  const [peekTk, setPeekTk] = useState<string | null>(null)
+  const hoverTimer = useRef<number | null>(null)
+  const skipPeek = useRef(false)
+
+  const openPeek = (tk: string) => {
+    const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
+    if (sym) setPeekTk(sym)
+  }
+
+  const onBoardEnter = (tk: string) => {
+    skipPeek.current = false
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
+    hoverTimer.current = window.setTimeout(() => {
+      if (!skipPeek.current) openPeek(tk)
+    }, 280)
+  }
+
+  const onBoardLeave = () => {
+    if (hoverTimer.current) {
+      window.clearTimeout(hoverTimer.current)
+      hoverTimer.current = null
+    }
+  }
+
+  const openFinancials = (tk: string) => {
+    const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
+    if (!sym) return
+    skipPeek.current = true
+    if (hoverTimer.current) {
+      window.clearTimeout(hoverTimer.current)
+      hoverTimer.current = null
+    }
+    setPeekTk(null)
+    navigate(`/financials?ticker=${encodeURIComponent(sym)}`)
+  }
 
   /* construct */
   const [cands, setCands] = useState<Candidate[]>([])
@@ -141,6 +179,12 @@ export function BuilderPage() {
   const loadBoard = useCallback(async (id: string) => {
     const d = await api<Board>(`/api/v2/builder/lists/${encodeURIComponent(id)}`)
     setBoard(d)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
+    }
   }, [])
 
   const loadCandidates = useCallback(async (fresh = false) => {
@@ -979,7 +1023,14 @@ export function BuilderPage() {
                         </thead>
                         <tbody>
                           {boardRows.map((r) => (
-                            <tr key={r.ticker}>
+                            <tr
+                              key={r.ticker}
+                              className={split.rowClick}
+                              title={`${r.ticker} — hover for snapshot, click for Financials`}
+                              onMouseEnter={() => onBoardEnter(r.ticker)}
+                              onMouseLeave={onBoardLeave}
+                              onClick={() => openFinancials(r.ticker)}
+                            >
                               <td>
                                 <span className={split.tk}>{r.ticker}</span>
                                 {r.name && (
@@ -1013,6 +1064,13 @@ export function BuilderPage() {
             )}
           </div>
         </div>
+      )}
+      {peekTk && (
+        <StockPeek
+          key={peekTk}
+          ticker={peekTk}
+          onClose={() => setPeekTk(null)}
+        />
       )}
     </div>
   )

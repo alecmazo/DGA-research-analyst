@@ -233,6 +233,11 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
     window.setTimeout(() => focusAnalyzeTicker(tk, false), 50)
   }
 
+  const openFinancials = () => {
+    onClose()
+    navigate(`/financials?ticker=${encodeURIComponent(tk)}`)
+  }
+
   return (
     <div
       className={styles.overlay}
@@ -359,6 +364,9 @@ export function StockPeek({ ticker, onClose, alreadyOnWatchlist = false }: Props
               Open report{sr.rating ? ` · ${sr.rating}` : ''}
             </Button>
           )}
+          <Button size="sm" onClick={openFinancials}>
+            Financials
+          </Button>
           <Button size="sm" variant="primary" onClick={runAi}>
             Run analysis
           </Button>
