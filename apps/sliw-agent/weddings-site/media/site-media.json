@@ -1,8 +1,8 @@
 {
   "weddingVideo": {
-    "src": "",
-    "poster": "images/wedding-couple.jpeg",
+    "src": "media/wedding-first-dance.mp4",
+    "poster": "media/wedding-first-dance.jpg",
     "title": "Watch a first dance",
-    "caption": "A wedding dance Edyta built for a real couple. Drop your file in public/media/ or paste a YouTube / Vimeo URL here."
+    "caption": "Matthew & Shannen’s reception reel — a first dance Edyta built for a real couple."
   }
 }
