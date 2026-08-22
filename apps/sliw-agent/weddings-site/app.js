@@ -291,6 +291,7 @@
     function itemHtml(v) {
       const embed = toEmbedSrc(v.src);
       if (!embed) return "";
+      const label = v.label ? '<p class="video-label">' + esc(v.label) + "</p>" : "";
       const cap = v.caption ? '<p class="video-caption">' + esc(v.caption) + "</p>" : "";
       let body = "";
       if (embed.kind === "iframe") {
@@ -302,7 +303,7 @@
         const p = v.poster ? ' poster="' + esc(mediaSrc(v.poster)) + '"' : "";
         body = '<video src="' + esc(embed.src) + '"' + p + " controls playsinline preload=\"metadata\"></video>";
       }
-      return '<div class="video-item"><div class="video-frame">' + body + "</div>" + cap + "</div>";
+      return '<div class="video-item"><div class="video-frame">' + body + "</div>" + label + cap + "</div>";
     }
 
     fetch("media/site-media.json", { cache: "no-store" })

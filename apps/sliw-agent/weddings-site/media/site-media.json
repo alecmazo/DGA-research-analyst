@@ -4,11 +4,19 @@
   },
   "weddingVideos": [
     {
+      "label": "Wedding 1",
       "src": "media/wedding-first-dance.mp4",
       "poster": "media/wedding-first-dance.jpg",
       "caption": "Matthew & Shannen — reception reel"
     },
     {
+      "label": "Wedding 2",
+      "src": "media/wedding-first-dance-3.mp4",
+      "poster": "media/wedding-first-dance-3.jpg",
+      "caption": "First dance"
+    },
+    {
+      "label": "Wedding 3",
       "src": "media/wedding-first-dance-2.mp4",
       "poster": "media/wedding-first-dance-2.jpg",
       "caption": "Matthew & Shannen — first dance"

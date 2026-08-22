@@ -264,12 +264,19 @@ blockquote footer { font-size: 12px; color: var(--muted); font-weight: 600; }
 .video-feature[hidden] { display: none !important; }
 .video-pair {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
   justify-items: center;
   align-items: start;
 }
-.video-item { width: 100%; max-width: 300px; }
+.video-item { width: 100%; max-width: 280px; }
+.video-label {
+  font-family: var(--display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+  margin: 10px 0 0;
+}
 .video-frame {
   position: relative;
   border-radius: 18px; overflow: hidden;
@@ -277,8 +284,8 @@ blockquote footer { font-size: 12px; color: var(--muted); font-weight: 600; }
   box-shadow: 0 14px 40px rgba(18,15,22,0.12);
   aspect-ratio: 9/16;
   width: 100%;
-  max-width: 300px;
-  max-height: min(52vh, 480px);
+  max-width: 280px;
+  max-height: min(48vh, 440px);
   margin: 0 auto;
 }
 .video-frame video,
@@ -287,7 +294,7 @@ blockquote footer { font-size: 12px; color: var(--muted); font-weight: 600; }
   border: 0; object-fit: contain;
   background: #1a1423;
 }
-.video-caption { margin: 12px 0 0; color: var(--muted); font-size: 14px; }
+.video-caption { margin: 4px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
 .reviews-head { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
 .google-badge {
   display: inline-flex; align-items: center;
