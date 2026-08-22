@@ -329,6 +329,10 @@ blockquote footer { font-size: 12px; color: var(--muted); font-weight: 600; }
 }
 .foot a { color: var(--ink); font-weight: 600; }
 
+@media (max-width: 720px) {
+  .video-pair { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 860px) {
   .nav a:not(.nav-cta) { display: none; }
   .hero, .steps, .pkg-grid, .quotes, .book-grid, .row2, .review-grid {
