@@ -2409,14 +2409,12 @@ _CIK_SUB_TTL = 2700  # 45 min
 
 # Curated official + wire-service RSS only. No paid APIs, no LLM, no
 # retail aggregators (Yahoo/CNBC clickbait). Google News site: queries
-# are free public RSS that surface Reuters / AP headlines.
+# are free public RSS that surface AP headlines. Reuters is out.
 _MARKET_WIRE_FEEDS: list[tuple[str, str]] = [
     ("Fed", "https://www.federalreserve.gov/feeds/press_all.xml"),
     ("Treasury", "https://home.treasury.gov/rss/press-releases"),
     ("BLS", "https://www.bls.gov/feed/bls_latest.rss"),
     ("SEC", "https://www.sec.gov/news/pressreleases.rss"),
-    ("Reuters",
-     "https://news.google.com/rss/search?q=site:reuters.com+(economy+OR+markets+OR+%22federal+reserve%22+OR+inflation)+when:2d&hl=en-US&gl=US&ceid=US:en"),
     ("AP",
      "https://news.google.com/rss/search?q=site:apnews.com+(economy+OR+markets+OR+inflation+OR+fed)+when:2d&hl=en-US&gl=US&ceid=US:en"),
     ("BBC", "https://feeds.bbci.co.uk/news/business/rss.xml"),
@@ -2424,6 +2422,7 @@ _MARKET_WIRE_FEEDS: list[tuple[str, str]] = [
     ("NYT", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"),
     ("WSJ", "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain.xml"),
 ]
+_WIRE_BLOCK_REUTERS = re.compile(r"reuters\.com|\breuters\b", re.I)
 
 # Boost = more "desk-relevant"; block = pure noise / retail clickbait.
 _WIRE_BOOST = re.compile(
@@ -2548,6 +2547,9 @@ def _market_wire_score(item: dict, now_ts: float) -> float:
     if _WIRE_FILING_NOISE.search(title):
         return -1000.0
     url = (item.get("url") or "").lower()
+    pub = (item.get("publisher") or item.get("feed") or "")
+    if _WIRE_BLOCK_REUTERS.search(url) or _WIRE_BLOCK_REUTERS.search(pub):
+        return -1000.0
     # Company EDGAR archives belong on Fund Filings, not Market Wire.
     if "sec.gov/archives/edgar/data" in url or "/cgi-bin/browse-edgar" in url:
         return -1000.0
@@ -2568,7 +2570,7 @@ def _market_wire_score(item: dict, now_ts: float) -> float:
         score += 16.0
     elif feed in ("sec", "sec press"):
         score += 10.0
-    elif feed in ("reuters", "ap"):
+    elif feed in ("ap",):
         score += 12.0
     elif feed in ("bbc", "npr", "nyt", "wsj"):
         score += 6.0
@@ -2623,7 +2625,7 @@ def _build_market_wire(limit: int = 14) -> dict:
         "feeds_ok": len(_MARKET_WIRE_FEEDS) - len(errors),
         "feeds_total": len(_MARKET_WIRE_FEEDS),
         "errors": errors[:6],
-        "note": "Free official + wire RSS (Fed, Treasury, BLS, SEC, Reuters, AP, BBC, NPR, NYT, WSJ). No tokens.",
+        "note": "Free official + wire RSS (Fed, Treasury, BLS, SEC, AP, BBC, NPR, NYT, WSJ). No tokens.",
         "cached": False,
     }
     c["data"] = data
@@ -7429,7 +7431,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui487-20260821-fin-500-hover"
+WEB_BUILD_VERSION = "ui488-20260824-no-reuters"
 
 
 @app.get("/api/build")
