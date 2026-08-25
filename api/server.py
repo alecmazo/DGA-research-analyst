@@ -7431,7 +7431,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui492-20260825-report-print"
+WEB_BUILD_VERSION = "ui493-20260825-report-share-pdf"
 
 
 @app.get("/api/build")
@@ -8559,6 +8559,107 @@ def report_version_get(ticker: str, version_id: str, request: Request = None):
         "is_current": False,
     }
 
+
+class SavedReportEmailRequest(BaseModel):
+    """Email the saved-report window as a PDF attachment (GP/admin)."""
+    to: str
+    provider: str = "grok"
+    version_id: Optional[str] = None
+    html: str = ""
+    price: Optional[str] = None
+    day: Optional[str] = None
+    rating: Optional[str] = None
+    target: Optional[str] = None
+    upside: Optional[str] = None
+    when: Optional[str] = None
+    version_label: Optional[str] = None
+    note: Optional[str] = None
+    day_tone: Optional[str] = None
+    upside_tone: Optional[str] = None
+    delta_title: Optional[str] = None
+    delta_bits: Optional[str] = None
+    delta_note: Optional[str] = None
+    subject: Optional[str] = None
+
+
+@app.post("/api/report/{ticker}/email")
+def email_saved_report_pdf(ticker: str, body: SavedReportEmailRequest, request: Request):
+    """Render the on-screen saved report (header + metrics + markdown) to PDF
+    and email it as an attachment. Format matches the report window / print view,
+    not the Analyst letterhead."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    if _request_is_demo(request):
+        raise HTTPException(403, "Demo sessions cannot email reports")
+    to_addr = (body.to or "").strip()
+    if not _valid_email_addr(to_addr):
+        raise HTTPException(400, "A valid recipient email is required.")
+    html_body = (body.html or "").strip()
+    if not html_body:
+        raise HTTPException(400, "No report content to send.")
+    tk = (ticker or "").strip().upper()
+    if not tk or len(tk) > 12 or not re.fullmatch(r"[A-Z0-9.\-]+", tk):
+        raise HTTPException(422, "Invalid ticker")
+    provider = (body.provider or "grok").lower().strip()
+    if provider not in ("grok", "claude", "kimi", "deepseek"):
+        provider = "grok"
+    html_doc = _dga_saved_report_pdf_html(
+        ticker=tk,
+        provider=provider,
+        body_html=html_body,
+        price=body.price,
+        day=body.day,
+        rating=body.rating,
+        target=body.target,
+        upside=body.upside,
+        when=body.when,
+        version_label=body.version_label,
+        note=body.note,
+        day_tone=body.day_tone,
+        upside_tone=body.upside_tone,
+        delta_title=body.delta_title,
+        delta_bits=body.delta_bits,
+        delta_note=body.delta_note,
+    )
+    try:
+        pdf = _render_saved_report_pdf(html_doc)
+    except Exception as e:
+        raise HTTPException(500, f"PDF render failed: {e!s:.200}")
+    import html as _html
+    prov_u = provider.upper()
+    subject = (body.subject or f"DGA Capital — {tk} {prov_u} report").strip()
+    when_e = _html.escape((body.when or "").strip())
+    email_html = (
+        '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
+        'color:#0A1628;max-width:560px;">'
+        '<div style="background:#0A1628;padding:16px 18px;border-radius:8px 8px 0 0;">'
+        '<div style="color:#fff;font-weight:800;font-size:15px;letter-spacing:0.6px;">DGA CAPITAL</div>'
+        f'<div style="color:#5BB8D4;font-size:11px;font-weight:700;letter-spacing:0.8px;'
+        f'text-transform:uppercase;margin-top:3px;">{_html.escape(tk)} · {prov_u} report</div>'
+        '</div>'
+        '<div style="border:1px solid #e2e8f0;border-top:3px solid #5BB8D4;'
+        'padding:16px 18px;border-radius:0 0 8px 8px;">'
+        f'<p style="margin:0 0 12px;font-size:14px;line-height:1.5;">'
+        f'Please find the attached <strong>{_html.escape(tk)}</strong> research report '
+        f'({_html.escape(prov_u)}) as a PDF.</p>'
+        + (f'<p style="margin:0 0 12px;font-size:12px;color:#64748b;">{when_e}</p>' if when_e else '')
+        + '<p style="color:#94a3b8;font-size:11px;margin:0;line-height:1.45;">'
+        'DGA Capital · Confidential — for the intended recipient only. '
+        'Not investment advice.</p></div></div>'
+    )
+    fn = f"DGA_{tk}_{prov_u}_Report.pdf"
+    res = _send_email_with_pdf_attachment(to_addr, subject, email_html, pdf, fn)
+    if not res.get("ok"):
+        raise HTTPException(502, res.get("error", "Email send failed"))
+    _audit(
+        action="saved_report_emailed",
+        user=str(claims.get("email") or "gp"),
+        ip="",
+        ok=True,
+        detail=f"{tk} {provider} -> {_mask_email(to_addr)}",
+    )
+    return {"ok": True, "sent_to": to_addr, "transport": res.get("transport")}
 
 
 @app.get("/api/download/{ticker}/docx")
@@ -27973,6 +28074,295 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
         f'{verify}'
         f'</body></html>'
     )
+
+
+def _sanitize_saved_report_html(html: str) -> str:
+    """Drop script/iframe/handlers from client-rendered markdown HTML."""
+    s = html or ""
+    if len(s) > 1_500_000:
+        raise HTTPException(400, "Report too large to email as PDF.")
+    s = re.sub(
+        r"<(script|iframe|object|embed|link|meta|form|base)(\b[^>]*)?>[\s\S]*?</\1>",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r"<(script|iframe|object|embed|link|meta|form|base)\b[^>]*/?>",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(r"\son\w+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", "", s, flags=re.IGNORECASE)
+    s = re.sub(
+        r"(href|src)\s*=\s*(['\"])\s*javascript:[^'\"]*\2",
+        r"\1=\2#\2",
+        s,
+        flags=re.IGNORECASE,
+    )
+    return s
+
+
+def _pdf_tone_color(tone: str | None) -> str:
+    t = (tone or "").strip().lower()
+    if t == "pos":
+        return "#047857"
+    if t == "neg":
+        return "#b91c1c"
+    return "#0a1628"
+
+
+_PROVIDER_BADGE_BG = {
+    "grok": "#0a1628",
+    "claude": "#d97706",
+    "kimi": "#166534",
+    "deepseek": "#1e3a8a",
+}
+
+
+def _dga_saved_report_pdf_html(
+    ticker: str,
+    provider: str,
+    body_html: str,
+    *,
+    price: str | None = None,
+    day: str | None = None,
+    rating: str | None = None,
+    target: str | None = None,
+    upside: str | None = None,
+    when: str | None = None,
+    version_label: str | None = None,
+    note: str | None = None,
+    day_tone: str | None = None,
+    upside_tone: str | None = None,
+    delta_title: str | None = None,
+    delta_bits: str | None = None,
+    delta_note: str | None = None,
+) -> str:
+    """PDF HTML that mirrors the saved-report window (header, metrics, markdown).
+
+    xhtml2pdf-safe: tables for layout, Inter + DejaVu faces, same markdown
+    classes the window uses (md-h1 / md-table / …).
+    """
+    import html as _html
+    tk_e = _html.escape((ticker or "").strip().upper() or "—")
+    prov = (provider or "grok").lower().strip()
+    if prov not in _PROVIDER_BADGE_BG:
+        prov = "grok"
+    prov_e = _html.escape(prov.upper())
+    prov_bg = _PROVIDER_BADGE_BG[prov]
+    when_e = _html.escape((when or "").strip())
+    ver_e = _html.escape((version_label or "").strip())
+    note_e = _html.escape((note or "").strip())
+    dash = "—"
+
+    def _cell(label: str, value: str | None, color: str = "#0a1628") -> str:
+        v = _html.escape((value or "").strip() or dash)
+        return (
+            f'<td class="mcell">'
+            f'<div class="mlab">{_html.escape(label)}</div>'
+            f'<div class="mval" style="color:{color};">{v}</div>'
+            f"</td>"
+        )
+
+    metrics = (
+        '<table class="metrics"><tr>'
+        + _cell("Price", price)
+        + _cell("Day", day, _pdf_tone_color(day_tone))
+        + _cell("Rating", rating)
+        + _cell("Target", target)
+        + _cell("Upside", upside, _pdf_tone_color(upside_tone))
+        + "</tr></table>"
+    )
+
+    ver_html = (
+        f'<span class="ver">{ver_e}</span>' if ver_e else ""
+    )
+    when_html = (
+        f'<span class="when">{when_e}</span>' if when_e else ""
+    )
+    note_html = (
+        f'<div class="note">{note_e}</div>' if note_e else ""
+    )
+    head = (
+        '<table class="head"><tr><td>'
+        f'<span class="tk">{tk_e}</span>'
+        f'<span class="prov" style="background-color:{prov_bg};">{prov_e}</span>'
+        f"{ver_html}{when_html}{note_html}"
+        "</td></tr></table>"
+    )
+
+    d_title = (delta_title or "").strip()
+    d_bits = (delta_bits or "").strip()
+    d_note = (delta_note or "").strip()
+    if d_title or d_bits:
+        delta_html = (
+            '<table class="delta"><tr><td>'
+            + (f'<div class="dtitle">{_html.escape(d_title)}</div>' if d_title else "")
+            + (f'<div class="dbits">{_html.escape(d_bits)}</div>' if d_bits else "")
+            + (f'<div class="dnote">{_html.escape(d_note)}</div>' if d_note else "")
+            + "</td></tr></table>"
+        )
+    else:
+        delta_html = ""
+
+    css = """
+      @font-face { font-family: "InterPdf"; src: url(Inter-Regular.ttf); }
+      @font-face { font-family: "InterPdf"; src: url(Inter-Bold.ttf); font-weight: bold; }
+      @font-face { font-family: "InterPdf"; src: url(Inter-Italic.ttf); font-style: italic; }
+      @font-face { font-family: "InterPdf"; src: url(Inter-BoldItalic.ttf); font-weight: bold; font-style: italic; }
+      @font-face { font-family: "DejaVuSans"; src: url(DejaVuSans.ttf); }
+      @font-face { font-family: "DejaVuSans"; src: url(DejaVuSans-Bold.ttf); font-weight: bold; }
+      @page {
+        size: letter;
+        margin: 0.55in 0.6in 0.75in 0.6in;
+        @frame footer_frame {
+          -pdf-frame-content: footerContent;
+          bottom: 0.32in; margin-left: 0.6in; margin-right: 0.6in; height: 0.38in;
+        }
+      }
+      body {
+        font-family: "InterPdf", "DejaVuSans";
+        font-size: 10pt;
+        line-height: 1.6;
+        color: #334155;
+      }
+      table.head, table.metrics, table.delta {
+        width: 100%; border: none; margin: 0;
+      }
+      table.head td {
+        border: none; border-bottom: 0.7pt solid #e2e8f0;
+        padding: 0 0 8pt 0; vertical-align: middle;
+      }
+      .tk {
+        font-size: 12pt; font-weight: bold; color: #0a1628;
+        letter-spacing: 0.4pt;
+      }
+      .prov {
+        color: #ffffff; font-size: 6.5pt; font-weight: bold;
+        letter-spacing: 0.5pt; padding: 1.5pt 6pt;
+      }
+      .ver {
+        font-size: 7pt; font-weight: bold; color: #0369a1;
+        background-color: #e0f2fe; padding: 1pt 6pt;
+      }
+      .when { font-size: 8pt; color: #64748b; }
+      .note {
+        font-size: 8pt; color: #92400e; background-color: #fffbeb;
+        padding: 2pt 6pt; margin-top: 4pt;
+      }
+      table.metrics td.mcell {
+        border: none; border-bottom: 0.7pt solid #e2e8f0;
+        background-color: #f8fafc; width: 20%;
+        padding: 7pt 4pt 8pt 0; vertical-align: top;
+      }
+      .mlab {
+        font-size: 6.5pt; font-weight: bold; letter-spacing: 0.5pt;
+        text-transform: uppercase; color: #64748b; margin-bottom: 1.5pt;
+      }
+      .mval { font-size: 10.5pt; font-weight: bold; color: #0a1628; }
+      table.delta td {
+        border: none; border-bottom: 0.7pt solid #bae6fd;
+        background-color: #e0f2fe; padding: 8pt 10pt;
+      }
+      .dtitle { font-size: 8.5pt; font-weight: bold; color: #0c4a6e; margin-bottom: 2pt; }
+      .dbits { font-size: 9pt; font-weight: bold; color: #0f172a; line-height: 1.4; }
+      .dnote { font-size: 7.5pt; color: #475569; margin-top: 4pt; line-height: 1.4; }
+      .md-rendered { color: #334155; margin-top: 10pt; }
+      .md-rendered .md-h { font-weight: bold; color: #0a1628; page-break-after: avoid; }
+      .md-rendered .md-h1 {
+        font-size: 15pt; margin-top: 6pt; margin-bottom: 7pt;
+        color: #0a1628; padding-bottom: 4.5pt;
+        border-bottom: 1.9pt solid #5bb8d4;
+      }
+      .md-rendered .md-h2 {
+        font-size: 12pt; margin-top: 13pt; margin-bottom: 5pt;
+        color: #0a1628; padding-bottom: 3pt;
+        border-bottom: 0.7pt solid #e2e8f0;
+      }
+      .md-rendered .md-h3, .md-rendered .md-h4 {
+        font-size: 10.5pt; color: #1e3a5f; margin-top: 10pt; margin-bottom: 4pt;
+      }
+      .md-rendered p { margin-top: 0; margin-bottom: 7.5pt; }
+      .md-rendered .md-li {
+        padding: 1.5pt 0 1.5pt 3pt; line-height: 1.55; color: #334155;
+      }
+      .md-rendered strong { font-weight: bold; color: #0a1628; }
+      .md-rendered em { font-style: italic; color: #334155; }
+      .md-rendered code {
+        font-family: Courier; background-color: #eef2f7; font-size: 8.5pt;
+        color: #0f2744;
+      }
+      .md-rendered .md-pre, .md-rendered pre.md-pre {
+        background-color: #0a1628; color: #e8eef7;
+        font-size: 8pt; line-height: 1.45;
+        padding: 8pt 9pt; margin: 8pt 0 10pt 0;
+      }
+      .md-rendered .md-pre code, .md-rendered pre.md-pre code {
+        background-color: transparent; color: #e8eef7; font-size: 8pt;
+      }
+      .md-rendered hr.md-hr {
+        border: 0; border-top: 0.7pt solid #e2e8f0;
+        margin-top: 11pt; margin-bottom: 11pt;
+      }
+      .md-rendered a { color: #0a6b8a; text-decoration: none; }
+      .md-rendered .md-bq, .md-rendered blockquote.md-bq {
+        margin: 6pt 0; padding: 6pt 9pt;
+        border-left: 2.2pt solid #5bb8d4;
+        background-color: #f0f9fc; color: #334155;
+      }
+      .md-rendered table.md-table {
+        width: 100%; margin-top: 9pt; margin-bottom: 12pt;
+        font-size: 8.5pt; line-height: 1.35;
+        border: 0.6pt solid #cbd5e1;
+        table-layout: fixed;
+        -pdf-keep-with-next: false;
+      }
+      .md-rendered table.md-table th {
+        background-color: #0a1628; color: #ffffff;
+        text-align: left; padding: 5pt 5.5pt; font-weight: bold;
+        font-size: 7pt; letter-spacing: 0.25pt; text-transform: uppercase;
+      }
+      .md-rendered table.md-table td {
+        padding: 4pt 5.5pt; border-bottom: 0.45pt solid #e2e8f0;
+        color: #0a1628; vertical-align: top;
+      }
+      #footerContent {
+        font-size: 7pt; color: #94a3b8; text-align: center;
+        border-top: 0.6pt solid #e2e8f0; padding-top: 4pt;
+      }
+      #footerContent .fnavy { color: #0A1628; font-weight: bold; }
+      #footerContent .fcyan { color: #5BB8D4; font-weight: bold; }
+    """
+    footer = (
+        '<div id="footerContent">'
+        '<span class="fnavy">DGA Capital</span>'
+        ' &nbsp;&middot;&nbsp; '
+        '<span class="fcyan">Confidential</span>'
+        ' — for the intended recipient only &nbsp;&middot;&nbsp; '
+        'Not investment advice &nbsp;&middot;&nbsp; '
+        'Page <pdf:pagenumber> of <pdf:pagecount>'
+        '</div>'
+    )
+    body = _fix_md_table_widths(_sanitize_saved_report_html(body_html or ""))
+    return (
+        f'<!doctype html><html><head><meta charset="utf-8">'
+        f'<style>{css}</style></head><body>'
+        f'{footer}{head}{metrics}{delta_html}'
+        f'<div class="md-rendered">{body}</div>'
+        f'</body></html>'
+    )
+
+
+def _render_saved_report_pdf(html_doc: str) -> bytes:
+    """HTML → PDF. Prefer xhtml2pdf (Railway-safe); fall back to WeasyPrint."""
+    try:
+        return _render_research_pdf(html_doc)
+    except Exception as e1:
+        try:
+            return _render_report_pdf(html_doc)
+        except Exception as e2:
+            raise RuntimeError(f"xhtml2pdf: {e1!s:.160}; weasyprint: {e2!s:.160}")
 
 
 _FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts")

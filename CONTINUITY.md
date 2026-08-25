@@ -89,7 +89,9 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Desk watchlist peek card** | **`ui473-20260818-desk-watchlist-peek`** | Click a Desk ticker → same stock-info card as mobile |
 | **Snapshot fact sheet** | **`ui474-20260818-snapshot-factsheet`** | Watchlist peek: range bar + labeled rows, no stat boxes |
 | **Builder boards first** | **`ui475-20260819-builder-boards-first`** | Track boards is the default tab; Construct basket is second |
-| **Next deploy after this** | **`ui476-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Report print** | **`ui492-20260825-report-print`** | Print on saved report window; print CSS matches on-screen |
+| **Report share PDF** | **`ui493-20260825-report-share-pdf`** | Share emails the saved report as a PDF matching that window |
+| **Next deploy after this** | **`ui494-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

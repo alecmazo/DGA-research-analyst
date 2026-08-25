@@ -9,6 +9,7 @@ import {
   type ReportHistory,
   type ReportHistoryVersion,
 } from '@/lib/api'
+import { getCachedUser } from '@/lib/auth'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { renderMd, reportMarkdown } from '@/lib/md'
 import styles from './ReportPage.module.css'
@@ -58,6 +59,7 @@ export function ReportPage() {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [histBusy, setHistBusy] = useState(false)
+  const [sharing, setSharing] = useState(false)
 
   useEffect(() => {
     document.title = ticker
@@ -179,6 +181,57 @@ export function ReportPage() {
       ? data?.generated_at || data?.report_date
       : viewSnap?.generated_at || viewSnap?.report_date
 
+  const sharePdf = async () => {
+    if (!html || !ticker) return
+    const def = getCachedUser()?.email || ''
+    const to = window.prompt('Email this report PDF to:', def)
+    if (!to) return
+    setSharing(true)
+    try {
+      const d = await api<{ ok?: boolean; detail?: string }>(
+        `/api/report/${encodeURIComponent(ticker)}/email`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            to,
+            provider: shownProvider,
+            version_id: viewId === 'current' ? undefined : String(viewId),
+            html,
+            price: fmtPx(quote?.price),
+            day: fmtPct(pct),
+            rating: displayRating || '—',
+            target: fmtTarget(displayTarget),
+            upside: fmtPct(displayUpside),
+            when:
+              (viewId === 'current' ? '' : 'prior · ') +
+              (displayWhen ? relativeTime(displayWhen) : ''),
+            version_label: vc > 1 ? `v${vc}` : '',
+            note: data?.note || '',
+            day_tone: pctClass(pct) || '',
+            upside_tone: pctClass(displayUpside) || '',
+            delta_title: showDelta
+              ? `Δ since prior Analyze ${vc > 1 ? `(v${vc})` : ''}`
+              : '',
+            delta_bits: showDelta
+              ? bits.length
+                ? bits.join(' · ')
+                : 'Thesis re-run archived (headline numbers similar)'
+              : '',
+            delta_note: showDelta
+              ? 'Each Analyze is a timestamped snapshot. Priors are kept. New reports include a Thesis Continuity section when a prior exists.'
+              : '',
+          }),
+        },
+      )
+      if (!d.ok) throw new Error(d.detail || 'Send failed')
+      alert('Sent to ' + to)
+    } catch (e) {
+      alert('Email failed: ' + (e instanceof Error ? e.message : e))
+    } finally {
+      setSharing(false)
+    }
+  }
+
   return (
     <div className={styles.page}>
       <header className={styles.head}>
@@ -219,6 +272,15 @@ export function ReportPage() {
             title="Print this window as you see it"
           >
             Print
+          </button>
+          <button
+            type="button"
+            className={styles.share}
+            onClick={() => void sharePdf()}
+            disabled={loading || sharing || !html}
+            title="Email this report as a PDF"
+          >
+            {sharing ? 'Sending…' : 'Share'}
           </button>
           <button type="button" className={styles.close} onClick={() => window.close()}>
             Close
