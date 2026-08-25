@@ -1,14 +1,35 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode, type TouchEvent } from 'react'
 import { api } from '@/lib/api'
 import type { PriceHistory } from './types'
 import { PRICE_RANGES } from './types'
 import styles from '../FinancialsPage.module.css'
+
+const W = 920
+const H = 280
+const PAD_L = 8
+const PAD_R = 64
+const PAD_T = 14
+const PAD_B = 26
+
+function fmtPx(v: number) {
+  return v.toLocaleString('en-US', {
+    minimumFractionDigits: v < 1000 ? 2 : 0,
+    maximumFractionDigits: v < 1000 ? 2 : 0,
+  })
+}
+
+function fmtDate(t?: string) {
+  const s = String(t || '')
+  if (s.length >= 16 && s.includes('T')) return s.slice(0, 16).replace('T', ' ')
+  return s.slice(0, 10)
+}
 
 export function PriceChart({ ticker }: { ticker: string }) {
   const [range, setRange] = useState('YTD')
   const [data, setData] = useState<PriceHistory | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [hover, setHover] = useState<number | null>(null)
 
   useEffect(() => {
     const tk = ticker.trim().toUpperCase()
@@ -16,6 +37,7 @@ export function PriceChart({ ticker }: { ticker: string }) {
     let cancelled = false
     setLoading(true)
     setErr(null)
+    setHover(null)
     void api<PriceHistory>(
       `/api/financials/${encodeURIComponent(tk)}/price-history?range=${encodeURIComponent(range)}`,
     )
@@ -46,14 +68,8 @@ export function PriceChart({ ticker }: { ticker: string }) {
     [data],
   )
 
-  const chart = useMemo(() => {
+  const geo = useMemo(() => {
     if (pts.length < 2) return null
-    const W = 920
-    const H = 280
-    const padL = 8
-    const padR = 64
-    const padT = 14
-    const padB = 26
     const n = pts.length
     const ys = pts.map((p) => p.c)
     let lo = Math.min(...ys)
@@ -61,8 +77,8 @@ export function PriceChart({ ticker }: { ticker: string }) {
     const pad = (hi - lo) * 0.08 || hi * 0.02 || 1
     lo -= pad
     hi += pad
-    const xOf = (i: number) => padL + (i / (n - 1)) * (W - padL - padR)
-    const yOf = (v: number) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB)
+    const xOf = (i: number) => PAD_L + (i / (n - 1)) * (W - PAD_L - PAD_R)
+    const yOf = (v: number) => PAD_T + (1 - (v - lo) / (hi - lo)) * (H - PAD_T - PAD_B)
     const up = ys[n - 1]! >= ys[0]!
     const lineCol = up ? '#16a34a' : '#dc2626'
     const areaCol = up ? 'rgba(22,163,74,0.13)' : 'rgba(220,38,38,0.12)'
@@ -74,9 +90,8 @@ export function PriceChart({ ticker }: { ticker: string }) {
       dLine += `${i ? 'L' : 'M'}${x} ${y} `
       dArea += `${i ? 'L' : 'M'}${x} ${y} `
     })
-    dArea += `L${xOf(n - 1).toFixed(1)} ${H - padB} L${xOf(0).toFixed(1)} ${H - padB} Z`
+    dArea += `L${xOf(n - 1).toFixed(1)} ${H - PAD_B} L${xOf(0).toFixed(1)} ${H - PAD_B} Z`
     const last = ys[n - 1]!
-    const lpY = yOf(last)
     const grid: ReactNode[] = []
     for (let k = 0; k <= 4; k++) {
       const v = lo + ((hi - lo) * k) / 4
@@ -84,8 +99,8 @@ export function PriceChart({ ticker }: { ticker: string }) {
       grid.push(
         <g key={k}>
           <line
-            x1={padL}
-            x2={W - padR}
+            x1={PAD_L}
+            x2={W - PAD_R}
             y1={y}
             y2={y}
             stroke="var(--border-subtle,#e2e8f0)"
@@ -93,7 +108,7 @@ export function PriceChart({ ticker }: { ticker: string }) {
             strokeDasharray="2 4"
           />
           <text
-            x={W - padR + 6}
+            x={W - PAD_R + 6}
             y={y + 4}
             fontSize={12}
             fill="var(--text-tertiary,#94a3b8)"
@@ -103,78 +118,51 @@ export function PriceChart({ ticker }: { ticker: string }) {
         </g>,
       )
     }
-    return (
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className={styles.priceSvg}
-        preserveAspectRatio="none"
-      >
-        {grid}
-        <line
-          x1={padL}
-          x2={W - padR}
-          y1={yOf(Math.max(...ys))}
-          y2={yOf(Math.max(...ys))}
-          stroke="#16a34a"
-          strokeWidth={1}
-          strokeDasharray="3 3"
-          opacity={0.5}
-        />
-        <line
-          x1={padL}
-          x2={W - padR}
-          y1={yOf(Math.min(...ys))}
-          y2={yOf(Math.min(...ys))}
-          stroke="#dc2626"
-          strokeWidth={1}
-          strokeDasharray="3 3"
-          opacity={0.5}
-        />
-        <path d={dArea} fill={areaCol} stroke="none" />
-        <path
-          d={dLine}
-          fill="none"
-          stroke={lineCol}
-          strokeWidth={1.8}
-          strokeLinejoin="round"
-        />
-        {[0, Math.floor((n - 1) / 2), n - 1].map((i) => {
-          const x = xOf(i)
-          const anch = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'
-          return (
-            <text
-              key={i}
-              x={x}
-              y={H - 6}
-              fontSize={12}
-              fill="var(--text-tertiary,#94a3b8)"
-              textAnchor={anch}
-            >
-              {String(pts[i]!.t || '').slice(0, 10)}
-            </text>
-          )
-        })}
-        <rect
-          x={W - padR + 2}
-          y={lpY - 11}
-          width={padR - 4}
-          height={22}
-          rx={4}
-          fill={lineCol}
-        />
+    const xLabels = [0, Math.floor((n - 1) / 2), n - 1].map((i) => {
+      const x = xOf(i)
+      const anch = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'
+      return (
         <text
-          x={W - padR / 2}
-          y={lpY + 4}
+          key={i}
+          x={x}
+          y={H - 6}
           fontSize={12}
-          fontWeight={700}
-          fill="#fff"
-          textAnchor="middle"
+          fill="var(--text-tertiary,#94a3b8)"
+          textAnchor={anch}
         >
-          {last.toFixed(last < 1000 ? 1 : 0)}
+          {String(pts[i]!.t || '').slice(0, 10)}
         </text>
-      </svg>
-    )
+      )
+    })
+    return { n, xOf, yOf, lineCol, areaCol, dLine, dArea, last, grid, xLabels, ys }
   }, [pts])
+
+  const pickIndex = (clientX: number, svg: SVGSVGElement) => {
+    if (!geo) return
+    const rect = svg.getBoundingClientRect()
+    if (!rect.width) return
+    const vx = ((clientX - rect.left) / rect.width) * W
+    let best = 0
+    let bd = Infinity
+    for (let i = 0; i < geo.n; i++) {
+      const dd = Math.abs(geo.xOf(i) - vx)
+      if (dd < bd) {
+        bd = dd
+        best = i
+      }
+    }
+    setHover(best)
+  }
+
+  const onMove = (e: MouseEvent<SVGSVGElement>) => pickIndex(e.clientX, e.currentTarget)
+  const onTouch = (e: TouchEvent<SVGSVGElement>) => {
+    const t = e.touches[0]
+    if (t) pickIndex(t.clientX, e.currentTarget)
+  }
+
+  const hi = hover != null && pts[hover] ? pts[hover] : null
+  const hiX = hover != null && geo ? geo.xOf(hover) : 0
+  const hiY = hi && geo ? geo.yOf(hi.c) : 0
 
   const stats = data?.stats
   const pf = (v: number | null | undefined) =>
@@ -214,9 +202,9 @@ export function PriceChart({ ticker }: { ticker: string }) {
               {pf(stats.below_high_pct)}
             </strong>
           </span>
-          {stats.last != null && (
+          {(hi?.c != null || stats.last != null) && (
             <span className={styles.priceLast}>
-              ${stats.last.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+              ${fmtPx(hi?.c ?? (stats.last as number))}
             </span>
           )}
         </div>
@@ -225,8 +213,102 @@ export function PriceChart({ ticker }: { ticker: string }) {
         <div className={styles.priceEmpty}>Loading {ticker} {range}…</div>
       )}
       {err && !loading && <div className={styles.priceEmpty}>{err}</div>}
-      {!loading && !err && chart}
-      {!loading && !err && !chart && (
+      {!loading && !err && geo && (
+        <div className={styles.priceSvgWrap}>
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            className={styles.priceSvg}
+            preserveAspectRatio="none"
+            onMouseMove={onMove}
+            onMouseLeave={() => setHover(null)}
+            onTouchMove={onTouch}
+            onTouchEnd={() => setHover(null)}
+          >
+            {geo.grid}
+            <line
+              x1={PAD_L}
+              x2={W - PAD_R}
+              y1={geo.yOf(Math.max(...geo.ys))}
+              y2={geo.yOf(Math.max(...geo.ys))}
+              stroke="#16a34a"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              opacity={0.5}
+            />
+            <line
+              x1={PAD_L}
+              x2={W - PAD_R}
+              y1={geo.yOf(Math.min(...geo.ys))}
+              y2={geo.yOf(Math.min(...geo.ys))}
+              stroke="#dc2626"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              opacity={0.5}
+            />
+            <path d={geo.dArea} fill={geo.areaCol} stroke="none" />
+            <path
+              d={geo.dLine}
+              fill="none"
+              stroke={geo.lineCol}
+              strokeWidth={1.8}
+              strokeLinejoin="round"
+            />
+            {geo.xLabels}
+            <rect
+              x={W - PAD_R + 2}
+              y={geo.yOf(geo.last) - 11}
+              width={PAD_R - 4}
+              height={22}
+              rx={4}
+              fill={geo.lineCol}
+            />
+            <text
+              x={W - PAD_R / 2}
+              y={geo.yOf(geo.last) + 4}
+              fontSize={12}
+              fontWeight={700}
+              fill="#fff"
+              textAnchor="middle"
+            >
+              {geo.last.toFixed(geo.last < 1000 ? 1 : 0)}
+            </text>
+            {hi && (
+              <>
+                <line
+                  x1={hiX}
+                  x2={hiX}
+                  y1={PAD_T}
+                  y2={H - PAD_B}
+                  stroke="var(--text-secondary,#64748b)"
+                  strokeWidth={1}
+                  opacity={0.55}
+                />
+                <circle
+                  cx={hiX}
+                  cy={hiY}
+                  r={4}
+                  fill={geo.lineCol}
+                  stroke="#fff"
+                  strokeWidth={1.5}
+                />
+              </>
+            )}
+          </svg>
+          {hi && (
+            <div
+              className={styles.priceTip}
+              style={{
+                left: `${(hiX / W) * 100}%`,
+                top: `${(hiY / H) * 100}%`,
+              }}
+            >
+              <span className={styles.priceTipDate}>{fmtDate(hi.t)}</span>
+              <strong>${fmtPx(hi.c)}</strong>
+            </div>
+          )}
+        </div>
+      )}
+      {!loading && !err && !geo && (
         <div className={styles.priceEmpty}>Not enough data to plot.</div>
       )}
     </div>
