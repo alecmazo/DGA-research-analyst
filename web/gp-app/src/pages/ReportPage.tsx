@@ -200,7 +200,7 @@ export function ReportPage() {
           )}
           {data?.note && <span className={styles.note}>{data.note}</span>}
         </div>
-        <div className={styles.actions}>
+        <div className={`${styles.actions} ${styles.noPrint}`}>
           {data?.gamma_url && (
             <a
               href={data.gamma_url}
@@ -211,6 +211,15 @@ export function ReportPage() {
               GAMMA
             </a>
           )}
+          <button
+            type="button"
+            className={styles.print}
+            onClick={() => window.print()}
+            disabled={loading || !html}
+            title="Print this window as you see it"
+          >
+            Print
+          </button>
           <button type="button" className={styles.close} onClick={() => window.close()}>
             Close
           </button>
@@ -257,7 +266,7 @@ export function ReportPage() {
       )}
 
       {showTimeline && (
-        <div className={styles.timeline}>
+        <div className={`${styles.timeline} ${styles.noPrint}`}>
           <div className={styles.timelineLabel}>
             Thesis timeline · {(history?.current ? 1 : 0) + versions.length} snapshot
             {(history?.current ? 1 : 0) + versions.length === 1 ? '' : 's'}
@@ -308,7 +317,9 @@ export function ReportPage() {
           </div>
         )}
       </div>
-      <SupportFab />
+      <div className={styles.noPrint}>
+        <SupportFab />
+      </div>
     </div>
   )
 }
