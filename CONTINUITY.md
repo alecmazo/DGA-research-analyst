@@ -91,7 +91,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Builder boards first** | **`ui475-20260819-builder-boards-first`** | Track boards is the default tab; Construct basket is second |
 | **Report print** | **`ui492-20260825-report-print`** | Print on saved report window; print CSS matches on-screen |
 | **Report share PDF** | **`ui493-20260825-report-share-pdf`** | Share emails the saved report as a PDF matching that window |
-| **Next deploy after this** | **`ui494-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Financials hover stays on screen** | **`ui494-20260825-fin-chart-tip-flip`** | Chart/price tips flip left so right-side bars are fully readable |
+| **Next deploy after this** | **`ui495-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

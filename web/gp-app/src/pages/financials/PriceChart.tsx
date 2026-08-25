@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type MouseEvent, type ReactNode, type Tou
 import { api } from '@/lib/api'
 import type { PriceHistory } from './types'
 import { PRICE_RANGES } from './types'
+import { HoverTip } from './HoverTip'
 import styles from '../FinancialsPage.module.css'
 
 const W = 920
@@ -30,6 +31,7 @@ export function PriceChart({ ticker }: { ticker: string }) {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [hover, setHover] = useState<number | null>(null)
+  const [ptr, setPtr] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     const tk = ticker.trim().toUpperCase()
@@ -38,6 +40,7 @@ export function PriceChart({ ticker }: { ticker: string }) {
     setLoading(true)
     setErr(null)
     setHover(null)
+    setPtr(null)
     void api<PriceHistory>(
       `/api/financials/${encodeURIComponent(tk)}/price-history?range=${encodeURIComponent(range)}`,
     )
@@ -137,7 +140,7 @@ export function PriceChart({ ticker }: { ticker: string }) {
     return { n, xOf, yOf, lineCol, areaCol, dLine, dArea, last, grid, xLabels, ys }
   }, [pts])
 
-  const pickIndex = (clientX: number, svg: SVGSVGElement) => {
+  const pickIndex = (clientX: number, clientY: number, svg: SVGSVGElement) => {
     if (!geo) return
     const rect = svg.getBoundingClientRect()
     if (!rect.width) return
@@ -152,12 +155,14 @@ export function PriceChart({ ticker }: { ticker: string }) {
       }
     }
     setHover(best)
+    setPtr({ x: clientX, y: clientY })
   }
 
-  const onMove = (e: MouseEvent<SVGSVGElement>) => pickIndex(e.clientX, e.currentTarget)
+  const onMove = (e: MouseEvent<SVGSVGElement>) =>
+    pickIndex(e.clientX, e.clientY, e.currentTarget)
   const onTouch = (e: TouchEvent<SVGSVGElement>) => {
     const t = e.touches[0]
-    if (t) pickIndex(t.clientX, e.currentTarget)
+    if (t) pickIndex(t.clientX, t.clientY, e.currentTarget)
   }
 
   const hi = hover != null && pts[hover] ? pts[hover] : null
@@ -220,9 +225,15 @@ export function PriceChart({ ticker }: { ticker: string }) {
             className={styles.priceSvg}
             preserveAspectRatio="none"
             onMouseMove={onMove}
-            onMouseLeave={() => setHover(null)}
+            onMouseLeave={() => {
+              setHover(null)
+              setPtr(null)
+            }}
             onTouchMove={onTouch}
-            onTouchEnd={() => setHover(null)}
+            onTouchEnd={() => {
+              setHover(null)
+              setPtr(null)
+            }}
           >
             {geo.grid}
             <line
@@ -294,17 +305,11 @@ export function PriceChart({ ticker }: { ticker: string }) {
               </>
             )}
           </svg>
-          {hi && (
-            <div
-              className={styles.priceTip}
-              style={{
-                left: `${(hiX / W) * 100}%`,
-                top: `${(hiY / H) * 100}%`,
-              }}
-            >
+          {hi && ptr && (
+            <HoverTip x={ptr.x} y={ptr.y} className={styles.priceTip}>
               <span className={styles.priceTipDate}>{fmtDate(hi.t)}</span>
               <strong>${fmtPx(hi.c)}</strong>
-            </div>
+            </HoverTip>
           )}
         </div>
       )}

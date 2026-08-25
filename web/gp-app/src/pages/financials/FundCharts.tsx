@@ -1,6 +1,7 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import type { DashSeriesPoint } from './types'
 import { gfCount, gfMoney } from './format'
+import { HoverTip } from './HoverTip'
 import styles from '../FinancialsPage.module.css'
 
 const COLORS = {
@@ -73,9 +74,13 @@ function rangeOf(
 }
 
 function ChartCard({ cfg }: { cfg: ChartCfg }) {
-  const [tip, setTip] = useState<{ html: string; x: number; y: number } | null>(
+  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(
     null,
   )
+  const showTip = useCallback((text: string, e: { clientX: number; clientY: number }) => {
+    setTip({ text, x: e.clientX, y: e.clientY })
+  }, [])
+  const hideTip = useCallback(() => setTip(null), [])
   const W = 560
   const H = 268
   const padL = 72
@@ -202,18 +207,13 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
             fill={col}
             rx={1}
             style={{ cursor: 'pointer' }}
-            onMouseEnter={(e) => {
-              const rect = (e.target as SVGElement)
-                .closest('svg')
-                ?.getBoundingClientRect()
-              if (!rect) return
-              setTip({
-                html: `${cfg.labels[i]} · ${nm}: ${fmtVal(v, a)}`,
-                x: e.clientX - rect.left + 12,
-                y: e.clientY - rect.top - 8,
-              })
-            }}
-            onMouseLeave={() => setTip(null)}
+            onMouseEnter={(e) =>
+              showTip(`${cfg.labels[i]} · ${nm}: ${fmtVal(v, a)}`, e)
+            }
+            onMouseMove={(e) =>
+              showTip(`${cfg.labels[i]} · ${nm}: ${fmtVal(v, a)}`, e)
+            }
+            onMouseLeave={hideTip}
           />,
         )
       })
@@ -239,6 +239,14 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
               fill={s.color}
               stroke="#fff"
               strokeWidth={1}
+              style={{ cursor: 'pointer' }}
+              onMouseEnter={(e) =>
+                showTip(`${cfg.labels[i]} · ${s.name}: ${fmtVal(v, a)}`, e)
+              }
+              onMouseMove={(e) =>
+                showTip(`${cfg.labels[i]} · ${s.name}: ${fmtVal(v, a)}`, e)
+              }
+              onMouseLeave={hideTip}
             />,
           )
         })
@@ -280,7 +288,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
         {xLabels}
       </>
     )
-  }, [cfg, n, hasR, padR, plotH, plotW])
+  }, [cfg, n, hasR, padR, plotH, plotW, showTip, hideTip])
 
   if (!n) {
     return (
@@ -308,12 +316,9 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
           {chart}
         </svg>
         {tip && (
-          <div
-            className={styles.chartTip}
-            style={{ left: tip.x, top: tip.y }}
-          >
-            {tip.html}
-          </div>
+          <HoverTip x={tip.x} y={tip.y} className={styles.chartTip}>
+            {tip.text}
+          </HoverTip>
         )}
       </div>
     </div>
