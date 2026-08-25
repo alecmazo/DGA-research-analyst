@@ -190,7 +190,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
           padL + slotW * i + slotW / 2 - (barSeries.length * bw) / 2 + si * bw
         const y = yOf(v, a)
         const col = v < 0 && s.colorNeg ? s.colorNeg : s.color
-        const nm = v < 0 && s.nameNeg ? s.nameNeg : s.name
+        const nm = s.name
         const barY = Math.min(y, y0)
         const barH = Math.max(1, Math.abs(y0 - y))
         bars.push(
@@ -301,15 +301,6 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
               style={{ background: s.color }}
             />
             {s.name}
-            {s.colorNeg && (
-              <>
-                <span
-                  className={styles.chartDot}
-                  style={{ background: s.colorNeg, marginLeft: 6 }}
-                />
-                {s.nameNeg || `${s.name} (−)`}
-              </>
-            )}
           </span>
         ))}
       </div>
@@ -347,14 +338,12 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
           name: 'Net Income',
           color: COLORS.green,
           colorNeg: COLORS.red,
-          nameNeg: 'Net Loss',
           values: col(series, 'net_income'),
         },
         {
           name: 'EBITDA',
           color: COLORS.orange,
           colorNeg: COLORS.red,
-          nameNeg: 'EBITDA (neg)',
           values: col(series, 'ebitda'),
         },
       ],
@@ -377,7 +366,6 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
           name: 'Net Margin %',
           color: COLORS.green,
           colorNeg: COLORS.red,
-          nameNeg: 'Net Margin % (neg)',
           values: col(series, 'net_margin_pct'),
         },
       ],
@@ -393,24 +381,21 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
       labels,
       series: [
         {
-          name: 'Operating CF',
+          name: 'OCF',
           color: COLORS.orange,
           colorNeg: COLORS.red,
-          nameNeg: 'OCF (neg)',
           values: col(series, 'ocf'),
         },
         {
-          name: 'Free CF',
+          name: 'FCF',
           color: COLORS.blue,
           colorNeg: COLORS.red,
-          nameNeg: 'FCF (neg)',
           values: col(series, 'fcf'),
         },
         {
           name: 'Net Income',
           color: COLORS.green,
           colorNeg: COLORS.red,
-          nameNeg: 'Net Loss',
           values: col(series, 'net_income'),
         },
         {
@@ -433,7 +418,6 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
           name: 'ROIC %',
           color: COLORS.green,
           colorNeg: COLORS.red,
-          nameNeg: 'ROIC % (neg)',
           values: col(series, 'roic_pct'),
         },
         {
@@ -481,7 +465,6 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
           name: 'Stockholders Equity',
           color: COLORS.green,
           colorNeg: COLORS.red,
-          nameNeg: 'Equity (neg)',
           values: col(series, 'equity'),
         },
         {

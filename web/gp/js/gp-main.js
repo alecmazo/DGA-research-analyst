@@ -3220,7 +3220,7 @@
         const v = (s.values || [])[i];
         if (v == null || !isFinite(v)) return;
         const a = s.axis || 'L';
-        const nm = (v < 0 && s.nameNeg) ? s.nameNeg : s.name;
+        const nm = s.name;
         const col = (v < 0 && s.colorNeg) ? s.colorNeg : s.color;
         lines.push({ name: nm, val: fmtVal(v, a), color: col });
       });
@@ -3244,7 +3244,7 @@
         const x = padL + slotW * i + slotW / 2 - (barSeries.length * bw) / 2 + si * bw;
         const y = yOf(v, a);
         const col = (v < 0 && s.colorNeg) ? s.colorNeg : s.color;
-        const nm = (v < 0 && s.nameNeg) ? s.nameNeg : s.name;
+        const nm = s.name;
         const barY = Math.min(y, y0);
         const barH = Math.max(1, Math.abs(y0 - y));
         const tipHtml =
@@ -3296,9 +3296,7 @@
         (line ? `<span style="width:16px;height:2.5px;background:${color};display:inline-block;"></span>`
               : `<span style="width:9px;height:9px;border-radius:50%;background:${color};display:inline-block;"></span>`) +
         `${_gfEsc(name)}</span>`;
-      let h = chip(s.name, s.color, s.type === 'line');
-      if (s.colorNeg) h += chip(s.nameNeg || (s.name + ' (negative)'), s.colorNeg, false);
-      return h;
+      return chip(s.name, s.color, s.type === 'line');
     }).join('');
     return `<div class="gf-chart-wrap" style="position:relative;border:1px solid var(--border-subtle);border-radius:8px;padding:10px 12px;background:var(--bg-elevated);">`
       + `<div style="margin-bottom:5px;">${legend}</div>`
@@ -3660,23 +3658,23 @@
     grid.innerHTML = [
       _gfChart({ labels, series: [
         { name:'Revenue', color:_GF.blue,  values: col('revenue') },
-        { name:'Net Income', color:_GF.green, colorNeg:_GF.red, nameNeg:'Net Loss', values: col('net_income') },
-        { name:'EBITDA', color:_GF.orange, colorNeg:_GF.red, nameNeg:'EBITDA (neg)', values: col('ebitda') }] }),
+        { name:'Net Income', color:_GF.green, colorNeg:_GF.red, values: col('net_income') },
+        { name:'EBITDA', color:_GF.orange, colorNeg:_GF.red, values: col('ebitda') }] }),
       _gfChart({ labels, fmtL:_gfPctF, series: [
         { name:'Gross Margin %', color:_GF.blue, values: col('gross_margin_pct') },
         { name:'Op. Margin %', color:_GF.orange, values: col('operating_margin_pct') },
-        { name:'Net Margin %', color:_GF.green, colorNeg:_GF.red, nameNeg:'Net Margin % (neg)', values: col('net_margin_pct') }] }),
+        { name:'Net Margin %', color:_GF.green, colorNeg:_GF.red, values: col('net_margin_pct') }] }),
       _gfChart({ labels, series: [
         { name:'Cash + STI', color:_GF.green, values: col('cash') },
         { name:'Total Debt', color:_GF.red,   values: col('debt') }] }),
       _gfChart({ labels, series: [
-        { name:'Operating CF', color:_GF.orange, colorNeg:_GF.red, nameNeg:'OCF (neg)', values: col('ocf') },
-        { name:'Free CF', color:_GF.blue, colorNeg:_GF.red, nameNeg:'FCF (neg)', values: col('fcf') },
-        { name:'Net Income', color:_GF.green, colorNeg:_GF.red, nameNeg:'Net Loss', values: col('net_income') },
+        { name:'OCF', color:_GF.orange, colorNeg:_GF.red, values: col('ocf') },
+        { name:'FCF', color:_GF.blue, colorNeg:_GF.red, values: col('fcf') },
+        { name:'Net Income', color:_GF.green, colorNeg:_GF.red, values: col('net_income') },
         { name:'Dividends', color:_GF.purple, values: col('dividends') },
         { name:'Buybacks', color:_GF.pink, values: col('buybacks') }] }),
       _gfChart({ labels, fmtL:_gfPctF, series: [
-        { name:'ROIC %', color:_GF.green, colorNeg:_GF.red, nameNeg:'ROIC % (neg)', values: col('roic_pct') },
+        { name:'ROIC %', color:_GF.green, colorNeg:_GF.red, values: col('roic_pct') },
         { name:'WACC % (est.)', color:_GF.red, values: col('wacc_pct') },
         { name:'ROIC − WACC', color:'var(--text-primary)', type:'line', values:
           S.map(x => (x.roic_pct != null && x.wacc_pct != null) ? x.roic_pct - x.wacc_pct : null) }] }),
@@ -3685,7 +3683,7 @@
         { name: shareDeltaName, nameNeg: shareDeltaNeg, color:_GF.green, colorNeg:_GF.red,
           axis:'R', values: col('buyback_ratio_pct') }] }),
       _gfChart({ labels, series: [
-        { name:'Stockholders Equity', color:_GF.green, colorNeg:_GF.red, nameNeg:'Equity (neg)', values: col('equity') },
+        { name:'Stockholders Equity', color:_GF.green, colorNeg:_GF.red, values: col('equity') },
         { name:'Total Assets', color:_GF.blue, values: col('assets') }] }),
     ].join('');
     grid.style.display = 'grid';

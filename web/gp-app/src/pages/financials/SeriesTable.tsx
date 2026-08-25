@@ -35,7 +35,7 @@ export function SeriesPanel({ series }: { series: DashSeriesPoint[] }) {
   const cards = [
     { label: 'Revenue', vals: rev, fmt: (v: number | null) => (v != null ? `$${gfMoney(v)}` : '—') },
     { label: 'Net Income', vals: ni, fmt: (v: number | null) => (v != null ? `$${gfMoney(v)}` : '—') },
-    { label: 'Free CF', vals: fcf, fmt: (v: number | null) => (v != null ? `$${gfMoney(v)}` : '—') },
+    { label: 'FCF', vals: fcf, fmt: (v: number | null) => (v != null ? `$${gfMoney(v)}` : '—') },
     { label: 'Net Margin %', vals: nm, fmt: fmtPct },
     { label: 'ROIC %', vals: roic, fmt: fmtPct },
   ]
