@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api, apiBlob } from '@/lib/api'
 import { pollJob } from '@/lib/jobs'
+import { useAnalysisScene } from '@/hooks/useAnalysisScene'
 import { relativeTime } from '@/lib/format'
 import { ScriptRender } from './podcasts/ScriptRender'
 import {
@@ -125,6 +126,19 @@ export function PodcastsPage() {
   const [voteWinner, setVoteWinner] = useState<string | null>(null)
   const [voteStatus, setVoteStatus] = useState('')
   const [runBusy, setRunBusy] = useState<string | null>(null)
+
+  useAnalysisScene(
+    'podcast-script',
+    Boolean(scriptProg),
+    scriptProg?.label || 'Writing script…',
+    scriptProg ? `${scriptProg.pct}%` : undefined,
+  )
+  useAnalysisScene(
+    'podcast-audio',
+    Boolean(audioProg),
+    audioProg?.label || 'Mixing audio…',
+    audioProg ? `${audioProg.pct}%` : undefined,
+  )
 
   const refreshLists = useCallback(async () => {
     try {

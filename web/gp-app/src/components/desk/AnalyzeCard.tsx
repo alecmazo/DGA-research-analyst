@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { api, type JobStatus, type LlmProvider } from '@/lib/api'
 import { pollJob } from '@/lib/jobs'
+import { useAnalysisScene } from '@/hooks/useAnalysisScene'
 import {
   DEFAULT_REPORT_COST,
   fmtUsd,
@@ -78,6 +79,13 @@ export function AnalyzeCard({
   const [showProg, setShowProg] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [canceling, setCanceling] = useState(false)
+
+  useAnalysisScene(
+    'analyze',
+    Boolean(showProg && running),
+    progLbl || 'Queued…',
+    progPct == null ? undefined : `${progPct}%`,
+  )
 
   useEffect(() => {
     try {

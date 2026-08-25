@@ -15,6 +15,7 @@ import {
 } from '@/lib/agentic'
 import { relativeTime } from '@/lib/format'
 import { renderMd } from '@/lib/md'
+import { AnalysisScene } from '@/components/ui/AnalysisScene'
 import styles from './ReportPage.module.css'
 import extra from './ResearchAnswerPage.module.css'
 
@@ -414,29 +415,31 @@ export function ResearchAnswerPage() {
       )}
 
       {waiting && (
-        <div className={extra.progress} role="status">
-          <div className={extra.progressHead}>
-            <span className={extra.spinDot} />
-            <span>
-              {job?.label ||
-                (pending && !id ? 'Starting…' : 'Working…')}
-            </span>
-            <span className={extra.progressMeta}>
-              {job?.steps != null ? `${job.steps} steps` : ''}
-              {job?.cost_usd != null ? ` · $${Number(job.cost_usd).toFixed(3)}` : ''}
-              {secs ? ` · ${secs}s` : ''}
-            </span>
-          </div>
+        <AnalysisScene
+          size="fill"
+          label={
+            job?.label || (pending && !id ? 'Starting…' : 'Working…')
+          }
+          meta={
+            [
+              job?.steps != null ? `${job.steps} steps` : '',
+              job?.cost_usd != null ? `$${Number(job.cost_usd).toFixed(3)}` : '',
+              secs ? `${secs}s` : '',
+            ]
+              .filter(Boolean)
+              .join(' · ') || undefined
+          }
+        >
           {tools.map((tc, i) => (
-            <div key={i} className={extra.toolLine}>
+            <div key={i}>
               🔧 <strong>{tc.tool}</strong>{' '}
               <code>{tc.input ? JSON.stringify(tc.input).slice(0, 60) : ''}</code>
             </div>
           ))}
-        </div>
+        </AnalysisScene>
       )}
 
-      <div className={styles.body}>
+      <div className={styles.body} style={waiting && !html ? { display: 'none' } : undefined}>
         {err && <div className={styles.err}>{err}</div>}
         {!err && html && (
           <article className={styles.md} dangerouslySetInnerHTML={{ __html: html }} />

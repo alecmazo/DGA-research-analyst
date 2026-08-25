@@ -92,7 +92,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Report print** | **`ui492-20260825-report-print`** | Print on saved report window; print CSS matches on-screen |
 | **Report share PDF** | **`ui493-20260825-report-share-pdf`** | Share emails the saved report as a PDF matching that window |
 | **Financials hover stays on screen** | **`ui494-20260825-fin-chart-tip-flip`** | Chart/price tips flip left so right-side bars are fully readable |
-| **Next deploy after this** | **`ui495-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Foundation analysis scene** | **`ui495-20260825-foundation-analysis-scene`** | Imagine Vault/Prime Radiant graphic while Grok/Claude/agent jobs run |
+| **Next deploy after this** | **`ui496-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

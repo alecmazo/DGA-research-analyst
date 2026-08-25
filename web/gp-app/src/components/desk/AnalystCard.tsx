@@ -18,6 +18,7 @@ import {
   type AgenticResult,
 } from '@/lib/agentic'
 import { formatRange, useCostCatalog } from '@/lib/llmCost'
+import { useAnalysisScene } from '@/hooks/useAnalysisScene'
 import { renderMd } from '@/lib/md'
 import {
   navigateResearchWindow,
@@ -306,6 +307,18 @@ export function AnalystCard({ bare = false }: Props) {
 
   const secs = Math.round(elapsed / 1000)
   const tools = (progress?.tool_calls || result?.tool_calls || []).slice(-10)
+  useAnalysisScene(
+    'analyst',
+    Boolean(progress && !result),
+    progress?.label || 'Working…',
+    [
+      progress?.steps != null ? `${progress.steps} steps` : '',
+      progress?.cost_usd != null ? `$${Number(progress.cost_usd).toFixed(3)}` : '',
+      secs ? `${secs}s` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ') || undefined,
+  )
 
   return (
     <div className={`${styles.agentBody} ${bare ? styles.heroBare : ''}`}>
