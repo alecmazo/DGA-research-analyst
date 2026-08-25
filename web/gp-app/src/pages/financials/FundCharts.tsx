@@ -17,7 +17,6 @@ type SeriesCfg = {
   name: string
   nameNeg?: string
   color: string
-  colorNeg?: string
   values: Array<number | null>
   axis?: 'L' | 'R'
   type?: 'bar' | 'line'
@@ -189,7 +188,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
         const x =
           padL + slotW * i + slotW / 2 - (barSeries.length * bw) / 2 + si * bw
         const y = yOf(v, a)
-        const col = v < 0 && s.colorNeg ? s.colorNeg : s.color
+        const col = s.color
         const nm = s.name
         const barY = Math.min(y, y0)
         const barH = Math.max(1, Math.abs(y0 - y))
@@ -337,13 +336,11 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'Net Income',
           color: COLORS.green,
-          colorNeg: COLORS.red,
           values: col(series, 'net_income'),
         },
         {
           name: 'EBITDA',
           color: COLORS.orange,
-          colorNeg: COLORS.red,
           values: col(series, 'ebitda'),
         },
       ],
@@ -365,7 +362,6 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'Net Margin %',
           color: COLORS.green,
-          colorNeg: COLORS.red,
           values: col(series, 'net_margin_pct'),
         },
       ],
@@ -383,19 +379,16 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'OCF',
           color: COLORS.orange,
-          colorNeg: COLORS.red,
           values: col(series, 'ocf'),
         },
         {
           name: 'FCF',
           color: COLORS.blue,
-          colorNeg: COLORS.red,
           values: col(series, 'fcf'),
         },
         {
           name: 'Net Income',
           color: COLORS.green,
-          colorNeg: COLORS.red,
           values: col(series, 'net_income'),
         },
         {
@@ -417,7 +410,6 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'ROIC %',
           color: COLORS.green,
-          colorNeg: COLORS.red,
           values: col(series, 'roic_pct'),
         },
         {
@@ -452,7 +444,6 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
           name: shareDeltaName,
           nameNeg: shareDeltaNeg,
           color: COLORS.green,
-          colorNeg: COLORS.red,
           axis: 'R',
           values: col(series, 'buyback_ratio_pct'),
         },
@@ -464,7 +455,6 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'Stockholders Equity',
           color: COLORS.green,
-          colorNeg: COLORS.red,
           values: col(series, 'equity'),
         },
         {

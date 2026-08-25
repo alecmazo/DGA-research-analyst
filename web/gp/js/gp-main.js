@@ -3152,7 +3152,7 @@
   };
 
   // Generic grouped-bar (+optional line, dual-axis) SVG chart panel.
-  // cfg = { labels:[], series:[{name,nameNeg?,color,colorNeg?,values,axis:'L'|'R',type:'bar'|'line'}],
+  // cfg = { labels:[], series:[{name,color,values,axis:'L'|'R',type:'bar'|'line'}],
   //         fmtL, fmtR, clampL?:{lo,hi}, clampR?:{lo,hi} }
   // clamp*: caps the AXIS range so one outlier period (e.g. a 400% dilution
   // year) can't flatten every other bar — clipped bars draw to the edge, and
@@ -3221,7 +3221,7 @@
         if (v == null || !isFinite(v)) return;
         const a = s.axis || 'L';
         const nm = s.name;
-        const col = (v < 0 && s.colorNeg) ? s.colorNeg : s.color;
+        const col = s.color;
         lines.push({ name: nm, val: fmtVal(v, a), color: col });
       });
       if (!lines.length) continue;
@@ -3243,7 +3243,7 @@
         if (v == null || !isFinite(v)) return;
         const x = padL + slotW * i + slotW / 2 - (barSeries.length * bw) / 2 + si * bw;
         const y = yOf(v, a);
-        const col = (v < 0 && s.colorNeg) ? s.colorNeg : s.color;
+        const col = s.color;
         const nm = s.name;
         const barY = Math.min(y, y0);
         const barH = Math.max(1, Math.abs(y0 - y));
@@ -3288,8 +3288,7 @@
       if (i % step) return;
       svg += `<text x="${(padL + slotW * i + slotW / 2).toFixed(1)}" y="${H - 12}" text-anchor="middle" font-size="${FS}" fill="var(--text-secondary,#64748b)">${_gfEsc(lb)}</text>`;
     });
-    // legend — a sign-colored series (colorNeg) gets BOTH chips so the legend
-    // never lies about what a red bar means.
+    // legend — one chip per series; sign is the bar vs the zero line.
     const legend = cfg.series.map(s => {
       const chip = (name, color, line) =>
         `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);margin-right:12px;">` +
@@ -3658,32 +3657,32 @@
     grid.innerHTML = [
       _gfChart({ labels, series: [
         { name:'Revenue', color:_GF.blue,  values: col('revenue') },
-        { name:'Net Income', color:_GF.green, colorNeg:_GF.red, values: col('net_income') },
-        { name:'EBITDA', color:_GF.orange, colorNeg:_GF.red, values: col('ebitda') }] }),
+        { name:'Net Income', color:_GF.green,  values: col('net_income') },
+        { name:'EBITDA', color:_GF.orange,  values: col('ebitda') }] }),
       _gfChart({ labels, fmtL:_gfPctF, series: [
         { name:'Gross Margin %', color:_GF.blue, values: col('gross_margin_pct') },
         { name:'Op. Margin %', color:_GF.orange, values: col('operating_margin_pct') },
-        { name:'Net Margin %', color:_GF.green, colorNeg:_GF.red, values: col('net_margin_pct') }] }),
+        { name:'Net Margin %', color:_GF.green,  values: col('net_margin_pct') }] }),
       _gfChart({ labels, series: [
         { name:'Cash + STI', color:_GF.green, values: col('cash') },
         { name:'Total Debt', color:_GF.red,   values: col('debt') }] }),
       _gfChart({ labels, series: [
-        { name:'OCF', color:_GF.orange, colorNeg:_GF.red, values: col('ocf') },
-        { name:'FCF', color:_GF.blue, colorNeg:_GF.red, values: col('fcf') },
-        { name:'Net Income', color:_GF.green, colorNeg:_GF.red, values: col('net_income') },
+        { name:'OCF', color:_GF.orange,  values: col('ocf') },
+        { name:'FCF', color:_GF.blue,  values: col('fcf') },
+        { name:'Net Income', color:_GF.green,  values: col('net_income') },
         { name:'Dividends', color:_GF.purple, values: col('dividends') },
         { name:'Buybacks', color:_GF.pink, values: col('buybacks') }] }),
       _gfChart({ labels, fmtL:_gfPctF, series: [
-        { name:'ROIC %', color:_GF.green, colorNeg:_GF.red, values: col('roic_pct') },
+        { name:'ROIC %', color:_GF.green,  values: col('roic_pct') },
         { name:'WACC % (est.)', color:_GF.red, values: col('wacc_pct') },
         { name:'ROIC − WACC', color:'var(--text-primary)', type:'line', values:
           S.map(x => (x.roic_pct != null && x.wacc_pct != null) ? x.roic_pct - x.wacc_pct : null) }] }),
       _gfChart({ labels, fmtL:_gfCount, fmtR:_gfPctF, clampR:{lo:-25, hi:25}, series: [
         { name:'Shares Outstanding', color:_GF.blue, values: col('shares') },
-        { name: shareDeltaName, nameNeg: shareDeltaNeg, color:_GF.green, colorNeg:_GF.red,
+        { name: shareDeltaName, nameNeg: shareDeltaNeg, color:_GF.green, 
           axis:'R', values: col('buyback_ratio_pct') }] }),
       _gfChart({ labels, series: [
-        { name:'Stockholders Equity', color:_GF.green, colorNeg:_GF.red, values: col('equity') },
+        { name:'Stockholders Equity', color:_GF.green,  values: col('equity') },
         { name:'Total Assets', color:_GF.blue, values: col('assets') }] }),
     ].join('');
     grid.style.display = 'grid';
