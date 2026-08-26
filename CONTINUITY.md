@@ -95,7 +95,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Foundation analysis scene** | **`ui495-20260825-foundation-analysis-scene`** | Imagine Vault/Prime Radiant graphic while Grok/Claude/agent jobs run |
 | **Grok tool-dump reports** | **`ui496-20260825-rivn-grok-tool-dump`** | Don’t show/save live-search traces as a report (RIVN); fall back to a real engine |
 | **Print + analysis loop** | **`ui497-20260826-print-and-analysis-loop`** | Saved-report print no longer blank; 20s seamless no-human calculation loop |
-| **Next deploy after this** | **`ui498-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Report print fits the page** | **`ui498-20260826-report-print-fit`** | Tighter print margins; tables wrap so the report does not bleed off letter |
+| **Next deploy after this** | **`ui499-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

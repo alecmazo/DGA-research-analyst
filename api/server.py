@@ -7441,7 +7441,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui497-20260826-print-and-analysis-loop"
+WEB_BUILD_VERSION = "ui498-20260826-report-print-fit"
 
 
 @app.get("/api/build")
@@ -28286,10 +28286,10 @@ def _dga_saved_report_pdf_html(
       @font-face { font-family: "DejaVuSans"; src: url(DejaVuSans-Bold.ttf); font-weight: bold; }
       @page {
         size: letter;
-        margin: 0.55in 0.6in 0.75in 0.6in;
+        margin: 0.4in 0.4in 0.55in 0.4in;
         @frame footer_frame {
           -pdf-frame-content: footerContent;
-          bottom: 0.32in; margin-left: 0.6in; margin-right: 0.6in; height: 0.38in;
+          bottom: 0.22in; margin-left: 0.4in; margin-right: 0.4in; height: 0.32in;
         }
       }
       body {

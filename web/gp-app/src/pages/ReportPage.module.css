@@ -389,11 +389,12 @@
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     visibility: visible !important;
+    box-sizing: border-box !important;
   }
 
   @page {
     size: letter;
-    margin: 0.55in 0.6in 0.6in;
+    margin: 0.4in 0.4in 0.45in;
   }
 
   :global(html),
@@ -401,7 +402,10 @@
   :global(#root) {
     background: #fff !important;
     height: auto !important;
+    width: auto !important;
     overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .noPrint {
@@ -411,6 +415,8 @@
   .page {
     min-height: 0;
     height: auto;
+    width: 100% !important;
+    max-width: 100% !important;
     display: block;
     overflow: visible;
     background: #fff;
@@ -419,31 +425,67 @@
 
   .head {
     position: static;
-    padding: 0 0 10px;
+    padding: 0 0 8px;
     border-bottom: 1px solid #e2e8f0;
     background: #fff;
+    width: 100%;
+    max-width: 100%;
   }
 
   .metrics {
     background: #f8fafc;
     border-bottom: 1px solid #e2e8f0;
-    padding: 10px 0;
+    padding: 8px 0;
     gap: 6px;
     page-break-inside: avoid;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .deltaBanner {
+    padding: 8px 0;
+    width: 100%;
+    max-width: 100%;
   }
 
   .body {
     overflow: visible;
     height: auto;
-    max-width: none;
+    max-width: 100% !important;
+    width: 100% !important;
     margin: 0;
-    padding: 14px 0 0;
+    padding: 10px 0 0;
   }
 
-  .md :global(.md-pre),
-  .md :global(.md-table),
-  .md :global(.md-bq),
-  .deltaBanner {
+  .md {
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .md :global(.md-table) {
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-size: 10px;
+    break-inside: auto;
+  }
+
+  .md :global(.md-pre) {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .md :global(img),
+  .md :global(svg) {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  .md :global(.md-bq) {
     break-inside: avoid;
   }
 
