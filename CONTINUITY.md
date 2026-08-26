@@ -89,6 +89,21 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Desk watchlist peek card** | **`ui473-20260818-desk-watchlist-peek`** | Click a Desk ticker → same stock-info card as mobile |
 | **Snapshot fact sheet** | **`ui474-20260818-snapshot-factsheet`** | Watchlist peek: range bar + labeled rows, no stat boxes |
 | **Builder boards first** | **`ui475-20260819-builder-boards-first`** | Track boards is the default tab; Construct basket is second |
+| **Claude reports + Fund SPY YTD** | **`ui476-20260820-claude-reports-spy-ytd`** | Claude Analyze persist; Fund SPY YTD |
+| **Pulse DeepSeek-only** | **`ui477-20260820-pulse-deepseek-only`** | Daily Pulse + Market Pulse never fall back to Grok |
+| **Analyze all engines one job** | **`ui479-20260821-analyze-multi-engine`** | Selected engines run sequential in one job |
+| **Claude reuse + DeepSeek 402** | **`ui480-20260821-claude-reuse-ds402`** | Claude NameError on reuse cache; name DeepSeek 402 |
+| **Automation in Models** | **`ui481-20260822-models-automation`** | Move automation into Models; retire Idea Generator |
+| **Mobile morning quotes** | **`ui482-20260822-mobile-morning-quotes`** | Refresh watchlist quotes on first morning open |
+| **Watchlist calendar YTD** | **`ui483-20260823-watchlist-ytd`** | YTD on WMT and other names with a tape |
+| **DGA Scored board** | **`ui484-20260823-dga-scored-board`** | Track board: top 30 DGA score strictly above 90 |
+| **YTD + this-year IPO mark** | **`ui485-20260823-ytd-ipo-mark`** | CART/MGM/NET YTD; CBRS/SKHY IPO marker |
+| **Builder board hover/click** | **`ui486-20260824-board-hover-click`** | Hover name → snapshot; click → Financials |
+| **Score weights + hover follow** | **`ui487-20260824-score-hover-follow`** | Restore DGA weights (BKNG 500); hover follows row outside peek |
+| **No Reuters on Market Wire** | **`ui488-20260824-no-reuters`** | Cut Reuters RSS / bylines from Market Wire |
+| **One signed chart series** | **`ui489-20260824-signed-charts`** | FCF/OCF; drop duplicate (neg) legend chips |
+| **Bar color = legend** | **`ui490-20260825-bar-legend-color`** | Bars keep series color above and below zero |
+| **Price chart hover** | **`ui491-20260825-price-hover`** | Financials price history: hover date → close |
 | **Report print** | **`ui492-20260825-report-print`** | Print on saved report window; print CSS matches on-screen |
 | **Report share PDF** | **`ui493-20260825-report-share-pdf`** | Share emails the saved report as a PDF matching that window |
 | **Financials hover stays on screen** | **`ui494-20260825-fin-chart-tip-flip`** | Chart/price tips flip left so right-side bars are fully readable |
@@ -98,7 +113,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Report print fits the page** | **`ui498-20260826-report-print-fit`** | Tighter print margins; tables wrap so the report does not bleed off letter |
 | **Watchlist unhang** | **`ui499-20260826-watchlist-uncouple`** | Desk watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 | **IPO YTD from print** | **`ui500-20260826-ipo-ytd-from-print`** | This-year IPOs show % since IPO price with a small IPO marker; next year is normal YTD |
-| **Next deploy after this** | **`ui501-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Handoff pack current** | **`ui501-20260826-handoff-refresh`** | Settings continuity pack: React GP paths, standing rules, ui476–ui500 filled in |
+| **Next deploy after this** | **`ui502-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -151,30 +167,42 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-### Recently shipped (this session stream)
+**Live (2026-08-26):** `ui501-20260826-handoff-refresh` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+
+### Recently shipped (this stream, Aug 23–26)
 
 | Build | Topic |
 |-------|--------|
-| ui107–ui108 | Day-% prior close; Nasdaq gap-fill; watchlist parallel quotes |
-| ui109–ui110 | Koyfin-style Options + Desk market bar / Analyst command surface |
-| ui111 | Market Pulse stale-72d ghosts; pulse WL filter |
-| ui112–ui113 | Compact watchlist rows; fully expand no inner scroll |
-| ui114 | SnapTrade partner auth for SDK v12 (`commercial_api_key`) |
+| ui484 | DGA Scored board — top 30 names with score **> 90** |
+| ui485–ui500 | Watchlist YTD (WMT/CART/MGM/NET); this-year IPOs % since IPO print + **IPO** marker |
+| ui486–ui487 | Builder board hover snapshot (follow pointer outside peek); click → Financials |
+| ui488 | Reuters removed from Market Wire |
+| ui489–ui491 | Financials charts: one signed series, legend color both sides of zero; price hover |
+| ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
+| ui495–ui497 | Analyze-in-progress Foundation Vault loop (no human, 20s seamless ping-pong) |
+| ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
+| ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
 ### Known systems
 
-- **Push worktree for main:** often `/tmp/cra-push` (clone of `alecmazo/DGA-research-analyst`)
-- **User worktree:** `~/.grok/worktrees/.../dga-capital-portal` may lag `main`
-- **Railway:** auto-deploy from `main`; probe with `/api/build`
-- **GP login (dev):** email/password via `/api/auth/v2/login` (token header `x-auth-v2-token`)
+- **Repo:** `https://github.com/alecmazo/DGA-research-analyst` · branch `main` · Railway auto-deploys
+- **Railway:** project `upbeat-ambition`, GP service **`web`**, Postgres plugin, Sliw service `sliw`
+- **GP login:** `/api/auth/v2/login` · header `x-auth-v2-token`
 - **Support tickets:** `/api/support/tickets` + agent inbox; mark fixed with PATCH + trail
+- **GP bundle:** `npm run build` in `web/gp-app/` then **commit `dist/`** (Nixpacks has no Node step)
+- **Sliw:** Alec / Edyta only; CRM in shared Postgres; do not auto-send email; do not resurrect Contacted history unless asked
 
 ### Do not regress
 
 - Watchlist day-% = session prior close (not Yahoo meta `previousClose`)
-- Watchlist: two-line rows, expanded, no inner scroll, no stale chip
-- SnapTrade: use `SnapTradeAuth.commercial_api_key` when available
-- Options wheel: term tables + KPI strip (ui109+)
+- Watchlist load **independent** of Daily Pulse (`Promise.all` used to freeze the list)
+- Watchlist YTD: calendar Jan 1; **this-year IPOs** = % since first tape print + small IPO tag
+- Grok Analyze: never persist `web_search` dumps as `report_md`
+- Financials `@media print` must stay scoped to `.shell`, never `body *`
+- Chart bars keep **legend color** above and below zero (sign is position vs zero)
+- Do not auto-send email; Share on reports prompts for a recipient
+- SnapTrade: `SnapTradeAuth.commercial_api_key` when available
+- Options wheel: held names first; term tables + KPI strip
 
 ---
 
@@ -195,10 +223,14 @@ When switching machine or agent (Claude ↔ Grok):
 
 | Path | Role |
 |------|------|
-| `api/server.py` | `WEB_BUILD_VERSION`, most APIs |
-| `web/portfolio-gp.html` | GP shell + topbar |
-| `web/gp/js/gp-main.js` | SPA logic |
-| `web/gp/css/gp-design-v2.css` | Design system |
+| `web/gp-app/` | **Canonical GP** (React + TS, Vite). Served at `/gp` |
+| `web/gp-app/src/pages/` | Desk, Financials, Report window, Settings, Podcasts… |
+| `web/gp-app/dist/` | Committed production bundle — rebuild after UI edits |
+| `api/server.py` | FastAPI, `WEB_BUILD_VERSION`, most APIs (very large) |
+| `DGA_analyst.py` | Multi-LLM Analyze pipeline (Grok/Claude/Kimi/DeepSeek) |
+| `web/gp/` | Legacy GP (`/gp-legacy`) — do not treat as source of truth |
+| `web/portfolio.html` | Login gateway |
+| `mobile/` | Expo app (OTA); keep YTD/IPO/watchlist in sync when you touch desk quotes |
 | `market_data.py` / `snaptrade_link.py` | Quotes / SnapTrade |
 | `docs/support-inbox/` | Support ticket notes (if present) |
 
@@ -217,4 +249,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-07-28 · Agent: Grok Build (laptop session) · Live: ui380 · ship through ui383 · Next: ui384*
+*Last updated: 2026-08-26 · Agent: Grok Build · Live: `ui501-20260826-handoff-refresh` · Next: `ui502-YYYYMMDD-slug`*

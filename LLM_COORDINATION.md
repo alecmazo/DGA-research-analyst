@@ -23,7 +23,7 @@ If your clone’s `main` is not at this tip (or newer `origin/main`), **pull/reb
 | Surface | Paths | Notes |
 |---------|--------|--------|
 | **Auth gateway** | `web/portfolio.html` | Login at portfolio.dgacapital.com |
-| **GP terminal** | `web/portfolio-gp.html` (~21k lines, monolithic) | Full desk: research, builder, ideas, positions, options, fund, lab… |
+| **GP terminal** | `web/gp-app/` (React+TS, `/gp`) | Canonical desk. Legacy HTML at `web/gp/` (`/gp-legacy`). |
 | **LP portal** | `web/portfolio-lp.html` | Investor performance / docs / reports |
 | **Research PWA** | `web/index.html`, `web/app.js`, `web/style.css` | Mobile tabs: Research / Ideas / Tracker / Fund / Settings |
 | **API** | `api/server.py`, `auth_v2.py`, root Python pipeline | Shared backend — coordinate before large changes |

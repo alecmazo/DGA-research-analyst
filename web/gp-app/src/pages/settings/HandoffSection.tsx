@@ -122,9 +122,9 @@ export function HandoffSection() {
     >
       <p className={styles.hint}>
         Switching computers or AI tools (Grok Build ↔ Claude Code ↔ Cursor)? Click{' '}
-        <strong>Copy handoff</strong>, then paste into the new agent. It includes the live UI build
-        number, next-version rules, nav layout, and <code>CONTINUITY.md</code> so nothing is lost
-        and UI numbers never go backwards.
+        <strong>Copy handoff</strong>, then paste into the new agent. It includes the live UI build,
+        next-version rules, React GP paths, standing constraints (email, Sliw, Grok tool-dumps,
+        print CSS), nav layout, and <code>CONTINUITY.md</code> so UI numbers never go backwards.
       </p>
       <div className={styles.row} style={{ marginBottom: 10 }}>
         <Button size="sm" variant="primary" onClick={() => void copy()}>
