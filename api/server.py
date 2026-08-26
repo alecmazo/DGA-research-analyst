@@ -4184,12 +4184,14 @@ def watchlist_get(request: Request, fresh: bool = False):
             # Live Yahoo — MUST use shutdown(wait=False). A `with ThreadPoolExecutor`
             # after result(timeout=…) still waits for the hung worker on exit and
             # freezes GET /api/watchlist forever (ui390–ui391 hang).
-            if need:
+            # Skip Yahoo if we already spent most of the 4.5s paint budget.
+            left = max(0.0, 4.5 - (time.time() - t0))
+            if need and left >= 0.8:
                 raw: dict = {}
                 try:
                     raw = _run_with_timeout(
                         lambda: _batch_quotes_fast(need) or {},
-                        6.0,
+                        min(4.0, left),
                         default={},
                     ) or {}
                 except Exception as e:
@@ -4221,11 +4223,11 @@ def watchlist_get(request: Request, fresh: bool = False):
                 except Exception as e:
                     print(f"[watchlist] report lookup failed: {e!s:.120}", flush=True)
 
-        # Earnings chips (best-effort, hard-capped) — restored after ui390
-        # stripped them for login speed. Cache + budget keep Desk snappy.
+        # Earnings chips (best-effort, hard-capped). 8s used to stall the desk.
         if tickers:
             try:
-                earnings_map = _watchlist_earnings_for(tickers, budget_s=8.0) or {}
+                earn_budget = min(2.0, max(0.4, 4.5 - (time.time() - t0)))
+                earnings_map = _watchlist_earnings_for(tickers, budget_s=earn_budget) or {}
                 for tk in list(earnings_map.keys()):
                     earnings_map[tk]["has_report"] = bool(reports_map.get(tk))
             except Exception as e:
@@ -4240,7 +4242,12 @@ def watchlist_get(request: Request, fresh: bool = False):
                     for tk in tickers
                     if (quotes.get(tk) or {}).get("price") is not None
                 }
-                ytd_map = _watchlist_ytd_pcts(tickers, live_prices=live_px) or {}
+                ytd_budget = min(1.2, max(0.2, 4.5 - (time.time() - t0)))
+                ytd_map = _run_with_timeout(
+                    lambda: _watchlist_ytd_pcts(tickers, live_prices=live_px) or {},
+                    ytd_budget,
+                    default={},
+                ) or {}
                 # Stamp onto the original ticker key the UI looks up (and
                 # uppercase) so a spelling/case mismatch can't hide YTD.
                 for orig in tickers:
@@ -7441,7 +7448,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui498-20260826-report-print-fit"
+WEB_BUILD_VERSION = "ui499-20260826-watchlist-uncouple"
 
 
 @app.get("/api/build")

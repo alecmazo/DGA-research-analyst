@@ -96,7 +96,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Grok tool-dump reports** | **`ui496-20260825-rivn-grok-tool-dump`** | Don’t show/save live-search traces as a report (RIVN); fall back to a real engine |
 | **Print + analysis loop** | **`ui497-20260826-print-and-analysis-loop`** | Saved-report print no longer blank; 20s seamless no-human calculation loop |
 | **Report print fits the page** | **`ui498-20260826-report-print-fit`** | Tighter print margins; tables wrap so the report does not bleed off letter |
-| **Next deploy after this** | **`ui499-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Watchlist unhang** | **`ui499-20260826-watchlist-uncouple`** | Desk watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
+| **Next deploy after this** | **`ui500-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

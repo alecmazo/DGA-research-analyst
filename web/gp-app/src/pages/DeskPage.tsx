@@ -12,6 +12,7 @@ import { MarketWire } from '@/components/desk/MarketWire'
 import { MarketPulse } from '@/components/desk/MarketPulse'
 import {
   api,
+  ApiError,
   type DailyBrief,
   type Quote,
   type WatchlistEarning,
@@ -67,11 +68,42 @@ function quotePct(q?: Quote | null): number | null {
   return v == null || Number.isNaN(Number(v)) ? null : Number(v)
 }
 
+const WL_CACHE_KEY = 'dga.desk.wl.v1'
+
+function readWlCache(): WatchlistResponse | null {
+  try {
+    const raw = localStorage.getItem(WL_CACHE_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as WatchlistResponse
+    if (p && Array.isArray(p.tickers)) return p
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function writeWlCache(w: WatchlistResponse) {
+  try {
+    localStorage.setItem(
+      WL_CACHE_KEY,
+      JSON.stringify({
+        tickers: w.tickers || [],
+        quotes: w.quotes || {},
+        earnings: w.earnings || {},
+        reports: w.reports || {},
+      }),
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
 export function DeskPage() {
-  const [wl, setWl] = useState<WatchlistResponse | null>(null)
+  const cached = readWlCache()
+  const [wl, setWl] = useState<WatchlistResponse | null>(cached)
   const [brief, setBrief] = useState<DailyBrief | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!cached)
   const [tickerIn, setTickerIn] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -81,28 +113,52 @@ export function DeskPage() {
   const [earningsTk, setEarningsTk] = useState<string | null>(null)
   const [peekTk, setPeekTk] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setErr(null)
+  const loadWatchlist = useCallback(async () => {
+    const ac = new AbortController()
+    const timer = window.setTimeout(() => ac.abort(), 10_000)
     try {
-      const [w, b] = await Promise.all([
-        api<WatchlistResponse>('/api/watchlist'),
-        api<DailyBrief>('/api/daily-brief/latest').catch(() => ({ exists: false })),
-      ])
+      const w = await api<WatchlistResponse>('/api/watchlist', { signal: ac.signal })
       setWl(w)
-      setBrief(b)
+      writeWlCache(w)
+      setErr(null)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to load desk')
+      if (e instanceof ApiError && e.status === 401) return
+      const aborted =
+        (e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && /abort/i.test(e.message))
+      setErr(
+        aborted
+          ? 'Watchlist timed out — showing last list. Click Refresh.'
+          : e instanceof Error
+            ? e.message
+            : 'Watchlist failed',
+      )
     } finally {
+      window.clearTimeout(timer)
       setLoading(false)
     }
   }, [])
 
+  const loadBrief = useCallback(async () => {
+    try {
+      const b = await api<DailyBrief>('/api/daily-brief/latest')
+      setBrief(b)
+    } catch {
+      /* pulse is optional */
+    }
+  }, [])
+
+  const load = useCallback(async () => {
+    await Promise.all([loadWatchlist(), loadBrief()])
+  }, [loadWatchlist, loadBrief])
+
   useEffect(() => {
-    void load()
+    void loadWatchlist()
+    void loadBrief()
     return subscribeQuoteRefresh(() => {
-      void load()
+      void loadWatchlist()
     })
-  }, [load])
+  }, [loadWatchlist, loadBrief])
 
   const rows = useMemo(() => {
     const tickers = wl?.tickers || []
@@ -243,7 +299,9 @@ export function DeskPage() {
                 {!loading && !rows.length && (
                   <tr>
                     <td colSpan={5} className={styles.empty}>
-                      No tickers yet — add a name above.
+                      {err
+                        ? 'Could not load the list — click Refresh.'
+                        : 'No tickers yet — add a name above.'}
                     </td>
                   </tr>
                 )}
