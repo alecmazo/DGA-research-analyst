@@ -5,7 +5,6 @@ import styles from './AnalysisScene.module.css'
 
 const BASE = import.meta.env.BASE_URL || '/gp/'
 const STILL_A = `${BASE}analysis-scene.jpg`
-const STILL_B = `${BASE}analysis-chamber.jpg`
 const VIDEO = `${BASE}analysis-scene.mp4`
 
 type Size = 'card' | 'fill' | 'float'
@@ -41,7 +40,6 @@ export function AnalysisScene({
     >
       <div className={styles.stage} aria-hidden>
         <img src={STILL_A} alt="" className={`${styles.still} ${styles.stillA}`} />
-        <img src={STILL_B} alt="" className={`${styles.still} ${styles.stillB}`} />
         {!reduce && (
           <video
             className={`${styles.video} ${playing ? styles.videoOn : ''}`}

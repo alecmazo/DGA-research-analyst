@@ -159,6 +159,13 @@
   pointer-events: none;
 }
 
+@media print {
+  .floatHost,
+  .wrap {
+    display: none !important;
+  }
+}
+
 @keyframes ken {
   from {
     transform: scale(1.04);

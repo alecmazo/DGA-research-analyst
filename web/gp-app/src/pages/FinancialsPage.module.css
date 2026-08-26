@@ -1245,16 +1245,17 @@
   }
 }
 
-/* Print: Value Line sheet focus */
+/* Print: Value Line sheet focus — scoped to this page so Saved Reports
+   print is not blanked by body { visibility: hidden }. */
 @media print {
-  body * {
+  .shell * {
     visibility: hidden !important;
   }
-  #fin-vl-panel,
-  #fin-vl-panel * {
+  :global(#fin-vl-panel),
+  :global(#fin-vl-panel) * {
     visibility: visible !important;
   }
-  #fin-vl-panel {
+  :global(#fin-vl-panel) {
     position: absolute !important;
     left: 0;
     top: 0;

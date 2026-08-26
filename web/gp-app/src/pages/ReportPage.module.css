@@ -388,6 +388,7 @@
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    visibility: visible !important;
   }
 
   @page {
@@ -395,9 +396,12 @@
     margin: 0.55in 0.6in 0.6in;
   }
 
-  html,
-  body {
+  :global(html),
+  :global(body),
+  :global(#root) {
     background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
   }
 
   .noPrint {
@@ -406,6 +410,9 @@
 
   .page {
     min-height: 0;
+    height: auto;
+    display: block;
+    overflow: visible;
     background: #fff;
     color: #0a1628;
   }
@@ -427,6 +434,7 @@
 
   .body {
     overflow: visible;
+    height: auto;
     max-width: none;
     margin: 0;
     padding: 14px 0 0;

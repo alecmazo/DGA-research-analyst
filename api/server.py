@@ -7441,7 +7441,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui496-20260825-rivn-grok-tool-dump"
+WEB_BUILD_VERSION = "ui497-20260826-print-and-analysis-loop"
 
 
 @app.get("/api/build")
