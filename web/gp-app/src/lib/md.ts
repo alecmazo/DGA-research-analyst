@@ -1,3 +1,22 @@
+/** True when Grok saved live-search / tool traces instead of a research note. */
+export function looksLikeToolTrace(src: string): boolean {
+  const t = String(src || '')
+  if (!t.trim()) return false
+  const low = t.toLowerCase()
+  if (low.includes('potekle') || t.includes('<|eos|>') || low.includes('extra_query_')) {
+    return true
+  }
+  const web = (t.match(/web_search/gi) || []).length
+  const xs = (t.match(/x_search/gi) || []).length
+  if (web >= 6 || xs >= 6) return true
+  if ((t.match(/➞/g) || []).length >= 8) return true
+  const nl = (t.match(/\n/g) || []).length
+  if (t.length > 4000 && nl < Math.max(8, Math.floor(t.length / 800))) {
+    if (/web_search|x_search|function_call/i.test(t)) return true
+  }
+  return false
+}
+
 /**
  * Escape HTML, then apply a markdown subset suitable for DGA research reports
  * and agent answers (headings, lists, tables, code, links, bold/italic).
@@ -5,6 +24,15 @@
 export function renderMd(src: string): string {
   let s = String(src || '')
     .replace(/\r\n/g, '\n')
+  if (looksLikeToolTrace(s)) {
+    return (
+      '<div class="md-h md-h1">Report incomplete</div>' +
+      '<p>The last Analyze run captured live-search / tool traces instead of the ' +
+      'research note, so there is nothing to format. Re-run <strong>Analyze</strong> ' +
+      'for this ticker, or open another engine if one is already saved.</p>'
+    )
+  }
+  s = s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

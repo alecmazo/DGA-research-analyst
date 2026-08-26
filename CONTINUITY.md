@@ -93,7 +93,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Report share PDF** | **`ui493-20260825-report-share-pdf`** | Share emails the saved report as a PDF matching that window |
 | **Financials hover stays on screen** | **`ui494-20260825-fin-chart-tip-flip`** | Chart/price tips flip left so right-side bars are fully readable |
 | **Foundation analysis scene** | **`ui495-20260825-foundation-analysis-scene`** | Imagine Vault/Prime Radiant graphic while Grok/Claude/agent jobs run |
-| **Next deploy after this** | **`ui496-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Grok tool-dump reports** | **`ui496-20260825-rivn-grok-tool-dump`** | Don’t show/save live-search traces as a report (RIVN); fall back to a real engine |
+| **Next deploy after this** | **`ui497-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

@@ -7858,35 +7858,120 @@ def _client():
     return OpenAI(api_key=get_grok_api_key(), base_url="https://api.x.ai/v1")
 
 
-def _extract_responses_text(resp) -> str:
-    """Extract the assistant text from an xAI Responses API reply.
+_TOOL_ITEM_TYPES = {
+    "web_search_call", "x_search_call", "function_call", "custom_tool_call",
+    "tool_call", "file_search_call", "computer_call", "reasoning",
+}
 
-    Shape of the reply (OpenAI-compatible Responses API):
-        resp.output = [ { "type": "message", "content": [ {"type":"output_text","text":"..."} ] } ]
-    We also accept ``resp.output_text`` (SDK convenience) when present.
+
+def looks_like_llm_tool_trace(text: str | None) -> bool:
+    """True when the model dumped live-search / tool calls instead of a report.
+
+    Seen on Grok Responses API: ``output_text`` concatenates web_search queries
+    into one 50k+ char blob (RIVN 2026-08-21) — the report window then looks
+    'garbled' because there is no markdown to format.
     """
-    # Convenience aggregate that newer SDK builds expose.
-    text = getattr(resp, "output_text", None)
-    if text:
-        return text
+    t = str(text or "")
+    if not t.strip():
+        return False
+    low = t.lower()
+    if "potekle" in low or "<|eos|>" in t or "extra_query_" in low:
+        return True
+    if t.count("web_search") >= 6 or t.count("x_search") >= 6:
+        return True
+    if t.count("➞") >= 8:
+        return True
+    nl = t.count("\n")
+    if len(t) > 4000 and nl < max(8, len(t) // 800):
+        if "web_search" in low or "x_search" in low or "function_call" in low:
+            return True
+    return False
 
+
+def looks_like_research_report(text: str | None) -> bool:
+    """Heuristic: real DGA / markdown research note, not a tool dump."""
+    t = str(text or "")
+    if looks_like_llm_tool_trace(t):
+        return False
+    if len(t.strip()) < 400:
+        return False
+    if t.count("\n") < 8:
+        return False
+    if re.search(r"^#{1,3}\s", t, re.M):
+        return True
+    if re.search(
+        r"DGA CAPITAL|Price Target|Executive Summary|Implied Return|12-Month",
+        t, re.I,
+    ):
+        return True
+    if t.count("|") >= 10 and t.count("\n") >= 12:
+        return True
+    return False
+
+
+def incomplete_report_placeholder(ticker: str, provider: str = "grok") -> str:
+    tk = (ticker or "").strip().upper() or "TICKER"
+    pv = (provider or "grok").strip().upper()
+    return (
+        f"# {tk} · {pv} report incomplete\n\n"
+        f"The last **{pv}** Analyze run captured live-search / tool traces "
+        f"instead of the research note, so there is nothing to format.\n\n"
+        f"Re-run **Analyze** with {pv} for {tk}. If another engine already "
+        f"finished, open that badge on Saved Reports.\n"
+    )
+
+
+def _extract_responses_text(resp) -> str:
+    """Extract the assistant *report* from an xAI Responses API reply.
+
+    Do **not** use ``resp.output_text`` first — newer SDKs concatenate every
+    web_search / x_search argument into that field, which looks like a
+    garbled report in the window. Only keep ``type=message`` output_text
+    chunks, and prefer the last one that looks like a research note.
+    """
     output = getattr(resp, "output", None) or []
-    chunks: list[str] = []
+    messages: list[str] = []
     for item in output:
-        # Pydantic model -> dict coercion for either shape.
         if hasattr(item, "model_dump"):
-            item = item.model_dump()
+            try:
+                item = item.model_dump()
+            except Exception:
+                pass
         if not isinstance(item, dict):
             continue
-        if item.get("type") == "message":
-            for c in item.get("content") or []:
-                if hasattr(c, "model_dump"):
+        typ = str(item.get("type") or "").lower()
+        if typ in _TOOL_ITEM_TYPES:
+            continue
+        if any(tok in typ for tok in ("search", "tool", "call")) and typ != "message":
+            continue
+        parts: list[str] = []
+        for c in item.get("content") or []:
+            if hasattr(c, "model_dump"):
+                try:
                     c = c.model_dump()
-                if isinstance(c, dict) and c.get("type") in ("output_text", "text"):
-                    t = c.get("text") or ""
-                    if t:
-                        chunks.append(t)
-    return "\n".join(chunks)
+                except Exception:
+                    pass
+            if not isinstance(c, dict):
+                continue
+            if c.get("type") in ("output_text", "text"):
+                t = (c.get("text") or "").strip()
+                if t:
+                    parts.append(t)
+        if parts:
+            messages.append("\n\n".join(parts))
+
+    for cand in reversed(messages):
+        if looks_like_research_report(cand):
+            return cand
+    for cand in reversed(messages):
+        if not looks_like_llm_tool_trace(cand) and len(cand.strip()) >= 400:
+            return cand
+
+    # SDK convenience last — only if it is actually a report.
+    conv = getattr(resp, "output_text", None)
+    if isinstance(conv, str) and looks_like_research_report(conv):
+        return conv
+    return ""
 
 
 # Per-Mtoken prices for Grok via xAI (USD).
@@ -8014,6 +8099,14 @@ def call_grok(system_prompt: str, user_content: str,
                 ],
             )
             text = _extract_responses_text(resp)
+            if text and looks_like_llm_tool_trace(text):
+                print(
+                    f"   ⚠️  Grok live-search returned tool traces "
+                    f"({len(text):,} chars, newlines={text.count(chr(10))}) "
+                    f"— not a report; ignoring.",
+                    flush=True,
+                )
+                text = ""
             n_cite = 0
             try:
                 cites = getattr(resp, "citations", None) or []
@@ -8040,7 +8133,9 @@ def call_grok(system_prompt: str, user_content: str,
                 user_content
                 + "\n\nREINFORCE: Explicitly search for acquisitions, mergers, "
                 + "definitive agreements, and takeovers involving this ticker "
-                + "in the last 90 days. If a deal exists you MUST lead with it."
+                + "in the last 90 days. If a deal exists you MUST lead with it.\n"
+                + "FINAL OUTPUT must be the complete DGA markdown research report "
+                + "only — never list web_search / x_search queries in the answer."
             )
             resp2 = client.responses.create(
                 model=model,
@@ -8054,6 +8149,12 @@ def call_grok(system_prompt: str, user_content: str,
                 ],
             )
             text2 = _extract_responses_text(resp2)
+            if text2 and looks_like_llm_tool_trace(text2):
+                print(
+                    "   ⚠️  Grok live-search retry was also a tool dump — ignoring.",
+                    flush=True,
+                )
+                text2 = ""
             if text2 and len(text2.strip()) >= 200:
                 _capture(resp2, search_count=2)
                 print(f"   ✅ Grok live-search retry OK ({len(text2):,} chars)", flush=True)

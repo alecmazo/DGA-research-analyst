@@ -6225,6 +6225,16 @@ def _persist_analysis_text(
               f"(result.ok={isinstance(result, dict) and result.get('ok')}, "
               f"file_exists={_md_path.exists()}, len={len(text)})")
         return False, len(text)
+    try:
+        if analyst.looks_like_llm_tool_trace(text):
+            print(
+                f"❌ [persist] refusing tool-trace dump for {ticker}/{provider} "
+                f"({len(text):,} chars, newlines={text.count(chr(10))})",
+                flush=True,
+            )
+            return False, 0
+    except Exception:
+        pass
 
     # Hydrate disk file if it's not there (subsequent flows + Compare reruns
     # that use reuse_user_msg=True depend on the file)
@@ -7431,7 +7441,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui495-20260825-foundation-analysis-scene"
+WEB_BUILD_VERSION = "ui496-20260825-rivn-grok-tool-dump"
 
 
 @app.get("/api/build")
@@ -8233,6 +8243,67 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
     if provider not in ("grok", "claude", "kimi", "deepseek"):
         provider = "grok"
 
+    def _present_md(md: str, *, row=None, payload: dict) -> dict:
+        """If this engine saved a live-search dump, show a real report or a
+        readable placeholder — never the garbled query list."""
+        raw = md or ""
+        try:
+            dump = analyst.looks_like_llm_tool_trace(raw)
+        except Exception:
+            dump = False
+        if not dump:
+            payload["report_md"] = raw
+            return payload
+        if row:
+            alts = (
+                ("claude", "report_md_claude", "claude_generated_at",
+                 "claude_rating", "claude_price_target", "claude_upside_pct"),
+                ("kimi", "report_md_kimi", "kimi_generated_at",
+                 "kimi_rating", "kimi_price_target", "kimi_upside_pct"),
+                ("deepseek", "report_md_deepseek", "deepseek_generated_at",
+                 "deepseek_rating", "deepseek_price_target", "deepseek_upside_pct"),
+                ("grok", "report_md", "generated_at",
+                 "rating", "price_target", "upside_pct"),
+            )
+            for alt, md_key, ts_key, rat_key, pt_key, up_key in alts:
+                if alt == (payload.get("provider") or provider):
+                    continue
+                alt_md = row.get(md_key) or ""
+                try:
+                    ok = analyst.looks_like_research_report(alt_md)
+                except Exception:
+                    ok = False
+                if not ok:
+                    continue
+                payload["provider"] = alt
+                payload["report_md"] = alt_md
+                payload["generated_at"] = _iso(row.get(ts_key))
+                payload["rating"] = row.get(rat_key) or row.get("rating")
+                payload["price_target"] = _f(row.get(pt_key)) if row.get(pt_key) is not None else _f(row.get("price_target"))
+                payload["upside_pct"] = _f(row.get(up_key)) if row.get(up_key) is not None else _f(row.get("upside_pct"))
+                payload["note"] = (
+                    f"{provider.upper()} last run captured live-search traces "
+                    f"instead of a report. Showing {alt.upper()} until you re-run "
+                    f"Analyze with {provider.upper()}."
+                )
+                return payload
+        try:
+            payload["report_md"] = analyst.incomplete_report_placeholder(
+                ticker, payload.get("provider") or provider,
+            )
+        except Exception:
+            payload["report_md"] = (
+                "# Report incomplete\n\nRe-run Analyze — the last run "
+                "saved tool traces instead of the research note.\n"
+            )
+        payload["note"] = (
+            f"{provider.upper()} live-search dump — re-run Analyze."
+        )
+        payload["rating"] = None
+        payload["price_target"] = None
+        payload["upside_pct"] = None
+        return payload
+
     def _iso(v):
         if v is None:
             return None
@@ -8270,7 +8341,7 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                 _vc = int(row.get("version_count") or 1)
                 _delta_raw = row.get("delta_from_prior")
                 if provider == "claude" and (row.get("report_md_claude") or "").strip():
-                    return {
+                    return _present_md(row["report_md_claude"], row=row, payload={
                         "ticker": ticker,
                         "provider": "claude",
                         "version_count": _vc,
@@ -8288,9 +8359,9 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                         "upside_pct": _f(row.get("claude_upside_pct"))
                                        if row.get("claude_upside_pct") is not None
                                        else _f(row.get("upside_pct")),
-                    }
+                    })
                 if provider == "kimi" and (row.get("report_md_kimi") or "").strip():
-                    return {
+                    return _present_md(row["report_md_kimi"], row=row, payload={
                         "ticker": ticker,
                         "provider": "kimi",
                         "version_count": _vc,
@@ -8308,9 +8379,9 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                         "upside_pct": _f(row.get("kimi_upside_pct"))
                                        if row.get("kimi_upside_pct") is not None
                                        else _f(row.get("upside_pct")),
-                    }
+                    })
                 if provider == "deepseek" and (row.get("report_md_deepseek") or "").strip():
-                    return {
+                    return _present_md(row["report_md_deepseek"], row=row, payload={
                         "ticker": ticker,
                         "provider": "deepseek",
                         "version_count": _vc,
@@ -8328,9 +8399,9 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                         "upside_pct": _f(row.get("deepseek_upside_pct"))
                                        if row.get("deepseek_upside_pct") is not None
                                        else _f(row.get("upside_pct")),
-                    }
+                    })
                 if provider == "grok" and (row.get("report_md") or "").strip():
-                    return {
+                    return _present_md(row["report_md"], row=row, payload={
                         "ticker": ticker,
                         "provider": "grok",
                         "version_count": _vc,
@@ -8344,7 +8415,7 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                         "rating": row.get("rating"),
                         "price_target": _f(row.get("price_target")),
                         "upside_pct": _f(row.get("upside_pct")),
-                    }
+                    })
                 # Requested engine missing — try any available rather than
                 # silently returning the wrong provider's text.
                 for alt, md_key, ts_key, rat_key, pt_key, up_key in (
@@ -8354,7 +8425,7 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                     ("deepseek", "report_md_deepseek", "deepseek_generated_at", "deepseek_rating", "deepseek_price_target", "deepseek_upside_pct"),
                 ):
                     if (row.get(md_key) or "").strip():
-                        return {
+                        return _present_md(row[md_key], row=row, payload={
                             "ticker": ticker,
                             "provider": alt,
                             "version_count": _vc,
@@ -8369,7 +8440,7 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                             "price_target": _f(row.get(pt_key)) if row.get(pt_key) is not None else _f(row.get("price_target")),
                             "upside_pct": _f(row.get(up_key)) if row.get(up_key) is not None else _f(row.get("upside_pct")),
                             "note": f"Requested {provider} not found; showing {alt}.",
-                        }
+                        })
         except Exception as _e:
             print(f"[analyst_reports] get_report DB query failed for {ticker} (falling back): {_e!s:.200}")
 
@@ -8393,7 +8464,7 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                 gamma_generated_at = entry.get("generated_at")
         except Exception:
             pass
-    return {
+    return _present_md(md_path.read_text(), row=None, payload={
         "ticker": ticker,
         "provider": provider,
         "report_md": md_path.read_text(),
@@ -8402,7 +8473,7 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
         "has_pptx": has_pptx,
         "gamma_url": gamma_url,
         "gamma_generated_at": gamma_generated_at,
-    }
+    })
 
 
 
