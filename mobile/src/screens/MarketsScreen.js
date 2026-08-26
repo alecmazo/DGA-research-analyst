@@ -391,7 +391,7 @@ export default function MarketsScreen({ navigation }) {
         const pct = q.pct != null ? Number(q.pct) : (q.pct_change != null ? Number(q.pct_change) : null);
         const ytdIpo = q.ytd_status === 'ipo' || q.ytd_label === 'IPO';
         const ytdRaw = q.ytd != null ? q.ytd : q.ytd_pct;
-        const ytd = ytdIpo ? null : (ytdRaw != null && !isNaN(Number(ytdRaw)) ? Number(ytdRaw) : null);
+        const ytd = ytdRaw != null && !isNaN(Number(ytdRaw)) ? Number(ytdRaw) : null;
         return { tk, q, pct, ytd, ytdIpo, abs: pct == null || isNaN(pct) ? -1 : Math.abs(pct) };
       })
       .sort((a, b) => b.abs - a.abs);
@@ -649,7 +649,7 @@ export default function MarketsScreen({ navigation }) {
               const { tk, q, pct, ytd, ytdIpo } = row;
               const up = pct == null || isNaN(pct) ? null : pct >= 0;
               const pxColor = up == null ? t.textSecondary : up ? t.pillUpFg : t.pillDownFg;
-              const ytdUp = ytdIpo || ytd == null || isNaN(ytd) ? null : ytd >= 0;
+              const ytdUp = ytd == null || isNaN(ytd) ? null : ytd >= 0;
               return (
                 <View
                   key={tk}
@@ -685,9 +685,9 @@ export default function MarketsScreen({ navigation }) {
                         ]}
                         numberOfLines={1}
                       >
-                        {ytdIpo ? 'IPO' : (ytd == null || isNaN(ytd) ? '—' : fmtPct(ytd))}
+                        {ytd == null || isNaN(ytd) ? '—' : fmtPct(ytd)}
                       </Text>
-                      <Text style={s.wlYtdLbl}>YTD</Text>
+                      <Text style={s.wlYtdLbl}>{ytdIpo ? 'IPO' : 'YTD'}</Text>
                     </View>
                     <Ionicons
                       name="chevron-forward"

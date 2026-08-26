@@ -2115,6 +2115,17 @@ html[data-theme="dark"] .opt-cell-empty { color: var(--gray-400); }
   opacity: 0.55;
   color: var(--text-tertiary);
 }
+.wl-list-wrap .wl-ytd-ipo {
+  display: block;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  opacity: 0.9;
+  line-height: 1.1;
+  margin-top: 1px;
+}
 .wl-list-wrap .wl-remove {
   position: absolute;
   top: 50%;

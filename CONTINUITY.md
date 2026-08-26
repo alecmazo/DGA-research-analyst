@@ -97,7 +97,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Print + analysis loop** | **`ui497-20260826-print-and-analysis-loop`** | Saved-report print no longer blank; 20s seamless no-human calculation loop |
 | **Report print fits the page** | **`ui498-20260826-report-print-fit`** | Tighter print margins; tables wrap so the report does not bleed off letter |
 | **Watchlist unhang** | **`ui499-20260826-watchlist-uncouple`** | Desk watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
-| **Next deploy after this** | **`ui500-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **IPO YTD from print** | **`ui500-20260826-ipo-ytd-from-print`** | This-year IPOs show % since IPO price with a small IPO marker; next year is normal YTD |
+| **Next deploy after this** | **`ui501-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 

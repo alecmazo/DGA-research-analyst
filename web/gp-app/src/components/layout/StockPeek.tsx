@@ -292,13 +292,13 @@ export function StockPeek({
 
               <Section title="Market">
                 <Row
-                  label="Year to date"
-                  value={
+                  label={
                     w.ytd_status === 'ipo' || w.ytd_label === 'IPO'
-                      ? 'IPO'
-                      : signedPct(w.ytd_pct)
+                      ? 'Year to date · IPO'
+                      : 'Year to date'
                   }
-                  tone={w.ytd_status === 'ipo' ? null : w.ytd_pct}
+                  value={signedPct(w.ytd_pct)}
+                  tone={w.ytd_pct}
                 />
                 <Row label="One year" value={signedPct(w.one_year_pct)} tone={w.one_year_pct} />
                 <Row

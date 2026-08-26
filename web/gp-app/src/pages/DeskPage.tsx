@@ -172,9 +172,7 @@ export function DeskPage() {
           q.ytd_status === 'ipo' || q.ytd_label === 'IPO' ? 'ipo' : q.ytd_status
         const ytdRaw = q.ytd ?? q.ytd_pct
         const ytd =
-          ytdStatus === 'ipo' || ytdRaw == null || Number.isNaN(Number(ytdRaw))
-            ? null
-            : Number(ytdRaw)
+          ytdRaw == null || Number.isNaN(Number(ytdRaw)) ? null : Number(ytdRaw)
         const earn = earnings[tk] || null
         return { tk, q, pct, ytd, ytdStatus, earn, abs: pct == null ? -1 : Math.abs(pct) }
       })
@@ -357,18 +355,19 @@ export function DeskPage() {
                       {fmtPct(pct)}
                     </td>
                     <td
-                      className={`tabular ${styles.colYtd} ${
-                        ytdStatus === 'ipo' ? styles.ytdIpo : pctClass(ytd)
-                      }`}
+                      className={`tabular ${styles.colYtd} ${pctClass(ytd)}`}
                       title={
                         ytdStatus === 'ipo'
-                          ? 'IPO this year — no full calendar YTD'
+                          ? `Return since IPO price${q.ytd_since ? ` (${q.ytd_since})` : ''} — not a full calendar YTD`
                           : ytd == null
                             ? 'YTD unavailable (no Jan price in store)'
                             : 'Calendar year-to-date %'
                       }
                     >
-                      {ytdStatus === 'ipo' ? 'IPO' : fmtPct(ytd)}
+                      <span className={styles.ytdNum}>{fmtPct(ytd)}</span>
+                      {ytdStatus === 'ipo' && (
+                        <span className={styles.ytdMark}>IPO</span>
+                      )}
                     </td>
                     <td className={styles.actions}>
                       <button

@@ -98,6 +98,8 @@ export type Quote = {
   /** ``ipo`` when the name listed this calendar year — show IPO, not a dash. */
   ytd_status?: 'ok' | 'ipo' | string | null
   ytd_label?: string | null
+  /** First listed date (ISO) when ytd_status is ipo. */
+  ytd_since?: string | null
   as_of?: string | null
   prev?: number | null
 }
