@@ -2407,22 +2407,27 @@ _FILINGS_TTL = 1800
 _CIK_SUB_CACHE: dict = {}  # cik → {ts, recent_rows}
 _CIK_SUB_TTL = 2700  # 45 min
 
-# Curated official + wire-service RSS only. No paid APIs, no LLM, no
-# retail aggregators (Yahoo/CNBC clickbait). Google News site: queries
-# are free public RSS that surface AP headlines. Reuters is out.
+# Curated official + market RSS only. No paid APIs, no LLM, no Yahoo/CNBC
+# clickbait. Reuters and AP are out (MSM wire). Prefer primary releases
+# (Fed/Treasury/BLS/SEC/EIA/FDIC/ECB) plus markets tape (Bloomberg, MW).
 _MARKET_WIRE_FEEDS: list[tuple[str, str]] = [
     ("Fed", "https://www.federalreserve.gov/feeds/press_all.xml"),
     ("Treasury", "https://home.treasury.gov/rss/press-releases"),
     ("BLS", "https://www.bls.gov/feed/bls_latest.rss"),
     ("SEC", "https://www.sec.gov/news/pressreleases.rss"),
-    ("AP",
-     "https://news.google.com/rss/search?q=site:apnews.com+(economy+OR+markets+OR+inflation+OR+fed)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+    ("EIA", "https://www.eia.gov/rss/todayinenergy.xml"),
+    ("FDIC", "https://www.fdic.gov/rss.xml"),
+    ("ECB", "https://www.ecb.europa.eu/rss/press.html"),
+    ("BBG", "https://feeds.bloomberg.com/markets/news.rss"),
+    ("MW", "https://feeds.content.dowjones.io/public/rss/mw_marketpulse"),
     ("BBC", "https://feeds.bbci.co.uk/news/business/rss.xml"),
-    ("NPR", "https://feeds.npr.org/1006/rss.xml"),
-    ("NYT", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"),
-    ("WSJ", "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain.xml"),
 ]
 _WIRE_BLOCK_REUTERS = re.compile(r"reuters\.com|\breuters\b", re.I)
+_WIRE_BLOCK_AP = re.compile(
+    r"apnews\.com|\bassociated press\b|\bap news\b|\(ap\)"
+    r"|(?:^|[\s|—–-])AP(?:$|[\s|—–:.,])",
+    re.I,
+)
 
 # Boost = more "desk-relevant"; block = pure noise / retail clickbait.
 _WIRE_BOOST = re.compile(
@@ -2550,6 +2555,9 @@ def _market_wire_score(item: dict, now_ts: float) -> float:
     pub = (item.get("publisher") or item.get("feed") or "")
     if _WIRE_BLOCK_REUTERS.search(url) or _WIRE_BLOCK_REUTERS.search(pub):
         return -1000.0
+    if (_WIRE_BLOCK_AP.search(url) or _WIRE_BLOCK_AP.search(pub)
+            or _WIRE_BLOCK_AP.search(title)):
+        return -1000.0
     # Company EDGAR archives belong on Fund Filings, not Market Wire.
     if "sec.gov/archives/edgar/data" in url or "/cgi-bin/browse-edgar" in url:
         return -1000.0
@@ -2566,13 +2574,13 @@ def _market_wire_score(item: dict, now_ts: float) -> float:
         score -= 5.0
     # Official releases first, then wire services, then broadsheet headlines.
     feed = (item.get("feed") or item.get("publisher") or "").lower()
-    if feed in ("fed", "treasury", "bls"):
+    if feed in ("fed", "treasury", "bls", "eia", "fdic", "ecb"):
         score += 16.0
     elif feed in ("sec", "sec press"):
         score += 10.0
-    elif feed in ("ap",):
-        score += 12.0
-    elif feed in ("bbc", "npr", "nyt", "wsj"):
+    elif feed in ("bbg", "mw", "wsj"):
+        score += 10.0
+    elif feed in ("bbc",):
         score += 6.0
     return score
 
@@ -2625,7 +2633,7 @@ def _build_market_wire(limit: int = 14) -> dict:
         "feeds_ok": len(_MARKET_WIRE_FEEDS) - len(errors),
         "feeds_total": len(_MARKET_WIRE_FEEDS),
         "errors": errors[:6],
-        "note": "Free official + wire RSS (Fed, Treasury, BLS, SEC, AP, BBC, NPR, NYT, WSJ). No tokens.",
+        "note": "Official + market RSS (Fed, Treasury, BLS, SEC, EIA, FDIC, ECB, Bloomberg, MarketWatch, BBC). Reuters/AP blocked.",
         "cached": False,
     }
     c["data"] = data
@@ -7467,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui501-20260826-handoff-refresh"
+WEB_BUILD_VERSION = "ui502-20260827-wire-drop-ap"
 
 
 @app.get("/api/build")

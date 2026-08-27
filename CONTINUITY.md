@@ -114,7 +114,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Watchlist unhang** | **`ui499-20260826-watchlist-uncouple`** | Desk watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 | **IPO YTD from print** | **`ui500-20260826-ipo-ytd-from-print`** | This-year IPOs show % since IPO price with a small IPO marker; next year is normal YTD |
 | **Handoff pack current** | **`ui501-20260826-handoff-refresh`** | Settings continuity pack: React GP paths, standing rules, ui476–ui500 filled in |
-| **Next deploy after this** | **`ui502-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Market Wire drop AP** | **`ui502-20260827-wire-drop-ap`** | Cut AP; add EIA/FDIC/ECB + Bloomberg/MarketWatch pulse; block AP bylines |
+| **Next deploy after this** | **`ui503-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -167,7 +168,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-26):** `ui501-20260826-handoff-refresh` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui502-20260827-wire-drop-ap` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -177,6 +178,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui485–ui500 | Watchlist YTD (WMT/CART/MGM/NET); this-year IPOs % since IPO print + **IPO** marker |
 | ui486–ui487 | Builder board hover snapshot (follow pointer outside peek); click → Financials |
 | ui488 | Reuters removed from Market Wire |
+| ui502 | AP removed from Market Wire; EIA/FDIC/ECB + Bloomberg/MarketWatch instead |
 | ui489–ui491 | Financials charts: one signed series, legend color both sides of zero; price hover |
 | ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
 | ui495–ui497 | Analyze-in-progress Foundation Vault loop (no human, 20s seamless ping-pong) |
@@ -200,6 +202,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - Grok Analyze: never persist `web_search` dumps as `report_md`
 - Financials `@media print` must stay scoped to `.shell`, never `body *`
 - Chart bars keep **legend color** above and below zero (sign is position vs zero)
+- Market Wire: no Reuters or AP (no AP Google News RSS; drop AP bylines)
 - Do not auto-send email; Share on reports prompts for a recipient
 - SnapTrade: `SnapTradeAuth.commercial_api_key` when available
 - Options wheel: held names first; term tables + KPI strip
@@ -249,4 +252,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-26 · Agent: Grok Build · Live: `ui501-20260826-handoff-refresh` · Next: `ui502-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui502-20260827-wire-drop-ap` · Next: `ui503-YYYYMMDD-slug`*
