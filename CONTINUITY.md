@@ -123,7 +123,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **All-time chart/table** | **`ui508-20260827-alltime-table`** | Managed-account All-Time Performance has Chart | Table like YTD monthly |
 | **Neg-equity DGA cap** | **`ui509-20260827-neg-eq-score-cap`** | Negative book: ROE scores 0 (not omitted); profit ≤70, growth ≤75 |
 | **Accounts tab** | **`ui510-20260827-nav-accounts`** | Topbar label Fund → Accounts (route still `/fund`) |
-| **Next deploy after this** | **`ui511-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **All-time folds Annual** | **`ui511-20260827-alltime-fold-annual`** | All-Time Performance absorbs benchmark + CAGR/cumulative; Annual card removed |
+| **Next deploy after this** | **`ui512-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -176,7 +177,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui510-20260827-nav-accounts` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui511-20260827-alltime-fold-annual` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -195,6 +196,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui508 | All-Time Performance: Chart | Table toggle (same as YTD monthly) |
 | ui509 | DGA Score: negative book equity cannot print 100 on profit or growth |
 | ui510 | Topbar: Fund renamed Accounts |
+| ui511 | All-Time Performance: benchmark + CAGR/cumulative; Annual card retired |
 | ui489–ui491 | Financials charts: one signed series, legend color both sides of zero; price hover |
 | ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
 | ui495–ui497 | Analyze-in-progress Foundation Vault loop (no human, 20s seamless ping-pong) |
@@ -271,4 +273,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui510-20260827-nav-accounts` · Next: `ui511-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui511-20260827-alltime-fold-annual` · Next: `ui512-YYYYMMDD-slug`*

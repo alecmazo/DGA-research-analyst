@@ -179,6 +179,7 @@ export type BalanceHistoryPoint = {
   skip?: boolean
   data_months?: number
   benchmark_return_pct?: number | null
+  return_source?: string
 }
 
 export type BalanceHistory = {
