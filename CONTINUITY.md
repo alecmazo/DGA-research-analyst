@@ -117,7 +117,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Market Wire drop AP** | **`ui502-20260827-wire-drop-ap`** | Cut AP; add EIA/FDIC/ECB + Bloomberg/MarketWatch pulse; block AP bylines |
 | **Clean Grok report markdown** | **`ui503-20260827-report-md-clean`** | Unwrap bold-wrapped cover tables; convert prompt ━ SECTION banners to `#` so TSLA matches RIVN |
 | **BKNG DGA score + ROIC** | **`ui504-20260827-bkng-dga-score`** | ROIC when book IC ≤ 0 uses assets−cash; neg equity D/E scores 0; hover math on DGA score card |
-| **Next deploy after this** | **`ui505-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Options after Positions** | **`ui505-20260827-nav-options-after-pos`** | Topbar: Options sits immediately right of Positions |
+| **Next deploy after this** | **`ui506-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -151,11 +152,11 @@ If Mac mini later ships a higher N while offline, **pull main first**, then set
 
 1. Desk (`research`)
 2. Financials (`financials`)
-3. Options (`options`)
-4. Builder (`builder`)
-5. Podcasts (`lab`) — *label only; internal tab id stays `lab`*
-6. Transcripts (`transcripts`)
-7. Positions (`positions`)
+3. Builder (`builder`)
+4. Podcasts (`lab`) — *label only; internal tab id stays `lab`*
+5. Transcripts (`transcripts`)
+6. Positions (`positions`)
+7. Options (`options`)
 
 **Firm ops** (right of divider):
 
@@ -170,7 +171,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui504-20260827-bkng-dga-score` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui505-20260827-nav-options-after-pos` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -183,6 +184,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui502 | AP removed from Market Wire; EIA/FDIC/ECB + Bloomberg/MarketWatch instead |
 | ui503 | Grok report cover/section markdown cleaned (TSLA matches RIVN) |
 | ui504 | BKNG: ROIC for buyback years; DGA score hover math; neg equity no longer a free 100 |
+| ui505 | Topbar: Options moved to the right of Positions |
 | ui489–ui491 | Financials charts: one signed series, legend color both sides of zero; price hover |
 | ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
 | ui495–ui497 | Analyze-in-progress Foundation Vault loop (no human, 20s seamless ping-pong) |
@@ -258,4 +260,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui504-20260827-bkng-dga-score` · Next: `ui505-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui505-20260827-nav-options-after-pos` · Next: `ui506-YYYYMMDD-slug`*

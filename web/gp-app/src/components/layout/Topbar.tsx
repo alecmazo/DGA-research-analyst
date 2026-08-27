@@ -11,11 +11,11 @@ import styles from './Topbar.module.css'
 const WORK: { to: string; label: string }[] = [
   { to: '/', label: 'Desk' },
   { to: '/financials', label: 'Financials' },
-  { to: '/options', label: 'Options' },
   { to: '/builder', label: 'Builder' },
   { to: '/podcasts', label: 'Podcasts' },
   { to: '/transcripts', label: 'Transcripts' },
   { to: '/positions', label: 'Positions' },
+  { to: '/options', label: 'Options' },
 ]
 
 const OPS: { to: string; label: string }[] = [

@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui504-20260827-bkng-dga-score"
+WEB_BUILD_VERSION = "ui505-20260827-nav-options-after-pos"
 
 
 @app.get("/api/build")
@@ -7575,7 +7575,7 @@ def _continuity_pack() -> dict:
         f"- Auth header: `x-auth-v2-token`. Login `/api/auth/v2/login`.\n"
         f"- Legacy GP HTML is `/gp-legacy` (`web/gp/`) — not the source of truth.\n\n"
         f"## Nav (do not reshuffle casually)\n"
-        f"Work: Desk · Financials · Options · Builder · Podcasts · Transcripts · Positions\n"
+        f"Work: Desk · Financials · Builder · Podcasts · Transcripts · Positions · Options\n"
         f"| Firm ops: Fund · Memos · Settings · Sliw\n\n"
         f"## CONTINUITY.md (repo copy at handoff time)\n\n"
         f"{cont_md or '_(file missing on this deploy — use rules above)_'}\n"
