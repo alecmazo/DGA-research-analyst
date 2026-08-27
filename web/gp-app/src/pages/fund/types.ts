@@ -200,6 +200,9 @@ export type RebalanceRow = {
   ticker?: string
   rating?: string
   upside_pct?: number | null
+  price_target?: number | null
+  target_provider?: string | null
+  price?: number | null
   current_pct?: number
   suggested_pct?: number
   shares_delta?: number | null

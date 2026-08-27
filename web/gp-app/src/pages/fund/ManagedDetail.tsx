@@ -751,7 +751,8 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
               {!reb?.rows?.length ? (
                 <div className={styles.pad}>
                   <p className={styles.hint}>
-                    Run to compute suggested weights from research ratings &amp; upside.
+                    Run to compute suggested weights from Saved Report 12-month
+                    price targets vs live last.
                   </p>
                 </div>
               ) : (
@@ -787,7 +788,14 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                               <tr key={row.ticker}>
                                 <td className={styles.tk}>{row.ticker}</td>
                                 <td>{row.rating || '—'}</td>
-                                <td className={`tabular ${pctClass(row.upside_pct)}`}>
+                                <td
+                                  className={`tabular ${pctClass(row.upside_pct)}`}
+                                  title={
+                                    row.price_target != null
+                                      ? `${(row.target_provider || 'report').toUpperCase()} PT $${Number(row.price_target).toFixed(0)} vs last ${row.price != null ? '$' + Number(row.price).toFixed(2) : '—'}`
+                                      : 'No saved-report price target'
+                                  }
+                                >
                                   {fmtPct(row.upside_pct, 1)}
                                 </td>
                                 <td className={`tabular ${styles.nowrap}`}>

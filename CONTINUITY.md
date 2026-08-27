@@ -119,7 +119,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **BKNG DGA score + ROIC** | **`ui504-20260827-bkng-dga-score`** | ROIC when book IC ≤ 0 uses assets−cash; neg equity D/E scores 0; hover math on DGA score card |
 | **Options after Positions** | **`ui505-20260827-nav-options-after-pos`** | Topbar: Options sits immediately right of Positions |
 | **Fund hide CSV uploads** | **`ui506-20260827-fund-hide-csv`** | Manual Data Uploads no longer a Fund card; collapsed CSV backup; SnapTrade is the path |
-| **Next deploy after this** | **`ui507-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Rebalance live PT upside** | **`ui507-20260827-rebalance-live-pt`** | Fund rebalance upside = Saved Report 12m PT vs live last (not frozen report %) |
+| **Next deploy after this** | **`ui508-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -172,7 +173,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui506-20260827-fund-hide-csv` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui507-20260827-rebalance-live-pt` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -187,6 +188,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui504 | BKNG: ROIC for buyback years; DGA score hover math; neg equity no longer a free 100 |
 | ui505 | Topbar: Options moved to the right of Positions |
 | ui506 | Fund: hide Manual Data Uploads; SnapTrade is the live path |
+| ui507 | Rebalance upside from saved-report PT vs live last (CRM +41% was stale) |
 | ui489–ui491 | Financials charts: one signed series, legend color both sides of zero; price hover |
 | ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
 | ui495–ui497 | Analyze-in-progress Foundation Vault loop (no human, 20s seamless ping-pong) |
@@ -212,6 +214,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - DGA Score: if book invested capital ≤ 0, ROIC uses total assets − cash; negative equity scores 0 on D/E (do not skip)
 - Financials `@media print` must stay scoped to `.shell`, never `body *`
 - Chart bars keep **legend color** above and below zero (sign is position vs zero)
+- Fund rebalance upside = Saved Report 12-month PT vs live last — never frozen report %
 - Market Wire: no Reuters or AP (no AP Google News RSS; drop AP bylines)
 - Do not auto-send email; Share on reports prompts for a recipient
 - SnapTrade: `SnapTradeAuth.commercial_api_key` when available
@@ -262,4 +265,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui506-20260827-fund-hide-csv` · Next: `ui507-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui507-20260827-rebalance-live-pt` · Next: `ui508-YYYYMMDD-slug`*

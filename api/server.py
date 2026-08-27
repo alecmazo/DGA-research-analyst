@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui506-20260827-fund-hide-csv"
+WEB_BUILD_VERSION = "ui507-20260827-rebalance-live-pt"
 
 
 @app.get("/api/build")
@@ -18802,31 +18802,90 @@ def run_account_rebalance(fund_id: str, request: Request):
             if total_equity_mv <= 0:
                 total_equity_mv = max(sum(pos_map[s]["cost"] for s in equity_syms if s in pos_map), 1.0)
 
-            # 5. Look up research reports from saved markdown files in STOCKS_FOLDER.
-            #    Falls back to Hold/0 upside when no report exists for a ticker.
+            # 5. Saved Reports (Postgres) — newest engine with a 12m PT.
+            #    Upside is always PT vs *live* last, never the frozen % in the
+            #    report (CRM Grok Jul-17 stored +41% when last was ~$174).
+            db_signals: dict[str, dict] = {}
+            try:
+                cur.execute("""
+                    SELECT ticker,
+                           rating, price_target, generated_at,
+                           claude_rating, claude_price_target, claude_generated_at,
+                           kimi_rating, kimi_price_target, kimi_generated_at,
+                           deepseek_rating, deepseek_price_target, deepseek_generated_at
+                      FROM analyst_reports
+                     WHERE ticker = ANY(%s)
+                """, (equity_syms,))
+                for row in (cur.fetchall() or []):
+                    tk = (row.get("ticker") or "").strip().upper()
+                    if not tk:
+                        continue
+                    cands = []
+                    for prov, ts_k, rat_k, pt_k in (
+                        ("grok", "generated_at", "rating", "price_target"),
+                        ("claude", "claude_generated_at", "claude_rating", "claude_price_target"),
+                        ("kimi", "kimi_generated_at", "kimi_rating", "kimi_price_target"),
+                        ("deepseek", "deepseek_generated_at", "deepseek_rating", "deepseek_price_target"),
+                    ):
+                        pt = row.get(pt_k)
+                        ts = row.get(ts_k)
+                        if pt is None and not row.get(rat_k) and not ts:
+                            continue
+                        try:
+                            pt_f = float(pt) if pt is not None else None
+                        except (TypeError, ValueError):
+                            pt_f = None
+                        if ts is not None and getattr(ts, "tzinfo", None) is not None:
+                            try:
+                                ts = ts.replace(tzinfo=None)
+                            except Exception:
+                                pass
+                        cands.append((ts or datetime(1970, 1, 1), 1 if pt_f else 0, prov,
+                                      row.get(rat_k) or "Hold", pt_f))
+                    # Newest report that actually has a price target; else newest rating.
+                    with_pt = [c for c in cands if c[1] == 1]
+                    pick = max(with_pt or cands, key=lambda c: c[0]) if (with_pt or cands) else None
+                    if pick:
+                        db_signals[tk] = {
+                            "provider": pick[2],
+                            "rating": pick[3] or "Hold",
+                            "price_target": pick[4],
+                        }
+            except Exception as _e:
+                print(f"[rebalance] analyst_reports lookup failed: {_e!s:.160}", flush=True)
+
             reports_folder = analyst.STOCKS_FOLDER
             ticker_results = []
             for sym in equity_syms:
-                md_path = reports_folder / f"{sym}_DGA_Report.md"
-                summary_dict: dict = {}
-                if md_path.exists():
-                    try:
-                        raw_summary = _extract_summary_cached(md_path)
-                        if raw_summary:
-                            summary_dict = {
-                                "rating":       raw_summary.get("rating") or "Hold",
-                                "price_target": raw_summary.get("price_target"),
-                                "upside_pct":   raw_summary.get("upside_pct") or 0,
-                            }
-                    except Exception:
-                        pass
-
+                live = pos_map.get(sym, {}).get("price")
+                sig = db_signals.get(sym) or {}
+                rating = sig.get("rating")
+                pt = sig.get("price_target")
+                provider = sig.get("provider")
+                if pt is None and rating is None:
+                    md_path = reports_folder / f"{sym}_DGA_Report.md"
+                    if md_path.exists():
+                        try:
+                            raw_summary = _extract_summary_cached(md_path)
+                            if raw_summary:
+                                rating = raw_summary.get("rating") or "Hold"
+                                pt = raw_summary.get("price_target")
+                                provider = "disk"
+                        except Exception:
+                            pass
+                summary_dict = {
+                    "rating": rating or "Hold",
+                    "price_target": pt,
+                    # Do not pass frozen upside_pct — compute vs live last.
+                }
                 ticker_results.append({
                     "ticker": sym,
                     "ok": True,
-                    "summary": summary_dict or {"rating": "Hold", "price_target": None, "upside_pct": 0},
-                    "sector":   "Unknown",
+                    "market_price": live,
+                    "summary": summary_dict,
+                    "sector": "Unknown",
                     "industry": "Unknown",
+                    "target_provider": provider,
                 })
 
             if not ticker_results:
@@ -18856,12 +18915,24 @@ def run_account_rebalance(fund_id: str, request: Request):
                 sug_pct = sug_frac * 100
 
                 reb = reb_lookup.get(sym, {})
-                rating = reb.get("rating") or (ticker_results[equity_syms.index(sym)].get("summary") or {}).get("rating") or "Hold"
+                src = ticker_results[equity_syms.index(sym)]
+                src_sum = src.get("summary") or {}
+                rating = reb.get("rating") or src_sum.get("rating") or "Hold"
+                pt = reb.get("price_target")
+                if pt is None:
+                    pt = src_sum.get("price_target")
+                live_px = src.get("market_price") or pm.get("price")
                 upside_pct = reb.get("upside_pct")
+                if upside_pct is None and isinstance(pt, (int, float)) and live_px:
+                    try:
+                        upside_pct = (float(pt) - float(live_px)) / float(live_px) * 100.0
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        upside_pct = 0
                 if upside_pct is None:
-                    upside_pct = (ticker_results[equity_syms.index(sym)].get("summary") or {}).get("upside_pct") or 0
+                    upside_pct = 0
                 score = float(reb.get("score") or 0)
-                sec = reb.get("sector") or ticker_results[equity_syms.index(sym)].get("sector") or "Unknown"
+                sec = reb.get("sector") or src.get("sector") or "Unknown"
+                tprov = src.get("target_provider") or ""
 
                 current_ev  += (cur_pct / 100) * float(upside_pct)
                 suggested_ev += sug_frac * float(upside_pct)
@@ -18893,6 +18964,8 @@ def run_account_rebalance(fund_id: str, request: Request):
                     "suggested_pct": round(sug_pct, 2),
                     "rating":        rating,
                     "upside_pct":    round(float(upside_pct), 2),
+                    "price_target":  round(float(pt), 2) if isinstance(pt, (int, float)) else None,
+                    "target_provider": tprov,
                     "score":         round(score, 4),
                     "sector":        sec,
                     "action":        action,

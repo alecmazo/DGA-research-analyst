@@ -11355,13 +11355,19 @@ def _score_ticker(result: dict) -> dict:
     price = result.get("market_price")
     pt = s.get("price_target")
 
-    # Prefer a pre-computed upside from the portfolio Grok roll-up if available.
-    upside = s.get("upside_pct")
-    if upside is None:
-        if isinstance(price, (int, float)) and isinstance(pt, (int, float)) and price:
-            upside = (pt - price) / price * 100.0
-        else:
+    # Always recompute from saved 12m PT vs *live* last. Stored upside_pct is
+    # the % on the day the report was written (CRM Jul-17 +41% at ~$174) and
+    # must not drive Fund rebalance once the tape has moved.
+    upside = None
+    if isinstance(price, (int, float)) and isinstance(pt, (int, float)) and price > 0:
+        upside = (float(pt) - float(price)) / float(price) * 100.0
+    elif s.get("upside_pct") is not None:
+        try:
+            upside = float(s.get("upside_pct"))
+        except (TypeError, ValueError):
             upside = 0.0
+    else:
+        upside = 0.0
     # Clip extreme outliers so one +500% fantasy target doesn't dominate.
     upside = max(-60.0, min(120.0, float(upside)))
 
