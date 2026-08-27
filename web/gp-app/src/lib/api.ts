@@ -272,7 +272,8 @@ export type SavedReport = {
 export type JobStatus = {
   job_id?: string
   status?: string
-  progress?: { pct?: number | null; label?: string | null }
+  llm_provider?: string
+  progress?: { pct?: number | null; label?: string | null; step?: string | null }
   result?: {
     cost_usd?: number
     model?: string

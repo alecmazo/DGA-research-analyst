@@ -16,6 +16,7 @@ import {
 import { relativeTime } from '@/lib/format'
 import { renderMd } from '@/lib/md'
 import { AnalysisScene } from '@/components/ui/AnalysisScene'
+import { inferSceneEngine } from '@/lib/analysisScene'
 import styles from './ReportPage.module.css'
 import extra from './ResearchAnswerPage.module.css'
 
@@ -86,9 +87,14 @@ export function openResearchWindow(
 }
 
 /** Open on the Analyze / Run click (user gesture) so the popup is not blocked. */
-export function openPendingResearchWindow(kind: ResearchKind, hint?: string): Window | null {
+export function openPendingResearchWindow(
+  kind: ResearchKind,
+  hint?: string,
+  engine?: string,
+): Window | null {
   const q = hint ? `&q=${encodeURIComponent(hint.replace(/\s+/g, ' ').slice(0, 180))}` : ''
-  const url = `/gp/research?kind=${encodeURIComponent(kind)}&pending=1${q}`
+  const eng = engine ? `&engine=${encodeURIComponent(engine)}` : ''
+  const url = `/gp/research?kind=${encodeURIComponent(kind)}&pending=1${q}${eng}`
   const name = `dga-research-${kind}-live`
   const win = window.open(url, name, WIN_FEATURES)
   if (!win) return null
@@ -154,6 +160,7 @@ export function ResearchAnswerPage() {
   const id = (params.get('id') || '').trim()
   const pending = params.get('pending') === '1'
   const qHint = (params.get('q') || '').trim()
+  const engineHint = (params.get('engine') || '').trim()
 
   const [review, setReview] = useState<ReviewPayload | null>(null)
   const [job, setJob] = useState<AgenticJob | null>(null)
@@ -267,10 +274,19 @@ export function ResearchAnswerPage() {
   const html = useMemo(() => (answer ? renderMd(answer) : ''), [answer])
   const model = review?.model || ''
   const shownProv = providerFromModel(model)
+  const sceneEngine = inferSceneEngine(
+    engineHint || job?.label || model,
+    shownProv || 'claude',
+  )
   const verification = asVerification(review?.verification)
   const secs = Math.round(elapsed / 1000)
   const tools = (job?.tool_calls || []).slice(-10)
   const waiting = Boolean((pending && !id) || (id && loading && !answer))
+  const printStamp = review?.generated_at
+    ? new Date(review.generated_at).toLocaleString()
+    : new Date().toLocaleString()
+  const printDoc =
+    kind === 'strategist' ? 'Investment Committee Review' : 'Research Note'
 
   const pdfPayload = () => ({
     title: kind === 'strategist' ? 'Investment Committee Review' : 'Analyst',
@@ -370,7 +386,7 @@ export function ResearchAnswerPage() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.head}>
+      <header className={`${styles.head} ${styles.noPrint}`}>
         <div className={styles.title}>
           <strong>{heading}</strong>
           {model && (
@@ -386,9 +402,18 @@ export function ResearchAnswerPage() {
           )}
           {model && <span className={styles.meta}>{model}</span>}
         </div>
-        <div className={styles.actions}>
+        <div className={`${styles.actions} ${styles.noPrint}`}>
           {answer && (
             <>
+              <button
+                type="button"
+                className={styles.print}
+                onClick={() => window.print()}
+                disabled={busyAct || !html}
+                title="Print this window as you see it"
+              >
+                Print
+              </button>
               <Button size="sm" disabled={busyAct} onClick={() => void exportPdf()}>
                 ⬇ PDF
               </Button>
@@ -406,6 +431,20 @@ export function ResearchAnswerPage() {
         </div>
       </header>
 
+      <div className={extra.printMast} aria-hidden>
+        <div>
+          <div className={extra.printWord}>DGA CAPITAL</div>
+          <div className={extra.printDoc}>{printDoc}</div>
+        </div>
+        <div className={extra.printMeta}>
+          <div className={extra.printConf}>Confidential</div>
+          <div>{printStamp}</div>
+          {model ? <div>{model}</div> : null}
+          {shownProv ? <div>{shownProv.toUpperCase()}</div> : null}
+        </div>
+      </div>
+      <div className={extra.printAccent} aria-hidden />
+
       {(review?.fund_name || review?.tickers || question) && (
         <div className={extra.question}>
           {review?.fund_name && <div className={extra.fund}>{review.fund_name}</div>}
@@ -417,6 +456,7 @@ export function ResearchAnswerPage() {
       {waiting && (
         <AnalysisScene
           size="fill"
+          engine={sceneEngine}
           label={
             job?.label || (pending && !id ? 'Starting…' : 'Working…')
           }
@@ -469,7 +509,9 @@ export function ResearchAnswerPage() {
           </div>
         )}
       </div>
-      <SupportFab />
+      <div className={styles.noPrint}>
+        <SupportFab />
+      </div>
     </div>
   )
 }

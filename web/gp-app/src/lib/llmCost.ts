@@ -24,9 +24,9 @@ export const DEFAULT_AGENTIC_COST: Record<AgentEngine, CostRange> = {
   deepseek: [0.01, 0.08],
 }
 
-/** Whole-book Portfolio Strategist */
+/** Whole-book Portfolio Strategist (Opus 5, thinking off — matches ~$1 4.8 runs) */
 export const DEFAULT_STRATEGIST_COST: Record<AgentEngine, CostRange> = {
-  claude: [0.3, 1.0],
+  claude: [0.4, 1.2],
   grok: [0.25, 0.8],
   deepseek: [0.05, 0.25],
 }

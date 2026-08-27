@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { api, type JobStatus, type LlmProvider } from '@/lib/api'
 import { pollJob } from '@/lib/jobs'
 import { useAnalysisScene } from '@/hooks/useAnalysisScene'
+import { inferSceneEngine, type SceneEngine } from '@/lib/analysisScene'
 import {
   DEFAULT_REPORT_COST,
   fmtUsd,
@@ -79,12 +80,14 @@ export function AnalyzeCard({
   const [showProg, setShowProg] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [canceling, setCanceling] = useState(false)
+  const [sceneEngine, setSceneEngine] = useState<SceneEngine>('grok')
 
   useAnalysisScene(
     'analyze',
     Boolean(showProg && running),
     progLbl || 'Queued…',
     progPct == null ? undefined : `${progPct}%`,
+    sceneEngine,
   )
 
   useEffect(() => {
@@ -169,6 +172,7 @@ export function AnalyzeCard({
       const ordered = [...engines].sort(
         (a, b) => order.indexOf(a) - order.indexOf(b),
       )
+      setSceneEngine(ordered[0] || 'grok')
       const job = await api<JobStatus>('/api/analyze', {
         method: 'POST',
         body: JSON.stringify({
@@ -184,9 +188,15 @@ export function AnalyzeCard({
       onStart?.()
 
       const outcome = await pollJob(jobId, {
-        onProgress: (pctInt, lbl) => {
+        onProgress: (pctInt, lbl, job) => {
           setProgPct(pctInt == null ? null : Math.min(99, pctInt))
           setProgLbl(lbl || '…')
+          setSceneEngine(
+            inferSceneEngine(
+              job?.progress?.step || job?.llm_provider || lbl,
+              ordered[0] || 'grok',
+            ),
+          )
         },
       })
       setActiveJobId(null)

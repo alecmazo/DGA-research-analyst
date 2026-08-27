@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui517-20260827-accounts-managed-first"
+WEB_BUILD_VERSION = "ui518-20260827-engine-loops-print"
 
 
 @app.get("/api/build")
@@ -7704,12 +7704,23 @@ def config_models():
                 round(float(est_v(ds_model, 30_000, 8_000)), 4) if callable(est_v) else 0.01,
                 round(float(est_v(ds_model, 45_000, 16_000)), 4) if callable(est_v) else 0.05,
             ],
-            # Flat bands (legacy chips) + per-engine maps for Desk
-            "agentic":            [0.05, 0.30],
-            "strategist":         [0.30, 1.00],
+            # Flat bands (legacy chips) + per-engine maps for Desk.
+            # Claude $ = cumulative tool-loop tokens at live $/Mtok (thinking OFF).
+            # Opus 5 with thinking-on was $4.60–$5.90/review; 4.8 history was ~$1.
+            "agentic":            [
+                round(float(analyst.estimate_claude_cost(c_model, 20_000, 4_000)), 2),
+                round(float(analyst.estimate_claude_cost(c_model, 80_000, 12_000)), 2),
+            ],
+            "strategist":         [
+                round(float(analyst.estimate_claude_cost(c_model, 40_000, 8_000)), 2),
+                round(float(analyst.estimate_claude_cost(c_model, 140_000, 22_000)), 2),
+            ],
             "agentic_by_provider": {
                 # Multi-step tool-use: Claude default · Grok mid · DeepSeek cheap
-                "claude":   [0.05, 0.30],
+                "claude":   [
+                    round(float(analyst.estimate_claude_cost(c_model, 20_000, 4_000)), 2),
+                    round(float(analyst.estimate_claude_cost(c_model, 80_000, 12_000)), 2),
+                ],
                 "grok":     [
                     round(analyst.estimate_grok_cost(g_model, 12_000, 2_500, 2), 3),
                     round(analyst.estimate_grok_cost(g_model, 35_000, 8_000, 6), 2),
@@ -7720,8 +7731,11 @@ def config_models():
                 ],
             },
             "strategist_by_provider": {
-                # Whole-book review — heavier envelope than agentic Q&A
-                "claude":   [0.30, 1.00],
+                # Whole-book review — thinking off, ≤12 Claude steps
+                "claude":   [
+                    round(float(analyst.estimate_claude_cost(c_model, 40_000, 8_000)), 2),
+                    round(float(analyst.estimate_claude_cost(c_model, 140_000, 22_000)), 2),
+                ],
                 "grok":     [
                     round(analyst.estimate_grok_cost(g_model, 25_000, 6_000, 2), 2),
                     round(analyst.estimate_grok_cost(g_model, 60_000, 14_000, 5), 2),
@@ -25276,17 +25290,21 @@ _agentic_jobs: dict[str, dict] = {}
 
 
 def _agentic_thinking_kwargs(model: str) -> dict:
-    """Return model-appropriate thinking/effort kwargs. Opus 5 / 4.6+ and
-    Sonnet 5 / 4.6 use adaptive thinking + effort; 4.1/4.5 and earlier omit
-    it (the old budget_tokens API isn't worth the complexity here). Keeps us
-    400-free across every model string."""
+    """Thinking/effort for agentic + strategist Claude calls.
+
+    Opus 5 turns thinking ON by default at high effort. That billed thinking
+    tokens at output rates ($25/M) and pushed Portfolio Strategist from ~$1
+    (Opus 4.8, ANAT-IRA / EM-DEF history) to $4.60–$5.90. Reports already
+    disable thinking. Tool-use loops have the evidence in tool results — same
+    fast path. ``thinking: disabled`` requires effort high or below (API 400).
+    """
     m = (model or "").lower()
     if any(tag in m for tag in (
         "opus-5", "opus-4-6", "opus-4-7", "opus-4-8",
         "sonnet-5", "sonnet-4-6",
     )):
-        return {"thinking": {"type": "adaptive"},
-                "output_config": {"effort": "high"}}
+        return {"thinking": {"type": "disabled"},
+                "output_config": {"effort": "medium"}}
     return {}   # 4.1 / 4.5 / older: plain tool use, no thinking params
 
 
@@ -25732,17 +25750,21 @@ def _agentic_exec_tool(name: str, args: dict) -> str:
             claude_md = (row.get("report_md_claude") or "").strip()
             kimi_md   = (row.get("report_md_kimi") or "").strip()
             ds_md     = (row.get("report_md_deepseek") or "").strip()
-            MAX = 8000   # truncate hard so one report can't blow the context
+            # Tight excerpts — full 8k×N engines was re-billed every tool round.
+            MAX = 3500
+            BOTH = 1800
             parts = [f"Ticker: {tk}  rating={row.get('rating')}  "
                      f"target={row.get('price_target')}  upside={row.get('upside_pct')}%"]
-            if provider in ("grok", "both") and grok_md:
-                parts.append(f"\n══ GROK REPORT ══\n{grok_md[:MAX]}")
-            if provider in ("claude", "both") and claude_md:
-                parts.append(f"\n══ CLAUDE REPORT ══\n{claude_md[:MAX]}")
-            if provider in ("kimi", "both") and kimi_md:
-                parts.append(f"\n══ KIMI K3 REPORT ══\n{kimi_md[:MAX]}")
-            if provider in ("deepseek", "both") and ds_md:
-                parts.append(f"\n══ DEEPSEEK REPORT ══\n{ds_md[:MAX]}")
+            want_both = provider in ("both", "all", "")
+            cap = BOTH if want_both else MAX
+            if provider in ("grok", "both", "all", "") and grok_md:
+                parts.append(f"\n══ GROK REPORT ══\n{grok_md[:cap]}")
+            if provider in ("claude", "both", "all") and claude_md:
+                parts.append(f"\n══ CLAUDE REPORT ══\n{claude_md[:cap]}")
+            if provider in ("kimi", "both", "all") and kimi_md:
+                parts.append(f"\n══ KIMI K3 REPORT ══\n{kimi_md[:cap]}")
+            if provider in ("deepseek", "both", "all") and ds_md:
+                parts.append(f"\n══ DEEPSEEK REPORT ══\n{ds_md[:cap]}")
             return "\n".join(parts) if len(parts) > 1 else f"No {provider} report text for {tk}."
 
         if name == "get_recent_news":
@@ -26025,6 +26047,7 @@ def _agentic_verify(client, model: str, question: str, answer: str,
         resp = client.messages.create(
             model=model, max_tokens=6000,
             system=sys, messages=[{"role": "user", "content": user}],
+            **_agentic_thinking_kwargs(model),
         )
         text = next((b.text for b in resp.content
                      if getattr(b, "type", None) == "text"), "") or ""
@@ -26474,9 +26497,14 @@ def _run_agentic_analysis(job_id: str, question: str,
     # Per-run override from desk/mobile engine chips (falls back to Settings route)
     _ov = (jr0.get("llm_provider") or jr0.get("provider_override") or "").lower().strip()
     provider, model = _agent_route_and_model(mode, provider_override=_ov or None)
-    max_steps = (
-        _STRATEGIST_MAX_STEPS if mode == "strategist" else _AGENTIC_MAX_STEPS
-    )
+    # Claude batches tools; 24 rounds was for Grok 1-name-per-step and is
+    # wasteful on Opus ($5/$25). Cap Claude strategist at the Analyst budget.
+    if mode == "strategist":
+        max_steps = (
+            _AGENTIC_MAX_STEPS if provider == "claude" else _STRATEGIST_MAX_STEPS
+        )
+    else:
+        max_steps = _AGENTIC_MAX_STEPS
     _set(stage="queued", status="running", label=f"Starting {provider}…",
          started_at=time.time(), steps=0, tool_calls=[], cost_usd=0.0,
          provider=provider, model=model, max_steps=max_steps)
@@ -27248,10 +27276,11 @@ _STRATEGIST_SYSTEM = (
     "that are really one AI-capex trade), catalyst clustering, and wipeout scenarios.\n\n"
     "TOOL DISCIPLINE: use compute for ALL math (EV, weighted avgs, % deltas — never "
     "mental math); get_financials for any fundamental; get_ytd_attribution for real "
-    "returns; read_saved_report to ground key theses (batch: focus on top weights + "
-    "outliers, not every micro name); get_recent_news / web_search for fresh "
-    "catalysts. NEVER invent a number. Prefer multi-ticker tool calls over "
-    "one-ticker serial loops.\n\n"
+    "returns. Grok and Claude 12m PT/upside are ALREADY in the book list — do NOT "
+    "read_saved_report for every name. At most 4 theses (largest weights + outliers). "
+    "get_recent_news / web_search only for fresh catalysts. NEVER invent a number. "
+    "Prefer multi-ticker tool calls over one-ticker serial loops. Finish as soon as "
+    "the six sections are grounded — extra tool rounds waste money.\n\n"
     "Each name in the book may list a Grok 12m PT/upside AND a Claude 12m "
     "PT/upside. Use BOTH figures in EXPECTED VALUE and SUGGESTED ADJUSTMENTS "
     "(cite them as Grok vs Claude). Do not pick one engine and ignore the other. "

@@ -130,7 +130,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Exchange analysis loop** | **`ui515-20260827-exchange-analysis-loop`** | Analyze overlay is a 15s seamless matching-engine backroom loop; unused chamber still removed |
 | **Zero-debt strength** | **`ui516-20260827-zero-debt-strength`** | No/untagged debt is fortress: Cash-To-Debt ≥10×, D/E and D/EBITDA 0×; DGA FS 100 |
 | **Accounts managed first** | **`ui517-20260827-accounts-managed-first`** | Accounts tab: Managed first, LP Funds second (toggle, KPIs, default view) |
-| **Next deploy after this** | **`ui518-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Engine loops + research print** | **`ui518-20260827-engine-loops-print`** | Grok vs Claude 15s analysis loops; Print on Analyst/Strategist with DGA letterhead; Claude strategist thinking off |
+| **Next deploy after this** | **`ui519-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -183,7 +184,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui517-20260827-accounts-managed-first` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui518-20260827-engine-loops-print` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -213,6 +214,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui515 | 15s palindrome matching-engine loop (~940KB); unused `analysis-chamber.jpg` removed |
 | ui516 | Zero/untagged debt is fortress on Financial Strength (not blank ratios) |
 | ui517 | Accounts: Managed first, LP Funds second |
+| ui518 | Grok/Claude 15s loops; Print on Analyst/Strategist; Claude Strategist thinking off (~$1 not $5) |
 | ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
 | ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
@@ -240,6 +242,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - Accounts rebalance **target** = **Grok** 12m PT (other engines only if Grok has none)
 - Saved Reports TGT/Upside: when both Grok and Claude exist, each target has its own live upside underneath — never hide one %
 - Portfolio Strategist prompt includes **both** Grok and Claude PT/upside (and per-engine mechanical EV)
+- Claude Strategist/Analyst tool loops: **thinking disabled + medium effort** (Opus 5 default thinking was $4–$6/review). Do not set effort high.
 - Market Wire: no Reuters or AP (no AP Google News RSS; drop AP bylines)
 - Do not auto-send email; Share on reports prompts for a recipient
 - SnapTrade: `SnapTradeAuth.commercial_api_key` when available
@@ -290,4 +293,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui517-20260827-accounts-managed-first` · Next: `ui518-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui518-20260827-engine-loops-print` · Next: `ui519-YYYYMMDD-slug`*

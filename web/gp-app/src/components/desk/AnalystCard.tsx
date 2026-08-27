@@ -119,7 +119,7 @@ export function AnalystCard({ bare = false }: Props) {
     setProgress({ status: 'running', label: `Starting · ${engLabel(engine)}…`, steps: 0 })
     setElapsed(0)
     // Open on the click so the finished answer is not popup-blocked.
-    const win = openPendingResearchWindow('analyst', q)
+    const win = openPendingResearchWindow('analyst', q, engine)
     let startedId: string | null = null
     try {
       const d0 = await api<{ ok?: boolean; job_id?: string; error?: string }>(
@@ -318,6 +318,7 @@ export function AnalystCard({ bare = false }: Props) {
     ]
       .filter(Boolean)
       .join(' · ') || undefined,
+    engine,
   )
 
   return (

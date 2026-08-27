@@ -191,7 +191,7 @@ export function StrategistCard({ bare = false }: Props) {
           .map((f) => f.short_name || f.name || f.id)
           .join(' + ')
       : file?.name || 'uploaded book'
-    const win = openPendingResearchWindow('strategist', hint)
+    const win = openPendingResearchWindow('strategist', hint, engine)
     if (selected.length) {
       const label =
         funds
@@ -393,6 +393,7 @@ export function StrategistCard({ bare = false }: Props) {
     ]
       .filter(Boolean)
       .join(' · ') || undefined,
+    engine,
   )
 
   return (
