@@ -602,6 +602,43 @@
   color: var(--text-muted);
 }
 
+.csvBackup {
+  margin-top: 18px;
+  padding: 8px 12px 10px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.csvBackup summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  list-style: none;
+}
+
+.csvBackup summary::-webkit-details-marker {
+  display: none;
+}
+
+.csvBackup summary::before {
+  content: '▸ ';
+  font-size: 10px;
+}
+
+.csvBackup[open] summary::before {
+  content: '▾ ';
+}
+
+.csvBackupHint {
+  margin: 8px 0 4px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 .uploadGrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -118,7 +118,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Clean Grok report markdown** | **`ui503-20260827-report-md-clean`** | Unwrap bold-wrapped cover tables; convert prompt ━ SECTION banners to `#` so TSLA matches RIVN |
 | **BKNG DGA score + ROIC** | **`ui504-20260827-bkng-dga-score`** | ROIC when book IC ≤ 0 uses assets−cash; neg equity D/E scores 0; hover math on DGA score card |
 | **Options after Positions** | **`ui505-20260827-nav-options-after-pos`** | Topbar: Options sits immediately right of Positions |
-| **Next deploy after this** | **`ui506-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Fund hide CSV uploads** | **`ui506-20260827-fund-hide-csv`** | Manual Data Uploads no longer a Fund card; collapsed CSV backup; SnapTrade is the path |
+| **Next deploy after this** | **`ui507-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -171,7 +172,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui505-20260827-nav-options-after-pos` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui506-20260827-fund-hide-csv` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -185,6 +186,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui503 | Grok report cover/section markdown cleaned (TSLA matches RIVN) |
 | ui504 | BKNG: ROIC for buyback years; DGA score hover math; neg equity no longer a free 100 |
 | ui505 | Topbar: Options moved to the right of Positions |
+| ui506 | Fund: hide Manual Data Uploads; SnapTrade is the live path |
 | ui489–ui491 | Financials charts: one signed series, legend color both sides of zero; price hover |
 | ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
 | ui495–ui497 | Analyze-in-progress Foundation Vault loop (no human, 20s seamless ping-pong) |
@@ -260,4 +262,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui505-20260827-nav-options-after-pos` · Next: `ui506-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui506-20260827-fund-hide-csv` · Next: `ui507-YYYYMMDD-slug`*

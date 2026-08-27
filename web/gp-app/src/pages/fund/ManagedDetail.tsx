@@ -482,7 +482,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             {!monthlyRaw.length ? (
               <Empty
                 title="No performance data yet"
-                sub='Upload the Fidelity "Investment Income & Balance Detail" CSV (or wait for SnapTrade sync) to populate returns and attribution.'
+                sub="Returns fill from SnapTrade after a sync. CSV backup is folded under the account if you ever need it."
               />
             ) : ytdView === 'chart' ? (
               <MonthlyBarChart
@@ -562,7 +562,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             {!allTime || !atChartPts.length ? (
               <Empty
                 title="No all-time history yet"
-                sub="Upload a Balance & Income Detail CSV (full history) in Manual Data Uploads below."
+                sub="All-time history fills from SnapTrade. Open CSV backup at the bottom of this account only if a year is missing."
               />
             ) : (
               <AllTimePerfChart points={atChartPts} height={260} />
@@ -944,15 +944,21 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             </Panel>
           </div>
 
-          <Panel title="Manual Data Uploads" badge="CSV · backup">
+          <details className={styles.csvBackup}>
+            <summary>
+              CSV backup · SnapTrade is the live path
+            </summary>
+            <p className={styles.csvBackupHint}>
+              Hidden for new users. Only needed if a year of Fidelity history never
+              landed in SnapTrade.
+            </p>
             <div className={styles.uploadGrid}>
               <label className={styles.fileCard}>
                 <div className={styles.fileTitle}>
-                  Balance &amp; Income Detail <span className={styles.req}>required</span>
+                  Balance &amp; Income Detail <span className={styles.opt}>optional</span>
                 </div>
                 <div className={styles.hint}>
-                  Fidelity → Performance → Income &amp; Balance Detail · drives YTD
-                  return/NAV + monthly chart
+                  Fidelity → Performance → Income &amp; Balance Detail · YTD / monthly
                 </div>
                 <input
                   type="file"
@@ -989,15 +995,15 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             <div className={styles.uploadActions}>
               <Button
                 size="sm"
-                variant="primary"
+                variant="secondary"
                 disabled={runBusy}
                 onClick={() => void runAnalysis()}
               >
-                {runBusy ? 'Running…' : '▶ Run'}
+                {runBusy ? 'Running…' : 'Import CSV'}
               </Button>
               {runStatus && <span className={styles.runStatus}>{runStatus}</span>}
             </div>
-          </Panel>
+          </details>
         </>
       )}
     </div>

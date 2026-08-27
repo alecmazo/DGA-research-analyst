@@ -9,7 +9,7 @@ export function FundPositionsTable({ rows }: { rows: FundPosition[] }) {
   if (!rows.length) {
     return (
       <Panel title="Open Positions">
-        <Empty title="No positions yet" sub="Upload positions CSV or sync SnapTrade." />
+        <Empty title="No positions yet" sub="Holdings load from SnapTrade after a broker sync." />
       </Panel>
     )
   }
