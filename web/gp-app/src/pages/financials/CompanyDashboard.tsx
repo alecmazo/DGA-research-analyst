@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { MouseEvent } from 'react'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api } from '@/lib/api'
 import { fmtPx } from '@/lib/format'
-import type { CoverageRow, Dashboard, PeriodType } from './types'
+import type {
+  CoverageRow,
+  Dashboard,
+  DgaScoreExplain,
+  DgaScoreExplainBlock,
+  PeriodType,
+} from './types'
+import { HoverTip } from './HoverTip'
 import { LS_LAST_TICKER } from './types'
 import {
   gfCap,
@@ -21,6 +29,52 @@ import { SeriesPanel } from './SeriesTable'
 import { FundCharts } from './FundCharts'
 import { PriceChart } from './PriceChart'
 import styles from '../FinancialsPage.module.css'
+
+const SCORE_ROWS: Array<{
+  name: string
+  key: keyof Pick<
+    DgaScoreExplain,
+    'profitability' | 'growth' | 'financial_strength' | 'predictability' | 'value'
+  >
+}> = [
+  { name: 'Profitability', key: 'profitability' },
+  { name: 'Growth', key: 'growth' },
+  { name: 'Fin. Strength', key: 'financial_strength' },
+  { name: 'Predictability', key: 'predictability' },
+  { name: 'Value', key: 'value' },
+]
+
+function ScoreTipBody({
+  title,
+  block,
+  totalBlurb,
+}: {
+  title: string
+  block?: DgaScoreExplainBlock | null
+  totalBlurb?: string
+}) {
+  const w = block?.weight != null ? `${Math.round(block.weight * 100)}% weight` : ''
+  const sc = block?.score == null ? '—' : String(block.score)
+  return (
+    <>
+      <div className={styles.scoreTipTitle}>
+        {title}
+        {block ? ` · ${sc}/100` : ''}
+        {w ? ` · ${w}` : ''}
+      </div>
+      {block?.blurb && <div className={styles.scoreTipBlurb}>{block.blurb}</div>}
+      {(block?.parts || []).map((p, i) => (
+        <div key={i} className={styles.scoreTipPart}>
+          <strong>{p.name}</strong>
+          {p.raw != null ? ` ${p.raw}` : ''}
+          {p.score != null ? ` → ${p.score}` : ' → —'}
+          {p.note ? <div className={styles.scoreTipNote}>{p.note}</div> : null}
+        </div>
+      ))}
+      {totalBlurb && <div className={styles.scoreTipBlurb}>{totalBlurb}</div>}
+    </>
+  )
+}
 
 type Props = {
   ticker: string
@@ -46,6 +100,12 @@ export function CompanyDashboard({
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
+  const [scoreTip, setScoreTip] = useState<{
+    x: number
+    y: number
+    title: string
+    key: 'total' | (typeof SCORE_ROWS)[number]['key']
+  } | null>(null)
 
   const load = useCallback(
     async (tk: string, pt: PeriodType = period) => {
@@ -136,6 +196,14 @@ export function CompanyDashboard({
   const km = dash?.key_metrics || {}
   const sc = dash?.dga_score || {}
   const comps = sc.components || {}
+  const explain = (sc.explain || {}) as DgaScoreExplain
+  const showScoreTip = (
+    e: MouseEvent,
+    title: string,
+    key: 'total' | (typeof SCORE_ROWS)[number]['key'],
+  ) => {
+    setScoreTip({ x: e.clientX, y: e.clientY, title, key })
+  }
   const tg = dash?.targets || {}
   const ttm = dash?.ttm || {}
   const peers = peerList(dash?.peers)
@@ -336,42 +404,58 @@ export function CompanyDashboard({
               <div className={styles.scoreKicker}>DGA SCORE™</div>
               <div
                 className={styles.scoreBig}
-                style={{ color: gradeColor(sc.total) }}
+                style={{ color: gradeColor(sc.total), cursor: 'help' }}
+                onMouseEnter={(e) => showScoreTip(e, 'DGA Score', 'total')}
+                onMouseMove={(e) => showScoreTip(e, 'DGA Score', 'total')}
+                onMouseLeave={() => setScoreTip(null)}
               >
                 {sc.total == null ? '—' : sc.total}
                 <span className={styles.scoreOf}> /100</span>
               </div>
-              {(
-                [
-                  ['Profitability', comps.profitability],
-                  ['Growth', comps.growth],
-                  ['Fin. Strength', comps.financial_strength],
-                  ['Predictability', comps.predictability],
-                  ['Value', comps.value],
-                ] as const
-              ).map(([name, v]) => (
-                <div key={name} className={styles.compRow}>
-                  <span className={styles.compName}>{name}</span>
-                  <div className={styles.compTrack}>
-                    <div
-                      className={styles.compFill}
-                      style={{
-                        width: `${v == null ? 0 : v}%`,
-                        background: gradeColor(v),
-                      }}
-                    />
-                  </div>
-                  <span
-                    className={styles.compVal}
-                    style={{ color: gradeColor(v) }}
+              {SCORE_ROWS.map(({ name, key }) => {
+                const v = comps[key]
+                return (
+                  <div
+                    key={name}
+                    className={styles.compRow}
+                    onMouseEnter={(e) => showScoreTip(e, name, key)}
+                    onMouseMove={(e) => showScoreTip(e, name, key)}
+                    onMouseLeave={() => setScoreTip(null)}
                   >
-                    {v == null ? '—' : v}
-                  </span>
-                </div>
-              ))}
+                    <span className={styles.compName}>{name}</span>
+                    <div className={styles.compTrack}>
+                      <div
+                        className={styles.compFill}
+                        style={{
+                          width: `${v == null ? 0 : v}%`,
+                          background: gradeColor(v),
+                        }}
+                      />
+                    </div>
+                    <span
+                      className={styles.compVal}
+                      style={{ color: gradeColor(v) }}
+                    >
+                      {v == null ? '—' : v}
+                    </span>
+                  </div>
+                )
+              })}
               <div className={styles.mutedSm}>
-                30% profit · 25% growth · 20% strength · 15% pred · 10% value
+                30% profit · 25% growth · 20% strength · 15% pred · 10% value · hover a bar for the math
               </div>
+              {scoreTip && (
+                <HoverTip x={scoreTip.x} y={scoreTip.y} className={styles.scoreTip}>
+                  {scoreTip.key === 'total' ? (
+                    <ScoreTipBody title="DGA Score" totalBlurb={explain.total_blurb} />
+                  ) : (
+                    <ScoreTipBody
+                      title={scoreTip.title}
+                      block={explain[scoreTip.key]}
+                    />
+                  )}
+                </HoverTip>
+              )}
             </div>
 
             {/* DGA Value + anchors */}

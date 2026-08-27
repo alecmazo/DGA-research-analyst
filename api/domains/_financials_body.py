@@ -3015,12 +3015,8 @@ def _rk_fin_snapshot(row, price=None):
         if stored is None:
             return None
         return stored * 100.0 if abs(stored) <= 2 else stored
-    # ROIC
-    roic = None
-    if opin is not None and eq is not None:
-        inv = (debt or 0.0) + eq - cash_n
-        if inv > 0:
-            roic = opin * (1 - _DASH_TAX) / inv * 100.0
+    # ROIC — book IC, else operating capital when equity/IC is negative
+    roic, _ = _dash_roic_of(row)
     roce = None
     den = (eq or 0.0) + (debt or 0.0)
     if opin is not None and den > 0:
@@ -3239,13 +3235,8 @@ def _build_rank_cards(annuals, price, anchor_map, growth_pct, ticker=None):
         return _dash_cash_of(r)
 
     def roic_of(r):
-        op = g(r, "operating_income"); e = g(r, "stockholders_equity")
-        c = cash_of(r) or 0.0
-        d = debt_of(r) or 0.0
-        inv = d + (e or 0.0) - c
-        if op is None or e is None or inv <= 0:
-            return None
-        return op * (1 - _DASH_TAX) / inv * 100.0
+        v, _ = _dash_roic_of(r)
+        return v
 
     def roce_of(r):
         op = g(r, "operating_income")
@@ -3460,6 +3451,38 @@ def _dash_cash_of(r) -> float | None:
     return (c or 0.0) + (sti or 0.0)
 
 
+def _dash_invested_capital(r) -> tuple[float | None, str]:
+    """Book IC = debt + equity − cash.
+
+    Buyback names (BKNG, AZO, …) often have negative book equity, so book IC
+    is ≤ 0 and ROIC used to go blank. Fall back to operating capital =
+    total assets − cash so FY columns and the DGA score still have a number.
+    """
+    eq = _dash_f((r or {}).get("stockholders_equity"))
+    if eq is None:
+        return None, "no_equity"
+    cash = _dash_cash_of(r) or 0.0
+    debt = _dash_debt_of(r) or 0.0
+    ic = debt + eq - cash
+    if ic > 0:
+        return ic, "book"
+    ta = _dash_f((r or {}).get("total_assets"))
+    if ta is not None and (ta - cash) > 0:
+        return ta - cash, "operating"
+    return None, "none"
+
+
+def _dash_roic_of(r, *, quarterly: bool = False) -> tuple[float | None, str]:
+    opin = _dash_f((r or {}).get("operating_income"))
+    if opin is None:
+        return None, "no_ebit"
+    ic, method = _dash_invested_capital(r)
+    if not ic:
+        return None, method
+    nopat = opin * (1.0 - _DASH_TAX) * (4.0 if quarterly else 1.0)
+    return nopat / ic * 100.0, method
+
+
 _DGA_SCORE_WEIGHTS = {
     "profitability": 0.30,
     "growth": 0.25,
@@ -3514,12 +3537,25 @@ def _dga_score_from_annuals(annuals: list,
     l_debt_for_score = l_debt if l_debt is not None else 0.0
     l_fcf = _dash_f(last.get("free_cash_flow"))
 
-    l_roic = None
-    if l_opin is not None and l_eq and (l_debt_for_score + l_eq - l_cash) > 0:
-        l_roic = l_opin * (1 - _DASH_TAX) / (l_debt_for_score + l_eq - l_cash) * 100
+    l_roic, roic_method = _dash_roic_of(last)
     l_roe = (l_ni / l_eq * 100) if (l_ni is not None and l_eq and l_eq > 0) else None
-    p_parts = [s for s in (_dash_lin(l_nm, 0, 0.20), _dash_lin(l_roic, 0, 18),
-                           _dash_lin(l_roe, 0, 22)) if s is not None]
+    l_ta = _dash_f(last.get("total_assets"))
+    l_roa = (l_ni / l_ta * 100) if (l_ni is not None and l_ta and l_ta > 0) else None
+    p_named = [
+        ("Net margin", l_nm * 100 if l_nm is not None else None,
+         _dash_lin(l_nm, 0, 0.20), "cap 20% net margin → 100"),
+        ("ROIC", l_roic, _dash_lin(l_roic, 0, 18),
+         ("NOPAT / (assets − cash); book equity negative"
+          if roic_method == "operating"
+          else "NOPAT / (debt + equity − cash); cap 18% → 100")),
+        ("ROE", l_roe, _dash_lin(l_roe, 0, 22),
+         "n/a — negative book equity" if (l_eq is not None and l_eq <= 0)
+         else "cap 22% ROE → 100"),
+    ]
+    if l_roic is None and l_roa is not None:
+        p_named.append(("ROA (ROIC proxy)", l_roa, _dash_lin(l_roa, 0, 12),
+                         "ROIC blank; ROA used so missing capital does not inflate"))
+    p_parts = [s for _, _, s, _ in p_named if s is not None]
     profitability = round(sum(p_parts) / len(p_parts)) if p_parts else None
 
     def _cagr5(vals):
@@ -3532,34 +3568,75 @@ def _dga_score_from_annuals(annuals: list,
     g_rev = _cagr5(a_rev)
     g_ni = _cagr5(a_ni)
     g_cf = _cagr5(a_fcf) if any(v for v in a_fcf if v and v > 0) else g_ni
-    g_parts = [s for s in (_dash_lin(g_rev, 0, 0.15), _dash_lin(g_cf, 0, 0.15))
-               if s is not None]
+    g_named = [
+        ("Revenue CAGR", (g_rev * 100 if g_rev is not None else None),
+         _dash_lin(g_rev, 0, 0.15), "cap 15% CAGR → 100"),
+        ("FCF/NI CAGR", (g_cf * 100 if g_cf is not None else None),
+         _dash_lin(g_cf, 0, 0.15), "cap 15% CAGR → 100"),
+    ]
+    g_parts = [s for _, _, s, _ in g_named if s is not None]
     growth = round(sum(g_parts) / len(g_parts)) if g_parts else None
 
-    fs_parts = []
+    fs_named = []
     if l_debt is None:
         pass
     elif l_debt_for_score == 0:
-        fs_parts.append(100.0)
+        fs_named.append(("Net cash / no debt", None, 100.0, "zero debt → 100"))
     else:
-        fs_parts.append(_dash_lin(l_cash / l_debt_for_score, 0, 1.0) or 0)
-        if l_eq and l_eq > 0:
-            fs_parts.append(_dash_lin(2.0 - (l_debt_for_score / l_eq), 0, 2.0) or 0)
+        fs_named.append((
+            "Cash / debt",
+            (l_cash / l_debt_for_score if l_debt_for_score else None),
+            _dash_lin(l_cash / l_debt_for_score, 0, 1.0) or 0,
+            "cap 1.0× cash/debt → 100",
+        ))
+        if l_eq is None:
+            pass
+        elif l_eq <= 0:
+            fs_named.append((
+                "Debt / equity",
+                None, 0.0,
+                f"Book equity {l_eq/1e9:.1f}B is negative (buybacks) — no cushion, scores 0",
+            ))
+        else:
+            fs_named.append((
+                "Debt / equity",
+                l_debt_for_score / l_eq,
+                _dash_lin(2.0 - (l_debt_for_score / l_eq), 0, 2.0) or 0,
+                "lower leverage is better; 0 debt/equity → 100",
+            ))
         if l_fcf is not None:
-            fs_parts.append(_dash_lin(l_fcf / l_debt_for_score, 0, 0.5) or 0)
+            fs_named.append((
+                "FCF / debt",
+                l_fcf / l_debt_for_score,
+                _dash_lin(l_fcf / l_debt_for_score, 0, 0.5) or 0,
+                "cap 0.5× FCF/debt → 100",
+            ))
+    fs_parts = [s for _, _, s, _ in fs_named if s is not None]
     financial_strength = round(sum(fs_parts) / len(fs_parts)) if fs_parts else None
 
     ni_hist = [v for v in a_ni if v is not None][-10:]
     rev_hist = [v for v in a_rev if v is not None][-10:]
-    pred_parts = []
+    pred_named = []
     if len(ni_hist) >= 3:
-        pred_parts.append(sum(1 for v in ni_hist if v > 0) / len(ni_hist) * 100)
+        pred_named.append((
+            "Profitable years",
+            sum(1 for v in ni_hist if v > 0) / len(ni_hist) * 100,
+            sum(1 for v in ni_hist if v > 0) / len(ni_hist) * 100,
+            f"{sum(1 for v in ni_hist if v > 0)}/{len(ni_hist)} years with +NI",
+        ))
     if len(rev_hist) >= 4:
         ups = sum(1 for i in range(1, len(rev_hist)) if rev_hist[i] >= rev_hist[i - 1])
-        pred_parts.append(ups / (len(rev_hist) - 1) * 100)
+        pred_named.append((
+            "Revenue up-years",
+            ups / (len(rev_hist) - 1) * 100,
+            ups / (len(rev_hist) - 1) * 100,
+            f"{ups}/{len(rev_hist) - 1} YoY revenue increases",
+        ))
+    pred_parts = [s for _, _, s, _ in pred_named if s is not None]
     predictability = round(sum(pred_parts) / len(pred_parts)) if pred_parts else None
 
     value_score = None
+    value_note = "No saved Grok/Claude target — value dropped, other weights scaled"
     try:
         px = float(price) if price is not None else None
         dv = float(dga_value) if dga_value is not None else None
@@ -3568,6 +3645,10 @@ def _dga_score_from_annuals(annuals: list,
     if dv and px and px > 0:
         upside = dv / px - 1.0
         value_score = round(_dash_clamp(50 + upside * 100, 0, 100))
+        value_note = (
+            f"Target ${dv:,.0f} vs price ${px:,.0f} ({upside*100:+.1f}%); "
+            "50 + upside×100, clamped 0–100"
+        )
 
     comps = {
         "profitability": profitability,
@@ -3582,10 +3663,55 @@ def _dga_score_from_annuals(annuals: list,
                        / sum(weights[k] for k in avail)) if avail else None)
     n_op = sum(1 for k in ("profitability", "growth", "financial_strength",
                            "predictability") if comps.get(k) is not None)
+
+    def _exp_block(key, score, named, blurb):
+        parts = []
+        for name, raw, sc, note in named:
+            rec = {"name": name, "score": (round(sc) if sc is not None else None),
+                   "note": note}
+            if isinstance(raw, (int, float)):
+                rec["raw"] = round(float(raw), 2)
+            else:
+                rec["raw"] = None
+            parts.append(rec)
+        return {
+            "score": score,
+            "weight": weights.get(key),
+            "blurb": blurb,
+            "parts": parts,
+        }
+
+    used_w = sum(weights[k] for k in avail) if avail else 0
+    explain = {
+        "profitability": _exp_block(
+            "profitability", profitability, p_named,
+            "Average of net margin, ROIC, ROE. Missing pieces are omitted, not scored 100."),
+        "growth": _exp_block(
+            "growth", growth, g_named,
+            "Average of ~5y revenue CAGR and FCF (or NI) CAGR. 15% CAGR caps at 100."),
+        "financial_strength": _exp_block(
+            "financial_strength", financial_strength, fs_named,
+            "Average of cash/debt, debt/equity, FCF/debt. Negative equity scores 0 on D/E — it used to be skipped, which inflated 100s."),
+        "predictability": _exp_block(
+            "predictability", predictability, pred_named,
+            "Share of last ≤10 years with positive NI and rising revenue."),
+        "value": _exp_block(
+            "value", value_score,
+            [("DGA target vs price", None, value_score, value_note)],
+            "Needs a saved Analyze target. If missing, this 10% is dropped and the other four scale up."),
+        "total_blurb": (
+            (f"Weighted average of available components "
+             f"({', '.join(f'{k} {int(weights[k]*100)}%' for k in avail)}; "
+             f"weights scaled to {used_w*100:.0f}% → 100). ")
+            if avail else "No components."
+        ) + (f"Total {dga_score}/100." if dga_score is not None else ""),
+        "roic_method": roic_method,
+    }
     return {
         "total": dga_score,
         "components": comps,
         "weights": weights,
+        "explain": explain,
         "g_rev": g_rev, "g_ni": g_ni, "g_cf": g_cf, "l_roic": l_roic,
         "n_op": n_op,
         "n_rev": sum(1 for v in a_rev if v and v > 0),
@@ -4071,14 +4197,8 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             return None
         gp = _dash_f(r.get("gross_profit"))
 
-        # ROIC: NOPAT / (debt + equity − cash). Quarterly NOPAT annualized ×4.
-        roic = None
-        cash_for_roic = cash or 0.0
-        if opin is not None and eq is not None:
-            invested = (debt or 0.0) + eq - cash_for_roic
-            if invested and invested > 0:
-                nopat = opin * (1 - _DASH_TAX) * (4.0 if pt == "quarter" else 1.0)
-                roic = nopat / invested * 100.0
+        # ROIC: NOPAT / invested capital (book, else assets − cash if IC ≤ 0).
+        roic, _ = _dash_roic_of(r, quarterly=(pt == "quarter"))
         # WACC est. — book-equity-weighted blend of est. CoE and after-tax CoD.
         wacc = None
         if eq is not None and eq > 0:
@@ -4144,8 +4264,8 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     g_ni = scored.get("g_ni")
     g_cf = scored.get("g_cf")
     l_roic = scored.get("l_roic")
-    if l_roic is None and l_opin is not None and l_eq and (l_debt_for_score + l_eq - l_cash) > 0:
-        l_roic = l_opin * (1 - _DASH_TAX) / (l_debt_for_score + l_eq - l_cash) * 100
+    if l_roic is None:
+        l_roic, _ = _dash_roic_of(last)
 
     # ── TTM from last 4 quarters (preferred for trading multiples) ─────
     ttm = _dash_ttm_from_quarters(quarters_all)
@@ -4318,7 +4438,8 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "peers": peers,
             "rank_cards": rank_cards,
             "dga_score": {"total": dga_score, "components": comps,
-                          "weights": scored.get("weights") or dict(_DGA_SCORE_WEIGHTS)},
+                          "weights": scored.get("weights") or dict(_DGA_SCORE_WEIGHTS),
+                          "explain": scored.get("explain") or {}},
             "valuation": valuation,
             "metric_history": metric_history,
             # Filing freshness — store is 10-Q/10-K XBRL only (not earnings 8-Ks)
@@ -4326,7 +4447,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "earnings_8k_pending_10q": earnings_pending,
             "notes": {
                 "wacc": "WACC est.: 9% CoE / 4.3% after-tax CoD, book-equity weighted (no beta).",
-                "roic": "NOPAT (21% tax) / (debt + equity − cash). Quarterly NOPAT ×4.",
+                "roic": "NOPAT (21% tax) / (debt + equity − cash). If book capital ≤ 0 (buybacks), uses total assets − cash. Quarterly NOPAT ×4.",
                 "pe": "Prefers TTM diluted EPS (sum of last ≤4 quarters) over last FY.",
                 "share_delta": ("YoY share change" if pt == "annual"
                                 else "Sequential (QoQ) share change — not annualized."),
@@ -4451,22 +4572,11 @@ def _vl_series_from_annuals(annuals: list) -> dict:
 
     roe = [_vl_pct(ni[i], equity[i]) for i in range(len(annuals))]
     roa = [_vl_pct(ni[i], assets[i]) for i in range(len(annuals))]
-    # ROIC ≈ NOPAT / (debt + equity − cash)
+    # ROIC ≈ NOPAT / invested capital (book, else assets − cash)
     roic = []
-    for i, r in enumerate(annuals):
-        op = opin[i]
-        if op is None:
-            roic.append(None)
-            continue
-        nopat = op * (1 - _VL_TAX)
-        c = cash[i] or 0.0
-        d = debt[i] or 0.0
-        e = equity[i]
-        if e is None:
-            roic.append(None)
-            continue
-        inv = d + e - c
-        roic.append((nopat / inv * 100.0) if inv > 0 else None)
+    for r in annuals:
+        v, _ = _dash_roic_of(r)
+        roic.append(v)
 
     bvps = []
     dps = []  # dividends per share

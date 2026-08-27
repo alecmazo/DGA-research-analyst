@@ -97,6 +97,30 @@ export type ValuationAnchor = {
 
 export type MetricHistPoint = { as_of?: string; value?: number | null }
 
+export type DgaScoreExplainPart = {
+  name?: string
+  raw?: number | null
+  score?: number | null
+  note?: string
+}
+
+export type DgaScoreExplainBlock = {
+  score?: number | null
+  weight?: number
+  blurb?: string
+  parts?: DgaScoreExplainPart[]
+}
+
+export type DgaScoreExplain = {
+  total_blurb?: string
+  roic_method?: string
+  profitability?: DgaScoreExplainBlock
+  growth?: DgaScoreExplainBlock
+  financial_strength?: DgaScoreExplainBlock
+  predictability?: DgaScoreExplainBlock
+  value?: DgaScoreExplainBlock
+}
+
 export type Dashboard = {
   ok?: boolean
   error?: string
@@ -142,6 +166,7 @@ export type Dashboard = {
     total?: number | null
     components?: Record<string, number | null | undefined>
     weights?: Record<string, number>
+    explain?: DgaScoreExplain
   }
   valuation?: ValuationAnchor[]
   metric_history?: Record<string, MetricHistPoint[]>
