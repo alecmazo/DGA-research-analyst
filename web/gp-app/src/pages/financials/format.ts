@@ -98,6 +98,7 @@ export function rkFmt(v: number | null | undefined, fmt?: string): string {
   if (fmt === 'int') return String(Math.round(n))
   if (fmt === 'score10') return `${Math.round(n)}/10`
   if (fmt === 'spread') return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
+  if (fmt === 'x_ge') return `≥${n.toFixed(2)}`
   return n.toFixed(2)
 }
 

@@ -128,7 +128,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Bench period match** | **`ui513-20260827-bench-period-match`** | All-Time bench column is annual-only; MoM/QoQ stored in Postgres, never copy annual onto months |
 | **Dual-engine upside** | **`ui514-20260827-dual-engine-upside`** | Saved Reports: Grok + Claude PT each with live upside; rebalance uses Grok PT; Strategist gets both |
 | **Exchange analysis loop** | **`ui515-20260827-exchange-analysis-loop`** | Analyze overlay is a 15s seamless matching-engine backroom loop; unused chamber still removed |
-| **Next deploy after this** | **`ui516-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Zero-debt strength** | **`ui516-20260827-zero-debt-strength`** | No/untagged debt is fortress: Cash-To-Debt ≥10×, D/E and D/EBITDA 0×; DGA FS 100 |
+| **Next deploy after this** | **`ui517-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -181,7 +182,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui515-20260827-exchange-analysis-loop` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui516-20260827-zero-debt-strength` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -209,6 +210,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
 | ui495–ui497 | Analyze-in-progress overlay (later replaced by ui515 exchange backroom) |
 | ui515 | 15s palindrome matching-engine loop (~940KB); unused `analysis-chamber.jpg` removed |
+| ui516 | Zero/untagged debt is fortress on Financial Strength (not blank ratios) |
 | ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
 | ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
@@ -229,6 +231,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - Grok Analyze: never persist `web_search` dumps as `report_md`
 - Report markdown: cover is a GFM table (no `**` wrapping the row); sections are `# SECTION N` not unicode banners
 - DGA Score: if book invested capital ≤ 0, ROIC uses total assets − cash; negative equity scores 0 on D/E **and ROE** (do not skip); profit ≤70, growth ≤75
+- Financial Strength: **no debt is a strength** — untagged debt on a complete BS is 0× leverage (not blank); cash/debt uses a 1-unit floor then caps at 10×. Charts still leave missing debt as blank.
 - Financials `@media print` must stay scoped to `.shell`, never `body *`
 - Chart bars keep **legend color** above and below zero (sign is position vs zero)
 - Fund rebalance upside = Saved Report 12-month PT vs live last — never frozen report %
@@ -285,4 +288,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui515-20260827-exchange-analysis-loop` · Next: `ui516-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui516-20260827-zero-debt-strength` · Next: `ui517-YYYYMMDD-slug`*

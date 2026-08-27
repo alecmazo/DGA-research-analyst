@@ -2996,7 +2996,7 @@ def _rk_fin_snapshot(row, price=None):
     ocf = f(row.get("operating_cash_flow")); fcf = f(row.get("free_cash_flow"))
     gp = f(row.get("gross_profit"))
     eq = f(row.get("stockholders_equity")); ta = f(row.get("total_assets"))
-    debt = _dash_debt_of(row)
+    debt = _dash_debt_for_ratio(row)
     cash = _dash_cash_of(row)
     cash_n = cash if cash is not None else 0.0
     shares = f(row.get("shares_outstanding")) or f(row.get("diluted_shares"))
@@ -3021,10 +3021,8 @@ def _rk_fin_snapshot(row, price=None):
     den = (eq or 0.0) + (debt or 0.0)
     if opin is not None and den > 0:
         roce = opin / den * 100.0
-    # cash-to-debt: only when debt is known
-    c2d = None
-    if debt is not None:
-        c2d = 10.0 if (debt == 0 and cash_n > 0) else ratio(cash_n, debt)
+    # cash-to-debt: zero debt is fortress (denom floor 1, cap 10×)
+    c2d = _dash_cash_to_debt(cash_n if cash is not None else None, debt)
     mktcap = (price * shares) if (price and shares) else None
     ev = (mktcap + (debt or 0.0) - cash_n) if mktcap is not None else None
     pe = ratio(price, eps) if (price and eps and eps > 0) else None
@@ -3033,8 +3031,8 @@ def _rk_fin_snapshot(row, price=None):
     return {
         "cash_to_debt": c2d,
         "equity_to_asset": ratio(eq, ta),
-        "debt_to_equity": ratio(debt, eq),
-        "debt_to_ebitda": ratio(debt, ebitda),
+        "debt_to_equity": _dash_leverage_ratio(debt, eq),
+        "debt_to_ebitda": _dash_leverage_ratio(debt, ebitda),
         "gross_margin": margin_pct(f(row.get("gross_margin")), gp, rev),
         "operating_margin": mgn(opin, rev),
         "net_margin": mgn(ni, rev),
@@ -3229,7 +3227,7 @@ def _build_rank_cards(annuals, price, anchor_map, growth_pct, ticker=None):
         return x if (x is not None and x > 0) else None
 
     def debt_of(r):
-        return _dash_debt_of(r)
+        return _dash_debt_for_ratio(r)
 
     def cash_of(r):
         return _dash_cash_of(r)
@@ -3265,34 +3263,43 @@ def _build_rank_cards(annuals, price, anchor_map, growth_pct, ticker=None):
         wacc_latest = (eq * _DASH_COE + d * _DASH_COD_AT) / (eq + d) * 100.0
 
     # ── Financial Strength ──
-    c2d = None
-    if debt is not None:
-        c2d = 10.0 if (debt == 0 and cash_n > 0) else ratio(cash_n, debt)
+    # Zero / untagged debt is a strength: show the ratios (not blank). Cash-to-
+    # debt uses a 1-unit denom floor then caps at 10×. History still skips
+    # synthetic 10× years so a later modest-leverage year (META) is not a
+    # 5th-percentile collapse.
+    c2d = _dash_cash_to_debt(cash_n if cash is not None else None, debt)
     cash_series = []
     for r in annuals:
-        d = debt_of(r); c = cash_of(r)
+        d = debt_of(r)
+        c = cash_of(r)
         if d is None:
             cash_series.append(None)
         elif d == 0:
-            # Skip zero-debt years in history — a synthetic 10x cap made later
-            # modest leverage look like a 5th-percentile collapse (META bug).
             cash_series.append(None)
         else:
             cash_series.append(((c or 0.0) / d))
     e2a_series = [ratio(g(r, "stockholders_equity"), g(r, "total_assets")) for r in annuals]
-    d2e_series = [ratio(debt_of(r), g(r, "stockholders_equity")) for r in annuals]
-    d2eb_series = [ratio(debt_of(r), g(r, "ebitda")) for r in annuals]
+    d2e_series = [_dash_leverage_ratio(debt_of(r), g(r, "stockholders_equity")) for r in annuals]
+    d2eb_series = [_dash_leverage_ratio(debt_of(r), g(r, "ebitda")) for r in annuals]
     spread = (roic_latest - wacc_latest) if (roic_latest is not None and wacc_latest is not None) else None
     # WACC–ROIC spread has no clean industry peer field; history only if we can.
     # strength_blend: /10 uses max(history, industry, absolute fortress floor).
+    zero_debt = debt is not None and debt <= 0
+    c2d_note = ("No interest-bearing debt — cash/debt uses a 1-unit floor, "
+                "capped at 10× (fortress)" if zero_debt and c2d is not None else None)
+    d2e = _dash_leverage_ratio(debt, eq)
+    d2eb = _dash_leverage_ratio(debt, ebitda)
     fs = [
-        _rk_row("Cash-To-Debt", c2d, "x", True, cash_series, peers_of("cash_to_debt"),
-                strength_blend=True),
+        _rk_row("Cash-To-Debt", c2d, ("x_ge" if zero_debt and c2d is not None else "x"), True,
+                cash_series, peers_of("cash_to_debt"),
+                c2d_note, strength_blend=True),
         _rk_row("Equity-to-Asset", ratio(eq, ta), "x", True, e2a_series, peers_of("equity_to_asset"),
                 strength_blend=True),
-        _rk_row("Debt-to-Equity", ratio(debt, eq), "x", False, d2e_series, peers_of("debt_to_equity"),
+        _rk_row("Debt-to-Equity", d2e, "x", False, d2e_series, peers_of("debt_to_equity"),
+                ("No debt → 0× leverage (strength)" if zero_debt and d2e is not None else None),
                 strength_blend=True),
-        _rk_row("Debt-to-EBITDA", ratio(debt, ebitda), "x", False, d2eb_series, peers_of("debt_to_ebitda"),
+        _rk_row("Debt-to-EBITDA", d2eb, "x", False, d2eb_series, peers_of("debt_to_ebitda"),
+                ("No debt → 0× leverage (strength)" if zero_debt and d2eb is not None else None),
                 strength_blend=True),
         _rk_row("WACC vs ROIC", spread, "spread", True, None, None,
                 (f"ROIC {roic_latest:.1f}% − WACC {wacc_latest:.1f}% (est.)"
@@ -3430,17 +3437,76 @@ def _build_rank_cards(annuals, price, anchor_map, growth_pct, ticker=None):
             "peer_count": len(peer_snaps)}
 
 
+_CASH_TO_DEBT_CAP = 10.0  # fortress ceiling when debt is 0 (÷0 would be inf)
+
+
 def _dash_debt_of(r) -> float | None:
     """Total debt if any debt field is present; None when debt is unreported
-    (do NOT coerce missing → 0 — that flattens cash/debt charts to fake zeros)."""
+    (do NOT coerce missing → 0 for *charts* — that flattens cash/debt to fake zeros).
+
+    If total_debt is 0/null but LTD/STD are tagged, use the component sum
+    (CPRT quarters tagged total_debt=0 while notes/leases still exist).
+    """
     td = _dash_f((r or {}).get("total_debt"))
-    if td is not None:
-        return td
     ltd = _dash_f((r or {}).get("long_term_debt"))
     std = _dash_f((r or {}).get("short_term_debt"))
-    if ltd is None and std is None:
+    parts = [x for x in (ltd, std) if x is not None]
+    summed = sum(parts) if parts else None
+    if summed is not None and summed > 0 and (td is None or td == 0):
+        return summed
+    if td is not None:
+        return td
+    if summed is not None:
+        return summed
+    return None
+
+
+def _dash_debt_for_ratio(r) -> float | None:
+    """Debt for leverage ratios and Financial Strength.
+
+    Untagged debt on an otherwise complete balance sheet (CPRT annuals: assets
+    and equity present, every debt column NULL) means no interest-bearing debt
+    — treat as 0 so the strength card is not blank. Charts still use
+    ``_dash_debt_of`` and stay None.
+    """
+    d = _dash_debt_of(r)
+    if d is not None:
+        return max(float(d), 0.0)
+    if (_dash_f((r or {}).get("total_assets")) is None
+            and _dash_f((r or {}).get("stockholders_equity")) is None):
         return None
-    return (ltd or 0.0) + (std or 0.0)
+    return 0.0
+
+
+def _dash_cash_to_debt(cash, debt) -> float | None:
+    """Cash / debt. Zero debt uses a 1-unit denominator (ticket
+    SUP_20260827_3c8bf016) then caps at 10× so we don't print cash-in-dollars
+    as a multiple. That 10× is fortress / max strength."""
+    if cash is None or debt is None:
+        return None
+    c = float(cash)
+    d = float(debt)
+    if d <= 0:
+        d = 1.0
+        raw = c / d
+        return min(raw, _CASH_TO_DEBT_CAP) if c > 0 else None
+    return c / d
+
+
+def _dash_leverage_ratio(debt, den) -> float | None:
+    """Debt / x. Zero known debt is 0× leverage (a strength), even if the
+    denominator is missing — not NaN and not skipped."""
+    if debt is None:
+        return None
+    d = float(debt)
+    if d <= 0:
+        return 0.0
+    if den in (None, 0):
+        return None
+    try:
+        return d / float(den)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
 
 
 def _dash_cash_of(r) -> float | None:
@@ -3537,7 +3603,7 @@ def _dga_score_from_annuals(annuals: list,
     l_ni = _dash_f(last.get("net_income"))
     l_opin = _dash_f(last.get("operating_income"))
     l_cash = _dash_cash_of(last) or 0.0
-    l_debt = _dash_debt_of(last)
+    l_debt = _dash_debt_for_ratio(last)
     l_debt_for_score = l_debt if l_debt is not None else 0.0
     l_fcf = _dash_f(last.get("free_cash_flow"))
 
@@ -3603,7 +3669,10 @@ def _dga_score_from_annuals(annuals: list,
     if l_debt is None:
         pass
     elif l_debt_for_score == 0:
-        fs_named.append(("Net cash / no debt", None, 100.0, "zero debt → 100"))
+        fs_named.append((
+            "Net cash / no debt", None, 100.0,
+            "zero or untagged debt on a complete BS → 100 (fortress, not blank)",
+        ))
     else:
         fs_named.append((
             "Cash / debt",
@@ -3715,7 +3784,9 @@ def _dga_score_from_annuals(annuals: list,
             f"Negative book equity caps growth at {_NEG_EQ_GROWTH_CAP}."),
         "financial_strength": _exp_block(
             "financial_strength", financial_strength, fs_named,
-            "Average of cash/debt, debt/equity, FCF/debt. Negative equity scores 0 on D/E — it used to be skipped, which inflated 100s."),
+            "Average of cash/debt, debt/equity, FCF/debt. Zero or untagged debt "
+            "on a complete balance sheet is 100 (fortress). Negative equity scores "
+            "0 on D/E — it used to be skipped, which inflated 100s."),
         "predictability": _exp_block(
             "predictability", predictability, pred_named,
             "Share of last ≤10 years with positive NI and rising revenue."),
@@ -4270,7 +4341,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     l_ni   = _dash_f(last.get("net_income"))
     l_opin = _dash_f(last.get("operating_income"))
     l_cash = _dash_cash_of(last) or 0.0
-    l_debt = _dash_debt_of(last)
+    l_debt = _dash_debt_for_ratio(last)
     l_debt_for_score = l_debt if l_debt is not None else 0.0
     l_fcf  = _dash_f(last.get("free_cash_flow"))
     l_ebitda = _dash_f(last.get("ebitda"))
