@@ -651,8 +651,29 @@
 }
 
 .tgtStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.3;
+}
+
+.tgtLine {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.tgtPx {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.tgtUp {
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .tgtG,

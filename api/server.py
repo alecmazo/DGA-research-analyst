@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui513-20260827-bench-period-match"
+WEB_BUILD_VERSION = "ui514-20260827-dual-engine-upside"
 
 
 @app.get("/api/build")
@@ -7567,7 +7567,12 @@ def _continuity_pack() -> dict:
         f"8. Sliw is Alec/Edyta only. Do not resurrect Contacted history unless asked.\n"
         f"9. Never persist Grok live-search tool dumps as `report_md`.\n"
         f"10. Financials print CSS stays scoped to `.shell` — never `body *` "
-        f"(that blanked Saved Report print).\n\n"
+        f"(that blanked Saved Report print).\n"
+        f"11. Saved Reports: when both Grok and Claude have a 12m PT, show each "
+        f"target with its live upside underneath (not a single conservative %).\n"
+        f"12. Accounts rebalance uses the **Grok** 12m PT (fallback only if Grok "
+        f"has none). Upside is always PT vs live last.\n"
+        f"13. Portfolio Strategist receives **both** Grok and Claude upside numbers.\n\n"
         f"## Canonical code (2026-08)\n"
         f"- GP UI: `web/gp-app/` (React+TS). Routes in `src/App.tsx`. Desk: "
         f"`src/pages/DeskPage.tsx`. Report window: `src/pages/ReportPage.tsx`.\n"
@@ -19013,9 +19018,9 @@ def run_account_rebalance(fund_id: str, request: Request):
             if total_equity_mv <= 0:
                 total_equity_mv = max(sum(pos_map[s]["cost"] for s in equity_syms if s in pos_map), 1.0)
 
-            # 5. Saved Reports (Postgres) — newest engine with a 12m PT.
-            #    Upside is always PT vs *live* last, never the frozen % in the
-            #    report (CRM Grok Jul-17 stored +41% when last was ~$174).
+            # 5. Saved Reports (Postgres) — Grok 12m PT is the rebalancer
+            #    target. Other engines only if Grok has no PT. Upside is always
+            #    PT vs *live* last, never the frozen % in the report.
             db_signals: dict[str, dict] = {}
             try:
                 cur.execute("""
@@ -19053,9 +19058,14 @@ def run_account_rebalance(fund_id: str, request: Request):
                                 pass
                         cands.append((ts or datetime(1970, 1, 1), 1 if pt_f else 0, prov,
                                       row.get(rat_k) or "Hold", pt_f))
-                    # Newest report that actually has a price target; else newest rating.
-                    with_pt = [c for c in cands if c[1] == 1]
-                    pick = max(with_pt or cands, key=lambda c: c[0]) if (with_pt or cands) else None
+                    # Grok PT first (Accounts rebalancer). Else newest engine
+                    # that actually has a 12m target; else newest rating.
+                    grok_pt = next((c for c in cands if c[2] == "grok" and c[1] == 1), None)
+                    if grok_pt:
+                        pick = grok_pt
+                    else:
+                        with_pt = [c for c in cands if c[1] == 1]
+                        pick = max(with_pt or cands, key=lambda c: c[0]) if (with_pt or cands) else None
                     if pick:
                         db_signals[tk] = {
                             "provider": pick[2],
@@ -27121,44 +27131,108 @@ def _combine_fund_positions(fund_ids: list[str]) -> list[dict]:
 
 
 def _build_strategist_context(positions: list[dict], fund_name: str | None) -> str:
-    """Enrich positions with per-name upside/rating (saved reports), sector,
+    """Enrich positions with per-name Grok *and* Claude PT/upside (saved reports)
     and produce a grounded context block for the strategist prompt."""
     tickers = [p["ticker"] for p in positions if p.get("ticker")]
     reports = {}
     if _PSYCOPG2_OK and os.environ.get("DATABASE_URL") and tickers:
         try:
             with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-                cur.execute("""SELECT ticker, rating, upside_pct, price_target
-                                 FROM analyst_reports WHERE ticker = ANY(%s)""",
-                            (tickers,))
+                cur.execute("""
+                    SELECT ticker, rating, upside_pct, price_target,
+                           claude_rating, claude_price_target, claude_upside_pct
+                      FROM analyst_reports WHERE ticker = ANY(%s)
+                """, (tickers,))
                 for r in cur.fetchall() or []:
-                    reports[r["ticker"].upper()] = r
+                    reports[(r["ticker"] or "").upper()] = r
         except Exception:
             pass
+    live_px: dict[str, float] = {}
+    try:
+        now = time.time()
+        for tk in tickers:
+            ent = _QUOTE_CACHE.get(tk)
+            if not ent:
+                continue
+            if (now - float(ent.get("_ts") or 0)) > 24 * 3600:
+                continue
+            px = ent.get("price")
+            if px is not None:
+                try:
+                    live_px[tk] = float(px)
+                except (TypeError, ValueError):
+                    pass
+    except Exception:
+        pass
+
+    def _pt_f(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _up_of(pt, stored, last):
+        if pt is not None and last is not None and last > 0:
+            return (float(pt) - float(last)) / float(last) * 100.0
+        try:
+            return float(stored) if stored is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _fmt_pt(v):
+        if v is None:
+            return "n/a"
+        return f"${v:.0f}" if abs(v) >= 100 else f"${v:.2f}"
+
+    def _fmt_up(v):
+        return f"{v:+.1f}%" if v is not None else "n/a"
+
     lines = []
-    ev_terms = []
+    ev_g, ev_c = [], []
     for p in positions:
-        tk = p["ticker"]; w = float(p.get("weight_pct") or 0)
+        tk = p["ticker"]
+        w = float(p.get("weight_pct") or 0)
         rep = reports.get(tk) or {}
-        up = rep.get("upside_pct")
-        rating = rep.get("rating") or "—"
+        last = live_px.get(tk)
+        pt_g = _pt_f(rep.get("price_target"))
+        pt_c = _pt_f(rep.get("claude_price_target"))
+        up_g = _up_of(pt_g, rep.get("upside_pct"), last)
+        up_c = _up_of(pt_c, rep.get("claude_upside_pct"), last)
+        rat_g = (rep.get("rating") or "—")
+        rat_c = (rep.get("claude_rating") or "—")
         has_report = tk in reports
-        if up is not None:
-            ev_terms.append(w / 100.0 * float(up))
+        if up_g is not None:
+            ev_g.append(w / 100.0 * float(up_g))
+        if up_c is not None:
+            ev_c.append(w / 100.0 * float(up_c))
+        last_bit = f" last=${last:.2f}" if last is not None else ""
         lines.append(
-            f"  {tk:<7} {w:5.1f}%  rating={rating:<10} "
-            f"upside={'%+.1f%%' % float(up) if up is not None else 'n/a':<8} "
-            f"{'[has saved report]' if has_report else '[NO report]'}")
-    mech_ev = sum(ev_terms) if ev_terms else None
+            f"  {tk:<7} {w:5.1f}%{last_bit}  "
+            f"grok={rat_g} PT={_fmt_pt(pt_g)} up={_fmt_up(up_g)}  "
+            f"claude={rat_c} PT={_fmt_pt(pt_c)} up={_fmt_up(up_c)}  "
+            f"{'[has saved report]' if has_report else '[NO report]'}"
+        )
     ctx = [
         f"PORTFOLIO ({fund_name or 'uploaded book'}) — {len(positions)} positions:",
         *lines,
     ]
-    if mech_ev is not None:
-        ctx.append(f"\nMechanical EV (Σ weight × report-upside, current weights): "
-                   f"{mech_ev:+.2f}%-pts  — this is the baseline you reason against.")
-    ctx.append("\nNote: 'upside' is from each name's saved DGA report. Names marked "
-               "[NO report] have no thesis on file — flag that as a gap.")
+    if ev_g:
+        ctx.append(
+            f"\nMechanical EV Grok (Σ weight × Grok upside vs live last): "
+            f"{sum(ev_g):+.2f}%-pts"
+        )
+    if ev_c:
+        ctx.append(
+            f"Mechanical EV Claude (Σ weight × Claude upside vs live last): "
+            f"{sum(ev_c):+.2f}%-pts"
+        )
+    ctx.append(
+        "\nNote: each name lists Grok AND Claude 12m PT/upside separately when "
+        "both reports exist. Use BOTH numbers — do not collapse to one engine. "
+        "Upside is PT vs live last when a quote is on file; otherwise the stored "
+        "report-day %. Names marked [NO report] have no thesis on file — flag "
+        "that as a gap."
+    )
     return "\n".join(ctx)
 
 
@@ -27178,6 +27252,10 @@ _STRATEGIST_SYSTEM = (
     "outliers, not every micro name); get_recent_news / web_search for fresh "
     "catalysts. NEVER invent a number. Prefer multi-ticker tool calls over "
     "one-ticker serial loops.\n\n"
+    "Each name in the book may list a Grok 12m PT/upside AND a Claude 12m "
+    "PT/upside. Use BOTH figures in EXPECTED VALUE and SUGGESTED ADJUSTMENTS "
+    "(cite them as Grok vs Claude). Do not pick one engine and ignore the other. "
+    "Mechanical EV is provided per engine as the baseline you reason against.\n\n"
     "Deliver a structured dossier with these sections, in order:\n"
     "1. SNAPSHOT — sector mix, top concentrations, real YTD (cite the tool).\n"
     "2. CONCENTRATION & CORRELATION X-RAY — where the book is secretly one bet.\n"

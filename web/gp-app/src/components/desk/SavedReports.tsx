@@ -12,6 +12,25 @@ function tsMs(v?: string | null): number {
   return !Number.isNaN(t) && t > 0 ? t : 0
 }
 
+function fmtTgt(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(Number(v))) return '—'
+  const n = Number(v)
+  return `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`
+}
+
+/** Live last vs 12m PT; fall back to the stored report-day %. */
+function liveUpside(
+  pt: number | null | undefined,
+  price: number | null,
+  fallback?: number | null,
+): number | null {
+  if (pt != null && Number.isFinite(Number(pt)) && price != null && price > 0) {
+    return ((Number(pt) - price) / price) * 100
+  }
+  if (fallback != null && Number.isFinite(Number(fallback))) return Number(fallback)
+  return null
+}
+
 function freshnessMs(rep: SavedReport): number {
   return Math.max(
     tsMs(rep.generated_at),
@@ -176,14 +195,24 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                     : rep.pct_change != null
                       ? Number(rep.pct_change)
                       : null
+              const grokPt =
+                rep.grok_price_target != null ? Number(rep.grok_price_target) : null
+              const claudePt =
+                rep.claude_price_target != null
+                  ? Number(rep.claude_price_target)
+                  : null
+              const bothEngines = grokPt != null && claudePt != null
+              const grokUp = liveUpside(grokPt, price, rep.grok_upside_pct)
+              const claudeUp = liveUpside(claudePt, price, rep.claude_upside_pct)
               const target =
-                rep.price_target != null ? Number(rep.price_target) : null
-              const upside =
-                target != null && price != null && price > 0
-                  ? ((target - price) / price) * 100
-                  : rep.upside_pct != null
-                    ? Number(rep.upside_pct)
-                    : null
+                grokPt != null
+                  ? grokPt
+                  : claudePt != null
+                    ? claudePt
+                    : rep.price_target != null
+                      ? Number(rep.price_target)
+                      : null
+              const upside = liveUpside(target, price, rep.upside_pct)
               const runMs = freshnessMs(rep)
               const runIso = runMs ? new Date(runMs).toISOString() : rep.last_attempt_at
               const providers = rep.providers || []
@@ -331,25 +360,28 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                       <div className={`tabular ${pctClass(pct)}`}>{fmtPct(pct)}</div>
                     </td>
                     <td className={styles.num}>
-                      {rep.grok_price_target != null &&
-                      rep.claude_price_target != null ? (
+                      {bothEngines ? (
                         <div className={styles.tgtStack}>
-                          <div>
-                            <span className={styles.tgtG}>G</span>{' '}
-                            {fmtPx(rep.grok_price_target)}
+                          <div className={styles.tgtLine} title="Grok 12m PT vs live last">
+                            <div className={styles.tgtPx}>
+                              <span className={styles.tgtG}>G</span> {fmtTgt(grokPt)}
+                            </div>
+                            <div className={`tabular ${styles.tgtUp} ${pctClass(grokUp)}`}>
+                              {fmtPct(grokUp)}
+                            </div>
                           </div>
-                          <div>
-                            <span className={styles.tgtC}>C</span>{' '}
-                            {fmtPx(rep.claude_price_target)}
+                          <div className={styles.tgtLine} title="Claude 12m PT vs live last">
+                            <div className={styles.tgtPx}>
+                              <span className={styles.tgtC}>C</span> {fmtTgt(claudePt)}
+                            </div>
+                            <div className={`tabular ${styles.tgtUp} ${pctClass(claudeUp)}`}>
+                              {fmtPct(claudeUp)}
+                            </div>
                           </div>
                         </div>
                       ) : (
                         <>
-                          <div className={styles.numPrimary}>
-                            {target != null
-                              ? `$${target >= 100 ? target.toFixed(0) : target.toFixed(2)}`
-                              : '—'}
-                          </div>
+                          <div className={styles.numPrimary}>{fmtTgt(target)}</div>
                           <div className={`tabular ${pctClass(upside)}`}>
                             {fmtPct(upside)}
                           </div>
