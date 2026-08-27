@@ -45,13 +45,18 @@ function applyReturnMode(
   pts: BalanceHistoryPoint[],
   mode: AtReturnMode,
   benchByYear: Record<number, number>,
+  grain: 'monthly' | 'quarterly' | 'annual',
 ): AtDisplayPoint[] {
   let cumP = 1
   let cumB = 1
   return pts.map((p, idx) => {
+    // Annual BM is year-keyed. Never paint that same year figure onto
+    // every month/quarter. Monthly/quarterly use period-matched API values only.
     const bRet =
-      p.year != null && benchByYear[p.year] !== undefined
-        ? benchByYear[p.year]
+      grain === 'annual'
+        ? p.year != null && benchByYear[p.year] !== undefined
+          ? benchByYear[p.year]
+          : p.benchmark_return_pct ?? null
         : p.benchmark_return_pct ?? null
     const r = p.skip ? 0 : p.return_pct || 0
     cumP *= 1 + r / 100
@@ -297,18 +302,19 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
   }, [allTime, atView, atPeriod])
 
   const atDisplayPts = useMemo(
-    () => applyReturnMode(atSeries, atMode, atBenchReturns),
-    [atSeries, atMode, atBenchReturns],
+    () => applyReturnMode(atSeries, atMode, atBenchReturns, atView),
+    [atSeries, atMode, atBenchReturns, atView],
   )
+  const showAtBench = atView === 'annual'
 
   const atChartPts = useMemo(
     () =>
       atDisplayPts.map((p) => ({
         ...p,
         return_pct: p.display_return,
-        benchmark_return_pct: p.display_bench,
+        benchmark_return_pct: showAtBench ? p.display_bench : null,
       })),
-    [atDisplayPts],
+    [atDisplayPts, showAtBench],
   )
 
   const atActiveMonths = useMemo(() => {
@@ -694,21 +700,23 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                       </button>
                     ))}
                   </div>
-                  <div className={styles.atpGroup}>
-                    <span className={styles.atpLbl}>Benchmark</span>
-                    <select
-                      className={styles.benchSelect}
-                      value={atBench}
-                      onChange={(e) => void fetchAtBench(e.target.value)}
-                    >
-                      <option value="sp500">S&P 500</option>
-                      <option value="nasdaq100">Nasdaq 100</option>
-                      <option value="dow">Dow Jones</option>
-                      <option value="russell2000">Russell 2000</option>
-                      <option value="msci_world">MSCI World</option>
-                      <option value="agg">US Bonds (AGG)</option>
-                    </select>
-                  </div>
+                  {showAtBench && (
+                    <div className={styles.atpGroup}>
+                      <span className={styles.atpLbl}>Benchmark</span>
+                      <select
+                        className={styles.benchSelect}
+                        value={atBench}
+                        onChange={(e) => void fetchAtBench(e.target.value)}
+                      >
+                        <option value="sp500">S&P 500</option>
+                        <option value="nasdaq">Nasdaq 100</option>
+                        <option value="dow30">Dow 30</option>
+                        <option value="msci_world">MSCI World</option>
+                        <option value="bonds">US Bonds</option>
+                        <option value="60_40">60/40 Blend</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
                 {atDisp === 'chart' ? (
                   <AllTimePerfChart points={atChartPts} height={260} />
@@ -727,8 +735,8 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                                 ? 'Cumul.'
                                 : 'CAGR'}
                           </th>
-                          <th className="tabular">Benchmark</th>
-                          <th className="tabular">Alpha</th>
+                          {showAtBench && <th className="tabular">Benchmark</th>}
+                          {showAtBench && <th className="tabular">Alpha</th>}
                           <th className="tabular">Net flows</th>
                         </tr>
                       </thead>
@@ -749,12 +757,16 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                               <td className={`tabular ${pctClass(p.display_return)}`}>
                                 {p.skip ? 'N/A' : fmtPct(p.display_return)}
                               </td>
-                              <td className={`tabular ${pctClass(p.display_bench)}`}>
-                                {fmtPct(p.display_bench)}
-                              </td>
-                              <td className={`tabular ${pctClass(p.display_alpha)}`}>
-                                {fmtPct(p.display_alpha)}
-                              </td>
+                              {showAtBench && (
+                                <td className={`tabular ${pctClass(p.display_bench)}`}>
+                                  {fmtPct(p.display_bench)}
+                                </td>
+                              )}
+                              {showAtBench && (
+                                <td className={`tabular ${pctClass(p.display_alpha)}`}>
+                                  {fmtPct(p.display_alpha)}
+                                </td>
+                              )}
                               <td className="tabular">
                                 {net === 0
                                   ? '—'
@@ -797,7 +809,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                                 <td className={`tabular ${pctClass(totalCum)}`}>
                                   {fmtPct(totalCum)} cumul. / {fmtPct(totalCagr)} CAGR
                                 </td>
-                                <td colSpan={3} />
+                                <td colSpan={showAtBench ? 3 : 1} />
                               </tr>
                             )
                           })()}

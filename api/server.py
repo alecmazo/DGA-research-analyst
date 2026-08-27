@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui512-20260827-acct-cards-collapse"
+WEB_BUILD_VERSION = "ui513-20260827-bench-period-match"
 
 
 @app.get("/api/build")
@@ -9127,6 +9127,199 @@ def _get_benchmark_annual(benchmark_key: str, years: list) -> dict:
         if ytd is not None:
             result[yr] = ytd
 
+    return result
+
+
+def _yahoo_month_end_closes(ticker: str, start: str):
+    """Daily Yahoo history resampled to month-end closes. None on failure."""
+    if not _YFINANCE_OK:
+        return None
+    try:
+        hist = _builder_call_timeout(
+            lambda: yf.Ticker(ticker).history(start=start, interval="1d"),
+            12.0, None)
+        if hist is None or hist.empty or "Close" not in hist.columns:
+            return None
+        try:
+            monthly = hist["Close"].resample("ME").last().dropna()
+        except ValueError:
+            monthly = hist["Close"].resample("M").last().dropna()
+        out = []
+        for ts, close in monthly.items():
+            out.append((int(ts.year), int(ts.month), float(close)))
+        return out
+    except Exception as e:
+        print(f"[bench-period] {ticker} history failed: {e!s:.120}", flush=True)
+        return None
+
+
+def _blend_month_returns(closes_by_ticker: dict, weights: list) -> dict[tuple[int, int], float]:
+    """Month-over-month % from month-end closes, weighted across tickers."""
+    # Align on (year, month)
+    keys = None
+    series = []
+    for ticker, w in weights:
+        pts = closes_by_ticker.get(ticker) or []
+        m = {(y, mo): c for y, mo, c in pts}
+        series.append((m, w))
+        ks = set(m.keys())
+        keys = ks if keys is None else (keys & ks)
+    if not keys:
+        return {}
+    ordered = sorted(keys)
+    rets: dict[tuple[int, int], float] = {}
+    prev_blend = None
+    for y, mo in ordered:
+        blend = 0.0
+        tw = 0.0
+        for m, w in series:
+            px = m.get((y, mo))
+            if px is None:
+                continue
+            blend += px * w
+            tw += w
+        if tw <= 0:
+            continue
+        blend /= tw
+        if prev_blend and prev_blend > 0:
+            rets[(y, mo)] = round((blend / prev_blend - 1.0) * 100.0, 4)
+        prev_blend = blend
+    return rets
+
+
+def _persist_period_returns(benchmark_key: str, grain: str, mapping: dict[str, float],
+                            source: str = "yahoo") -> None:
+    if not mapping or not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        conn = _fund_conn()
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS benchmark_period_returns (
+                    benchmark_key TEXT NOT NULL,
+                    grain         TEXT NOT NULL,
+                    period_key    TEXT NOT NULL,
+                    return_pct    NUMERIC(10,4) NOT NULL,
+                    source        TEXT,
+                    updated_at    TIMESTAMPTZ DEFAULT now(),
+                    PRIMARY KEY (benchmark_key, grain, period_key)
+                )
+            """)
+            for pk, ret in mapping.items():
+                cur.execute("""
+                    INSERT INTO benchmark_period_returns
+                        (benchmark_key, grain, period_key, return_pct, source, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, now())
+                    ON CONFLICT (benchmark_key, grain, period_key) DO UPDATE
+                      SET return_pct = EXCLUDED.return_pct,
+                          source     = EXCLUDED.source,
+                          updated_at = now()
+                """, (benchmark_key, grain, pk, ret, source))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[bench-period] persist failed: {e!s:.120}", flush=True)
+
+
+def _load_period_returns_db(benchmark_key: str, grain: str, keys: list[str]) -> dict[str, float]:
+    if not keys or not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+        return {}
+    try:
+        conn = _fund_conn()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT period_key, return_pct FROM benchmark_period_returns
+                 WHERE benchmark_key = %s AND grain = %s AND period_key = ANY(%s)
+            """, (benchmark_key, grain, keys))
+            out = {row[0]: float(row[1]) for row in cur.fetchall()}
+        conn.close()
+        return out
+    except Exception:
+        return {}
+
+
+def _get_benchmark_monthly(benchmark_key: str, year_months: list[tuple[int, int]]) -> dict[str, float]:
+    """MoM ETF returns. Closed months come from Postgres; Yahoo fills gaps once."""
+    if not year_months:
+        return {}
+    defn = _BENCHMARK_DEFS.get(benchmark_key)
+    if not defn:
+        return {}
+    keys = [f"{y}-{m:02d}" for y, m in year_months]
+    result = _load_period_returns_db(benchmark_key, "monthly", keys)
+    missing = [(y, m) for y, m in year_months if f"{y}-{m:02d}" not in result]
+    if not missing:
+        return result
+
+    import datetime as _dt
+    today = _dt.date.today()
+    start_y = min(y for y, _ in missing)
+    start = f"{start_y - 1}-12-01"
+    closes = {}
+    for ticker, _w in defn["tickers"]:
+        pts = _yahoo_month_end_closes(ticker, start)
+        if pts:
+            closes[ticker] = pts
+    if not closes:
+        return result
+    mom = _blend_month_returns(closes, defn["tickers"])
+    persist: dict[str, float] = {}
+    live: dict[str, float] = {}
+    for (y, m), ret in mom.items():
+        pk = f"{y}-{m:02d}"
+        closed = (y, m) < (today.year, today.month)
+        if closed:
+            persist[pk] = ret
+        live[pk] = ret
+    if persist:
+        _persist_period_returns(benchmark_key, "monthly", persist, "yahoo")
+    for y, m in missing:
+        pk = f"{y}-{m:02d}"
+        if pk in live:
+            result[pk] = live[pk]
+    return result
+
+
+def _get_benchmark_quarterly(benchmark_key: str, year_quarters: list[tuple[int, int]]) -> dict[str, float]:
+    """QoQ from stored/fetched monthly returns. Persist closed quarters."""
+    if not year_quarters:
+        return {}
+    keys = [f"{y}-Q{q}" for y, q in year_quarters]
+    result = _load_period_returns_db(benchmark_key, "quarterly", keys)
+    missing = [(y, q) for y, q in year_quarters if f"{y}-Q{q}" not in result]
+    if not missing:
+        return result
+    months_needed = []
+    for y, q in missing:
+        start_m = (q - 1) * 3 + 1
+        months_needed.extend([(y, start_m), (y, start_m + 1), (y, start_m + 2)])
+    mom = _get_benchmark_monthly(benchmark_key, months_needed)
+    import datetime as _dt
+    today = _dt.date.today()
+    persist: dict[str, float] = {}
+    for y, q in missing:
+        start_m = (q - 1) * 3 + 1
+        parts = []
+        for m in (start_m, start_m + 1, start_m + 2):
+            pk = f"{y}-{m:02d}"
+            if pk in mom:
+                parts.append(mom[pk])
+        if len(parts) < 1:
+            continue
+        prod = 1.0
+        for r in parts:
+            prod *= 1.0 + r / 100.0
+        qk = f"{y}-Q{q}"
+        val = round((prod - 1.0) * 100.0, 4)
+        result[qk] = val
+        last_m = start_m + len(parts) - 1
+        closed = (y, q) < (today.year, (today.month - 1) // 3 + 1) or (
+            y == today.year and q < (today.month - 1) // 3 + 1
+        )
+        if closed and len(parts) == 3:
+            persist[qk] = val
+    if persist:
+        _persist_period_returns(benchmark_key, "quarterly", persist, "yahoo_compounded")
     return result
 
 
@@ -16857,6 +17050,23 @@ def _start_automation_schedulers() -> None:
 # the post-listen startup hook instead.
 
 
+def _ensure_benchmark_period_returns_table(conn) -> None:
+    """Month/quarter ETF returns so we never re-Yahoo closed periods."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS benchmark_period_returns (
+                benchmark_key TEXT NOT NULL,
+                grain         TEXT NOT NULL,
+                period_key    TEXT NOT NULL,
+                return_pct    NUMERIC(10,4) NOT NULL,
+                source        TEXT,
+                updated_at    TIMESTAMPTZ DEFAULT now(),
+                PRIMARY KEY (benchmark_key, grain, period_key)
+            )
+        """)
+    conn.commit()
+
+
 def _ensure_benchmark_annual_returns_table(conn) -> None:
     with conn.cursor() as cur:
         cur.execute("""
@@ -17198,6 +17408,7 @@ def _apply_self_migrations() -> None:
             _step("report_history_tables",      lambda: _ensure_report_history_tables())
             _step("watchlists_table",           lambda: _ensure_watchlists_table(conn))
             _step("benchmark_annual_returns",   lambda: _ensure_benchmark_annual_returns_table(conn))
+            _step("benchmark_period_returns",   lambda: _ensure_benchmark_period_returns_table(conn))
             _step("seed_benchmark_historical",  lambda: _seed_benchmark_historical(conn))
             _step("manual_annual_returns",      lambda: _ensure_manual_annual_returns_table(conn))
             _step("seed_manual_annual_returns", lambda: _seed_manual_annual_returns(conn))
@@ -20515,6 +20726,7 @@ def fund_balance_history(fund_id: str, request: Request):
             "withdrawals":       round(sum(float(p.get("withdrawals") or 0) for p in pts), 2),
             "return_pct":        chain_returns(pts),
             "inception_month":   _inception_month(pts),
+            "benchmark_return_pct": None,
         })
 
     # Load fund display settings (benchmark choice set by GP)
@@ -20526,6 +20738,59 @@ def fund_balance_history(fund_id: str, request: Request):
     # Fetch benchmark annual returns for all years in history
     years = sorted({p["year"] for p in monthly}) if monthly else []
     bmark_annual: dict[int, float] = _get_benchmark_annual(benchmark_key, years)
+    # Period-matched MoM / QoQ — never copy annual BM onto monthly/quarterly rows.
+    def _row_month(raw) -> int | None:
+        try:
+            if isinstance(raw, int):
+                mi = int(raw)
+            else:
+                s = str(raw or "")
+                mi = int(s.split("-")[1]) if "-" in s else int(s)
+            return mi if 1 <= mi <= 12 else None
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    month_keys = []
+    for p in monthly:
+        try:
+            mi = _row_month(p.get("month"))
+            if mi:
+                month_keys.append((int(p["year"]), mi))
+        except (KeyError, TypeError, ValueError):
+            pass
+    try:
+        bmark_monthly = _get_benchmark_monthly(benchmark_key, month_keys) if month_keys else {}
+    except Exception as _e:
+        print(f"[bench-period] monthly stamp skipped: {_e!s:.120}", flush=True)
+        bmark_monthly = {}
+    for p in monthly:
+        try:
+            mi = _row_month(p.get("month"))
+            if not mi:
+                continue
+            pk = f"{int(p['year'])}-{mi:02d}"
+        except (KeyError, TypeError, ValueError):
+            continue
+        if pk in bmark_monthly:
+            p["benchmark_return_pct"] = bmark_monthly[pk]
+    q_keys = []
+    for r in quarterly:
+        try:
+            q_keys.append((int(r["year"]), int(r["quarter"])))
+        except (KeyError, TypeError, ValueError):
+            pass
+    try:
+        bmark_q = _get_benchmark_quarterly(benchmark_key, q_keys) if q_keys else {}
+    except Exception as _e:
+        print(f"[bench-period] quarterly stamp skipped: {_e!s:.120}", flush=True)
+        bmark_q = {}
+    for r in quarterly:
+        try:
+            qk = f"{int(r['year'])}-Q{int(r['quarter'])}"
+        except (KeyError, TypeError, ValueError):
+            continue
+        if qk in bmark_q:
+            r["benchmark_return_pct"] = bmark_q[qk]
 
     # Manual overrides take precedence over Modified Dietz calculation
     manual_returns = _load_manual_annual_returns(fid)

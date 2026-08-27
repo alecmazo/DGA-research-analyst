@@ -169,6 +169,8 @@ export type BalanceHistoryAnnual = {
 export type BalanceHistoryPoint = {
   label?: string
   year?: number
+  month?: number
+  quarter?: number
   return_pct?: number | null
   end_balance?: number | null
   beg_balance?: number | null
