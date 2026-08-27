@@ -20,6 +20,37 @@
   background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-subtle) 100%);
 }
 
+.closed .head {
+  border-bottom-color: transparent;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  margin: -10px 0 -10px -6px;
+  padding: 10px 8px 10px 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.toggle:hover .title {
+  color: var(--brand-600);
+}
+
+.chev {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  width: 12px;
+  flex-shrink: 0;
+}
+
 .titleWrap {
   display: flex;
   align-items: center;

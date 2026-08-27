@@ -8,13 +8,13 @@ export function FundPositionsTable({ rows }: { rows: FundPosition[] }) {
   const totalMv = rows.reduce((s, p) => s + (p.market_value || 0), 0)
   if (!rows.length) {
     return (
-      <Panel title="Open Positions">
+      <Panel title="Open Positions" collapsible>
         <Empty title="No positions yet" sub="Holdings load from SnapTrade after a broker sync." />
       </Panel>
     )
   }
   return (
-    <Panel title="Open Positions" badge={`${rows.length} · ${fmtUsd(totalMv)}`} flush>
+    <Panel title="Open Positions" badge={`${rows.length} · ${fmtUsd(totalMv)}`} flush collapsible>
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>

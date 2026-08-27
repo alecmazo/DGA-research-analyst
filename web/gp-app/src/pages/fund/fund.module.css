@@ -745,6 +745,60 @@
   gap: 8px;
 }
 
+.runRebalance {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 14px 0 12px;
+  border: 1px solid rgba(184, 148, 58, 0.55);
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0a1628;
+  background: linear-gradient(180deg, #f4e0a8 0%, #d4b45c 48%, #c9a84c 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 4px 14px rgba(201, 168, 76, 0.38);
+  cursor: pointer;
+  animation: runGlow 2.6s ease-in-out infinite;
+}
+
+.runRebalance:hover:not(:disabled) {
+  background: linear-gradient(180deg, #fff1c2 0%, #e0c46a 50%, #d4b45c 100%);
+  transform: translateY(-0.5px);
+}
+
+.runRebalance:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  animation: none;
+}
+
+.runGlyph {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent #0a1628;
+}
+
+@keyframes runGlow {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.55),
+      0 4px 14px rgba(201, 168, 76, 0.32);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.7),
+      0 6px 20px rgba(201, 168, 76, 0.55);
+  }
+}
+
 .atpToolbar {
   display: flex;
   flex-wrap: wrap;

@@ -534,6 +534,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
           {/* Monthly YTD — chart or table */}
           <Panel
             title="Monthly Performance YTD"
+            collapsible
             badge={monthlyRaw.length ? `${monthlyRaw.length} mo` : 'YTD'}
             action={
               monthlyRaw.length ? (
@@ -614,6 +615,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
           {/* All-time performance */}
           <Panel
             title="All-Time Performance"
+            collapsible
             badge={
               allTime
                 ? `${atActiveMonths} mo${atCagr != null ? ` · ${atCagr >= 0 ? '+' : ''}${atCagr.toFixed(1)}% CAGR` : ''}`
@@ -811,11 +813,18 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             <FundPositionsTable rows={positions} />
             <Panel
               title="Rebalance Suggestions"
+              collapsible
               badge={reb?.rows?.length || undefined}
               action={
-                <Button size="sm" variant="primary" disabled={rebBusy} onClick={() => void runRebalance()}>
-                  {rebBusy ? '…' : '📊 Run'}
-                </Button>
+                <button
+                  type="button"
+                  className={styles.runRebalance}
+                  disabled={rebBusy}
+                  onClick={() => void runRebalance()}
+                >
+                  <span className={styles.runGlyph} aria-hidden />
+                  {rebBusy ? 'Running' : 'Run'}
+                </button>
               }
               flush
             >
@@ -892,6 +901,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
           <div className={styles.sideBySide}>
             <Panel
               title="YTD Attribution (per-stock contribution)"
+              collapsible
               badge={attr.length || undefined}
               flush
             >
@@ -989,7 +999,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
               )}
             </Panel>
 
-            <Panel title="YTD Cash Flows" badge={flows.length || undefined} flush>
+            <Panel title="YTD Cash Flows" badge={flows.length || undefined} flush collapsible>
               {!flows.length ? (
                 <div className={styles.pad}>
                   <p className={styles.hint}>No cash-flow rows in the YTD cache.</p>
