@@ -68,6 +68,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
   // All-time
   const [allTime, setAllTime] = useState<BalanceHistory | null>(null)
   const [atView, setAtView] = useState<'monthly' | 'quarterly' | 'annual'>('monthly')
+  const [atDisp, setAtDisp] = useState<'chart' | 'table'>('chart')
   const [atPeriod, setAtPeriod] = useState<'all' | '5yr' | '3yr'>('all')
   const [atMode, setAtMode] = useState<'annual' | 'cumulative' | 'cagr'>('annual')
   const [atBench, setAtBench] = useState('sp500')
@@ -544,17 +545,35 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             }
             action={
               allTime ? (
-                <div className={styles.viewToggle}>
-                  {(['monthly', 'quarterly', 'annual'] as const).map((v) => (
+                <div className={styles.atCardActions}>
+                  <div className={styles.viewToggle}>
                     <button
-                      key={v}
                       type="button"
-                      className={atView === v ? styles.viewOn : styles.viewBtn}
-                      onClick={() => setAtView(v)}
+                      className={atDisp === 'chart' ? styles.viewOn : styles.viewBtn}
+                      onClick={() => setAtDisp('chart')}
                     >
-                      {v[0].toUpperCase() + v.slice(1)}
+                      Chart
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      className={atDisp === 'table' ? styles.viewOn : styles.viewBtn}
+                      onClick={() => setAtDisp('table')}
+                    >
+                      Table
+                    </button>
+                  </div>
+                  <div className={styles.viewToggle}>
+                    {(['monthly', 'quarterly', 'annual'] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        className={atView === v ? styles.viewOn : styles.viewBtn}
+                        onClick={() => setAtView(v)}
+                      >
+                        {v[0].toUpperCase() + v.slice(1)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : undefined
             }
@@ -564,8 +583,57 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                 title="No all-time history yet"
                 sub="All-time history fills from SnapTrade. Open CSV backup at the bottom of this account only if a year is missing."
               />
-            ) : (
+            ) : atDisp === 'chart' ? (
               <AllTimePerfChart points={atChartPts} height={260} />
+            ) : (
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Period</th>
+                      <th className="tabular">Beg</th>
+                      <th className="tabular">End</th>
+                      <th className="tabular">Portfolio</th>
+                      <th className="tabular">
+                        {allTime.benchmark_label || 'Benchmark'}
+                      </th>
+                      <th className="tabular">Alpha</th>
+                      <th className="tabular">Net flows</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {atChartPts.map((p, i) => {
+                      const flow = (p.deposits || 0) - (p.withdrawals || 0)
+                      const alpha =
+                        p.return_pct != null && p.benchmark_return_pct != null
+                          ? p.return_pct - p.benchmark_return_pct
+                          : null
+                      const label =
+                        p.label ||
+                        (p.year != null ? String(p.year) : `row ${i + 1}`)
+                      return (
+                        <tr key={`${label}-${i}`}>
+                          <td>{label}</td>
+                          <td className="tabular">{fmtUsd(p.beg_balance)}</td>
+                          <td className="tabular">{fmtUsd(p.end_balance)}</td>
+                          <td className={`tabular ${pctClass(p.return_pct)}`}>
+                            {p.skip ? 'N/A' : fmtPct(p.return_pct)}
+                          </td>
+                          <td className={`tabular ${pctClass(p.benchmark_return_pct)}`}>
+                            {fmtPct(p.benchmark_return_pct)}
+                          </td>
+                          <td className={`tabular ${pctClass(alpha)}`}>
+                            {fmtPct(alpha)}
+                          </td>
+                          <td className={`tabular ${pctClass(flow || null)}`}>
+                            {flow ? fmtUsd(flow) : '—'}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Panel>
 

@@ -120,7 +120,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Options after Positions** | **`ui505-20260827-nav-options-after-pos`** | Topbar: Options sits immediately right of Positions |
 | **Fund hide CSV uploads** | **`ui506-20260827-fund-hide-csv`** | Manual Data Uploads no longer a Fund card; collapsed CSV backup; SnapTrade is the path |
 | **Rebalance live PT upside** | **`ui507-20260827-rebalance-live-pt`** | Fund rebalance upside = Saved Report 12m PT vs live last (not frozen report %) |
-| **Next deploy after this** | **`ui508-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **All-time chart/table** | **`ui508-20260827-alltime-table`** | Managed-account All-Time Performance has Chart | Table like YTD monthly |
+| **Next deploy after this** | **`ui509-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -173,7 +174,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui507-20260827-rebalance-live-pt` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui508-20260827-alltime-table` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -189,6 +190,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui505 | Topbar: Options moved to the right of Positions |
 | ui506 | Fund: hide Manual Data Uploads; SnapTrade is the live path |
 | ui507 | Rebalance upside from saved-report PT vs live last (CRM +41% was stale) |
+| ui508 | All-Time Performance: Chart | Table toggle (same as YTD monthly) |
 | ui489–ui491 | Financials charts: one signed series, legend color both sides of zero; price hover |
 | ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
 | ui495–ui497 | Analyze-in-progress Foundation Vault loop (no human, 20s seamless ping-pong) |
@@ -265,4 +267,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui507-20260827-rebalance-live-pt` · Next: `ui508-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui508-20260827-alltime-table` · Next: `ui509-YYYYMMDD-slug`*
