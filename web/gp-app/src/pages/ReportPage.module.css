@@ -348,8 +348,7 @@
   padding: 7px 10px;
   font-weight: 700;
   font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .md :global(.md-table td) {
@@ -463,13 +462,21 @@
   }
 
   .md :global(.md-table) {
-    width: 100% !important;
+    width: auto !important;
     max-width: 100% !important;
-    table-layout: fixed;
+    table-layout: auto;
     word-break: break-word;
     overflow-wrap: anywhere;
-    font-size: 10px;
+    font-size: 9.5px;
     break-inside: auto;
+  }
+
+  .md :global(.md-table) th,
+  .md :global(.md-table) td {
+    white-space: normal !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    hyphens: auto;
   }
 
   .md :global(.md-pre) {

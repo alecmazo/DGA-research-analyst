@@ -131,7 +131,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Zero-debt strength** | **`ui516-20260827-zero-debt-strength`** | No/untagged debt is fortress: Cash-To-Debt ≥10×, D/E and D/EBITDA 0×; DGA FS 100 |
 | **Accounts managed first** | **`ui517-20260827-accounts-managed-first`** | Accounts tab: Managed first, LP Funds second (toggle, KPIs, default view) |
 | **Engine loops + research print** | **`ui518-20260827-engine-loops-print`** | Grok vs Claude 15s analysis loops; Print on Analyst/Strategist with DGA letterhead; Claude strategist thinking off |
-| **Next deploy after this** | **`ui519-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **PDF tables + question** | **`ui519-20260827-pdf-table-question`** | Report/IC PDF columns sized from cell text; Strategist Question strip no longer dumps the LLM prompt |
+| **Next deploy after this** | **`ui520-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -184,7 +185,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui518-20260827-engine-loops-print` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui519-20260827-pdf-table-question` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -215,6 +216,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui516 | Zero/untagged debt is fortress on Financial Strength (not blank ratios) |
 | ui517 | Accounts: Managed first, LP Funds second |
 | ui518 | Grok/Claude 15s loops; Print on Analyst/Strategist; Claude Strategist thinking off (~$1 not $5) |
+| ui519 | PDF/print tables sized from content; Strategist PDF Account strip (no prompt dump) |
 | ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
 | ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
@@ -293,4 +295,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui518-20260827-engine-loops-print` · Next: `ui519-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui519-20260827-pdf-table-question` · Next: `ui520-YYYYMMDD-slug`*

@@ -132,6 +132,17 @@ function kindLabel(kind: ResearchKind) {
   return kind === 'strategist' ? 'Portfolio Strategist' : 'Analyst'
 }
 
+/** Hidden LLM brief (full book dump) — never show in the window or PDF. */
+function looksLikeAgentPrompt(q?: string | null): boolean {
+  const t = (q || '').trim()
+  if (!t) return false
+  if (t.length > 420) return true
+  if (/^run a full investment-committee/i.test(t)) return true
+  if (/PORTFOLIO\s*\(|IMPORTANT SCOPE|Do NOT look up/.test(t)) return true
+  if ((t.match(/\n/g) || []).length >= 6 && /upside=|has saved report/i.test(t)) return true
+  return false
+}
+
 function providerFromModel(model?: string): string {
   const m = (model || '').toLowerCase()
   if (m.includes('grok')) return 'grok'
@@ -269,7 +280,9 @@ export function ResearchAnswerPage() {
     }
   }, [kind, id, pending])
 
-  const question = review?.question || qHint
+  const questionRaw = review?.question || qHint
+  const question =
+    kind === 'strategist' && looksLikeAgentPrompt(questionRaw) ? '' : questionRaw
   const answer = review?.answer || ''
   const html = useMemo(() => (answer ? renderMd(answer) : ''), [answer])
   const model = review?.model || ''

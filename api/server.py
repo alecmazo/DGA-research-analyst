@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui518-20260827-engine-loops-print"
+WEB_BUILD_VERSION = "ui519-20260827-pdf-table-question"
 
 
 @app.get("/api/build")
@@ -24052,16 +24052,17 @@ def _table_col_kind(header: str) -> str:
     if re.search(
         r"^(from|to|from\s*->\s*to|from\s*to|delta|delta\s*%|delta\s*wt|"
         r"change|chg|wt\s*delta|view|rank|tier|score|beat|status|"
-        r"side|dir|ticker|symbol|code|id|name|names|position|company|"
-        r"security|asset|holding|#|no\.?)$", h
+        r"side|dir|ticker|symbol|code|id|#|no\.?)$", h
     ) or re.search(
         r"\b(from\s*->\s*to|delta\s*%|weight\s*delta|delta\s*weight)\b", h
     ) or h in ("from", "to", "%", "wt", "w", "n", "tk"):
         return "narrow"
     # Weights / numeric sizing (a bit wider than pure delta, still compact)
-    if re.search(r"\b(weight|wt|wtd|alloc|allocation|%\s*of\s*book|"
-                 r"target|current|suggested|prob|probability|upside|"
-                 r"shares|qty|price|pe|ev|mcap)\b", h):
+    if h in ("ev", "pe", "pb", "ps", "mcap", "upside", "weight", "wt", "w", "%") or re.search(
+        r"\b(weight|wt|wtd|alloc|allocation|%\s*of\s*book|"
+        r"target|current|suggested|prob|probability|"
+        r"shares|qty|price)\b", h
+    ):
         return "medium_num"
     return "default"
 
@@ -24083,12 +24084,13 @@ def _table_col_weight(header: str) -> float:
 _NUM_CELL_RE = re.compile(
     r"""^
     \(?
+    [+\u2212-]?
     [\$€£]?\s*
     [+\u2212-]?
     \d{1,3}(?:,\d{3})*(?:\.\d+)?
     \s*%?
     \)?
-    (?:x|pp|bps)?
+    (?:x|pp|bps|pts?|k)?
     $""",
     re.IGNORECASE | re.VERBOSE,
 )
@@ -24149,21 +24151,24 @@ def _norm_table_header(header: str) -> str:
 
 def _col_role(header: str) -> str:
     """Coarse role so Name stays tight and Action can grow with its phrases."""
-    h = _norm_table_header(header)
+    h = re.sub(r"[*_`]", "", _norm_table_header(header)).strip()
     if re.search(
         r"\b(rationale|thesis|reason|reasons|notes?|comment|commentary|"
         r"description|detail|details|why|assumption|narrative|"
-        r"justification|evidence|risks?)\b", h,
+        r"justification|evidence|risks?|what it funds|sourced from)\b", h,
     ):
         return "prose"
+    if re.search(r"from\s*(->|to)|→", h) or h in ("from to", "path"):
+        return "path"
     if re.search(
-        r"action|recommend|adjustment|what to do|next step", h,
-    ) or h in ("rec", "rating", "call", "verdict", "view"):
+        r"\baction\b|recommend|adjustment|what to do|next step", h,
+    ) or h in ("rec", "rating", "call", "verdict", "view", "move"):
         return "action"
+    # Exact labels only — "Ticker return" is NOT an id column.
     if h in (
-        "ticker", "symbol", "name", "names", "id", "code", "tk",
-        "company", "security", "holding", "asset", "position",
-    ) or re.search(r"^(ticker|symbol|name)\b", h):
+        "ticker", "symbol", "name", "id", "code", "tk",
+        "company", "security", "holding", "asset", "position", "sleeve",
+    ):
         return "id"
     if _table_col_kind(header) == "medium_num":
         return "num"
@@ -24239,6 +24244,7 @@ def _table_col_widths_from_content(
     numeric: list[bool] = []
     roles: list[str] = []
     flex_w: list[float] = []
+    typical_u: list[float] = []
     for i in range(n):
         header = hs[i]
         role = _col_role(header)
@@ -24249,6 +24255,7 @@ def _table_col_widths_from_content(
         head_u = _cell_char_units(header.upper())
         body_u = [_cell_char_units(c) for c in body] or [0.0]
         typical = _pctile(body_u, 0.85)
+        typical_u.append(typical)
         longest = min(max(body_u), max(typical * 1.65, typical + 8))
         body_need = max(typical, longest * 0.85) * char_pt
         head_floor = min(head_u * head_pt, 36.0 if role == "id" else 48.0)
@@ -24262,11 +24269,16 @@ def _table_col_widths_from_content(
             # stretching the column past the Action phrases next to it.
             col_need = pad + max(min(head_floor, 28.0), max(body_u) * char_pt, 16.0)
             col_need = min(col_need, 62.0)
+        elif role == "path":
+            # "7.4% → 4.5%" — size to the path, not leftover ocean.
+            col_need = pad + max(head_floor * 0.85, typical * char_pt, longest * char_pt)
+            is_cmp = True
+            col_need = min(max(col_need, 52.0), 110.0)
         elif role == "action":
             # Phrases like "Trim 200bp on a bounce" — pin to that length so
             # Action is wider than Name, but cap so rationale still gets leftover.
             col_need = pad + max(head_floor * 0.7, typical * char_pt, longest * char_pt)
-            is_cmp = True
+            is_cmp = max_u <= 22
             col_need = min(max(col_need, 48.0), 140.0)
         elif is_cmp:
             col_need = pad + max(head_floor, max(body_u) * char_pt, 12.0)
@@ -24310,6 +24322,21 @@ def _table_col_widths_from_content(
 
     leftover = tw - _reserved()
     flex_idx = [i for i in range(n) if not compact[i]]
+    has_prose = any(roles[i] == "prose" for i in range(n))
+    long_flex = [
+        i for i in flex_idx
+        if roles[i] == "prose" or typical_u[i] > 24
+    ]
+    # All-short tables (Name / % / $ P&L): do NOT stretch to full letter
+    # width — that was the empty-ocean look. Keep natural content width.
+    if not has_prose and not long_flex:
+        natural = [min(max(need[i], 28.0), tw * 0.42) for i in range(n)]
+        s = sum(natural) or 1.0
+        if s > tw:
+            natural = [w * (tw / s) for w in natural]
+        drift = min(s, tw) - sum(natural)
+        natural[-1] += drift
+        return natural, compact, numeric
     if not flex_idx:
         hungry = max(range(n), key=lambda i: need[i])
         compact[hungry] = False
@@ -26200,7 +26227,13 @@ def _persist_strategist_review(job_id: str, job: dict, answer: str,
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (id) DO NOTHING
             """, (job_id, job.get("fund_id"), job.get("fund_name"), tickers,
-                  (job.get("question") or "")[:4000], answer or "",
+                  (job.get("display_question")
+                   or _display_research_question(
+                       "strategist", job.get("question") or "",
+                       job.get("fund_name"))
+                   or (f"Investment committee review — {job.get('fund_name')}"
+                       if job.get("fund_name") else "Investment committee review")
+                   )[:400], answer or "",
                   json.dumps(verification or {}), cost_usd, model,
                   job.get("generated_by") or "gp"))
             conn.commit()
@@ -27379,6 +27412,10 @@ def research_portfolio_strategist(req: Request, background_tasks: BackgroundTask
     _agentic_jobs[job_id] = {"stage": "queued", "status": "running",
                               "label": "Queued · portfolio review", "started_at": time.time(),
                               "updated_at": time.time(), "question": question,
+                              "display_question": (
+                                  f"Investment committee review — {fund_name}"
+                                  if fund_name else "Investment committee review"
+                              ),
                               "steps": 0, "tool_calls": [], "cost_usd": 0.0,
                               "mode": "strategist", "positions": positions,
                               "tickers": tickers, "fund_name": fund_name,
@@ -28326,7 +28363,13 @@ def _fix_md_table_widths(html: str) -> str:
 
         def _open(mm):
             attrs = mm.group(1) or ""
-            attrs = _add_inline_css(attrs, "table-layout:fixed")
+            used = sum(widths)
+            # Short tables stay content-width; long/prose tables fill the page.
+            if used < 524.0 * 0.90:
+                extra = f"table-layout:fixed;width:{used:.1f}pt"
+            else:
+                extra = "table-layout:fixed;width:100%"
+            attrs = _add_inline_css(attrs, extra)
             return f"<table{attrs}>" + cg
 
         table = re.sub(r"<table(\b[^>]*)>", _open, table, count=1)
@@ -28415,6 +28458,31 @@ def _research_verify_html(verification) -> str:
         f"{''.join(items)}"
         f"</td></tr></table>"
     )
+
+
+def _looks_like_agent_prompt(question: str) -> bool:
+    """True when `question` is the hidden LLM brief, not a human question."""
+    t = (question or "").strip()
+    if not t:
+        return False
+    if len(t) > 420:
+        return True
+    low = t.lower()
+    if low.startswith("run a full investment-committee"):
+        return True
+    if re.search(r"PORTFOLIO\s*\(|IMPORTANT SCOPE|Do NOT look up", t):
+        return True
+    if t.count("\n") >= 6 and ("upside=" in low or "has saved report" in low):
+        return True
+    return False
+
+
+def _display_research_question(kind: str | None, question: str,
+                               fund_name: str | None = None) -> str:
+    """What to print in the Question/Account strip — never the model prompt."""
+    if (kind or "").strip().lower() == "strategist" or _looks_like_agent_prompt(question):
+        return ""
+    return (question or "").strip()
 
 
 def _dga_research_pdf_html(title: str, question: str, answer_html: str,
@@ -28575,7 +28643,7 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
       .md-rendered table.md-table th {
         background-color: #0a1628; color: #ffffff;
         text-align: left; padding: 5pt 5.5pt; font-weight: bold;
-        font-size: 7pt; letter-spacing: 0.25pt; text-transform: uppercase;
+        font-size: 7.5pt; letter-spacing: 0.1pt;
       }
       .md-rendered table.md-table td {
         padding: 4pt 5.5pt; border-bottom: 0.45pt solid #e2e8f0;
@@ -28611,12 +28679,28 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
         f'</tr></table>'
         f'<table class="accent"><tr><td>&nbsp;</td></tr></table>'
     )
-    q_main = q_e or fund_e
-    q_sub_bits = []
-    if fund_e and q_e:
-        q_sub_bits.append(fund_e)
-    if tick_e:
-        q_sub_bits.append(tick_e)
+    shown_q = _display_research_question(kind, question, fund_name)
+    q_e = _html.escape(shown_q) if shown_q else ""
+    is_strat = (kind or "").strip().lower() == "strategist" or _looks_like_agent_prompt(question)
+    if is_strat:
+        q_main = fund_e or "Portfolio"
+        q_label = "Account"
+        q_sub_bits = []
+        if tick_e:
+            # First handful of names — not the full prompt dump
+            bits = [x.strip() for x in tick_e.split(",") if x.strip()]
+            shown = ", ".join(bits[:8])
+            if len(bits) > 8:
+                shown += f" · +{len(bits) - 8} more"
+            q_sub_bits.append(_html.escape(shown))
+    else:
+        q_main = q_e or fund_e
+        q_label = "Question"
+        q_sub_bits = []
+        if fund_e and q_e:
+            q_sub_bits.append(fund_e)
+        if tick_e:
+            q_sub_bits.append(tick_e)
     if q_main:
         sub = (
             f'<div class="qsub">{" · ".join(q_sub_bits)}</div>' if q_sub_bits else ""
@@ -28625,7 +28709,7 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
             f'<table class="qbox"><tr>'
             f'<td class="qbar">&nbsp;</td>'
             f'<td class="qbody">'
-            f'<div class="qlabel">Question</div>'
+            f'<div class="qlabel">{q_label}</div>'
             f'<div class="qtext">{q_main}</div>'
             f'{sub}'
             f'</td></tr></table>'
@@ -28900,7 +28984,7 @@ def _dga_saved_report_pdf_html(
       .md-rendered table.md-table th {
         background-color: #0a1628; color: #ffffff;
         text-align: left; padding: 5pt 5.5pt; font-weight: bold;
-        font-size: 7pt; letter-spacing: 0.25pt; text-transform: uppercase;
+        font-size: 7.5pt; letter-spacing: 0.1pt;
       }
       .md-rendered table.md-table td {
         padding: 4pt 5.5pt; border-bottom: 0.45pt solid #e2e8f0;

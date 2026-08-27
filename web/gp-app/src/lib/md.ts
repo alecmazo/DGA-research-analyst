@@ -36,6 +36,37 @@ export function normalizeDgaReportMd(src: string): string {
   return s.trim() ? `${s.trim()}\n` : s
 }
 
+/** Content-aware col widths so print/PDF don't equalize ticker vs rationale. */
+function mdTableColgroup(head: string[], body: string[][]): string {
+  const n = head.length
+  if (n < 2) return ''
+  const scores = head.map((h, i) => {
+    const cells = [h, ...body.map((r) => r[i] || '')].map((c) =>
+      String(c)
+        .replace(/\*\*/g, '')
+        .replace(/<[^>]+>/g, '')
+        .trim(),
+    )
+    const lens = cells.map((c) => c.length)
+    const bodyLens = lens.slice(1)
+    const typical =
+      bodyLens.sort((a, b) => a - b)[Math.max(0, Math.floor(bodyLens.length * 0.75))] ||
+      lens[0] ||
+      4
+    const hLow = h.replace(/\*\*/g, '').trim().toLowerCase()
+    const prose = /rationale|reason|notes?|comment|why|evidence|funds|sourced/.test(hLow)
+    const id = /^(ticker|symbol|name|names|id|tk|sleeve)$/.test(hLow)
+    const short = !prose && (id || typical <= 14)
+    const ch = prose ? Math.max(typical, 40) : short ? Math.min(Math.max(typical, 6), 16) : Math.min(Math.max(typical, 10), 36)
+    return { ch, short, prose }
+  })
+  const total = scores.reduce((s, x) => s + x.ch, 0) || n
+  const pcts = scores.map((x) => Math.max(x.short ? 7 : 10, (x.ch / total) * 100))
+  const drift = 100 - pcts.reduce((a, b) => a + b, 0)
+  pcts[pcts.length - 1] += drift
+  return `<colgroup>${pcts.map((p) => `<col style="width:${p.toFixed(1)}%" />`).join('')}</colgroup>`
+}
+
 /**
  * Escape HTML, then apply a markdown subset suitable for DGA research reports
  * and agent answers (headings, lists, tables, code, links, bold/italic).
@@ -85,12 +116,18 @@ export function renderMd(src: string): string {
     if (!rows.length) return block
     const head = rows[0]
     const body = rows.slice(1)
-    let html = '<table class="md-table"><thead><tr>'
+    const ncols = head.length
+    const padded = body.map((r) => {
+      const row = r.slice(0, ncols)
+      while (row.length < ncols) row.push('')
+      return row
+    })
+    let html = '<table class="md-table">' + mdTableColgroup(head, padded) + '<thead><tr>'
     head.forEach((c) => {
       html += `<th>${c}</th>`
     })
     html += '</tr></thead><tbody>'
-    body.forEach((r) => {
+    padded.forEach((r) => {
       html += '<tr>'
       r.forEach((c) => {
         html += `<td>${c}</td>`
