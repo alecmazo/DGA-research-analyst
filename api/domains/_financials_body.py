@@ -3490,6 +3490,10 @@ _DGA_SCORE_WEIGHTS = {
     "predictability": 0.15,
     "value": 0.10,
 }
+# Negative book equity (buybacks: BKNG, AZO, …) is never a quality signal.
+# Do not drop ROE and let NM+ROIC average to 100. Do not allow growth = 100.
+_NEG_EQ_PROFIT_CAP = 70
+_NEG_EQ_GROWTH_CAP = 75
 
 
 def _dga_score_from_annuals(annuals: list,
@@ -3538,7 +3542,13 @@ def _dga_score_from_annuals(annuals: list,
     l_fcf = _dash_f(last.get("free_cash_flow"))
 
     l_roic, roic_method = _dash_roic_of(last)
-    l_roe = (l_ni / l_eq * 100) if (l_ni is not None and l_eq and l_eq > 0) else None
+    neg_eq = l_eq is not None and l_eq <= 0
+    if l_ni is not None and l_eq and l_eq > 0:
+        l_roe = l_ni / l_eq * 100
+    elif neg_eq:
+        l_roe = 0.0  # not a quality ROE; include as 0 so NM+ROIC cannot print 100
+    else:
+        l_roe = None
     l_ta = _dash_f(last.get("total_assets"))
     l_roa = (l_ni / l_ta * 100) if (l_ni is not None and l_ta and l_ta > 0) else None
     p_named = [
@@ -3548,15 +3558,21 @@ def _dga_score_from_annuals(annuals: list,
          ("NOPAT / (assets − cash); book equity negative"
           if roic_method == "operating"
           else "NOPAT / (debt + equity − cash); cap 18% → 100")),
-        ("ROE", l_roe, _dash_lin(l_roe, 0, 22),
-         "n/a — negative book equity" if (l_eq is not None and l_eq <= 0)
-         else "cap 22% ROE → 100"),
+        ("ROE", l_roe, (0.0 if neg_eq else _dash_lin(l_roe, 0, 22)),
+         (f"book equity {l_eq/1e9:.1f}B ≤ 0 — scores 0, not omitted"
+          if neg_eq else "cap 22% ROE → 100")),
     ]
     if l_roic is None and l_roa is not None:
         p_named.append(("ROA (ROIC proxy)", l_roa, _dash_lin(l_roa, 0, 12),
                          "ROIC blank; ROA used so missing capital does not inflate"))
     p_parts = [s for _, _, s, _ in p_named if s is not None]
     profitability = round(sum(p_parts) / len(p_parts)) if p_parts else None
+    if neg_eq and profitability is not None and profitability > _NEG_EQ_PROFIT_CAP:
+        profitability = _NEG_EQ_PROFIT_CAP
+        p_named.append((
+            "Negative-equity cap", None, float(_NEG_EQ_PROFIT_CAP),
+            f"Profitability capped at {_NEG_EQ_PROFIT_CAP} — negative book is never elite",
+        ))
 
     def _cagr5(vals):
         vv = [v for v in vals if v is not None]
@@ -3576,6 +3592,12 @@ def _dga_score_from_annuals(annuals: list,
     ]
     g_parts = [s for _, _, s, _ in g_named if s is not None]
     growth = round(sum(g_parts) / len(g_parts)) if g_parts else None
+    if neg_eq and growth is not None and growth > _NEG_EQ_GROWTH_CAP:
+        growth = _NEG_EQ_GROWTH_CAP
+        g_named.append((
+            "Negative-equity cap", None, float(_NEG_EQ_GROWTH_CAP),
+            f"Growth capped at {_NEG_EQ_GROWTH_CAP} — buybacks that hollow the book are not a 100 growth score",
+        ))
 
     fs_named = []
     if l_debt is None:
@@ -3685,10 +3707,12 @@ def _dga_score_from_annuals(annuals: list,
     explain = {
         "profitability": _exp_block(
             "profitability", profitability, p_named,
-            "Average of net margin, ROIC, ROE. Missing pieces are omitted, not scored 100."),
+            "Average of net margin, ROIC, ROE. Negative book equity scores ROE 0 "
+            f"(never omitted) and caps profitability at {_NEG_EQ_PROFIT_CAP}."),
         "growth": _exp_block(
             "growth", growth, g_named,
-            "Average of ~5y revenue CAGR and FCF (or NI) CAGR. 15% CAGR caps at 100."),
+            "Average of ~5y revenue CAGR and FCF (or NI) CAGR. 15% CAGR caps at 100. "
+            f"Negative book equity caps growth at {_NEG_EQ_GROWTH_CAP}."),
         "financial_strength": _exp_block(
             "financial_strength", financial_strength, fs_named,
             "Average of cash/debt, debt/equity, FCF/debt. Negative equity scores 0 on D/E — it used to be skipped, which inflated 100s."),
