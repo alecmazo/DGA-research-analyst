@@ -18,12 +18,30 @@ export function looksLikeToolTrace(src: string): boolean {
 }
 
 /**
+ * Repair Grok/Claude markdown so the report window can parse it.
+ * TSLA Grok wrapped cover-table rows in **| … |** and copied prompt ━━━
+ * banners; RIVN Grok is the gold format (plain GFM table + # SECTION).
+ */
+export function normalizeDgaReportMd(src: string): string {
+  let s = String(src || '').replace(/\r\n/g, '\n')
+  if (!s.trim()) return s
+  s = s.replace(/^[ \t]*\*\*[ \t]*(\|.*)[ \t]*\*\*[ \t]*$/gm, '$1')
+  s = s.replace(
+    /(?:^[ \t]*[═━─\-—]{8,}[ \t]*\n)+[ \t]*(SECTION[ \t]+\d[\dA-Z.]*[ \t]*[—–\-:][ \t]*.+?)[ \t]*\n(?:[ \t]*[═━─\-—]{8,}[ \t]*\n)+/gm,
+    '# $1\n\n',
+  )
+  s = s.replace(/^[ \t]*[═━─]{8,}[ \t]*$/gm, '')
+  s = s.replace(/^(SECTION[ \t]+\d[\dA-Z.]*[ \t]*[—–\-:][ \t].+)$/gm, '# $1')
+  s = s.replace(/\n{3,}/g, '\n\n')
+  return s.trim() ? `${s.trim()}\n` : s
+}
+
+/**
  * Escape HTML, then apply a markdown subset suitable for DGA research reports
  * and agent answers (headings, lists, tables, code, links, bold/italic).
  */
 export function renderMd(src: string): string {
-  let s = String(src || '')
-    .replace(/\r\n/g, '\n')
+  let s = normalizeDgaReportMd(String(src || ''))
   if (looksLikeToolTrace(s)) {
     return (
       '<div class="md-h md-h1">Report incomplete</div>' +

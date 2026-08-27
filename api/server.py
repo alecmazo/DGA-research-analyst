@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui502-20260827-wire-drop-ap"
+WEB_BUILD_VERSION = "ui503-20260827-report-md-clean"
 
 
 @app.get("/api/build")
@@ -8300,6 +8300,10 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
         except Exception:
             dump = False
         if not dump:
+            try:
+                raw = analyst.normalize_dga_report_md(raw)
+            except Exception:
+                pass
             payload["report_md"] = raw
             return payload
         if row:
@@ -8324,6 +8328,10 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                 if not ok:
                     continue
                 payload["provider"] = alt
+                try:
+                    alt_md = analyst.normalize_dga_report_md(alt_md)
+                except Exception:
+                    pass
                 payload["report_md"] = alt_md
                 payload["generated_at"] = _iso(row.get(ts_key))
                 payload["rating"] = row.get(rat_key) or row.get("rating")
@@ -12956,6 +12964,12 @@ def _db_upsert_report(
         # File-only / local mode — nothing to write to DB.
         return True
     if not ticker or not (md_text or "").strip():
+        return False
+    try:
+        md_text = analyst.normalize_dga_report_md(md_text)
+    except Exception:
+        pass
+    if not (md_text or "").strip():
         return False
 
     report_date = _extract_report_date(md_text)

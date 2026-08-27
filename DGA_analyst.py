@@ -1810,6 +1810,8 @@ All other sections of the report (Executive Summary, Valuation, etc.) must be co
 
 GENERAL RULES:
 - Put "DGA Capital Research" as the header and add today's date.
+- Cover/header MUST be a GitHub-flavored markdown table: rows start and end with `|`. Never wrap a table row in **.
+- Section titles MUST be ATX headings (`# SECTION 1 — …`). Do not draw unicode box lines (━━━ / ═══) around them.
 
 SECTION 1 — Executive Summary:
 → Investment thesis: Why should someone care about this stock right now?
@@ -7886,6 +7888,39 @@ def looks_like_llm_tool_trace(text: str | None) -> bool:
         if "web_search" in low or "x_search" in low or "function_call" in low:
             return True
     return False
+
+
+_COVER_ROW_WRAP = re.compile(r"^[ \t]*\*\*[ \t]*(\|.*)[ \t]*\*\*[ \t]*$", re.M)
+_BANNER_ONLY = re.compile(r"^[ \t]*[═━─]{8,}[ \t]*$", re.M)
+_SECTION_BANNER = re.compile(
+    r"(?:^[ \t]*[═━─\-—]{8,}[ \t]*\n)+"
+    r"[ \t]*(SECTION[ \t]+\d[\dA-Z.]*[ \t]*[—–\-:][ \t]*.+?)[ \t]*\n"
+    r"(?:[ \t]*[═━─\-—]{8,}[ \t]*\n)+",
+    re.M,
+)
+_BARE_SECTION = re.compile(
+    r"^(SECTION[ \t]+\d[\dA-Z.]*[ \t]*[—–\-:][ \t].+)$",
+    re.M,
+)
+
+
+def normalize_dga_report_md(text: str | None) -> str:
+    """Repair Grok/Claude markdown so the GP window can parse it.
+
+    TSLA Grok (2026-08-26) wrapped every cover-table row in ``**| … |**`` and
+    copied the prompt's ━━━ banners instead of ``# SECTION N`` headings.
+    RIVN Grok from the same day is the gold format (plain GFM table + ATX
+    headings). This keeps stored/displayed reports on that shape.
+    """
+    s = str(text or "").replace("\r\n", "\n")
+    if not s.strip():
+        return s
+    s = _COVER_ROW_WRAP.sub(r"\1", s)
+    s = _SECTION_BANNER.sub(r"# \1\n\n", s)
+    s = _BANNER_ONLY.sub("", s)
+    s = _BARE_SECTION.sub(r"# \1", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip() + ("\n" if s.strip() else "")
 
 
 def looks_like_research_report(text: str | None) -> bool:

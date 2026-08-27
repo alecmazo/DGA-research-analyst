@@ -30,6 +30,14 @@ REPORT FORMAT — GOLDMAN SACHS / MORGAN STANLEY STYLE
 
 Follow this exact structure. Do not skip sections. Do not reorder sections.
 
+MARKDOWN RENDERING — NON-NEGOTIABLE (the GP window parses GitHub-flavored markdown):
+- Cover block is a GFM table. Every row MUST start with `|` and end with `|`.
+- NEVER wrap a table row in asterisks. Wrong: `**| DGA CAPITAL RESEARCH | date |**`. Right: `| DGA CAPITAL RESEARCH | date |`.
+- Bold only *inside* cells: `| **Rating:** BUY | |`
+- Section titles MUST be ATX headings on their own line: `# SECTION 1 — INVESTMENT SUMMARY`
+- Do NOT copy the ━━━ / ═══ instruction rules into the report. Those lines are prompt chrome only and render as garbage in the window.
+- Do not emit a "COVER BLOCK" heading. Start the report with the cover table.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 COVER BLOCK  (render as a markdown table — this is the report header)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
