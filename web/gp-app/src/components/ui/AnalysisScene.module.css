@@ -40,15 +40,11 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center 42%;
+  object-position: center center;
 }
 
 .stillA {
   animation: ken 28s ease-in-out infinite alternate;
-}
-
-.stillB {
-  animation: ken 32s ease-in-out infinite alternate reverse, cross 18s ease-in-out infinite;
 }
 
 .video {
@@ -175,20 +171,6 @@
   }
 }
 
-@keyframes cross {
-  0%,
-  38% {
-    opacity: 0;
-  }
-  50%,
-  88% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
 @keyframes pulse {
   0% {
     box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.5);
@@ -203,12 +185,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .stillA,
-  .stillB,
   .dot {
     animation: none;
-  }
-  .stillB {
-    opacity: 0;
   }
   .video {
     display: none;

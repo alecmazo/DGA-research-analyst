@@ -4,6 +4,7 @@ import { getAnalysisScene, subscribeAnalysisScene } from '@/lib/analysisScene'
 import styles from './AnalysisScene.module.css'
 
 const BASE = import.meta.env.BASE_URL || '/gp/'
+/** 15s palindrome loop of the exchange matching-engine backroom. */
 const STILL_A = `${BASE}analysis-scene.jpg`
 const VIDEO = `${BASE}analysis-scene.mp4`
 

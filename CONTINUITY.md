@@ -127,7 +127,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Account cards collapse** | **`ui512-20260827-acct-cards-collapse`** | Monthly-and-below account cards collapsible (open by default); gold Run button |
 | **Bench period match** | **`ui513-20260827-bench-period-match`** | All-Time bench column is annual-only; MoM/QoQ stored in Postgres, never copy annual onto months |
 | **Dual-engine upside** | **`ui514-20260827-dual-engine-upside`** | Saved Reports: Grok + Claude PT each with live upside; rebalance uses Grok PT; Strategist gets both |
-| **Next deploy after this** | **`ui515-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Exchange analysis loop** | **`ui515-20260827-exchange-analysis-loop`** | Analyze overlay is a 15s seamless matching-engine backroom loop; unused chamber still removed |
+| **Next deploy after this** | **`ui516-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -180,7 +181,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui514-20260827-dual-engine-upside` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui515-20260827-exchange-analysis-loop` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -203,9 +204,11 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui512 | Account cards collapsible; Rebalance Run is a gold control |
 | ui513 | All-Time benchmark is annual-only; monthly/quarterly BM stored, not copied |
 | ui514 | Saved Reports dual Grok/Claude upside under each PT; rebalance = Grok PT; Strategist gets both |
+| ui515 | Analyze overlay: 15s seamless exchange matching-engine loop; drop unused chamber still |
 | ui489–ui491 | Financials charts: one signed series, legend color both sides of zero; price hover |
 | ui492–ui498 | Saved-report Print + Share PDF; print CSS scoped so Financials does not blank reports |
-| ui495–ui497 | Analyze-in-progress Foundation Vault loop (no human, 20s seamless ping-pong) |
+| ui495–ui497 | Analyze-in-progress overlay (later replaced by ui515 exchange backroom) |
+| ui515 | 15s palindrome matching-engine loop (~940KB); unused `analysis-chamber.jpg` removed |
 | ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
 | ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
@@ -282,4 +285,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui514-20260827-dual-engine-upside` · Next: `ui515-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui515-20260827-exchange-analysis-loop` · Next: `ui516-YYYYMMDD-slug`*
