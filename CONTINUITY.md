@@ -129,7 +129,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Dual-engine upside** | **`ui514-20260827-dual-engine-upside`** | Saved Reports: Grok + Claude PT each with live upside; rebalance uses Grok PT; Strategist gets both |
 | **Exchange analysis loop** | **`ui515-20260827-exchange-analysis-loop`** | Analyze overlay is a 15s seamless matching-engine backroom loop; unused chamber still removed |
 | **Zero-debt strength** | **`ui516-20260827-zero-debt-strength`** | No/untagged debt is fortress: Cash-To-Debt ≥10×, D/E and D/EBITDA 0×; DGA FS 100 |
-| **Next deploy after this** | **`ui517-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Accounts managed first** | **`ui517-20260827-accounts-managed-first`** | Accounts tab: Managed first, LP Funds second (toggle, KPIs, default view) |
+| **Next deploy after this** | **`ui518-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 
 ### One-click handoff (preferred)
 
@@ -182,7 +183,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 
 ## Open product state (handoff notes)
 
-**Live (2026-08-27):** `ui516-20260827-zero-debt-strength` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
+**Live (2026-08-27):** `ui517-20260827-accounts-managed-first` on Railway `web` (project `upbeat-ambition`). GP is the **React** app at `/gp` (`web/gp-app/`). Legacy HTML lives at `/gp-legacy`.
 
 ### Recently shipped (this stream, Aug 23–26)
 
@@ -211,6 +212,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui495–ui497 | Analyze-in-progress overlay (later replaced by ui515 exchange backroom) |
 | ui515 | 15s palindrome matching-engine loop (~940KB); unused `analysis-chamber.jpg` removed |
 | ui516 | Zero/untagged debt is fortress on Financial Strength (not blank ratios) |
+| ui517 | Accounts: Managed first, LP Funds second |
 | ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
 | ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
@@ -288,4 +290,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui516-20260827-zero-debt-strength` · Next: `ui517-YYYYMMDD-slug`*
+*Last updated: 2026-08-27 · Agent: Grok Build · Live: `ui517-20260827-accounts-managed-first` · Next: `ui518-YYYYMMDD-slug`*

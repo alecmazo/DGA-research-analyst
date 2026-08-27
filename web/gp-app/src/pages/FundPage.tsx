@@ -17,7 +17,7 @@ import styles from './fund/fund.module.css'
 type Subtab = 'funds' | 'accts'
 
 export function FundPage() {
-  const [sub, setSub] = useState<Subtab>('funds')
+  const [sub, setSub] = useState<Subtab>('accts')
   const [funds, setFunds] = useState<OverviewFund[]>([])
   const [accts, setAccts] = useState<OverviewAcct[]>([])
   const [loading, setLoading] = useState(true)
@@ -154,20 +154,11 @@ export function FundPage() {
           <p className={page.kicker}>Capital base</p>
           <h1 className={page.h1}>Accounts</h1>
           <p className={page.sub}>
-            LP funds and managed accounts — NAV, capital, and performance. Open a
+            Managed accounts and LP funds — NAV, capital, and performance. Open a
             row for holdings, waterfall, attribution, and exports.
           </p>
         </div>
         <div className={styles.subtabs} role="tablist" aria-label="Account type">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={sub === 'funds'}
-            className={`${styles.subtab} ${sub === 'funds' ? styles.subtabOn : ''}`}
-            onClick={() => setSub('funds')}
-          >
-            LP Funds <span className={styles.count}>{funds.length}</span>
-          </button>
           <button
             type="button"
             role="tab"
@@ -177,6 +168,15 @@ export function FundPage() {
           >
             Managed <span className={styles.count}>{accts.length}</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sub === 'funds'}
+            className={`${styles.subtab} ${sub === 'funds' ? styles.subtabOn : ''}`}
+            onClick={() => setSub('funds')}
+          >
+            LP Funds <span className={styles.count}>{funds.length}</span>
+          </button>
         </div>
       </header>
 
@@ -185,14 +185,14 @@ export function FundPage() {
 
       <div className={styles.kpiStrip}>
         <div className={styles.kpi}>
-          <div className={styles.kpiLabel}>LP Funds</div>
-          <div className={styles.kpiVal}>{funds.length}</div>
-          <div className={styles.kpiHint}>Active vehicles</div>
-        </div>
-        <div className={styles.kpi}>
           <div className={styles.kpiLabel}>Managed accounts</div>
           <div className={styles.kpiVal}>{accts.length}</div>
           <div className={styles.kpiHint}>SMA / IRA books</div>
+        </div>
+        <div className={styles.kpi}>
+          <div className={styles.kpiLabel}>LP Funds</div>
+          <div className={styles.kpiVal}>{funds.length}</div>
+          <div className={styles.kpiHint}>Active vehicles</div>
         </div>
         <div className={styles.kpi}>
           <div className={styles.kpiLabel}>View</div>
@@ -202,7 +202,7 @@ export function FundPage() {
       </div>
 
       {loading ? (
-        <Spinner label="Loading funds…" />
+        <Spinner label="Loading accounts…" />
       ) : sub === 'funds' ? (
         !funds.length ? (
           <Empty
