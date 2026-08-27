@@ -156,7 +156,7 @@ export default function App() {
               <Route
                 path="fund"
                 element={
-                  <ErrorBoundary label="Fund">
+                  <ErrorBoundary label="Accounts">
                     <FundPage />
                   </ErrorBoundary>
                 }

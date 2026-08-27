@@ -152,13 +152,13 @@ export function FundPage() {
       <header className={page.hero}>
         <div>
           <p className={page.kicker}>Capital base</p>
-          <h1 className={page.h1}>Fund Dashboard</h1>
+          <h1 className={page.h1}>Accounts</h1>
           <p className={page.sub}>
             LP funds and managed accounts — NAV, capital, and performance. Open a
             row for holdings, waterfall, attribution, and exports.
           </p>
         </div>
-        <div className={styles.subtabs} role="tablist" aria-label="Fund type">
+        <div className={styles.subtabs} role="tablist" aria-label="Account type">
           <button
             type="button"
             role="tab"

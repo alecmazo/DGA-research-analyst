@@ -19,7 +19,7 @@ const WORK: { to: string; label: string }[] = [
 ]
 
 const OPS: { to: string; label: string }[] = [
-  { to: '/fund', label: 'Fund' },
+  { to: '/fund', label: 'Accounts' },
   { to: '/memos', label: 'Memos' },
   { to: '/settings', label: 'Settings' },
 ]
