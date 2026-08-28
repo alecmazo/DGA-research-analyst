@@ -266,6 +266,85 @@ def _pick_assigned_accounts(assigned: list[str], funds: list[dict]) -> tuple[lis
     return picked, unmatched
 
 
+_CASH_SYMS = {
+    "SPAXX", "FDRXX", "SPRXX", "FZFXX", "FZDXX", "FDLXX", "VMFXX",
+    "CASH", "USD", "FCASH",
+}
+_MM_YIELD_CACHE: dict = {"pct": None, "ts": 0.0}
+
+
+def _is_cash_symbol(sym: str) -> bool:
+    return (sym or "").rstrip("*").upper() in _CASH_SYMS
+
+
+def _is_cash_label(label: str) -> bool:
+    s = (label or "").lower()
+    return any(k in s for k in ("cash", "checking", "money market", "mmf", "spaxx"))
+
+
+def _mm_yield_pct() -> float:
+    """13-week T-bill (^IRX) as the cash / money-market rate. Fallback 4.20%."""
+    import time as _time
+    now = _time.time()
+    cached = _MM_YIELD_CACHE.get("pct")
+    if cached is not None and now - float(_MM_YIELD_CACHE.get("ts") or 0) < 3600:
+        return float(cached)
+    pct = 4.20
+    try:
+        import yfinance as yf
+        t = yf.Ticker("^IRX")
+        v = None
+        try:
+            v = getattr(t.fast_info, "last_price", None)
+        except Exception:
+            v = None
+        if v is None:
+            info = getattr(t, "info", None) or {}
+            v = info.get("regularMarketPrice") or info.get("previousClose")
+        if v is not None and 0.5 < float(v) < 15:
+            pct = round(float(v), 2)
+    except Exception:
+        pass
+    _MM_YIELD_CACHE["pct"] = pct
+    _MM_YIELD_CACHE["ts"] = now
+    return pct
+
+
+def _attr_income_and_gains(rj: dict) -> tuple[float, float]:
+    """YTD dividend/interest cash and attribution capital gains (ignore ST/LT)."""
+    income = 0.0
+    gains = 0.0
+    for a in rj.get("attribution") or []:
+        if not isinstance(a, dict):
+            continue
+        tk = str(a.get("ticker") or "")
+        div = _f(a.get("dividends_cash"), 0.0) or 0.0
+        dg = _f(a.get("dollar_gain"), 0.0) or 0.0
+        income += div
+        if a.get("is_mm") or _is_cash_symbol(tk):
+            if div <= 0 and dg:
+                income += dg
+        else:
+            gains += dg
+    return round(income, 2), round(gains, 2)
+
+
+def _blended_yield(nav, cash_mv, div_ytd) -> float | None:
+    """Equity trailing dividend yield (annualized) + cash at the MM rate, NAV-weighted."""
+    nav = _f(nav, 0.0) or 0.0
+    cash_mv = max(_f(cash_mv, 0.0) or 0.0, 0.0)
+    if nav <= 0:
+        return None
+    doy = datetime.now(timezone.utc).timetuple().tm_yday
+    frac = max(doy / 365.0, 0.15)
+    equity = max(nav - cash_mv, 0.0)
+    div_ytd = _f(div_ytd, 0.0) or 0.0
+    eq_yield = (div_ytd / equity / frac * 100.0) if equity > 0 else 0.0
+    mm = _mm_yield_pct()
+    blended = (eq_yield / 100.0 * equity + mm / 100.0 * cash_mv) / nav * 100.0
+    return round(blended, 2)
+
+
 def _pnl_from_ytd(nav, ytd_pct, beg, deps, wdrs):
     nav = _f(nav)
     beg = _f(beg)
@@ -281,7 +360,13 @@ def _pnl_from_ytd(nav, ytd_pct, beg, deps, wdrs):
 
 def _live_books(user: dict) -> dict:
     """Resolve this LP's managed NAVs and fund stakes."""
-    out = {"managed": [], "funds": [], "unmatched_accounts": [], "warnings": []}
+    out = {
+        "managed": [],
+        "funds": [],
+        "unmatched_accounts": [],
+        "warnings": [],
+        "mm_yield_pct": _mm_yield_pct(),
+    }
     if not getattr(B, "_PSYCOPG2_OK", False) or not os.environ.get("DATABASE_URL"):
         out["warnings"].append("database unavailable")
         return out
@@ -370,6 +455,31 @@ def _live_books(user: dict) -> dict:
                 except Exception:
                     conn.rollback()
 
+            cash_by_fid: dict = {}
+            if acct_fids:
+                try:
+                    cur.execute(
+                        """
+                        SELECT tl.fund_id::text AS fid,
+                               COALESCE(SUM(tl.quantity), 0) AS qty
+                          FROM tax_lots tl
+                          JOIN securities s ON s.id = tl.security_id
+                         WHERE tl.fund_id::text = ANY(%s)
+                           AND tl.closed_at IS NULL
+                           AND (
+                                LOWER(COALESCE(s.asset_class, '')) = 'cash'
+                                OR UPPER(TRIM(TRAILING '*' FROM COALESCE(s.symbol, '')))
+                                   = ANY(%s)
+                           )
+                         GROUP BY tl.fund_id
+                        """,
+                        (acct_fids, list(_CASH_SYMS)),
+                    )
+                    for r in cur.fetchall():
+                        cash_by_fid[str(r["fid"])] = float(r["qty"] or 0)
+                except Exception:
+                    conn.rollback()
+
             for a in acct_rows:
                 fid = str(a["id"])
                 snap = snaps.get(fid) or {}
@@ -381,24 +491,38 @@ def _live_books(user: dict) -> dict:
 
                 beg = deps = wdrs = None
                 ytd_pct = _f(ytd.get("ytd_pct"))
+                rj = None
                 if ytd.get("result_json"):
                     try:
                         rj = ytd["result_json"]
                         if isinstance(rj, str):
                             rj = json.loads(rj)
-                        beg = _f(rj.get("ytd_beg_balance") or rj.get("begin_value"))
-                        deps = _f(rj.get("ytd_total_deposits"), 0)
-                        wdrs = _f(rj.get("ytd_total_withdrawals"), 0)
-                        md = _f(rj.get("md_return_pct"))
-                        if ytd_pct is None and md is not None:
-                            ytd_pct = md
+                        if not isinstance(rj, dict):
+                            rj = None
+                        if rj:
+                            beg = _f(rj.get("ytd_beg_balance") or rj.get("begin_value"))
+                            deps = _f(rj.get("ytd_total_deposits"), 0)
+                            wdrs = _f(rj.get("ytd_total_withdrawals"), 0)
+                            md = _f(rj.get("md_return_pct"))
+                            if ytd_pct is None and md is not None:
+                                ytd_pct = md
                     except Exception:
-                        pass
+                        rj = None
 
                 as_of = None
                 if market <= 0 and snap.get("as_of_date"):
                     d = snap["as_of_date"]
                     as_of = d.isoformat() if hasattr(d, "isoformat") else str(d)
+
+                pnl = _pnl_from_ytd(nav, ytd_pct, beg, deps, wdrs)
+                div_ytd = cap_gains = yield_live = None
+                cash_mv = cash_by_fid.get(fid, 0.0)
+                if rj:
+                    ig = _f(rj.get("investment_gain"))
+                    if ig is not None:
+                        pnl = ig
+                    div_ytd, cap_gains = _attr_income_and_gains(rj)
+                    yield_live = _blended_yield(nav, cash_mv, div_ytd)
 
                 assigned_as = a.get("assigned_as") or a.get("name") or ""
                 out["managed"].append({
@@ -408,7 +532,11 @@ def _live_books(user: dict) -> dict:
                     "assigned_as": assigned_as,
                     "nav": nav,
                     "ytd_pct": ytd_pct,
-                    "pnl_ytd": _pnl_from_ytd(nav, ytd_pct, beg, deps, wdrs),
+                    "pnl_ytd": pnl,
+                    "dividends_ytd": div_ytd,
+                    "capital_gains": cap_gains,
+                    "cash_mv": cash_mv,
+                    "yield_pct_live": yield_live,
                     "as_of": as_of,
                     "live": market > 0,
                 })
@@ -546,10 +674,21 @@ def _row_amount(r: dict) -> float:
     return _f(r.get("amount"), 0.0) or 0.0
 
 
+def _row_yield(r: dict) -> float | None:
+    y = _f(r.get("yield_pct"))
+    live = _f(r.get("yield_pct_live"))
+    if _is_cash_label(r.get("label") or "") and live is not None:
+        if y is None or y <= 1.0:
+            return live
+    if y is not None:
+        return y
+    return live
+
+
 def _row_pnl_est(r: dict) -> float | None:
     if r.get("section") == "income":
         return _row_amount(r)
-    y = _f(r.get("yield_pct"))
+    y = _row_yield(r)
     if y is None:
         return None
     return round(_row_amount(r) * y / 100.0, 2)
@@ -669,6 +808,10 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
             "live_as_of": acct.get("as_of"),
             "ytd_pct": acct.get("ytd_pct"),
             "live": bool(acct.get("live")),
+            "yield_pct_live": acct.get("yield_pct_live"),
+            "capital_gains": acct.get("capital_gains"),
+            "dividends_ytd": acct.get("dividends_ytd"),
+            "cash_mv": acct.get("cash_mv"),
         }
         return row_live
 
@@ -766,6 +909,11 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
             r["stale"] = True
         kept.append(r)
 
+    mm = _f(live.get("mm_yield_pct")) or _mm_yield_pct()
+    for r in kept:
+        if r.get("source") == "manual" and _is_cash_label(r.get("label") or ""):
+            r["yield_pct_live"] = mm
+
     return {
         "title": title,
         "as_of": as_of,
@@ -773,6 +921,7 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
         "annual_expenses": expenses,
         "updated_at": (saved or {}).get("updated_at"),
         "seeded": seeded,
+        "mm_yield_pct": mm,
         "rows": kept,
     }
 

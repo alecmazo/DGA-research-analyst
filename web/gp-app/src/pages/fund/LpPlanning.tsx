@@ -28,6 +28,9 @@ type PlanRow = {
   live?: boolean
   stale?: boolean
   commitment?: number | null
+  yield_pct_live?: number | null
+  capital_gains?: number | null
+  dividends_ytd?: number | null
 }
 
 type Computed = {
@@ -38,6 +41,7 @@ type Computed = {
   other_income: number
   pnl_estimate: number | null
   pnl_actual: number | null
+  capital_gains: number | null
   annual_expenses: number
   required_generation: number
   total_yield: number
@@ -82,10 +86,30 @@ function rowAmount(r: PlanRow): number {
   return r.amount ?? 0
 }
 
+function cashLike(label: string): boolean {
+  const s = (label || '').toLowerCase()
+  return ['cash', 'checking', 'money market', 'mmf', 'spaxx'].some((k) =>
+    s.includes(k),
+  )
+}
+
+function rowYield(r: PlanRow): number | null {
+  if (
+    cashLike(r.label) &&
+    r.yield_pct_live != null &&
+    (r.yield_pct == null || r.yield_pct <= 1)
+  ) {
+    return r.yield_pct_live
+  }
+  if (r.yield_pct != null) return r.yield_pct
+  return r.yield_pct_live ?? null
+}
+
 function rowPnlEst(r: PlanRow): number | null {
   if (r.section === 'income') return rowAmount(r)
-  if (r.yield_pct == null) return null
-  return rowAmount(r) * (r.yield_pct / 100)
+  const y = rowYield(r)
+  if (y == null) return null
+  return rowAmount(r) * (y / 100)
 }
 
 function rowPnlAct(r: PlanRow): number | null {
@@ -101,8 +125,10 @@ function compute(rows: PlanRow[], expenses: number): Computed {
   let income = 0
   let invEst = 0
   let invAct = 0
+  let capGains = 0
   let hasEst = false
   let hasAct = false
+  let hasCap = false
   for (const r of rows) {
     if (r.hidden) continue
     const amt = rowAmount(r)
@@ -126,6 +152,10 @@ function compute(rows: PlanRow[], expenses: number): Computed {
       invAct += act
       hasAct = true
     }
+    if (r.capital_gains != null) {
+      capGains += r.capital_gains
+      hasCap = true
+    }
   }
   const required = Math.max(0, expenses - income)
   const invMark = hasAct ? invAct : invEst
@@ -137,6 +167,7 @@ function compute(rows: PlanRow[], expenses: number): Computed {
     other_income: income,
     pnl_estimate: hasEst ? invEst : null,
     pnl_actual: hasAct ? invAct : null,
+    capital_gains: hasCap ? capGains : null,
     annual_expenses: expenses,
     required_generation: required,
     total_yield: invMark + income,
@@ -390,12 +421,6 @@ export function LpPlanning() {
     if (r.hidden) return null
     return (amt / totals.total_assets) * 100
   }
-  const pctInv = (r: PlanRow) => {
-    if (!r.include_in_investments || r.hidden) return null
-    if (r.section !== 'current' && r.section !== 'long_term') return null
-    if (!totals.investable) return null
-    return (rowAmount(r) / totals.investable) * 100
-  }
 
   if (!roster.length && !loading && !err) {
     return (
@@ -607,9 +632,9 @@ export function LpPlanning() {
                     <th className={styles.thLeft}>Inv</th>
                     <th>Amount</th>
                     <th>% Tot</th>
-                    <th>% Inv</th>
                     <th>Yield %</th>
                     <th>P&amp;L est</th>
+                    <th>Cap gains</th>
                     <th>P&amp;L actual</th>
                     <th className={styles.thLeft}>Notes</th>
                     <th />
@@ -631,7 +656,6 @@ export function LpPlanning() {
                         rows={list}
                         subtotal={sub}
                         pctTot={pctTot}
-                        pctInv={pctInv}
                         onAdd={() => addRow(sec.key)}
                         onPatch={patch}
                         onRemove={removeRow}
@@ -644,10 +668,10 @@ export function LpPlanning() {
                     <td style={{ textAlign: 'right' }}>{fmtUsd(totals.total_assets)}</td>
                     <td className={styles.cellMuted}>100%</td>
                     <td />
-                    <td />
                     <td style={{ textAlign: 'right' }}>
                       {fmtUsd(totals.pnl_estimate)}
                     </td>
+                    <td style={{ textAlign: 'right' }}>{fmtUsd(totals.capital_gains)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtUsd(totals.pnl_actual)}</td>
                     <td />
                     <td />
@@ -703,7 +727,6 @@ function SectionBlock(props: {
   rows: PlanRow[]
   subtotal: number
   pctTot: (r: PlanRow) => number | null
-  pctInv: (r: PlanRow) => number | null
   onAdd: () => void
   onPatch: (id: string, p: Partial<PlanRow>) => void
   onRemove: (r: PlanRow) => void
@@ -792,27 +815,31 @@ function SectionBlock(props: {
             <td className={styles.cellMuted}>
               {props.pctTot(r) == null ? '' : fmtPct(props.pctTot(r), 1).replace('+', '')}
             </td>
-            <td className={styles.cellMuted}>
-              {props.pctInv(r) == null ? '' : fmtPct(props.pctInv(r), 1).replace('+', '')}
-            </td>
             <td>
               {r.section === 'income' ? (
                 <span className={styles.cellMuted}>n/a</span>
               ) : (
                 <NumCell
                   kind="pct"
-                  value={r.yield_pct}
+                  value={rowYield(r)}
                   onChange={(v) => props.onPatch(r.id, { yield_pct: v })}
                   placeholder="%"
                 />
               )}
             </td>
             <td className={styles.cellMuted}>{est == null ? '' : fmtUsd(est)}</td>
+            <td className={styles.cellMuted}>
+              {r.section === 'income' || r.section === 'liability'
+                ? ''
+                : r.capital_gains == null
+                  ? ''
+                  : fmtUsd(r.capital_gains)}
+            </td>
             <td>
               {linked || r.section === 'income' ? (
-                <span className={styles.cellMuted}>
+                <span className={styles.cellMuted} style={{ whiteSpace: 'nowrap' }}>
                   {act == null ? '' : fmtUsd(act)}
-                  {r.ytd_pct != null ? `  ${fmtPct(r.ytd_pct)}` : ''}
+                  {r.ytd_pct != null ? ` (${fmtPct(r.ytd_pct)} YTD)` : ''}
                 </span>
               ) : (
                 <NumCell
