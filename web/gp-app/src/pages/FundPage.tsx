@@ -4,6 +4,7 @@ import { Empty, Spinner } from '@/components/ui/Empty'
 import { api } from '@/lib/api'
 import { fmtPct, fmtUsd, pctClass } from '@/lib/format'
 import { LpDetail } from './fund/LpDetail'
+import { LpPlanning } from './fund/LpPlanning'
 import { ManagedDetail } from './fund/ManagedDetail'
 import type {
   FundDetail,
@@ -14,7 +15,7 @@ import type {
 import page from './page.module.css'
 import styles from './fund/fund.module.css'
 
-type Subtab = 'funds' | 'accts'
+type Subtab = 'funds' | 'accts' | 'plan'
 
 export function FundPage() {
   const [sub, setSub] = useState<Subtab>('accts')
@@ -154,8 +155,9 @@ export function FundPage() {
           <p className={page.kicker}>Capital base</p>
           <h1 className={page.h1}>Accounts</h1>
           <p className={page.sub}>
-            Managed accounts and LP funds — NAV, capital, and performance. Open a
-            row for holdings, waterfall, attribution, and exports.
+            {sub === 'plan'
+              ? 'GP-only household snapshot for one Settings LP — full assets, liabilities, and the annual P&L the books need to generate.'
+              : 'Managed accounts and LP funds — NAV, capital, and performance. Open a row for holdings, waterfall, attribution, and exports.'}
           </p>
         </div>
         <div className={styles.subtabs} role="tablist" aria-label="Account type">
@@ -177,12 +179,25 @@ export function FundPage() {
           >
             LP Funds <span className={styles.count}>{funds.length}</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sub === 'plan'}
+            className={`${styles.subtab} ${sub === 'plan' ? styles.subtabOn : ''}`}
+            onClick={() => setSub('plan')}
+          >
+            Planning
+          </button>
         </div>
       </header>
 
-      {err && <div className={page.bannerErr}>{err}</div>}
+      {err && sub !== 'plan' && <div className={page.bannerErr}>{err}</div>}
       {detailLoading && <Spinner label="Opening detail…" />}
 
+      {sub === 'plan' ? (
+        <LpPlanning />
+      ) : (
+        <>
       <div className={styles.kpiStrip}>
         <div className={styles.kpi}>
           <div className={styles.kpiLabel}>Managed accounts</div>
@@ -295,6 +310,8 @@ export function FundPage() {
             )
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   )

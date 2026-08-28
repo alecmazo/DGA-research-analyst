@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui519-20260827-pdf-table-question"
+WEB_BUILD_VERSION = "ui520-20260828-lp-planning-snapshot"
 
 
 @app.get("/api/build")
@@ -39150,6 +39150,22 @@ try:
     })
 except Exception as _dom_err:
     print(f"[boot] support domain mount failed: {_dom_err!s:.200}", flush=True)
+
+try:
+    from api.domains import lp_planning as _lp_plan_domain
+    _lp_plan_domain.mount({
+        "app": app,
+        "_fund_conn": _fund_conn,
+        "_RealDictCursor": globals().get("_RealDictCursor"),
+        "_PSYCOPG2_OK": globals().get("_PSYCOPG2_OK", False),
+        "psycopg2": globals().get("psycopg2"),
+        "_claims_or_401": _claims_or_401,
+        "_kv_get": _kv_get,
+        "_kv_put": _kv_put,
+        "_bulk_fund_market_nav": _bulk_fund_market_nav,
+    })
+except Exception as _plan_err:
+    print(f"[boot] lp-planning domain mount failed: {_plan_err!s:.200}", flush=True)
 
 
 
