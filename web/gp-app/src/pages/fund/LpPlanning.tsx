@@ -58,6 +58,7 @@ type RosterLp = {
   lp_id: string
   name?: string
   email?: string
+  role?: string
   fund_count?: number
   acct_count?: number
   has_snapshot?: boolean
@@ -581,6 +582,7 @@ export function LpPlanning() {
             {roster.map((u) => (
               <option key={u.lp_id} value={u.lp_id}>
                 {u.name || u.email || u.lp_id}
+                {u.role === 'gp' ? '  ·  GP' : ''}
                 {u.acct_count || u.fund_count
                   ? `  ·  ${u.acct_count || 0} SMA / ${u.fund_count || 0} fund`
                   : ''}

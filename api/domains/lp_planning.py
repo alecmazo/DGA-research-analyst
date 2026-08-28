@@ -178,6 +178,31 @@ def _tokens(s: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", (s or "").lower())
 
 
+def _assignment_belongs_elsewhere(assigned: str, owner: dict, others: list[dict]) -> bool:
+    """True when the assignment's first token is another user's given name.
+
+    Stops "Alec Ind" on Dennis's Settings list from binding Alec's SMA. An
+    assignment that starts with this owner's own name is kept.
+    """
+    toks = _tokens(assigned)
+    if not toks:
+        return False
+    lead = toks[0]
+    if len(lead) < 3:
+        return False
+    own = _tokens(owner.get("name") or "")
+    if lead in own:
+        return False
+    oid = str(owner.get("lp_id") or "")
+    for u in others:
+        if str(u.get("lp_id") or "") == oid:
+            continue
+        given = (_tokens(u.get("name") or "") or [""])[0]
+        if given == lead:
+            return True
+    return False
+
+
 def _score_assigned_name(assigned: str, fund: dict) -> int:
     """Score how well a Settings assignment name matches a fund row.
 
@@ -387,6 +412,14 @@ def _live_books(user: dict) -> dict:
         return out
 
     acct_names = [str(x) for x in (user.get("managed_account_ids") or []) if x]
+    try:
+        roster = _auth_mod().list_users()
+    except Exception:
+        roster = []
+    acct_names = [
+        n for n in acct_names
+        if not _assignment_belongs_elsewhere(n, user, roster)
+    ]
     memberships = user.get("fund_memberships") or {}
     if not isinstance(memberships, dict):
         memberships = {}
@@ -1010,7 +1043,8 @@ def planning_roster(request: Request):
     saved = _saved_ids()
     lps = []
     for u in users:
-        if (u.get("role") or "lp") != "lp":
+        role = (u.get("role") or "lp").lower()
+        if role not in ("lp", "gp"):
             continue
         fm = u.get("fund_memberships") or {}
         ma = u.get("managed_account_ids") or []
@@ -1018,6 +1052,7 @@ def planning_roster(request: Request):
             "lp_id": u.get("lp_id"),
             "name": u.get("name") or "",
             "email": u.get("email") or "",
+            "role": role,
             "fund_count": len(fm) if isinstance(fm, dict) else 0,
             "acct_count": len(ma) if isinstance(ma, list) else 0,
             "has_snapshot": u.get("lp_id") in saved,
