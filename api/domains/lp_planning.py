@@ -1104,6 +1104,39 @@ def _pct_txt(v, ytd=False) -> str:
     return f"{body} YTD" if ytd else body
 
 
+def _pdf_wrap(text: str, width: int = 28) -> str:
+    """Hard-wrap for xhtml2pdf so a cell cannot paint into its neighbor."""
+    import html as _html
+    raw = re.sub(r"\s+", " ", (text or "").strip())
+    if not raw:
+        return ""
+    cap = max(width * 2, width)
+    if len(raw) > cap:
+        raw = raw[: cap - 1] + "…"
+    lines, cur = [], ""
+    for w in raw.split(" "):
+        trial = f"{cur} {w}".strip() if cur else w
+        if len(trial) <= width:
+            cur = trial
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return "<br/>".join(_html.escape(x) for x in lines)
+
+
+def _pdf_td(inner: str, *, align: str = "right", width: int, extra: str = "",
+            colspan: int = 1) -> str:
+    span = f' colspan="{colspan}"' if colspan > 1 else ""
+    return (
+        f'<td{span} align="{align}" width="{width}" '
+        f'style="text-align:{align};width:{width}pt;padding:1.5pt 5pt 1.5pt 6pt;'
+        f'overflow:hidden;{extra}">{inner}</td>'
+    )
+
+
 def _planning_pdf_filename(lp: dict, snap: dict) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", (lp.get("name") or "LP").strip())[:40]
     as_of = re.sub(r"[^0-9-]", "", snap.get("as_of") or "")[:10]
@@ -1215,32 +1248,35 @@ def _planning_pdf_html(pack: dict) -> str:
                 else ""
             )
             est_s = _usd_txt(est) if est is not None else ""
-            note = _html.escape((r.get("notes") or "")[:80])
-            lab = _html.escape(r.get("label") or "")
+            note = _pdf_wrap(r.get("notes") or "", 26)
+            lab = _pdf_wrap(r.get("label") or "", 22)
+            ytd_html = ytd_s.replace(" (", "<br/>(") if " (" in ytd_s else ytd_s
             body_rows.append(
                 "<tr>"
-                f'<td style="padding:1.5pt 4pt;">{lab}</td>'
-                f'<td align="center" style="text-align:center;">{inv}</td>'
-                f'<td align="right" style="text-align:right;">{_usd_txt(amt)}</td>'
-                f'<td align="right" style="text-align:right;">{pct_s}</td>'
-                f'<td align="right" style="text-align:right;">{yld_s}</td>'
-                f'<td align="right" style="text-align:right;">{est_s}</td>'
-                f'<td align="right" style="text-align:right;">{tax_s}</td>'
-                f'<td align="center" style="text-align:center;padding:1.5pt 3pt;">{note}</td>'
-                f'<td align="right" style="text-align:right;">{ytd_s}</td>'
-                "</tr>"
+                + _pdf_td(lab, align="left", width=128)
+                + _pdf_td(inv, align="center", width=24)
+                + _pdf_td(_usd_txt(amt), width=76)
+                + _pdf_td(pct_s, width=40)
+                + _pdf_td(yld_s, width=40)
+                + _pdf_td(est_s, width=68)
+                + _pdf_td(tax_s, width=76)
+                + _pdf_td(note, width=168)
+                + _pdf_td(ytd_html, width=120)
+                + "</tr>"
             )
+    tot_note = _pdf_wrap("(Income ytd)" if _f(computed.get("other_income")) else "", 26)
     body_rows.append(
         '<tr style="font-weight:bold;background-color:#F8FAFC;">'
-        f'<td colspan="2">Equity / net worth</td>'
-        f'<td style="text-align:right;">{_usd_txt(computed.get("net_worth"))}</td>'
-        '<td></td><td></td>'
-        f'<td style="text-align:right;">{_usd_txt(computed.get("pnl_estimate"))}</td>'
-        f'<td style="text-align:right;">{_usd_txt(tot_tax) if has_tax else "—"}</td>'
-        f'<td align="center" style="text-align:center;">'
-        f'{("(Income ytd)" if _f(computed.get("other_income")) else "")}</td>'
-        f'<td style="text-align:right;">{_usd_txt(tot_ytd) if has_ytd else "—"}</td>'
-        "</tr>"
+        + _pdf_td("Equity / net worth", align="left", width=152, extra="font-weight:bold;",
+                  colspan=2)
+        + _pdf_td(_usd_txt(computed.get("net_worth")), width=76, extra="font-weight:bold;")
+        + _pdf_td("", width=40)
+        + _pdf_td("", width=40)
+        + _pdf_td(_usd_txt(computed.get("pnl_estimate")), width=68, extra="font-weight:bold;")
+        + _pdf_td(_usd_txt(tot_tax) if has_tax else "—", width=76, extra="font-weight:bold;")
+        + _pdf_td(tot_note, width=168, extra="font-weight:bold;")
+        + _pdf_td(_usd_txt(tot_ytd) if has_ytd else "—", width=120, extra="font-weight:bold;")
+        + "</tr>"
     )
     notes_cut = notes[:280] + ("…" if len(notes) > 280 else "")
     notes_html = (
@@ -1255,13 +1291,13 @@ def _planning_pdf_html(pack: dict) -> str:
       @font-face { font-family: "InterPdf"; src: url(Inter-Bold.ttf); font-weight: bold; }
       @page { size: landscape letter; margin: 0.28in; }
       body { font-family: "InterPdf", Helvetica, Arial; font-size: 7pt; color: #334155; }
-      table.sheet { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      table.sheet { width: 740pt; border-collapse: collapse; table-layout: fixed; }
       table.sheet th {
         font-size: 5.5pt; letter-spacing: 0.3pt; text-transform: uppercase;
-        color: #64748b; border-bottom: 0.6pt solid #cbd5e1; padding: 2pt 3pt;
-        text-align: center;
+        color: #64748b; border-bottom: 0.6pt solid #cbd5e1;
+        padding: 2pt 5pt 2pt 6pt; overflow: hidden;
       }
-      table.sheet td { border-bottom: 0.3pt solid #e2e8f0; font-size: 7pt; }
+      table.sheet td { border-bottom: 0.3pt solid #e2e8f0; font-size: 7pt; overflow: hidden; }
     """
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -1277,16 +1313,21 @@ def _planning_pdf_html(pack: dict) -> str:
         "</tr></table>"
         f'<table style="width:100%;border-collapse:collapse;margin-bottom:5pt;"><tr>{kpi_cells}</tr></table>'
         '<table class="sheet">'
+        "<colgroup>"
+        '<col width="128" /><col width="24" /><col width="76" />'
+        '<col width="40" /><col width="40" /><col width="68" />'
+        '<col width="76" /><col width="168" /><col width="120" />'
+        "</colgroup>"
         "<thead><tr>"
-        "<th align='left' style='text-align:left;width:18%;'>Line</th>"
-        "<th align='center' style='text-align:center;width:4%;'>Inv</th>"
-        "<th align='center' style='text-align:center;width:11%;'>Amount</th>"
-        "<th align='center' style='text-align:center;width:7%;'>% Tot</th>"
-        "<th align='center' style='text-align:center;width:7%;'>Yield %</th>"
-        "<th align='center' style='text-align:center;width:10%;'>P&amp;L est</th>"
-        "<th align='center' style='text-align:center;width:11%;'>P&amp;L actual</th>"
-        "<th align='center' style='text-align:center;width:16%;'>Notes</th>"
-        "<th align='center' style='text-align:center;width:16%;'>YTD (unrealized)</th>"
+        "<th align='left' style='text-align:left;width:128pt;'>Line</th>"
+        "<th align='center' style='text-align:center;width:24pt;'>Inv</th>"
+        "<th align='right' style='text-align:right;width:76pt;'>Amount</th>"
+        "<th align='right' style='text-align:right;width:40pt;'>% Tot</th>"
+        "<th align='right' style='text-align:right;width:40pt;'>Yld %</th>"
+        "<th align='right' style='text-align:right;width:68pt;'>P&amp;L est</th>"
+        "<th align='right' style='text-align:right;width:76pt;'>P&amp;L actual</th>"
+        "<th align='right' style='text-align:right;width:168pt;'>Notes</th>"
+        "<th align='right' style='text-align:right;width:120pt;'>YTD<br/>(unrealized)</th>"
         "</tr></thead><tbody>"
         + "".join(body_rows)
         + "</tbody></table>"
