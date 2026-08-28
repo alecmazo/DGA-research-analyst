@@ -119,6 +119,7 @@ function rowCapitalGains(r: PlanRow): number | null {
 }
 
 function rowPnlEst(r: PlanRow): number | null {
+  if (r.section === 'long_term') return null
   if (r.section === 'income') return rowAmount(r)
   const y = rowYield(r)
   if (y == null) return null
@@ -126,6 +127,7 @@ function rowPnlEst(r: PlanRow): number | null {
 }
 
 function rowPnlAct(r: PlanRow): number | null {
+  if (r.section === 'long_term') return null
   if (r.section === 'income') return rowAmount(r)
   if (r.source !== 'manual') return r.pnl_actual_live ?? null
   return r.pnl_actual
@@ -859,10 +861,12 @@ function SectionBlock(props: {
               )}
             </td>
             <td className={`${styles.cellMuted} ${styles.numAlign}`}>
-              {est == null ? '' : fmtUsd(est)}
+              {r.section === 'long_term' || est == null ? '' : fmtUsd(est)}
             </td>
             <td className={styles.numAlign}>
-              {linked || r.section === 'income' ? (
+              {r.section === 'long_term' ? (
+                ''
+              ) : linked || r.section === 'income' ? (
                 <span className={styles.cellMuted} style={{ whiteSpace: 'nowrap' }}>
                   {act == null ? '' : fmtUsd(act)}
                   {r.ytd_pct != null ? ` (${fmtPct(r.ytd_pct)} YTD)` : ''}

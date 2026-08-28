@@ -698,6 +698,8 @@ def _row_yield(r: dict) -> float | None:
 
 
 def _row_pnl_est(r: dict) -> float | None:
+    if r.get("section") in ("long_term", "liability"):
+        return None
     if r.get("section") == "income":
         return _row_amount(r)
     y = _row_yield(r)
@@ -707,6 +709,8 @@ def _row_pnl_est(r: dict) -> float | None:
 
 
 def _row_pnl_act(r: dict) -> float | None:
+    if r.get("section") in ("long_term", "liability"):
+        return None
     if r.get("section") == "income":
         return _row_amount(r)
     if r.get("source") in ("managed", "fund"):
