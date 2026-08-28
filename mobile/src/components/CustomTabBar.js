@@ -42,6 +42,10 @@ const TAB_CONFIG = {
     inactive: { family: 'mci', name: 'chart-line' },
     active:   { family: 'mci', name: 'chart-line' },
   },
+  Planning: {
+    inactive: { family: 'mci', name: 'clipboard-text-outline' },
+    active:   { family: 'mci', name: 'clipboard-text' },
+  },
   Research: {
     // Filled area stock-chart — looks like a premium financial chart
     inactive: { family: 'mci', name: 'chart-areaspline-variant' },

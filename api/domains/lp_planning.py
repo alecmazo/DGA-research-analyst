@@ -59,6 +59,21 @@ def _gp_only(request: Request) -> dict:
     return claims
 
 
+def _lp_only(request: Request) -> dict:
+    """Authenticated LP — never a GP looking up another book."""
+    claims = B._claims_or_401(request)
+    if claims.get("role") != "lp":
+        raise HTTPException(status_code=403, detail="LP role required")
+    return claims
+
+
+def _caller_lp_id(claims: dict) -> str:
+    lp_id = (claims.get("lp_id") or claims.get("sub") or "").strip()
+    if not lp_id:
+        raise HTTPException(status_code=400, detail="No LP identity on this session")
+    return lp_id
+
+
 def _f(v, default=None):
     if v is None or v == "":
         return default
@@ -1206,6 +1221,45 @@ def _planning_payload(lp_id: str) -> dict:
         "computed": computed,
         "has_snapshot": saved is not None,
     }
+
+
+def _planning_lp_pack(lp_id: str) -> dict:
+    """Own-book payload for the LP portal: no GP strategy notes, no hidden lines."""
+    pack = _planning_payload(lp_id)
+    snap = dict(pack.get("snapshot") or {})
+    snap["notes"] = ""
+    snap["rows"] = [r for r in (snap.get("rows") or []) if not r.get("hidden")]
+    pack["snapshot"] = snap
+    pack.pop("live", None)
+    return pack
+
+
+@router.get("/api/v2/lp/planning")
+def lp_planning_self(request: Request):
+    """LP-only: this login's planning worksheet. Never another LP's."""
+    claims = _lp_only(request)
+    return _planning_lp_pack(_caller_lp_id(claims))
+
+
+@router.get("/api/v2/lp/planning/pdf")
+def lp_planning_self_pdf(request: Request):
+    """LP-only: PDF of this login's planning worksheet."""
+    claims = _lp_only(request)
+    pack = _planning_lp_pack(_caller_lp_id(claims))
+    try:
+        pdf = _planning_pdf_bytes(pack)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF render failed: {e!s:.200}")
+    fname = _planning_pdf_filename(pack["lp"], pack["snapshot"])
+    try:
+        disp_h = B._content_disposition("attachment", fname)
+    except Exception:
+        disp_h = f'attachment; filename="{fname}"'
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": disp_h},
+    )
 
 
 @router.get("/api/v2/gp/lp-planning/{lp_id}")

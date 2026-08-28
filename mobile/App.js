@@ -20,6 +20,7 @@ import FundScreen             from './src/screens/FundScreen';
 import LoginScreen            from './src/screens/LoginScreen';
 import LockScreen             from './src/screens/LockScreen';
 import LPPerformanceScreen    from './src/screens/LPPerformanceScreen';
+import LPPlanningScreen       from './src/screens/LPPlanningScreen';
 import WatchlistScreen        from './src/screens/WatchlistScreen';
 import FinancialsScreen       from './src/screens/FinancialsScreen';
 import MoreScreen             from './src/screens/MoreScreen';
@@ -97,6 +98,7 @@ function LPTabs({ onLogout, isDemo, onSwitchToAdmin }) {
       <Tab.Screen name="Performance">
         {() => <LPPerformanceScreen onLogout={onLogout} isDemo={isDemo} onSwitchToAdmin={onSwitchToAdmin} />}
       </Tab.Screen>
+      <Tab.Screen name="Planning" component={LPPlanningScreen} />
       <Tab.Screen name="Podcast"   component={PodcastScreen} />
       <Tab.Screen name="Settings">
         {() => <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={null} isLpMode={true} onSwitchToAdmin={onSwitchToAdmin} />}

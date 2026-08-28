@@ -497,6 +497,63 @@
     margin: 0 auto;
     padding: 24px;
   }
+  .lp-tab-shell.plan-shell { max-width: 1180px; }
+
+  .plan-kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  @media (max-width: 900px) {
+    .plan-kpis { grid-template-columns: 1fr 1fr; }
+  }
+  .plan-kpi {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 12px;
+  }
+  .plan-kpi-l {
+    font-size: 9px; font-weight: 800; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--mid);
+  }
+  .plan-kpi-v {
+    margin-top: 2px; font-size: 16px; font-weight: 800;
+    font-variant-numeric: tabular-nums; color: var(--ink); letter-spacing: -0.02em;
+  }
+  .plan-kpi-h { margin-top: 2px; font-size: 10px; color: var(--dim); line-height: 1.3; }
+  .plan-table-wrap { overflow-x: auto; }
+  .plan-table {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+    font-variant-numeric: tabular-nums; min-width: 720px;
+  }
+  .plan-table th {
+    font-size: 9px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--mid); text-align: right; padding: 6px 8px;
+    border-bottom: 1px solid var(--line); background: var(--offwhite);
+  }
+  .plan-table th:first-child { text-align: left; }
+  .plan-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; color: var(--ink); }
+  .plan-table td:first-child { text-align: left; font-weight: 600; }
+  .plan-table td.plan-notes { color: var(--dim); font-weight: 500; }
+  .plan-sec td {
+    text-align: left; font-size: 10px; font-weight: 800; letter-spacing: 0.05em;
+    text-transform: uppercase; background: rgba(91,184,212,0.08); color: var(--navy);
+    padding: 6px 8px;
+  }
+  .plan-tot td { font-weight: 800; background: var(--offwhite); }
+  .plan-actions { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 12px; }
+  .plan-btn {
+    height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line);
+    background: white; font-size: 12px; font-weight: 700; cursor: pointer; color: var(--ink);
+  }
+  .plan-meta { font-size: 12px; color: var(--dim); margin: 0 0 12px; }
+  @media print {
+    .topbar, .ribbon-wrap, .plan-actions, .status-dot { display: none !important; }
+    .tab-panel { display: none !important; }
+    #tab-planning.tab-panel.active, #tab-planning { display: block !important; }
+  }
 
   /* Loading / empty states */
   .widget-loading, .widget-empty {
@@ -618,6 +675,7 @@
 
   <nav class="topbar-right">
     <span class="topbar-link active" data-tab="performance">Performance</span>
+    <span class="topbar-link" data-tab="planning">Planning</span>
     <span class="topbar-link" data-tab="documents">Documents</span>
     <span class="topbar-link" data-tab="lp-reports" id="nav-lp-reports-link">Reports</span>
     <span class="topbar-link" data-tab="account" id="nav-account-link" style="display:none;">⚙ Account</span>
@@ -711,6 +769,31 @@
   </aside>
 </main>
 </div><!-- #tab-performance -->
+
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!-- PLANNING TAB (this LP only)                                     -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div id="tab-planning" class="tab-panel">
+  <div class="lp-tab-shell plan-shell">
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Planning</span>
+        <span class="card-badge">Your worksheet</span>
+      </div>
+      <div style="padding:16px 18px 20px;">
+        <div class="plan-actions">
+          <button type="button" class="plan-btn" id="plan-print">Print</button>
+          <button type="button" class="plan-btn" id="plan-pdf">PDF</button>
+        </div>
+        <p class="plan-meta" id="plan-meta">Your planning worksheet — only you and your GP can see it.</p>
+        <div id="plan-body">
+          <div class="widget-loading">Loading your planning worksheet…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div><!-- #tab-planning -->
 
 
 <!-- ══════════════════════════════════════════════════════════════ -->
@@ -879,6 +962,7 @@
 
   // ── Tab routing ─────────────────────────────────────────────────
   const TAB_LOADERS = {
+    planning:   () => loadPlanningTab(),
     documents:  () => { /* static — nothing to load */ },
     'lp-reports': () => loadLpReportsTab(),
     account:    () => _initAccountTab(),
@@ -901,6 +985,144 @@
     const banner = document.getElementById('lp-must-change-banner');
     if (banner) banner.style.display = user.must_change_password ? 'block' : 'none';
   }
+
+  const _planUsd = (v) => {
+    if (v == null || Number.isNaN(Number(v))) return '—';
+    return Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  };
+  function _planIra(label, na) {
+    if (na) return true;
+    return /\b(ira|roth|401\s*\(?k\)?|sep)\b/i.test(label || '');
+  }
+  function _planAmt(r) {
+    if (r.hidden) return 0;
+    if (r.amount_override != null) return Number(r.amount_override);
+    if (r.source !== 'manual' && r.live_amount != null) return Number(r.live_amount);
+    return Number(r.amount || 0);
+  }
+  function _planYld(r) {
+    if (r.yield_pct != null) return Number(r.yield_pct);
+    return r.yield_pct_live != null ? Number(r.yield_pct_live) : null;
+  }
+  function _planTax(r) {
+    if (r.section === 'liability' || r.section === 'long_term') return null;
+    if (r.section === 'income') return _planAmt(r);
+    if (_planIra(r.label, r.realized_na)) return null;
+    if (r.capital_gains != null) return Number(r.capital_gains);
+    return r.capital_gains_live != null ? Number(r.capital_gains_live) : null;
+  }
+  function _planYtd(r) {
+    if (r.section === 'long_term' || r.section === 'liability' || r.section === 'income') return null;
+    if (r.source === 'manual') return null;
+    return r.pnl_actual_live != null ? Number(r.pnl_actual_live) : null;
+  }
+
+  async function loadPlanningTab() {
+    const body = document.getElementById('plan-body');
+    const meta = document.getElementById('plan-meta');
+    if (!body) return;
+    body.innerHTML = '<div class="widget-loading">Loading your planning worksheet…</div>';
+    try {
+      const r = await window.dgaFetch('/api/v2/lp/planning');
+      if (r.status === 403) throw new Error('This worksheet is only available on your LP login.');
+      if (!r.ok) throw new Error('Could not load planning (' + r.status + ')');
+      const d = await r.json();
+      const snap = d.snapshot || {};
+      const rows = (snap.rows || []).filter(x => !x.hidden);
+      const lp = d.lp || {};
+      const expenses = Number(snap.annual_expenses || 0);
+      let assets = 0, liab = 0, invest = 0, income = 0, tax = 0, ytd = 0, hasTax = false, hasYtd = false;
+      rows.forEach(row => {
+        const amt = _planAmt(row);
+        if (row.section === 'liability') { liab += amt; return; }
+        if (row.section === 'income') { income += amt; const t = _planTax(row); if (t != null) { tax += t; hasTax = true; } return; }
+        assets += amt;
+        if (row.include_in_investments) invest += amt;
+        const t = _planTax(row); if (t != null) { tax += t; hasTax = true; }
+        const y = _planYtd(row); if (y != null) { ytd += y; hasYtd = true; }
+      });
+      const nw = assets - liab;
+      const asOf = snap.as_of ? ' · as of ' + esc(snap.as_of) : '';
+      if (meta) meta.textContent = (lp.name || 'Your worksheet') + asOf + ' · only you and your GP can see this.';
+      const kpis = [
+        ['Net worth', _planUsd(nw), 'Assets ' + _planUsd(assets) + ' − debt ' + _planUsd(liab)],
+        ['Investable', _planUsd(invest), 'Checked lines'],
+        ['Taxable P&L', hasTax ? _planUsd(tax) : '—', 'Realized'],
+        ['YTD (unrealized)', hasYtd ? _planUsd(ytd) : '—', 'Mark-to-market + dividends'],
+        ['Annual expenses', _planUsd(expenses), ''],
+      ];
+      const sections = [
+        ['current', 'Current assets'],
+        ['long_term', 'Long-term assets'],
+        ['income', 'Other annual income'],
+        ['liability', 'Liabilities'],
+      ];
+      let html = '<div class="plan-kpis">' + kpis.map(k =>
+        '<div class="plan-kpi"><div class="plan-kpi-l">' + k[0] + '</div>' +
+        '<div class="plan-kpi-v">' + k[1] + '</div>' +
+        (k[2] ? '<div class="plan-kpi-h">' + k[2] + '</div>' : '') + '</div>'
+      ).join('') + '</div>';
+      html += '<div class="plan-table-wrap"><table class="plan-table"><thead><tr>' +
+        '<th>Line</th><th>Amount</th><th>% Tot</th><th>Yield %</th><th>P&amp;L est</th>' +
+        '<th>P&amp;L actual</th><th>Notes</th><th>YTD (unrealized)</th>' +
+        '</tr></thead><tbody>';
+      sections.forEach(([key, label]) => {
+        const chunk = rows.filter(x => x.section === key);
+        if (!chunk.length) return;
+        const sub = chunk.reduce((s, x) => s + _planAmt(x), 0);
+        html += '<tr class="plan-sec"><td colspan="8">' + esc(label) + ' &nbsp; ' + _planUsd(sub) + '</td></tr>';
+        chunk.forEach(row => {
+          const amt = _planAmt(row);
+          const yld = _planYld(row);
+          const taxV = _planTax(row);
+          const ytdV = _planYtd(row);
+          const ira = _planIra(row.label, row.realized_na);
+          let taxS = '';
+          if (row.section === 'liability' || row.section === 'long_term') taxS = '';
+          else if (ira && row.section !== 'income') taxS = 'N/A';
+          else if (taxV != null) taxS = _planUsd(taxV);
+          let ytdS = ytdV != null ? _planUsd(ytdV) : '';
+          if (ytdV != null && row.ytd_pct != null) ytdS += ' (' + fmtPct(row.ytd_pct) + ')';
+          const pct = (row.section === 'current' || row.section === 'long_term' || row.section === 'liability') && assets
+            ? (amt / assets * 100).toFixed(1) + '%' : '';
+          const yldS = (yld != null && row.section !== 'income' && row.section !== 'long_term') ? (String(yld).replace(/\.0+$/, '') + '%') : '';
+          let estS = '';
+          if (row.section === 'income') estS = _planUsd(amt);
+          else if (row.section !== 'long_term' && row.section !== 'liability' && yld != null) estS = _planUsd(amt * yld / 100);
+          html += '<tr><td>' + esc(row.label || '') + '</td>' +
+            '<td>' + _planUsd(amt) + '</td><td>' + pct + '</td><td>' + yldS + '</td>' +
+            '<td>' + estS + '</td><td>' + taxS + '</td>' +
+            '<td class="plan-notes">' + esc(row.notes || '') + '</td><td>' + ytdS + '</td></tr>';
+        });
+      });
+      html += '<tr class="plan-tot"><td>Equity / net worth</td><td>' + _planUsd(nw) +
+        '</td><td></td><td></td><td></td><td>' + (hasTax ? _planUsd(tax) : '—') +
+        '</td><td class="plan-notes"></td><td>' + (hasYtd ? _planUsd(ytd) : '—') + '</td></tr>';
+      html += '</tbody></table></div>';
+      body.innerHTML = html;
+    } catch (e) {
+      body.innerHTML = '<div class="widget-empty">' + esc(e.message || 'Could not load planning') + '</div>';
+    }
+  }
+
+  document.getElementById('plan-print')?.addEventListener('click', () => window.print());
+  document.getElementById('plan-pdf')?.addEventListener('click', async () => {
+    const btn = document.getElementById('plan-pdf');
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = 'PDF…'; }
+      const r = await window.dgaFetch('/api/v2/lp/planning/pdf');
+      if (!r.ok) throw new Error('PDF failed');
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'DGA_Planning.pdf'; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) {
+      alert(e.message || 'PDF failed');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'PDF'; }
+    }
+  });
 
   document.getElementById('lp-pw-save')?.addEventListener('click', async () => {
     const oldEl = document.getElementById('lp-pw-old');
