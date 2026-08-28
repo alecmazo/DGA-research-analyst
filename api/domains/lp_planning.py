@@ -733,7 +733,7 @@ def _row_ytd_perf(r: dict) -> float | None:
 
 
 def _row_taxable(r: dict) -> float | None:
-    if r.get("section") == "liability":
+    if r.get("section") in ("liability", "long_term"):
         return None
     if r.get("section") == "income":
         return _row_amount(r)
@@ -1133,7 +1133,7 @@ def _planning_pdf_html(pack: dict) -> str:
             tax = _row_taxable(r)
             ytd = _row_ytd_perf(r)
             ira = bool(r.get("realized_na") or _is_ira_name(r.get("label") or ""))
-            if r.get("section") == "liability":
+            if r.get("section") in ("liability", "long_term"):
                 tax_s = ""
             elif ira and r.get("section") != "income":
                 tax_s = "N/A"
@@ -1148,7 +1148,11 @@ def _planning_pdf_html(pack: dict) -> str:
             inv = "✓" if r.get("include_in_investments") and r.get("section") in ("current", "long_term") else ""
             pct = r.get("pct_total")
             pct_s = f"{pct:.1f}%" if _f(pct) is not None else ""
-            yld_s = f"{yld:g}%" if yld is not None and r.get("section") not in ("income",) else ""
+            yld_s = (
+                f"{yld:g}%"
+                if yld is not None and r.get("section") not in ("income", "long_term")
+                else ""
+            )
             est_s = _usd_txt(est) if est is not None else ""
             note = _html.escape((r.get("notes") or "")[:80])
             lab = _html.escape(r.get("label") or "")
@@ -1185,7 +1189,7 @@ def _planning_pdf_html(pack: dict) -> str:
         '<td></td><td></td>'
         f'<td style="text-align:right;">{_usd_txt(computed.get("pnl_estimate"))}</td>'
         f'<td style="text-align:right;">{_usd_txt(tot_tax) if has_tax else "—"}</td>'
-        '<td></td>'
+        f'<td>{("(Income ytd)" if _f(computed.get("other_income")) else "")}</td>'
         f'<td style="text-align:right;">{_usd_txt(tot_ytd) if has_ytd else "—"}</td>'
         "</tr>"
     )

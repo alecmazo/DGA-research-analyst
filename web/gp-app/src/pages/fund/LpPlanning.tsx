@@ -152,9 +152,9 @@ function rowYtdPerf(r: PlanRow): number | null {
   return null
 }
 
-/** Taxable P&L actual = realized gains. IRA/Roth/401k are N/A. */
+/** Taxable P&L actual = realized gains. IRA/Roth/401k are N/A. Primary homes have none. */
 function rowTaxablePnl(r: PlanRow): number | null {
-  if (r.section === 'liability') return null
+  if (r.section === 'liability' || r.section === 'long_term') return null
   if (r.section === 'income') return rowAmount(r)
   return rowCapitalGains(r)
 }
@@ -179,6 +179,16 @@ function compute(rows: PlanRow[], expenses: number): Computed {
     }
     if (r.section === 'income') {
       income += amt
+      const cg = rowTaxablePnl(r)
+      if (cg != null) {
+        capGains += cg
+        hasCap = true
+      }
+      const estInc = rowPnlEst(r)
+      if (estInc != null) {
+        invEst += estInc
+        hasEst = true
+      }
       continue
     }
     assets += amt
@@ -798,7 +808,9 @@ export function LpPlanning() {
                       {fmtUsd(totals.pnl_estimate)}
                     </td>
                     <td className={styles.numAlign}>{fmtUsd(totals.pnl_actual)}</td>
-                    <td />
+                    <td className={styles.cellMuted}>
+                      {totals.other_income ? '(Income ytd)' : ''}
+                    </td>
                     <td className={styles.numAlign}>{fmtUsd(totals.ytd_performance)}</td>
                     <td />
                   </tr>
@@ -938,8 +950,10 @@ function SectionBlock(props: {
               {props.pctTot(r) == null ? '' : fmtPct(props.pctTot(r), 1).replace('+', '')}
             </td>
             <td className={styles.colYield}>
-              {r.section === 'income' ? (
-                <span className={styles.cellMuted}>n/a</span>
+              {r.section === 'income' || r.section === 'long_term' ? (
+                <span className={styles.cellMuted}>
+                  {r.section === 'income' ? 'n/a' : ''}
+                </span>
               ) : (
                 <NumCell
                   kind="pct"
@@ -953,7 +967,7 @@ function SectionBlock(props: {
               {est == null ? '' : fmtUsd(est)}
             </td>
             <td className={styles.numAlign}>
-              {r.section === 'liability' ? (
+              {r.section === 'liability' || r.section === 'long_term' ? (
                 ''
               ) : r.section === 'income' ? (
                 <span className={styles.cellMuted}>{fmtUsd(taxPnl)}</span>
