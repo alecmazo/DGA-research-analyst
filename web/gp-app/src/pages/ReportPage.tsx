@@ -12,6 +12,7 @@ import {
 import { getCachedUser } from '@/lib/auth'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { renderMd, reportMarkdown } from '@/lib/md'
+import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import styles from './ReportPage.module.css'
 
 function fmtTarget(v: number | null | undefined) {
@@ -234,6 +235,14 @@ export function ReportPage() {
 
   return (
     <div className={styles.page}>
+      <PrintLetterhead
+        doc="Research Report"
+        meta={[
+          ticker,
+          shownProvider.toUpperCase(),
+          displayWhen ? relativeTime(displayWhen) : '',
+        ]}
+      />
       <header className={styles.head}>
         <div className={styles.title}>
           <strong>{ticker || '—'}</strong>

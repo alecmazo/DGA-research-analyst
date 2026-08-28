@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
 import { api, downloadAuth } from '@/lib/api'
@@ -188,6 +189,10 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
 
       {!loading && sheet && (
         <div className={styles.vlSheet}>
+          <PrintLetterhead
+            doc="Financials"
+            meta={[sheet.ticker || activeTk, sheet.entity_name, sectorLine]}
+          />
           <div className={styles.vlHead}>
             <div>
               <div className={styles.vlEntity}>

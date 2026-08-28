@@ -5231,6 +5231,7 @@
         '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}' +
         'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.55;color:#0A1628;max-width:7.1in;margin:0 auto;-webkit-font-smoothing:antialiased}' +
         '.mast{display:flex;justify-content:space-between;align-items:center;background:#fff;color:#0A1628;padding:7pt 10pt;border-bottom:none}' +
+        '.mast img{height:28px;width:auto;display:block}' +
         '.mast .brand{font-weight:800;font-size:11pt;letter-spacing:1px;color:#0A1628}' +
         '.mast .doc{color:#5BB8D4;font-size:7.5pt;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;margin-top:1px}' +
         '.mast .meta{text-align:right;font-size:8pt;color:#64748b;line-height:1.3}' +
@@ -5263,7 +5264,7 @@
         '.ft{margin-top:22pt;padding-top:8pt;border-top:1px solid #e2e8f0;font-size:8pt;color:#94a3b8;text-align:center}' +
         '.ft b{color:#0A1628}.ft .c{color:#5BB8D4;font-weight:700}' +
         '</style></head><body onload="window.print()">' +
-        '<div class="mast"><div><div class="brand">DGA CAPITAL</div><div class="doc">Research Note</div></div>' +
+        '<div class="mast"><div><img src="/branding/dga_logo_small.png" alt="DGA Capital" width="120" height="34" /><div class="doc">Research Note</div></div>' +
           '<div class="meta"><div class="conf">Confidential</div>' +
           (stamp ? '<div>' + esc(stamp) + '</div>' : '') +
           '</div></div>' +

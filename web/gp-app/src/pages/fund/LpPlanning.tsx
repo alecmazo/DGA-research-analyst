@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
+import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { api, downloadAuth } from '@/lib/api'
 import { fmtPct, fmtUsd, fmtUsdSigned } from '@/lib/format'
 import styles from './planning.module.css'
@@ -559,6 +560,10 @@ export function LpPlanning() {
 
   return (
     <div className={styles.wrap}>
+      <PrintLetterhead
+        doc="Household planning snapshot"
+        meta={[selected?.name, title, asOf]}
+      />
       <div className={styles.toolbar}>
         <label className={styles.field}>
           <span className={styles.lbl}>Limited partner</span>

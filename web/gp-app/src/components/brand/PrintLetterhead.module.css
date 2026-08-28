@@ -1,0 +1,52 @@
+.mast,
+.accent {
+  display: none;
+}
+
+@media print {
+  .mast {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 0 6px;
+  }
+
+  .logo {
+    display: block;
+    height: 28px;
+    width: auto;
+    max-width: 140px;
+  }
+
+  .doc {
+    margin-top: 3px;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #5bb8d4;
+  }
+
+  .meta {
+    text-align: right;
+    font-size: 8px;
+    line-height: 1.35;
+    color: #64748b;
+  }
+
+  .conf {
+    font-size: 7px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #0a6b8a;
+  }
+
+  .accent {
+    display: block;
+    height: 2px;
+    background: #5bb8d4;
+    margin: 0 0 8px;
+  }
+}

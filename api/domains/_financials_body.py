@@ -4877,6 +4877,7 @@ def _fin_sheet_pdf_bytes(sheet: dict) -> bytes:
     from reportlab.lib.units import inch
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
+        Image as RLImage,
     )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
@@ -4937,6 +4938,19 @@ def _fin_sheet_pdf_bytes(sheet: dict) -> bytes:
         return f"{sign}${ax:,.0f}"
 
     story = []
+    try:
+        from pathlib import Path as _P
+        _logo = _P(__file__).resolve().parent.parent.parent / "branding" / "dga_logo_small.png"
+        if not _logo.exists():
+            _logo = _P(__file__).resolve().parent.parent / "branding" / "dga_logo_small.png"
+        if _logo.exists():
+            img = RLImage(str(_logo))
+            aspect = (float(img.imageWidth) / float(img.imageHeight or 1)) or 3.53
+            h = 0.32 * inch
+            story.append(RLImage(str(_logo), width=h * aspect, height=h))
+            story.append(Spacer(1, 4))
+    except Exception:
+        pass
     tk = sheet.get("ticker") or ""
     name = sheet.get("entity_name") or tk
     px = sheet.get("price")

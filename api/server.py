@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui536-20260828-pdf-notes-center"
+WEB_BUILD_VERSION = "ui537-20260828-print-logo"
 
 
 @app.get("/api/build")
@@ -28847,6 +28847,23 @@ def _dga_saved_report_pdf_html(
     note_html = (
         f'<div class="note">{note_e}</div>' if note_e else ""
     )
+    logo = _dga_logo_data_uri()
+    logo_cell = (
+        f'<img src="{logo}" width="120" height="34" alt="DGA Capital" />'
+        if logo else
+        '<span class="brand">DGA CAPITAL</span>'
+    )
+    mast = (
+        '<table class="mast"><tr>'
+        f'<td style="width:58%;border:none;vertical-align:middle;">{logo_cell}'
+        '<div class="mast-doc">Research Report</div></td>'
+        '<td class="mast-meta">'
+        '<div class="conf">Confidential</div>'
+        f'<div>{tk_e} · {prov_e}</div>'
+        + (f'<div>{when_e}</div>' if when_e else '')
+        + '</td></tr></table>'
+        '<table class="accent"><tr><td>&nbsp;</td></tr></table>'
+    )
     head = (
         '<table class="head"><tr><td>'
         f'<span class="tk">{tk_e}</span>'
@@ -28889,6 +28906,23 @@ def _dga_saved_report_pdf_html(
         font-size: 10pt;
         line-height: 1.6;
         color: #334155;
+      }
+      table.mast { width: 100%; border: none; margin: 0; }
+      table.mast td { border: none; vertical-align: middle; padding: 0 0 4pt 0; }
+      .brand { font-size: 10pt; font-weight: bold; color: #0A1628; letter-spacing: 1pt; }
+      .mast-doc {
+        font-size: 6.5pt; font-weight: bold; color: #5BB8D4;
+        letter-spacing: 0.8pt; text-transform: uppercase; margin-top: 1pt;
+      }
+      .mast-meta { text-align: right; font-size: 6.5pt; color: #64748b; line-height: 1.3; }
+      .mast-meta .conf {
+        color: #0A6B8A; font-weight: bold; letter-spacing: 0.5pt;
+        font-size: 6pt; text-transform: uppercase;
+      }
+      table.accent { width: 100%; border: none; margin: 0 0 8pt 0; }
+      table.accent td {
+        border: none; padding: 0; height: 2pt;
+        background-color: #5BB8D4; font-size: 1pt; line-height: 1pt;
       }
       table.head, table.metrics, table.delta {
         width: 100%; border: none; margin: 0;
@@ -29011,7 +29045,7 @@ def _dga_saved_report_pdf_html(
     return (
         f'<!doctype html><html><head><meta charset="utf-8">'
         f'<style>{css}</style></head><body>'
-        f'{footer}{head}{metrics}{delta_html}'
+        f'{footer}{mast}{head}{metrics}{delta_html}'
         f'<div class="md-rendered">{body}</div>'
         f'</body></html>'
     )

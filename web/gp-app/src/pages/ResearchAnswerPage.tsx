@@ -16,6 +16,7 @@ import {
 import { relativeTime } from '@/lib/format'
 import { renderMd } from '@/lib/md'
 import { AnalysisScene } from '@/components/ui/AnalysisScene'
+import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { inferSceneEngine } from '@/lib/analysisScene'
 import styles from './ReportPage.module.css'
 import extra from './ResearchAnswerPage.module.css'
@@ -444,19 +445,10 @@ export function ResearchAnswerPage() {
         </div>
       </header>
 
-      <div className={extra.printMast} aria-hidden>
-        <div>
-          <div className={extra.printWord}>DGA CAPITAL</div>
-          <div className={extra.printDoc}>{printDoc}</div>
-        </div>
-        <div className={extra.printMeta}>
-          <div className={extra.printConf}>Confidential</div>
-          <div>{printStamp}</div>
-          {model ? <div>{model}</div> : null}
-          {shownProv ? <div>{shownProv.toUpperCase()}</div> : null}
-        </div>
-      </div>
-      <div className={extra.printAccent} aria-hidden />
+      <PrintLetterhead
+        doc={printDoc}
+        meta={[printStamp, model, shownProv ? shownProv.toUpperCase() : '']}
+      />
 
       {(review?.fund_name || review?.tickers || question) && (
         <div className={extra.question}>
