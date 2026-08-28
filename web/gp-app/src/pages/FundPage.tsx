@@ -20,7 +20,7 @@ type Subtab = 'funds' | 'accts' | 'plan'
 const ACCOUNTS_TIP_BOOKS =
   'Managed accounts and LP funds — NAV, capital, and performance. Open a row for holdings, waterfall, attribution, and exports.'
 const ACCOUNTS_TIP_PLAN =
-  'GP-only household snapshot for one Settings LP. Live SMA NAV and fund stakes fill in from their assignments; add cash, real estate, debt, Social Security, and expenses so you can see the annual P&L the books need to generate.'
+  'GP-only planning snapshot for one Settings LP. Live SMA NAV and fund stakes fill in from their assignments; add cash, real estate, debt, Social Security, and expenses so you can see the annual P&L the books need to generate.'
 
 export function FundPage() {
   const [sub, setSub] = useState<Subtab>('accts')

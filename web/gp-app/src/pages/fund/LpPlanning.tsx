@@ -562,7 +562,7 @@ export function LpPlanning() {
   return (
     <div className={styles.wrap}>
       <PrintLetterhead
-        doc="Household planning snapshot"
+        doc="Planning snapshot"
         meta={[selected?.name, title, asOf]}
       />
       <div className={styles.toolbar}>
