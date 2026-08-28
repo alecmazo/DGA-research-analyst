@@ -1187,14 +1187,14 @@ def _planning_pdf_html(pack: dict) -> str:
             body_rows.append(
                 "<tr>"
                 f'<td style="padding:1.5pt 4pt;">{lab}</td>'
-                f'<td style="text-align:center;">{inv}</td>'
-                f'<td style="text-align:right;">{_usd_txt(amt)}</td>'
-                f'<td style="text-align:right;">{pct_s}</td>'
-                f'<td style="text-align:right;">{yld_s}</td>'
-                f'<td style="text-align:right;">{est_s}</td>'
-                f'<td style="text-align:right;">{tax_s}</td>'
-                f'<td>{note}</td>'
-                f'<td style="text-align:right;">{ytd_s}</td>'
+                f'<td align="center" style="text-align:center;">{inv}</td>'
+                f'<td align="right" style="text-align:right;">{_usd_txt(amt)}</td>'
+                f'<td align="right" style="text-align:right;">{pct_s}</td>'
+                f'<td align="right" style="text-align:right;">{yld_s}</td>'
+                f'<td align="right" style="text-align:right;">{est_s}</td>'
+                f'<td align="right" style="text-align:right;">{tax_s}</td>'
+                f'<td align="center" style="text-align:center;padding:1.5pt 3pt;">{note}</td>'
+                f'<td align="right" style="text-align:right;">{ytd_s}</td>'
                 "</tr>"
             )
     body_rows.append(
@@ -1204,7 +1204,8 @@ def _planning_pdf_html(pack: dict) -> str:
         '<td></td><td></td>'
         f'<td style="text-align:right;">{_usd_txt(computed.get("pnl_estimate"))}</td>'
         f'<td style="text-align:right;">{_usd_txt(tot_tax) if has_tax else "—"}</td>'
-        f'<td>{("(Income ytd)" if _f(computed.get("other_income")) else "")}</td>'
+        f'<td align="center" style="text-align:center;">'
+        f'{("(Income ytd)" if _f(computed.get("other_income")) else "")}</td>'
         f'<td style="text-align:right;">{_usd_txt(tot_ytd) if has_ytd else "—"}</td>'
         "</tr>"
     )
@@ -1221,7 +1222,7 @@ def _planning_pdf_html(pack: dict) -> str:
       @font-face { font-family: "InterPdf"; src: url(Inter-Bold.ttf); font-weight: bold; }
       @page { size: landscape letter; margin: 0.28in; }
       body { font-family: "InterPdf", Helvetica, Arial; font-size: 7pt; color: #334155; }
-      table.sheet { width: 100%; border-collapse: collapse; }
+      table.sheet { width: 100%; border-collapse: collapse; table-layout: fixed; }
       table.sheet th {
         font-size: 5.5pt; letter-spacing: 0.3pt; text-transform: uppercase;
         color: #64748b; border-bottom: 0.6pt solid #cbd5e1; padding: 2pt 3pt;
@@ -1244,15 +1245,15 @@ def _planning_pdf_html(pack: dict) -> str:
         f'<table style="width:100%;border-collapse:collapse;margin-bottom:5pt;"><tr>{kpi_cells}</tr></table>'
         '<table class="sheet">'
         "<thead><tr>"
-        "<th style='text-align:left;width:18%;'>Line</th>"
-        "<th style='width:4%;'>Inv</th>"
-        "<th style='width:11%;'>Amount</th>"
-        "<th style='width:7%;'>% Tot</th>"
-        "<th style='width:7%;'>Yield %</th>"
-        "<th style='width:10%;'>P&amp;L est</th>"
-        "<th style='width:11%;'>P&amp;L actual</th>"
-        "<th style='width:16%;'>Notes</th>"
-        "<th style='width:16%;'>YTD (unrealized)</th>"
+        "<th align='left' style='text-align:left;width:18%;'>Line</th>"
+        "<th align='center' style='text-align:center;width:4%;'>Inv</th>"
+        "<th align='center' style='text-align:center;width:11%;'>Amount</th>"
+        "<th align='center' style='text-align:center;width:7%;'>% Tot</th>"
+        "<th align='center' style='text-align:center;width:7%;'>Yield %</th>"
+        "<th align='center' style='text-align:center;width:10%;'>P&amp;L est</th>"
+        "<th align='center' style='text-align:center;width:11%;'>P&amp;L actual</th>"
+        "<th align='center' style='text-align:center;width:16%;'>Notes</th>"
+        "<th align='center' style='text-align:center;width:16%;'>YTD (unrealized)</th>"
         "</tr></thead><tbody>"
         + "".join(body_rows)
         + "</tbody></table>"
