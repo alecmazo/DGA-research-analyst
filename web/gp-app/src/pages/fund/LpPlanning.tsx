@@ -30,6 +30,7 @@ type PlanRow = {
   commitment?: number | null
   yield_pct_live?: number | null
   capital_gains?: number | null
+  realized_na?: boolean
   dividends_ytd?: number | null
 }
 
@@ -93,6 +94,11 @@ function cashLike(label: string): boolean {
   )
 }
 
+function isIraRow(r: PlanRow): boolean {
+  if (r.realized_na) return true
+  return /\b(ira|roth|401\s*\(?k\)?|sep)\b/i.test(r.label || '')
+}
+
 function rowYield(r: PlanRow): number | null {
   if (
     cashLike(r.label) &&
@@ -152,7 +158,7 @@ function compute(rows: PlanRow[], expenses: number): Computed {
       invAct += act
       hasAct = true
     }
-    if (r.capital_gains != null) {
+    if (!isIraRow(r) && r.capital_gains != null) {
       capGains += r.capital_gains
       hasCap = true
     }
@@ -684,12 +690,12 @@ export function LpPlanning() {
                     <td style={{ textAlign: 'right' }}>{fmtUsd(totals.total_assets)}</td>
                     <td className={styles.cellMuted}>100%</td>
                     <td />
-                    <td style={{ textAlign: 'right' }}>
+                    <td className={styles.numAlign}>
                       {fmtUsd(totals.pnl_estimate)}
                     </td>
-                    <td style={{ textAlign: 'right' }}>{fmtUsd(totals.pnl_actual)}</td>
+                    <td className={styles.numAlign}>{fmtUsd(totals.pnl_actual)}</td>
                     <td />
-                    <td style={{ textAlign: 'right' }}>{fmtUsd(totals.capital_gains)}</td>
+                    <td className={styles.numAlign}>{fmtUsd(totals.capital_gains)}</td>
                     <td />
                   </tr>
                   <tr className={styles.tot}>
@@ -828,7 +834,7 @@ function SectionBlock(props: {
                 </span>
               )}
             </td>
-            <td className={styles.cellMuted}>
+            <td className={`${styles.cellMuted} ${styles.numAlign}`}>
               {props.pctTot(r) == null ? '' : fmtPct(props.pctTot(r), 1).replace('+', '')}
             </td>
             <td className={styles.colYield}>
@@ -843,8 +849,10 @@ function SectionBlock(props: {
                 />
               )}
             </td>
-            <td className={styles.cellMuted}>{est == null ? '' : fmtUsd(est)}</td>
-            <td>
+            <td className={`${styles.cellMuted} ${styles.numAlign}`}>
+              {est == null ? '' : fmtUsd(est)}
+            </td>
+            <td className={styles.numAlign}>
               {linked || r.section === 'income' ? (
                 <span className={styles.cellMuted} style={{ whiteSpace: 'nowrap' }}>
                   {act == null ? '' : fmtUsd(act)}
@@ -865,12 +873,14 @@ function SectionBlock(props: {
                 onChange={(e) => props.onPatch(r.id, { notes: e.target.value })}
               />
             </td>
-            <td className={styles.cellMuted}>
+            <td className={`${styles.cellMuted} ${styles.numAlign}`}>
               {r.section === 'income' || r.section === 'liability'
                 ? ''
-                : r.capital_gains == null
-                  ? ''
-                  : fmtUsd(r.capital_gains)}
+                : isIraRow(r)
+                  ? 'N/A'
+                  : r.capital_gains == null
+                    ? ''
+                    : fmtUsd(r.capital_gains)}
             </td>
             <td>
               {linked && (

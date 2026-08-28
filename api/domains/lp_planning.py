@@ -282,6 +282,13 @@ def _is_cash_label(label: str) -> bool:
     return any(k in s for k in ("cash", "checking", "money market", "mmf", "spaxx"))
 
 
+_IRA_RE = re.compile(r"\b(ira|roth|401\s*\(?k\)?|sep)\b", re.I)
+
+
+def _is_ira_name(*parts: str) -> bool:
+    return bool(_IRA_RE.search(" ".join(p or "" for p in parts)))
+
+
 def _mm_yield_pct() -> float:
     """13-week T-bill (^IRX) as the cash / money-market rate. Fallback 4.20%."""
     import time as _time
@@ -525,16 +532,19 @@ def _live_books(user: dict) -> dict:
                     yield_live = _blended_yield(nav, cash_mv, div_ytd)
 
                 assigned_as = a.get("assigned_as") or a.get("name") or ""
+                book_name = a.get("name") or ""
+                ira = _is_ira_name(book_name, a.get("short_name") or "", assigned_as)
                 out["managed"].append({
                     "fund_id": fid,
-                    "name": a.get("name") or "",
+                    "name": book_name,
                     "short_name": a.get("short_name") or "",
                     "assigned_as": assigned_as,
                     "nav": nav,
                     "ytd_pct": ytd_pct,
                     "pnl_ytd": pnl,
                     "dividends_ytd": div_ytd,
-                    "capital_gains": cap_gains,
+                    "capital_gains": None if ira else cap_gains,
+                    "realized_na": ira,
                     "cash_mv": cash_mv,
                     "yield_pct_live": yield_live,
                     "as_of": as_of,
@@ -810,6 +820,7 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
             "live": bool(acct.get("live")),
             "yield_pct_live": acct.get("yield_pct_live"),
             "capital_gains": acct.get("capital_gains"),
+            "realized_na": bool(acct.get("realized_na")),
             "dividends_ytd": acct.get("dividends_ytd"),
             "cash_mv": acct.get("cash_mv"),
         }

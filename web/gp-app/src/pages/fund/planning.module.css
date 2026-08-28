@@ -236,7 +236,7 @@
 }
 
 .colYield {
-  width: 52px;
+  width: 72px;
 }
 
 .colRealized {
@@ -359,9 +359,13 @@
 
 .yieldNum {
   min-width: 0;
-  width: 44px;
-  max-width: 52px;
-  padding: 0 2px 0 4px;
+  width: 62px;
+  max-width: 72px;
+  padding: 0 4px;
+}
+
+.numAlign {
+  text-align: right;
 }
 
 .cellMuted {
