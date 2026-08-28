@@ -289,6 +289,8 @@ export function LpPlanning() {
   const [unmatched, setUnmatched] = useState<string[]>([])
   const [pdfBusy, setPdfBusy] = useState(false)
   const [mailBusy, setMailBusy] = useState(false)
+  const [mailOpen, setMailOpen] = useState(false)
+  const [mailTo, setMailTo] = useState('')
 
   const loadRoster = useCallback(async () => {
     const d = await api<{ lps?: RosterLp[] }>('/api/v2/gp/lp-planning')
@@ -360,6 +362,7 @@ export function LpPlanning() {
   }, [loadRoster])
 
   useEffect(() => {
+    setMailOpen(false)
     if (!lpId) {
       setLoading(false)
       return
@@ -488,20 +491,43 @@ export function LpPlanning() {
     }
   }
 
-  const emailPdf = async () => {
+  const openMail = async () => {
     if (!lpId) return
+    if (mailOpen) {
+      setMailOpen(false)
+      return
+    }
     if (!(await flushIfDirty())) return
     const def = roster.find((x) => x.lp_id === lpId)?.email || ''
-    const to = window.prompt('Email this planning snapshot PDF to:', def)
-    if (!to) return
+    setMailTo(def)
+    setMailOpen(true)
+    setErr(null)
+    setStatus('')
+  }
+
+  const emailPdf = async () => {
+    if (!lpId) return
+    const to = mailTo.trim()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      setErr('Enter a recipient email address. Nothing was sent.')
+      return
+    }
+    if (
+      !confirm(
+        `Send this planning snapshot PDF to ${to}?\n\nNothing will be sent unless you confirm.`,
+      )
+    ) {
+      return
+    }
     setMailBusy(true)
     setErr(null)
     try {
       await api(`/api/v2/gp/lp-planning/${encodeURIComponent(lpId)}/email`, {
         method: 'POST',
-        body: JSON.stringify({ to: to.trim() }),
+        body: JSON.stringify({ to }),
       })
-      setStatus(`Emailed ${to.trim()}`)
+      setStatus(`Emailed ${to}`)
+      setMailOpen(false)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Email failed')
     } finally {
@@ -533,13 +559,6 @@ export function LpPlanning() {
 
   return (
     <div className={styles.wrap}>
-      <p className={styles.hint}>
-        GP-only household snapshot for one Settings LP. Live SMA NAV and fund
-        stakes fill in from their assignments; add cash, real estate, debt, Social
-        Security, and expenses so you can see the annual P&amp;L the books need to
-        generate.
-      </p>
-
       <div className={styles.toolbar}>
         <label className={styles.field}>
           <span className={styles.lbl}>Limited partner</span>
@@ -628,9 +647,9 @@ export function LpPlanning() {
             size="sm"
             variant="secondary"
             disabled={!lpId || mailBusy}
-            onClick={() => void emailPdf()}
+            onClick={() => void openMail()}
           >
-            {mailBusy ? 'Sending…' : 'Email'}
+            {mailOpen ? 'Cancel email' : 'Email'}
           </Button>
           <Button
             size="sm"
@@ -642,6 +661,50 @@ export function LpPlanning() {
           </Button>
         </div>
       </div>
+
+      {mailOpen && (
+        <div className={styles.mailBar} data-print="hide">
+          <label className={styles.field}>
+            <span className={styles.lbl}>Send PDF to</span>
+            <input
+              className={styles.input}
+              type="email"
+              autoFocus
+              autoComplete="email"
+              placeholder="name@example.com"
+              value={mailTo}
+              onChange={(e) => setMailTo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void emailPdf()
+                }
+                if (e.key === 'Escape') setMailOpen(false)
+              }}
+            />
+          </label>
+          <p className={styles.mailNote}>
+            Enter the recipient, then confirm. This does not send until you
+            confirm.
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={mailBusy}
+            onClick={() => setMailOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={mailBusy || !mailTo.trim()}
+            onClick={() => void emailPdf()}
+          >
+            {mailBusy ? 'Sending…' : 'Send PDF'}
+          </Button>
+        </div>
+      )}
 
       {err && <div className={styles.callout}>{err}</div>}
       {status && !dirty && <div className={styles.statusOk}>{status}</div>}

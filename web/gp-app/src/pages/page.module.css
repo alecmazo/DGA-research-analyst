@@ -31,6 +31,61 @@
   color: var(--text-primary);
 }
 
+.h1Tip {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+}
+
+.h1Star {
+  color: var(--brand-600);
+  font-size: 0.55em;
+  font-weight: 800;
+  margin-left: 3px;
+  vertical-align: super;
+  letter-spacing: 0;
+}
+
+.h1Tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  width: min(52ch, 72vw);
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.45;
+  border: 1px solid var(--border-default);
+  box-shadow: 0 8px 24px rgba(10, 22, 40, 0.14);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  white-space: normal;
+}
+
+.h1Tip:hover::after,
+.h1Tip:focus-visible::after {
+  opacity: 1;
+  transform: none;
+}
+
+@media print {
+  .h1Tip::after {
+    display: none !important;
+  }
+  .h1Star {
+    display: none;
+  }
+}
+
 .sub {
   margin: 6px 0 0;
   max-width: 52ch;

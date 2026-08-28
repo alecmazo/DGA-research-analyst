@@ -17,6 +17,11 @@ import styles from './fund/fund.module.css'
 
 type Subtab = 'funds' | 'accts' | 'plan'
 
+const ACCOUNTS_TIP_BOOKS =
+  'Managed accounts and LP funds — NAV, capital, and performance. Open a row for holdings, waterfall, attribution, and exports.'
+const ACCOUNTS_TIP_PLAN =
+  'GP-only household snapshot for one Settings LP. Live SMA NAV and fund stakes fill in from their assignments; add cash, real estate, debt, Social Security, and expenses so you can see the annual P&L the books need to generate.'
+
 export function FundPage() {
   const [sub, setSub] = useState<Subtab>('accts')
   const [funds, setFunds] = useState<OverviewFund[]>([])
@@ -149,17 +154,22 @@ export function FundPage() {
   }
 
   return (
-    <div className={page.page}>
-      <header className={page.hero}>
+    <div className={`${page.page} ${styles.pageTight}`}>
+      <header className={`${page.hero} ${styles.heroTight}`}>
         <div>
           <p className={page.kicker}>Capital base</p>
-          <h1 className={page.h1}>Accounts</h1>
-          {sub !== 'plan' && (
-            <p className={page.sub}>
-              Managed accounts and LP funds — NAV, capital, and performance. Open a
-              row for holdings, waterfall, attribution, and exports.
-            </p>
-          )}
+          <h1 className={page.h1}>
+            <span
+              className={page.h1Tip}
+              tabIndex={0}
+              data-tip={sub === 'plan' ? ACCOUNTS_TIP_PLAN : ACCOUNTS_TIP_BOOKS}
+            >
+              Accounts
+              <span className={page.h1Star} aria-hidden="true">
+                *
+              </span>
+            </span>
+          </h1>
         </div>
         <div
           className={styles.subtabs}

@@ -1,5 +1,13 @@
 /* Fund dashboard + detail shared styles */
 
+.pageTight {
+  gap: 10px;
+}
+
+.heroTight {
+  align-items: center;
+}
+
 .subtabs {
   display: flex;
   gap: 4px;
