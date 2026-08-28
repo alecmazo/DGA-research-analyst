@@ -78,3 +78,20 @@ a:hover {
 ::selection {
   background: rgba(91, 184, 212, 0.25);
 }
+
+@media print {
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  body.dga-print-planning [data-print='hide'] {
+    display: none !important;
+  }
+  body.dga-print-planning {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

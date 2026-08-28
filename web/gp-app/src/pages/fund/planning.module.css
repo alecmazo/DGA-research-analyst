@@ -499,8 +499,12 @@
   .secAdd,
   .iconBtn,
   .iconBtnDanger,
-  .showHidden {
+  .showHidden,
+  .hint {
     display: none !important;
+  }
+  .wrap {
+    gap: 8px;
   }
   .sheet,
   .kpi,
@@ -508,7 +512,50 @@
     break-inside: avoid;
   }
   .tableWrap {
-    max-height: none;
-    overflow: visible;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .table {
+    min-width: 0 !important;
+    width: 100% !important;
+    font-size: 8.5px;
+    table-layout: auto;
+  }
+  .table th {
+    position: static;
+    font-size: 8px;
+    padding: 3px 4px;
+  }
+  .table td {
+    padding: 2px 4px;
+  }
+  .table th:last-child,
+  .table td:last-child {
+    display: none;
+  }
+  .num,
+  .notesIn,
+  .lineIn,
+  .yieldNum {
+    height: 16px;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 2px;
+    font-size: 8.5px;
+  }
+  .kpis {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+  .kpiVal {
+    font-size: 13px;
+  }
+  .strategy textarea {
+    min-height: 36px;
+    font-size: 9px;
   }
 }

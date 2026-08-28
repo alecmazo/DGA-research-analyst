@@ -14,18 +14,24 @@ type Props = {
 export function Shell({ user, build }: Props) {
   return (
     <div className={styles.shell}>
-      <Topbar user={user} build={build} />
-      <MarketRibbon />
+      <div data-print="hide">
+        <Topbar user={user} build={build} />
+      </div>
+      <div data-print="hide">
+        <MarketRibbon />
+      </div>
       <main className={styles.main}>
         <div className={styles.inner}>
           <Outlet />
         </div>
       </main>
-      <footer className={styles.footer}>
+      <footer className={styles.footer} data-print="hide">
         <span>DGA Capital · GP Terminal (React)</span>
         {build && <span className={styles.build}>{build}</span>}
       </footer>
-      <SupportFab />
+      <div data-print="hide">
+        <SupportFab />
+      </div>
       <AnalysisSceneHost />
     </div>
   )

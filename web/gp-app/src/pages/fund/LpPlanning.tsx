@@ -75,6 +75,23 @@ function nid(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 12)
 }
 
+function printPlanning() {
+  document.querySelectorAll('[data-planning-print]').forEach((n) => n.remove())
+  const style = document.createElement('style')
+  style.setAttribute('data-planning-print', '1')
+  style.textContent =
+    '@page { size: landscape letter; margin: 0.32in; }'
+  document.head.appendChild(style)
+  document.body.classList.add('dga-print-planning')
+  const done = () => {
+    document.body.classList.remove('dga-print-planning')
+    style.remove()
+    window.removeEventListener('afterprint', done)
+  }
+  window.addEventListener('afterprint', done)
+  window.setTimeout(() => window.print(), 50)
+}
+
 function parseNum(raw: string): number | null {
   const t = raw.trim().replace(/[$,%\s]/g, '').replace(/^\((.+)\)$/, '-$1')
   if (!t) return null
@@ -544,7 +561,7 @@ export function LpPlanning() {
               Show hidden ({hiddenCount})
             </label>
           )}
-          <Button size="sm" variant="secondary" onClick={() => window.print()}>
+          <Button size="sm" variant="secondary" onClick={() => printPlanning()}>
             Print
           </Button>
           <Button

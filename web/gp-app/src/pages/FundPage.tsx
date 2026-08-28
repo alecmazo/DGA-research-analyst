@@ -161,7 +161,12 @@ export function FundPage() {
             </p>
           )}
         </div>
-        <div className={styles.subtabs} role="tablist" aria-label="Account type">
+        <div
+          className={styles.subtabs}
+          role="tablist"
+          aria-label="Account type"
+          data-print="hide"
+        >
           <button
             type="button"
             role="tab"

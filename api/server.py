@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui529-20260828-pnl-tax-vs-ytd"
+WEB_BUILD_VERSION = "ui530-20260828-planning-print-landscape"
 
 
 @app.get("/api/build")
