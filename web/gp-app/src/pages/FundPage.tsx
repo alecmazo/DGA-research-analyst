@@ -154,11 +154,12 @@ export function FundPage() {
         <div>
           <p className={page.kicker}>Capital base</p>
           <h1 className={page.h1}>Accounts</h1>
-          <p className={page.sub}>
-            {sub === 'plan'
-              ? 'GP-only household snapshot for one Settings LP — full assets, liabilities, and the annual P&L the books need to generate.'
-              : 'Managed accounts and LP funds — NAV, capital, and performance. Open a row for holdings, waterfall, attribution, and exports.'}
-          </p>
+          {sub !== 'plan' && (
+            <p className={page.sub}>
+              Managed accounts and LP funds — NAV, capital, and performance. Open a
+              row for holdings, waterfall, attribution, and exports.
+            </p>
+          )}
         </div>
         <div className={styles.subtabs} role="tablist" aria-label="Account type">
           <button
