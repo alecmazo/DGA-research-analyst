@@ -218,6 +218,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui518 | Grok/Claude 15s loops; Print on Analyst/Strategist; Claude Strategist thinking off (~$1 not $5) |
 | ui519 | PDF/print tables sized from content; Strategist PDF Account strip (no prompt dump) |
 | ui547 | Accounts Planning: Tax info YTD (SnapTrade activity rollup); Print removed; morning sync writes `snaptrade_tax_ytd` |
+| ui548 | SUP_20260828_9d392054 — bind SnapTrade tax YTD helpers on lp_planning.mount so Tax info YTD is not 503 |
 | ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
 | ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
@@ -296,4 +297,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-28 · Agent: Grok Build · Live: `ui547-20260828-tax-info-ytd` · Next: `ui548-YYYYMMDD-slug`*
+*Last updated: 2026-08-28 · Agent: Grok Build · Live: `ui548-20260828-tax-ytd-mount` · Next: `ui549-YYYYMMDD-slug`*

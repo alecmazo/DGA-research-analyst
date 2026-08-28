@@ -46,6 +46,8 @@ def mount(ns: dict) -> None:
         "_send_email_with_pdf_attachment",
         "_valid_email_addr",
         "_content_disposition",
+        "_snaptrade_refresh_tax_ytd",
+        "_snaptrade_tax_ytd_for_funds",
     ):
         if key in ns:
             setattr(B, key, ns[key])
