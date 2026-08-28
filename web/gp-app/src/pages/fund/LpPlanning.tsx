@@ -43,6 +43,7 @@ type Computed = {
   other_income: number
   pnl_estimate: number | null
   pnl_actual: number | null
+  ytd_performance: number | null
   capital_gains: number | null
   annual_expenses: number
   required_generation: number
@@ -119,18 +120,26 @@ function rowCapitalGains(r: PlanRow): number | null {
 }
 
 function rowPnlEst(r: PlanRow): number | null {
-  if (r.section === 'long_term') return null
+  if (r.section === 'long_term' || r.section === 'liability') return null
   if (r.section === 'income') return rowAmount(r)
   const y = rowYield(r)
   if (y == null) return null
   return rowAmount(r) * (y / 100)
 }
 
-function rowPnlAct(r: PlanRow): number | null {
-  if (r.section === 'long_term') return null
-  if (r.section === 'income') return rowAmount(r)
+/** Mark-to-market YTD (unrealized + dividends). Not a tax event. */
+function rowYtdPerf(r: PlanRow): number | null {
+  if (r.section === 'long_term' || r.section === 'liability' || r.section === 'income')
+    return null
   if (r.source !== 'manual') return r.pnl_actual_live ?? null
-  return r.pnl_actual
+  return null
+}
+
+/** Taxable P&L actual = realized gains. IRA/Roth/401k are N/A. */
+function rowTaxablePnl(r: PlanRow): number | null {
+  if (r.section === 'liability') return null
+  if (r.section === 'income') return rowAmount(r)
+  return rowCapitalGains(r)
 }
 
 function compute(rows: PlanRow[], expenses: number): Computed {
@@ -162,12 +171,12 @@ function compute(rows: PlanRow[], expenses: number): Computed {
       invEst += est
       hasEst = true
     }
-    const act = rowPnlAct(r)
-    if (act != null) {
-      invAct += act
+    const ytd = rowYtdPerf(r)
+    if (ytd != null) {
+      invAct += ytd
       hasAct = true
     }
-    const cg = rowCapitalGains(r)
+    const cg = rowTaxablePnl(r)
     if (cg != null) {
       capGains += cg
       hasCap = true
@@ -182,7 +191,8 @@ function compute(rows: PlanRow[], expenses: number): Computed {
     investable,
     other_income: income,
     pnl_estimate: hasEst ? invEst : null,
-    pnl_actual: hasAct ? invAct : null,
+    pnl_actual: hasCap ? capGains : null,
+    ytd_performance: hasAct ? invAct : null,
     capital_gains: hasCap ? capGains : null,
     annual_expenses: expenses,
     required_generation: required,
@@ -595,18 +605,17 @@ export function LpPlanning() {
               </div>
             </div>
             <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>Actual YTD / est.</div>
+              <div className={styles.kpiLabel}>YTD performance</div>
               <div className={styles.kpiVal}>
-                {totals.pnl_actual != null
-                  ? fmtUsd(totals.pnl_actual)
+                {totals.ytd_performance != null
+                  ? fmtUsd(totals.ytd_performance)
                   : totals.pnl_estimate != null
                     ? fmtUsd(totals.pnl_estimate)
                     : '—'}
               </div>
               <div className={styles.kpiHint}>
-                {totals.pnl_actual != null
-                  ? `Estimate ${fmtUsd(totals.pnl_estimate)}`
-                  : 'Set yield % or wait for SMA YTD'}
+                Mark-to-market + dividends · taxable P&amp;L{' '}
+                {fmtUsd(totals.pnl_actual)}
               </div>
             </div>
             <div className={styles.kpi}>
@@ -656,7 +665,7 @@ export function LpPlanning() {
                   <col />
                   <col />
                   <col />
-                  <col className={styles.colRealized} />
+                  <col className={styles.colYtd} />
                   <col />
                 </colgroup>
                 <thead>
@@ -669,7 +678,11 @@ export function LpPlanning() {
                     <th>P&amp;L est</th>
                     <th>P&amp;L actual</th>
                     <th>Notes</th>
-                    <th className={styles.colRealized}>Realized Gains</th>
+                    <th className={styles.colYtd}>
+                      YTD performance
+                      <br />
+                      (unrealized)
+                    </th>
                     <th />
                   </tr>
                 </thead>
@@ -706,7 +719,7 @@ export function LpPlanning() {
                     </td>
                     <td className={styles.numAlign}>{fmtUsd(totals.pnl_actual)}</td>
                     <td />
-                    <td className={styles.numAlign}>{fmtUsd(totals.capital_gains)}</td>
+                    <td className={styles.numAlign}>{fmtUsd(totals.ytd_performance)}</td>
                     <td />
                   </tr>
                   <tr className={styles.tot}>
@@ -793,12 +806,8 @@ function SectionBlock(props: {
               : r.source === 'fund'
                 ? { cls: `${styles.badge} ${styles.badgeFund}`, text: 'FUND' }
                 : null
-        const act =
-          r.section === 'income'
-            ? rowAmount(r)
-            : linked
-              ? r.pnl_actual_live
-              : r.pnl_actual
+        const ytdPerf = rowYtdPerf(r)
+        const taxPnl = rowTaxablePnl(r)
         const est = rowPnlEst(r)
         return (
           <tr key={r.id} className={r.hidden ? styles.hiddenRow : undefined}>
@@ -861,21 +870,22 @@ function SectionBlock(props: {
               )}
             </td>
             <td className={`${styles.cellMuted} ${styles.numAlign}`}>
-              {r.section === 'long_term' || est == null ? '' : fmtUsd(est)}
+              {est == null ? '' : fmtUsd(est)}
             </td>
             <td className={styles.numAlign}>
-              {r.section === 'long_term' ? (
+              {r.section === 'liability' ? (
                 ''
-              ) : linked || r.section === 'income' ? (
-                <span className={styles.cellMuted} style={{ whiteSpace: 'nowrap' }}>
-                  {act == null ? '' : fmtUsd(act)}
-                  {r.ytd_pct != null ? ` (${fmtPct(r.ytd_pct)} YTD)` : ''}
+              ) : r.section === 'income' ? (
+                <span className={styles.cellMuted}>{fmtUsd(taxPnl)}</span>
+              ) : isIraRow(r) ? (
+                <span className={styles.cellMuted} title="IRA/Roth — not a taxable event">
+                  N/A
                 </span>
               ) : (
                 <NumCell
-                  value={r.pnl_actual}
-                  onChange={(v) => props.onPatch(r.id, { pnl_actual: v })}
-                  placeholder="actual"
+                  value={taxPnl}
+                  onChange={(v) => props.onPatch(r.id, { capital_gains: v })}
+                  placeholder="taxable"
                 />
               )}
             </td>
@@ -887,16 +897,13 @@ function SectionBlock(props: {
               />
             </td>
             <td className={styles.numAlign}>
-              {r.section === 'income' || r.section === 'liability' ? (
+              {ytdPerf == null ? (
                 ''
-              ) : isIraRow(r) ? (
-                <span className={styles.cellMuted}>N/A</span>
               ) : (
-                <NumCell
-                  value={rowCapitalGains(r)}
-                  onChange={(v) => props.onPatch(r.id, { capital_gains: v })}
-                  placeholder="gains"
-                />
+                <span className={styles.cellMuted} style={{ whiteSpace: 'nowrap' }}>
+                  {fmtUsd(ytdPerf)}
+                  {r.ytd_pct != null ? ` (${fmtPct(r.ytd_pct)} YTD)` : ''}
+                </span>
               )}
             </td>
             <td>

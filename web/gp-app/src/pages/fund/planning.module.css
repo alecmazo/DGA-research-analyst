@@ -239,8 +239,13 @@
   width: 72px;
 }
 
-.colRealized {
-  width: 118px;
+.colYtd {
+  width: 150px;
+}
+
+.table th.colYtd {
+  white-space: normal;
+  line-height: 1.2;
 }
 
 .table td {
