@@ -203,6 +203,61 @@ def _assignment_belongs_elsewhere(assigned: str, owner: dict, others: list[dict]
     return False
 
 
+def _name_initials(name: str) -> str:
+    return "".join(t[0] for t in _tokens(name) if t)[:4]
+
+
+def _resolve_fund_lp(candidates: list[dict], alias: str, user_name: str,
+                     claimed: set[str]) -> dict | None:
+    """Map a Settings user onto a fund LP legal_name + commitment.
+
+    Empty aliases (Viktoriya on Fund I/III) used to miss VK and leave the
+    planning sheet at $0. Exact alias still wins; otherwise initials, then
+    the unique unclaimed leftover LP in that fund.
+    """
+    if not candidates:
+        return None
+    alias_l = (alias or "").strip().lower()
+    name_l = (user_name or "").strip().lower()
+    claimed_l = {str(x).strip().lower() for x in (claimed or set()) if x}
+
+    def one(hits):
+        return hits[0] if len(hits) == 1 else None
+
+    if alias_l:
+        hits = [c for c in candidates
+                if (c.get("legal_name") or "").strip().lower() == alias_l]
+        if hits:
+            return hits[0]
+    if name_l:
+        hits = [c for c in candidates
+                if (c.get("legal_name") or "").strip().lower() == name_l]
+        if hits:
+            return hits[0]
+    ini = _name_initials(user_name)
+    if len(ini) >= 2:
+        hit = one([c for c in candidates
+                   if (c.get("legal_name") or "").strip().lower() == ini])
+        if hit:
+            return hit
+    leftover = [
+        c for c in candidates
+        if (c.get("legal_name") or "").strip().lower() not in claimed_l
+    ]
+    if len(leftover) == 1:
+        return leftover[0]
+    toks = _tokens(user_name)
+    if toks:
+        first = toks[0][0]
+        hit = one([
+            c for c in leftover
+            if (c.get("legal_name") or "").strip().lower()[:1] == first
+        ])
+        if hit:
+            return hit
+    return None
+
+
 def _score_assigned_name(assigned: str, fund: dict) -> int:
     """Score how well a Settings assignment name matches a fund row.
 
@@ -642,44 +697,61 @@ def _live_books(user: dict) -> dict:
                     conn.rollback()
 
             user_name = (user.get("name") or "").strip()
+            lps_by_fid: dict[str, list[dict]] = {}
+            if fund_fids:
+                try:
+                    cur.execute(
+                        """
+                        SELECT l.fund_id::text AS fid,
+                               l.legal_name,
+                               COALESCE(SUM(c.commitment_amount), 0) AS commitment
+                          FROM lps l
+                          LEFT JOIN commitments c
+                            ON c.lp_id = l.id AND c.superseded_by IS NULL
+                         WHERE l.fund_id::text = ANY(%s)
+                           AND COALESCE(l.status, 'active') = 'active'
+                         GROUP BY l.fund_id, l.legal_name
+                        """,
+                        (fund_fids,),
+                    )
+                    for r in cur.fetchall():
+                        lps_by_fid.setdefault(str(r["fid"]), []).append({
+                            "legal_name": r.get("legal_name") or "",
+                            "commitment": float(r["commitment"] or 0),
+                        })
+                except Exception:
+                    conn.rollback()
+
+            claimed_by_fund: dict[str, set[str]] = {}
+            oid = str(user.get("lp_id") or "")
+            for u in roster:
+                if str(u.get("lp_id") or "") == oid:
+                    continue
+                fm = u.get("fund_memberships") or {}
+                if not isinstance(fm, dict):
+                    continue
+                for k, v in fm.items():
+                    a = str(v or "").strip()
+                    if a:
+                        claimed_by_fund.setdefault(str(k).strip().lower(), set()).add(a.lower())
+
             for f in fund_rows:
                 fid = str(f["id"])
                 fname = f.get("name") or ""
-                alias = (
+                alias = str(
                     memberships.get(fname)
                     or memberships.get(fname.upper())
                     or memberships.get(fname.lower())
-                    or user_name
                     or ""
+                ).strip()
+                picked = _resolve_fund_lp(
+                    lps_by_fid.get(fid) or [],
+                    alias,
+                    user_name,
+                    claimed_by_fund.get(fname.strip().lower()) or set(),
                 )
-                alias = str(alias).strip()
-                commitment = 0.0
-                legal = alias
-                if alias:
-                    try:
-                        cur.execute(
-                            """
-                            SELECT l.legal_name,
-                                   COALESCE(c.commitment, 0) AS commitment
-                              FROM lps l
-                              LEFT JOIN (
-                                  SELECT lp_id, SUM(commitment_amount) AS commitment
-                                    FROM commitments
-                                   WHERE superseded_by IS NULL
-                                   GROUP BY lp_id
-                              ) c ON c.lp_id = l.id
-                             WHERE l.fund_id::text = %s
-                               AND LOWER(TRIM(l.legal_name)) = %s
-                             LIMIT 1
-                            """,
-                            (fid, alias.lower()),
-                        )
-                        row = cur.fetchone()
-                        if row:
-                            commitment = float(row["commitment"] or 0)
-                            legal = row["legal_name"] or alias
-                    except Exception:
-                        conn.rollback()
+                commitment = float((picked or {}).get("commitment") or 0)
+                legal = ((picked or {}).get("legal_name") or alias or user_name or "").strip()
 
                 snap = snaps.get(fid) or {}
                 market = _f(mkt.get(fid), 0) or 0.0
