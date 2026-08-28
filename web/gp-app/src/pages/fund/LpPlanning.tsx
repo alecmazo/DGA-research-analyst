@@ -55,11 +55,11 @@ type RosterLp = {
   has_snapshot?: boolean
 }
 
-const SECTIONS: { key: Section; label: string; cls: string }[] = [
-  { key: 'current', label: 'Current assets', cls: styles.secCurrent },
-  { key: 'long_term', label: 'Long-term assets', cls: styles.secLong },
-  { key: 'liability', label: 'Liabilities', cls: styles.secLiab },
-  { key: 'income', label: 'Other annual income', cls: styles.secInc },
+const SECTIONS: { key: Section; label: string; add: string; cls: string }[] = [
+  { key: 'current', label: 'Current assets', add: '+ Add asset', cls: styles.secCurrent },
+  { key: 'long_term', label: 'Long-term assets', add: '+ Add property', cls: styles.secLong },
+  { key: 'liability', label: 'Liabilities', add: '+ Add liability', cls: styles.secLiab },
+  { key: 'income', label: 'Other annual income', add: '+ Add income', cls: styles.secInc },
 ]
 
 const LS_KEY = 'dga.lpPlanning.lpId'
@@ -203,6 +203,7 @@ export function LpPlanning() {
   const [dirty, setDirty] = useState(false)
   const [showHidden, setShowHidden] = useState(false)
   const [seeded, setSeeded] = useState(false)
+  const [unmatched, setUnmatched] = useState<string[]>([])
 
   const loadRoster = useCallback(async () => {
     const d = await api<{ lps?: RosterLp[] }>('/api/v2/gp/lp-planning')
@@ -229,6 +230,7 @@ export function LpPlanning() {
           rows?: PlanRow[]
           seeded?: boolean
         }
+        live?: { unmatched_accounts?: string[] }
       }>(`/api/v2/gp/lp-planning/${encodeURIComponent(id)}`)
       const s = d.snapshot || {}
       setTitle(s.title || '')
@@ -237,6 +239,7 @@ export function LpPlanning() {
       setExpenses(s.annual_expenses ?? 0)
       setRows(s.rows || [])
       setSeeded(Boolean(s.seeded))
+      setUnmatched(d.live?.unmatched_accounts || [])
       setDirty(false)
       setStatus('')
     } catch (e) {
@@ -289,29 +292,32 @@ export function LpPlanning() {
   }
 
   const addRow = (section: Section) => {
-    const labels: Record<Section, string> = {
-      current: 'New asset',
-      long_term: 'Property / illiquid',
-      liability: 'Liability',
-      income: 'Income source',
-    }
-    mark((rs) => [
-      ...rs,
-      {
-        id: nid(),
-        section,
-        label: labels[section],
-        amount: null,
-        yield_pct: null,
-        pnl_actual: null,
-        notes: '',
-        include_in_investments: section === 'current',
-        source: 'manual',
-        link_id: null,
-        hidden: false,
-        amount_override: null,
-      },
-    ])
+    mark((rs) => {
+      const n = rs.filter((r) => r.section === section && !r.hidden).length
+      const labels: Record<Section, string> = {
+        current: n ? `Other asset ${n}` : 'Other asset',
+        long_term: n ? `Property ${n + 1} (FMV)` : 'Real estate (FMV)',
+        liability: n ? `Liability ${n + 1}` : 'Mortgage / property debt',
+        income: n ? `Income source ${n + 1}` : 'Social Security (annual)',
+      }
+      return [
+        ...rs,
+        {
+          id: nid(),
+          section,
+          label: labels[section],
+          amount: null,
+          yield_pct: null,
+          pnl_actual: null,
+          notes: '',
+          include_in_investments: section === 'current',
+          source: 'manual' as const,
+          link_id: null,
+          hidden: false,
+          amount_override: null,
+        },
+      ]
+    })
   }
 
   const removeRow = (r: PlanRow) => {
@@ -501,8 +507,17 @@ export function LpPlanning() {
       {seeded && (
         <p className={styles.status}>
           Starter lines added — edit amounts or delete anything you don’t need.
-          Linked SMA / fund rows stay in sync with Settings assignments.
+          Every Settings SMA should appear under Current assets. Use{' '}
+          <strong>+ Add property</strong> for each real-estate line (FMV here,
+          mortgage under Liabilities).
         </p>
+      )}
+      {unmatched.length > 0 && (
+        <div className={`${styles.callout} ${styles.calloutNeed}`}>
+          Settings names with no matching SMA book:{' '}
+          {unmatched.join(', ')}. Check the account name in Settings, or keep the
+          line and type an amount.
+        </div>
       )}
 
       {!lpId ? (
@@ -684,7 +699,7 @@ export function LpPlanning() {
 }
 
 function SectionBlock(props: {
-  sec: { key: Section; label: string; cls: string }
+  sec: { key: Section; label: string; add: string; cls: string }
   rows: PlanRow[]
   subtotal: number
   pctTot: (r: PlanRow) => number | null
@@ -702,8 +717,13 @@ function SectionBlock(props: {
             {fmtUsd(props.subtotal)}
           </span>
           <button type="button" className={styles.secAdd} onClick={props.onAdd}>
-            + Add line
+            {props.sec.add}
           </button>
+          {props.sec.key === 'long_term' && (
+            <span style={{ fontWeight: 500, marginLeft: 8, textTransform: 'none', letterSpacing: 0 }}>
+              one line per property
+            </span>
+          )}
         </td>
       </tr>
       {props.rows.map((r) => {

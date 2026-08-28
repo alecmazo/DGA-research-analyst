@@ -263,18 +263,21 @@
 
 .secAdd {
   margin-left: 10px;
-  border: none;
-  background: transparent;
+  border: 1px solid rgba(91, 184, 212, 0.35);
+  background: var(--bg-surface);
   color: var(--brand-700);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   text-transform: none;
   letter-spacing: 0;
+  border-radius: 999px;
+  padding: 2px 10px;
 }
 
 .secAdd:hover {
-  text-decoration: underline;
+  background: var(--brand-50);
+  border-color: var(--brand-400);
 }
 
 .line {

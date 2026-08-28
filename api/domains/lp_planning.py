@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -165,6 +166,106 @@ def _lp_user(lp_id: str) -> dict:
     return user
 
 
+def _tokens(s: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (s or "").lower())
+
+
+def _score_assigned_name(assigned: str, fund: dict) -> int:
+    """Score how well a Settings assignment name matches a fund row.
+
+    Settings historically stored nicknames that later diverged from funds.name
+    (e.g. "Anatoly Ind" vs "Anat Defensive"). Exact name still wins; otherwise
+    first-token stems and whole-token hits, never a generic substring steal.
+    """
+    a = (assigned or "").strip().lower()
+    name = (fund.get("name") or "").strip().lower()
+    short = (fund.get("short_name") or "").strip().lower()
+    if not a:
+        return 0
+    if a == name:
+        return 1000
+    if short and a == short:
+        return 900
+    if len(a) >= 5 and len(name) >= 5 and (a.startswith(name) or name.startswith(a)):
+        return 800
+    at = _tokens(assigned)
+    ft = _tokens(name) + _tokens(short)
+    if not at or not ft:
+        return 0
+    score = 0
+    a0, f0 = at[0], ft[0]
+    if a0 == f0:
+        score += 500 + min(len(a0), 12)
+    elif min(len(a0), len(f0)) >= 3 and (a0.startswith(f0) or f0.startswith(a0)):
+        score += 400 + min(len(a0), len(f0), 10)
+    used = {f0} if score else set()
+    for ta in at[1:]:
+        for tb in ft:
+            if tb in used:
+                continue
+            if ta == tb and len(ta) >= 2:
+                score += 80
+                used.add(tb)
+                break
+            if min(len(ta), len(tb)) >= 4 and (ta.startswith(tb) or tb.startswith(ta)):
+                score += 40
+                used.add(tb)
+                break
+    # Fund name is an exact token of the assignment ("Alec Ind" → "Ind")
+    if name and name in at:
+        score = max(score, 350)
+    return score
+
+
+def _pick_assigned_accounts(assigned: list[str], funds: list[dict]) -> tuple[list[dict], list[str]]:
+    """Bind exact Settings names first, then fuzzy-match leftovers.
+
+    Otherwise "Anatoly Ind" would steal "Anatoly IRA" via the shared first token
+    and leave the real defensive SMA unmatched.
+    """
+    remaining = list(funds)
+    picked: list[dict] = []
+
+    def take(name: str, fund: dict) -> None:
+        row = dict(fund)
+        row["assigned_as"] = name
+        picked.append(row)
+        bid = str(fund.get("id"))
+        remaining[:] = [f for f in remaining if str(f.get("id")) != bid]
+
+    pending: list[str] = []
+    for name in assigned:
+        a = name.strip().lower()
+        hit = next(
+            (
+                f
+                for f in remaining
+                if (f.get("name") or "").strip().lower() == a
+                or (f.get("short_name") or "").strip().lower() == a
+            ),
+            None,
+        )
+        if hit:
+            take(name, hit)
+        else:
+            pending.append(name)
+
+    unmatched: list[str] = []
+    for name in pending:
+        scored = [(_score_assigned_name(name, f), f) for f in remaining]
+        scored = [x for x in scored if x[0] >= 40]
+        scored.sort(key=lambda x: -x[0])
+        if not scored:
+            unmatched.append(name)
+            continue
+        unique = len(scored) == 1 or scored[0][0] >= scored[1][0] + 30
+        if unique and scored[0][0] >= 40:
+            take(name, scored[0][1])
+        else:
+            unmatched.append(name)
+    return picked, unmatched
+
+
 def _pnl_from_ytd(nav, ytd_pct, beg, deps, wdrs):
     nav = _f(nav)
     beg = _f(beg)
@@ -180,7 +281,7 @@ def _pnl_from_ytd(nav, ytd_pct, beg, deps, wdrs):
 
 def _live_books(user: dict) -> dict:
     """Resolve this LP's managed NAVs and fund stakes."""
-    out = {"managed": [], "funds": [], "warnings": []}
+    out = {"managed": [], "funds": [], "unmatched_accounts": [], "warnings": []}
     if not getattr(B, "_PSYCOPG2_OK", False) or not os.environ.get("DATABASE_URL"):
         out["warnings"].append("database unavailable")
         return out
@@ -194,18 +295,24 @@ def _live_books(user: dict) -> dict:
     try:
         with B._fund_conn() as conn, conn.cursor(cursor_factory=B._RealDictCursor) as cur:
             acct_rows = []
+            unmatched_accts: list[str] = []
             if acct_names:
                 cur.execute(
                     """
                     SELECT id, name, short_name
                       FROM funds
                      WHERE fund_type = 'managed_account'
-                       AND LOWER(name) = ANY(%s)
                      ORDER BY name
-                    """,
-                    ([n.lower() for n in acct_names],),
+                    """
                 )
-                acct_rows = [dict(r) for r in cur.fetchall()]
+                acct_rows, unmatched_accts = _pick_assigned_accounts(
+                    acct_names, [dict(r) for r in cur.fetchall()]
+                )
+                out["unmatched_accounts"] = unmatched_accts
+                if unmatched_accts:
+                    out["warnings"].append(
+                        "Settings names with no SMA book: " + ", ".join(unmatched_accts)
+                    )
 
             fund_rows = []
             if fund_names:
@@ -293,10 +400,12 @@ def _live_books(user: dict) -> dict:
                     d = snap["as_of_date"]
                     as_of = d.isoformat() if hasattr(d, "isoformat") else str(d)
 
+                assigned_as = a.get("assigned_as") or a.get("name") or ""
                 out["managed"].append({
                     "fund_id": fid,
                     "name": a.get("name") or "",
                     "short_name": a.get("short_name") or "",
+                    "assigned_as": assigned_as,
                     "nav": nav,
                     "ytd_pct": ytd_pct,
                     "pnl_ytd": _pnl_from_ytd(nav, ytd_pct, beg, deps, wdrs),
@@ -570,20 +679,27 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
         key = ("managed", fid)
         existing = by_link.get(key)
         extra = _attach_managed(acct)
+        assigned = (acct.get("assigned_as") or "").strip()
+        book = (acct.get("name") or "").strip()
+        note = "Linked SMA"
+        if assigned and book and assigned.lower() != book.lower():
+            note = f"Linked SMA · Settings “{assigned}”"
         if existing:
             existing.update(extra)
             if not existing.get("label"):
-                existing["label"] = acct.get("name") or existing["label"]
+                existing["label"] = book or existing["label"]
+            if (existing.get("notes") or "") in ("", "Linked SMA"):
+                existing["notes"] = note
         else:
             row = _blank_row(
                 "current",
-                acct.get("name") or "Managed account",
+                book or assigned or "Managed account",
                 source="managed",
                 link_id=fid,
                 include_in_investments=True,
             )
             row.update(extra)
-            row["notes"] = "Linked SMA"
+            row["notes"] = note
             new_live.append(row)
             by_link[key] = row
 
@@ -618,9 +734,30 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
             new_live.append(row)
             by_link[key] = row
 
+    for name in live.get("unmatched_accounts") or []:
+        key = ("managed", "unmatched:" + name.lower())
+        if key in by_link:
+            by_link[key]["stale"] = True
+            continue
+        row = _blank_row(
+            "current",
+            name,
+            source="managed",
+            link_id="unmatched:" + name.lower(),
+            include_in_investments=True,
+        )
+        row["stale"] = True
+        row["notes"] = "Assigned in Settings — no matching SMA book"
+        new_live.append(row)
+        by_link[key] = row
+
     rows = new_live + rows
     live_keys = {("managed", str(a.get("fund_id"))) for a in (live.get("managed") or [])}
     live_keys |= {("fund", str(f.get("fund_id"))) for f in (live.get("funds") or [])}
+    live_keys |= {
+        ("managed", "unmatched:" + str(n).lower())
+        for n in (live.get("unmatched_accounts") or [])
+    }
     kept = []
     for r in rows:
         src = r.get("source")
