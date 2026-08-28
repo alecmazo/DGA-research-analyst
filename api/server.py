@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui546-20260828-lp-drop-pulse"
+WEB_BUILD_VERSION = "ui547-20260828-tax-info-ytd"
 
 
 @app.get("/api/build")
@@ -35063,6 +35063,32 @@ def _ensure_snaptrade_tables():
                 )""")
             cur.execute("CREATE INDEX IF NOT EXISTS snaptrade_activities_acct_idx "
                         "ON snaptrade_activities(account_id, trade_date)")
+            # Calendar-YTD tax-like rollup from activities. SnapTrade has no 1099
+            # endpoint — this is dividends / interest / fees / withholdings /
+            # sell proceeds, rewritten each morning after activity ingest.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS snaptrade_tax_ytd (
+                    account_id            TEXT NOT NULL,
+                    year                  INT  NOT NULL,
+                    dividends             NUMERIC(20,4) DEFAULT 0,
+                    substitute_dividends  NUMERIC(20,4) DEFAULT 0,
+                    stock_dividends       NUMERIC(20,4) DEFAULT 0,
+                    interest              NUMERIC(20,4) DEFAULT 0,
+                    fees                  NUMERIC(20,4) DEFAULT 0,
+                    tax_withheld          NUMERIC(20,4) DEFAULT 0,
+                    sell_proceeds         NUMERIC(20,4) DEFAULT 0,
+                    rei                   NUMERIC(20,4) DEFAULT 0,
+                    return_of_capital     NUMERIC(20,4) DEFAULT 0,
+                    income_total          NUMERIC(20,4) DEFAULT 0,
+                    by_symbol             JSONB DEFAULT '[]'::jsonb,
+                    by_month              JSONB DEFAULT '[]'::jsonb,
+                    activity_count        INT DEFAULT 0,
+                    line_count            INT DEFAULT 0,
+                    synced_at             TIMESTAMPTZ DEFAULT now(),
+                    PRIMARY KEY (account_id, year)
+                )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS snaptrade_tax_ytd_year_idx "
+                        "ON snaptrade_tax_ytd(year)")
             # Daily account-value snapshots — the raw series behind the automatic
             # balance/returns path (one row per account per Pacific day; the daily
             # scheduler upserts so re-syncs just refresh that day's value).
@@ -35669,6 +35695,27 @@ _SNAP_DIV_TYPES   = {"DIVIDEND", "CASH_DIVIDEND", "SUBSTITUTE_DIVIDEND", "STOCK_
 _SNAP_INT_TYPES   = {"INTEREST"}
 _SNAP_FEE_TYPES   = {"FEE", "MANAGEMENT_FEE", "ADMINISTRATIVE_FEE"}
 _SNAP_TAX_TYPES   = {"TAX"}
+_SNAP_REI_TYPES   = {"REI", "REINVESTMENT", "DRIP"}
+_SNAP_ROC_TYPES   = {"ROC", "RETURN_OF_CAPITAL"}
+# SnapTrade has no 1099 / realized-gain API. These buckets are the tax-like
+# cash we can honestly pull from daily activities (open tax_lots are unrealized).
+_SNAP_TAX_YTD_TYPE_BUCKET = {
+    "DIVIDEND": "dividends",
+    "CASH_DIVIDEND": "dividends",
+    "SUBSTITUTE_DIVIDEND": "substitute_dividends",
+    "STOCK_DIVIDEND": "stock_dividends",
+    "INTEREST": "interest",
+    "FEE": "fees",
+    "MANAGEMENT_FEE": "fees",
+    "ADMINISTRATIVE_FEE": "fees",
+    "TAX": "tax_withheld",
+    "SELL": "sell_proceeds",
+    "REI": "rei",
+    "REINVESTMENT": "rei",
+    "DRIP": "rei",
+    "ROC": "return_of_capital",
+    "RETURN_OF_CAPITAL": "return_of_capital",
+}
 
 
 def _snap_is_inkind_equity_insert(type_: str | None, units, amount,
@@ -37070,6 +37117,369 @@ def snaptrade_connect(request: Request):
     return {"ok": True, "redirect_uri": url}
 
 
+def _snaptrade_tax_ytd_bucket(type_: str | None, description: str | None = None,
+                              symbol: str | None = None) -> str | None:
+    """Map one SnapTrade activity to a tax-YTD bucket, or None to skip.
+
+    Money-market sweep buys/sells (SPAXX etc.) are not taxable sales.
+    """
+    t = (type_ or "").upper().strip()
+    d = (description or "").upper()
+    if t in _SNAP_SELL_TYPES and _snaptrade_cashlike(symbol or ""):
+        return None
+    if t in _SNAP_TAX_YTD_TYPE_BUCKET:
+        return _SNAP_TAX_YTD_TYPE_BUCKET[t]
+    if "RETURN OF CAPITAL" in d or "RETURN-OF-CAPITAL" in d:
+        return "return_of_capital"
+    if "WITHHOLD" in d and "TAX" in d:
+        return "tax_withheld"
+    return None
+
+
+def _snaptrade_tax_ytd_cash(bucket: str, amount, units, price, fee) -> float:
+    """Signed cash for income buckets; absolute for fees / tax / sell proceeds."""
+    try:
+        amt = float(amount) if amount is not None else 0.0
+    except (TypeError, ValueError):
+        amt = 0.0
+    try:
+        fee_n = float(fee) if fee is not None else 0.0
+    except (TypeError, ValueError):
+        fee_n = 0.0
+    if bucket in ("fees", "tax_withheld"):
+        if abs(amt) > 1e-9:
+            return abs(amt)
+        return abs(fee_n)
+    if bucket == "sell_proceeds":
+        if abs(amt) > 1e-9:
+            return abs(amt)
+        return _snap_activity_cash_value(units, price, amount)
+    return amt
+
+
+def _snaptrade_tax_ytd_empty() -> dict:
+    return {
+        "dividends": 0.0,
+        "substitute_dividends": 0.0,
+        "stock_dividends": 0.0,
+        "interest": 0.0,
+        "fees": 0.0,
+        "tax_withheld": 0.0,
+        "sell_proceeds": 0.0,
+        "rei": 0.0,
+        "return_of_capital": 0.0,
+        "income_total": 0.0,
+        "by_symbol": [],
+        "by_month": [],
+        "activity_count": 0,
+        "line_count": 0,
+        "lines": [],
+    }
+
+
+def _snaptrade_tax_ytd_accumulate(rows: list) -> dict[str, dict]:
+    """rows: dicts with account_id, trade_date, type, symbol, description,
+    units, price, amount, fee, activity_id. Returns per-account rollup."""
+    out: dict[str, dict] = {}
+    for r in rows:
+        aid = str(r.get("account_id") or "")
+        if not aid:
+            continue
+        rec = out.get(aid)
+        if rec is None:
+            rec = _snaptrade_tax_ytd_empty()
+            out[aid] = rec
+        rec["activity_count"] += 1
+        bucket = _snaptrade_tax_ytd_bucket(
+            r.get("type"), r.get("description"), r.get("symbol"))
+        if not bucket:
+            # Still fold explicit trade fees on skipped types (e.g. BUY).
+            try:
+                fee_n = abs(float(r.get("fee") or 0))
+            except (TypeError, ValueError):
+                fee_n = 0.0
+            if fee_n > 1e-9:
+                rec["fees"] += fee_n
+            continue
+        cash = _snaptrade_tax_ytd_cash(
+            bucket, r.get("amount"), r.get("units"), r.get("price"), r.get("fee"))
+        rec[bucket] = rec.get(bucket, 0.0) + cash
+        try:
+            fee_n = abs(float(r.get("fee") or 0))
+        except (TypeError, ValueError):
+            fee_n = 0.0
+        if fee_n > 1e-9 and bucket not in ("fees", "tax_withheld"):
+            rec["fees"] += fee_n
+        td = r.get("trade_date")
+        td_s = td.isoformat() if hasattr(td, "isoformat") else str(td or "")[:10]
+        month = td_s[:7] if len(td_s) >= 7 else ""
+        try:
+            units = float(r["units"]) if r.get("units") is not None else None
+        except (TypeError, ValueError):
+            units = None
+        try:
+            price = float(r["price"]) if r.get("price") is not None else None
+        except (TypeError, ValueError):
+            price = None
+        try:
+            amount = float(r["amount"]) if r.get("amount") is not None else None
+        except (TypeError, ValueError):
+            amount = None
+        rec["lines"].append({
+            "activity_id": r.get("activity_id"),
+            "date": td_s or None,
+            "type": (r.get("type") or "").upper() or None,
+            "bucket": bucket,
+            "symbol": r.get("symbol") or None,
+            "description": (r.get("description") or "")[:240] or None,
+            "units": units,
+            "price": price,
+            "amount": round(cash, 4),
+            "raw_amount": amount,
+            "fee": fee_n or None,
+        })
+        rec["line_count"] += 1
+        if bucket in ("dividends", "substitute_dividends", "stock_dividends",
+                      "interest", "return_of_capital", "rei"):
+            sym = (r.get("symbol") or "").strip().upper() or "(none)"
+            rec.setdefault("_sym", {}).setdefault(sym, {
+                "symbol": None if sym == "(none)" else sym,
+                "dividends": 0.0, "interest": 0.0, "other": 0.0, "count": 0,
+            })
+            rec["_sym"][sym]["count"] += 1
+            if bucket == "interest":
+                rec["_sym"][sym]["interest"] += cash
+            elif bucket in ("dividends", "substitute_dividends", "stock_dividends"):
+                rec["_sym"][sym]["dividends"] += cash
+            else:
+                rec["_sym"][sym]["other"] += cash
+        if month:
+            rec.setdefault("_mo", {}).setdefault(month, {
+                "month": month, "income": 0.0, "fees": 0.0,
+                "tax_withheld": 0.0, "sell_proceeds": 0.0,
+            })
+            if bucket in ("dividends", "substitute_dividends", "stock_dividends",
+                          "interest"):
+                rec["_mo"][month]["income"] += cash
+            elif bucket == "fees":
+                rec["_mo"][month]["fees"] += cash
+            elif bucket == "tax_withheld":
+                rec["_mo"][month]["tax_withheld"] += cash
+            elif bucket == "sell_proceeds":
+                rec["_mo"][month]["sell_proceeds"] += cash
+    for rec in out.values():
+        rec["income_total"] = (
+            rec["dividends"] + rec["substitute_dividends"]
+            + rec["stock_dividends"] + rec["interest"])
+        rec["by_symbol"] = sorted(
+            ({**v,
+              "dividends": round(v["dividends"], 2),
+              "interest": round(v["interest"], 2),
+              "other": round(v["other"], 2)}
+             for v in (rec.pop("_sym", {}) or {}).values()),
+            key=lambda x: -(abs(x["dividends"]) + abs(x["interest"]) + abs(x["other"])),
+        )[:40]
+        rec["by_month"] = sorted(
+            ({**v,
+              "income": round(v["income"], 2),
+              "fees": round(v["fees"], 2),
+              "tax_withheld": round(v["tax_withheld"], 2),
+              "sell_proceeds": round(v["sell_proceeds"], 2)}
+             for v in (rec.pop("_mo", {}) or {}).values()),
+            key=lambda x: x["month"],
+        )
+        for k in ("dividends", "substitute_dividends", "stock_dividends",
+                  "interest", "fees", "tax_withheld", "sell_proceeds", "rei",
+                  "return_of_capital", "income_total"):
+            rec[k] = round(float(rec.get(k) or 0), 2)
+        rec["lines"].sort(key=lambda x: (x.get("date") or "", x.get("activity_id") or ""),
+                          reverse=True)
+        rec["lines"] = rec["lines"][:2000]
+    return out
+
+
+def _snaptrade_tax_ytd_query_rows(cur, account_ids: list, year: int) -> list:
+    if not account_ids:
+        return []
+    jan1 = f"{int(year)}-01-01"
+    next_jan = f"{int(year) + 1}-01-01"
+    cur.execute(
+        """
+        SELECT activity_id, account_id, trade_date, type, symbol, description,
+               units, price, amount, fee
+          FROM snaptrade_activities
+         WHERE account_id = ANY(%s)
+           AND trade_date >= %s AND trade_date < %s
+         ORDER BY trade_date DESC, activity_id
+        """,
+        (list(account_ids), jan1, next_jan),
+    )
+    return [dict(r) for r in cur.fetchall()]
+
+
+def _snaptrade_refresh_tax_ytd(year: int | None = None) -> dict:
+    """Rewrite snaptrade_tax_ytd for the calendar year from ingested activities.
+
+    Called at the end of the morning SnapTrade sync. Not a 1099 — activity
+    rollup only. Returns {year, accounts, lines}.
+    """
+    _ensure_snaptrade_tables()
+    yr = int(year or datetime.utcnow().year)
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return {"year": yr, "accounts": 0, "lines": 0}
+    with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+        cur.execute(
+            "SELECT account_id FROM snaptrade_accounts "
+            "WHERE status='active' AND account_id NOT LIKE 'demo-%'"
+        )
+        ids = [str(r["account_id"]) for r in cur.fetchall() if r.get("account_id")]
+        rows = _snaptrade_tax_ytd_query_rows(cur, ids, yr)
+        rolled = _snaptrade_tax_ytd_accumulate(rows)
+        from psycopg2.extras import execute_values as _ev
+        payload = []
+        for aid in ids:
+            rec = rolled.get(aid) or _snaptrade_tax_ytd_empty()
+            payload.append((
+                aid, yr,
+                rec["dividends"], rec["substitute_dividends"], rec["stock_dividends"],
+                rec["interest"], rec["fees"], rec["tax_withheld"], rec["sell_proceeds"],
+                rec["rei"], rec["return_of_capital"], rec["income_total"],
+                json.dumps(rec["by_symbol"], default=str),
+                json.dumps(rec["by_month"], default=str),
+                rec["activity_count"], rec["line_count"],
+            ))
+        if payload:
+            _ev(cur, """
+                INSERT INTO snaptrade_tax_ytd (
+                    account_id, year, dividends, substitute_dividends, stock_dividends,
+                    interest, fees, tax_withheld, sell_proceeds, rei, return_of_capital,
+                    income_total, by_symbol, by_month, activity_count, line_count, synced_at)
+                VALUES %s
+                ON CONFLICT (account_id, year) DO UPDATE SET
+                    dividends=EXCLUDED.dividends,
+                    substitute_dividends=EXCLUDED.substitute_dividends,
+                    stock_dividends=EXCLUDED.stock_dividends,
+                    interest=EXCLUDED.interest,
+                    fees=EXCLUDED.fees,
+                    tax_withheld=EXCLUDED.tax_withheld,
+                    sell_proceeds=EXCLUDED.sell_proceeds,
+                    rei=EXCLUDED.rei,
+                    return_of_capital=EXCLUDED.return_of_capital,
+                    income_total=EXCLUDED.income_total,
+                    by_symbol=EXCLUDED.by_symbol,
+                    by_month=EXCLUDED.by_month,
+                    activity_count=EXCLUDED.activity_count,
+                    line_count=EXCLUDED.line_count,
+                    synced_at=now()
+            """, payload,
+                template="(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,now())")
+        conn.commit()
+    n_lines = sum((rolled.get(a) or {}).get("line_count", 0) for a in ids)
+    print(f"[snaptrade] tax YTD {yr}: {len(ids)} accounts, {n_lines} lines", flush=True)
+    return {"year": yr, "accounts": len(ids), "lines": n_lines}
+
+
+def _snaptrade_tax_ytd_for_funds(fund_ids: list, year: int | None = None) -> dict:
+    """Planning payload: tax-YTD rollup + line detail for SnapTrade accounts
+    assigned to these managed-account fund ids."""
+    yr = int(year or datetime.utcnow().year)
+    empty = {
+        "year": yr,
+        "disclaimer": (
+            "Not a 1099. SnapTrade does not export brokerage tax forms or "
+            "short/long-term realized gain. Figures are calendar-year cash "
+            "from Fidelity activity: dividends, interest, fees, tax withholdings, "
+            "and sell proceeds. IRA / Roth / 401k lines are not currently taxable."
+        ),
+        "accounts": [],
+        "totals": _snaptrade_tax_ytd_empty(),
+        "as_of": None,
+    }
+    empty["totals"].pop("lines", None)
+    empty["totals"].pop("by_symbol", None)
+    empty["totals"].pop("by_month", None)
+    fids = [str(x) for x in (fund_ids or []) if x]
+    if not fids or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return empty
+    try:
+        _ensure_snaptrade_tables()
+    except Exception:
+        pass
+    with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT account_id, account_name, brokerage_name, fund_id::text AS fund_id,
+                   account_mask, last_synced_at, total_value
+              FROM snaptrade_accounts
+             WHERE status='active'
+               AND COALESCE(hidden, FALSE) IS NOT TRUE
+               AND fund_id::text = ANY(%s)
+               AND account_id NOT LIKE 'demo-%'
+             ORDER BY account_name
+            """,
+            (fids,),
+        )
+        accts = [dict(r) for r in cur.fetchall()]
+        ids = [str(a["account_id"]) for a in accts]
+        rows = _snaptrade_tax_ytd_query_rows(cur, ids, yr)
+        cache = {}
+        if ids:
+            cur.execute(
+                """
+                SELECT account_id, synced_at, activity_count, line_count
+                  FROM snaptrade_tax_ytd
+                 WHERE year=%s AND account_id = ANY(%s)
+                """,
+                (yr, ids),
+            )
+            for r in cur.fetchall():
+                cache[str(r["account_id"])] = dict(r)
+    rolled = _snaptrade_tax_ytd_accumulate(rows)
+    accounts = []
+    tot = _snaptrade_tax_ytd_empty()
+    tot.pop("lines", None)
+    as_of = None
+    money_keys = ("dividends", "substitute_dividends", "stock_dividends",
+                  "interest", "fees", "tax_withheld", "sell_proceeds", "rei",
+                  "return_of_capital", "income_total")
+    for a in accts:
+        aid = str(a["account_id"])
+        rec = rolled.get(aid) or _snaptrade_tax_ytd_empty()
+        c = cache.get(aid) or {}
+        synced = c.get("synced_at") or a.get("last_synced_at")
+        if synced:
+            s = synced.isoformat() if hasattr(synced, "isoformat") else str(synced)
+            if as_of is None or s > as_of:
+                as_of = s
+        item = {
+            "account_id": aid,
+            "account_name": a.get("account_name") or "",
+            "account_mask": a.get("account_mask") or "",
+            "brokerage": a.get("brokerage_name") or "",
+            "fund_id": a.get("fund_id"),
+            "total_value": float(a["total_value"]) if a.get("total_value") is not None else None,
+            "synced_at": (synced.isoformat() if hasattr(synced, "isoformat") else str(synced))
+                         if synced else None,
+            "lines": rec.get("lines") or [],
+            "by_symbol": rec.get("by_symbol") or [],
+            "by_month": rec.get("by_month") or [],
+            "activity_count": rec.get("activity_count") or 0,
+            "line_count": rec.get("line_count") or 0,
+        }
+        for k in money_keys:
+            item[k] = rec.get(k) or 0.0
+            tot[k] = round((tot.get(k) or 0) + item[k], 2)
+        tot["activity_count"] += item["activity_count"]
+        tot["line_count"] += item["line_count"]
+        accounts.append(item)
+    tot.pop("by_symbol", None)
+    tot.pop("by_month", None)
+    empty["accounts"] = accounts
+    empty["totals"] = tot
+    empty["as_of"] = as_of
+    return empty
+
+
 def _snaptrade_run_sync() -> dict:
     """Pull holdings for all connected accounts, upsert them, and push assigned
     accounts' holdings into tax_lots. Request-free so both the /sync endpoint and
@@ -37273,9 +37683,10 @@ def _snaptrade_run_sync() -> dict:
     except Exception as e:
         errors.append({"stage": "activities", "error": _snaptrade_error_detail(e)})
 
+    tax_ytd = None
     try:
         _snaptrade_sync_stage("Rolling tax YTD from activities…")
-        _snaptrade_refresh_tax_ytd()
+        tax_ytd = _snaptrade_refresh_tax_ytd()
     except Exception as e:
         errors.append({"stage": "tax_ytd", "error": _snaptrade_error_detail(e)})
 
@@ -37400,7 +37811,8 @@ def _snaptrade_run_sync() -> dict:
         errors.append({"stage": "balance_history", "error": _snaptrade_error_detail(e)})
 
     return {"ok": True, "synced": out, "errors": errors, "lots_written": lots_written,
-            "activities": activities, "balance_history": balance_history}
+            "activities": activities, "balance_history": balance_history,
+            "tax_ytd": tax_ytd}
 
 
 # Single-slot sync job (one GP). A full sync legitimately takes minutes
@@ -39209,6 +39621,8 @@ try:
         "_send_email_with_pdf_attachment": _send_email_with_pdf_attachment,
         "_valid_email_addr": _valid_email_addr,
         "_content_disposition": _content_disposition,
+        "_snaptrade_refresh_tax_ytd": _snaptrade_refresh_tax_ytd,
+        "_snaptrade_tax_ytd_for_funds": _snaptrade_tax_ytd_for_funds,
     })
 except Exception as _plan_err:
     print(f"[boot] lp-planning domain mount failed: {_plan_err!s:.200}", flush=True)

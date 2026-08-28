@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
-import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { api, downloadAuth } from '@/lib/api'
 import { fmtPct, fmtUsd, fmtUsdSigned } from '@/lib/format'
 import styles from './planning.module.css'
@@ -73,25 +72,73 @@ const SECTIONS: { key: Section; label: string; add: string; cls: string }[] = [
 
 const LS_KEY = 'dga.lpPlanning.lpId'
 
+type TaxLine = {
+  activity_id?: string
+  date?: string | null
+  type?: string | null
+  bucket?: string | null
+  symbol?: string | null
+  description?: string | null
+  units?: number | null
+  price?: number | null
+  amount?: number | null
+  fee?: number | null
+}
+
+type TaxAccount = {
+  fund_id?: string | null
+  fund_name?: string
+  assigned_as?: string
+  account_id?: string | null
+  account_name?: string
+  brokerage?: string | null
+  ira?: boolean
+  realized_na?: boolean
+  missing?: boolean
+  dividends?: number
+  substitute_dividends?: number
+  stock_dividends?: number
+  interest?: number
+  fees?: number
+  tax_withheld?: number
+  sell_proceeds?: number
+  rei?: number
+  return_of_capital?: number
+  income_total?: number
+  taxable_income?: number | null
+  lines?: TaxLine[]
+  by_symbol?: { symbol?: string | null; dividends?: number; interest?: number; other?: number }[]
+  line_count?: number
+}
+
+type TaxYtd = {
+  year: number
+  as_of?: string | null
+  disclaimer?: string
+  totals: {
+    dividends?: number
+    substitute_dividends?: number
+    stock_dividends?: number
+    interest?: number
+    fees?: number
+    tax_withheld?: number
+    sell_proceeds?: number
+    rei?: number
+    return_of_capital?: number
+    income_total?: number
+    taxable_income?: number | null
+    line_count?: number
+  }
+  accounts: TaxAccount[]
+}
+
 function nid(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 12)
 }
 
-function printPlanning() {
-  document.querySelectorAll('[data-planning-print]').forEach((n) => n.remove())
-  const style = document.createElement('style')
-  style.setAttribute('data-planning-print', '1')
-  style.textContent =
-    '@page { size: landscape letter; margin: 0.32in; }'
-  document.head.appendChild(style)
-  document.body.classList.add('dga-print-planning')
-  const done = () => {
-    document.body.classList.remove('dga-print-planning')
-    style.remove()
-    window.removeEventListener('afterprint', done)
-  }
-  window.addEventListener('afterprint', done)
-  window.setTimeout(() => window.print(), 50)
+function moneyCls(n: number | null | undefined): string {
+  if (n == null || n === 0) return ''
+  return n > 0 ? styles.pos : styles.neg
 }
 
 function parseNum(raw: string): number | null {
@@ -293,6 +340,11 @@ export function LpPlanning() {
   const [mailBusy, setMailBusy] = useState(false)
   const [mailOpen, setMailOpen] = useState(false)
   const [mailTo, setMailTo] = useState('')
+  const [taxOpen, setTaxOpen] = useState(false)
+  const [taxBusy, setTaxBusy] = useState(false)
+  const [tax, setTax] = useState<TaxYtd | null>(null)
+  const [taxErr, setTaxErr] = useState<string | null>(null)
+  const [taxExpand, setTaxExpand] = useState<Record<string, boolean>>({})
 
   const loadRoster = useCallback(async () => {
     const d = await api<{ lps?: RosterLp[] }>('/api/v2/gp/lp-planning')
@@ -493,6 +545,31 @@ export function LpPlanning() {
     }
   }
 
+  const openTaxYtd = async () => {
+    if (!lpId) return
+    setTaxOpen(true)
+    setTaxBusy(true)
+    setTaxErr(null)
+    try {
+      const d = await api<TaxYtd>(
+        `/api/v2/gp/lp-planning/${encodeURIComponent(lpId)}/tax-ytd`,
+      )
+      setTax(d)
+      const expand: Record<string, boolean> = {}
+      const accts = d.accounts || []
+      accts.forEach((a, i) => {
+        const key = a.account_id || a.fund_id || String(i)
+        expand[key] = accts.length <= 4
+      })
+      setTaxExpand(expand)
+    } catch (e) {
+      setTaxErr(e instanceof Error ? e.message : 'Tax YTD failed')
+      setTax(null)
+    } finally {
+      setTaxBusy(false)
+    }
+  }
+
   const openMail = async () => {
     if (!lpId) return
     if (mailOpen) {
@@ -561,10 +638,6 @@ export function LpPlanning() {
 
   return (
     <div className={styles.wrap}>
-      <PrintLetterhead
-        doc="Planning snapshot"
-        meta={[selected?.name, title, asOf]}
-      />
       <div className={styles.toolbar}>
         <label className={styles.field}>
           <span className={styles.lbl}>Limited partner</span>
@@ -639,8 +712,13 @@ export function LpPlanning() {
               Show hidden ({hiddenCount})
             </label>
           )}
-          <Button size="sm" variant="secondary" onClick={() => printPlanning()}>
-            Print
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!lpId || taxBusy}
+            onClick={() => void openTaxYtd()}
+          >
+            {taxBusy ? 'Tax YTD…' : 'Tax info YTD'}
           </Button>
           <Button
             size="sm"
@@ -914,6 +992,234 @@ export function LpPlanning() {
           </label>
         </>
       )}
+
+      {taxOpen && (
+        <TaxYtdModal
+          name={selected?.name || lpId}
+          tax={tax}
+          busy={taxBusy}
+          err={taxErr}
+          expand={taxExpand}
+          onToggle={(key) =>
+            setTaxExpand((prev) => ({ ...prev, [key]: !prev[key] }))
+          }
+          onClose={() => setTaxOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function TaxYtdModal(props: {
+  name: string
+  tax: TaxYtd | null
+  busy: boolean
+  err: string | null
+  expand: Record<string, boolean>
+  onToggle: (key: string) => void
+  onClose: () => void
+}) {
+  const t = props.tax
+  const tot = t?.totals
+  return (
+    <div
+      className={styles.overlay}
+      role="presentation"
+      onClick={props.onClose}
+    >
+      <div
+        className={styles.taxModal}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Tax info YTD"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className={styles.taxHead}>
+          <div>
+            <h3>Tax info YTD</h3>
+            <p>
+              {props.name}
+              {t ? `  ·  ${t.year}` : ''}
+              {t?.as_of
+                ? `  ·  synced ${t.as_of.slice(0, 10)}`
+                : ''}
+            </p>
+          </div>
+          <button
+            type="button"
+            className={styles.modalClose}
+            onClick={props.onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </header>
+        {props.busy ? (
+          <Spinner label="Loading Fidelity tax YTD…" />
+        ) : props.err ? (
+          <div className={styles.callout}>{props.err}</div>
+        ) : !t ? (
+          <p className={styles.hint}>No tax YTD yet.</p>
+        ) : (
+          <>
+            <p className={styles.taxDisc}>{t.disclaimer}</p>
+            <div className={styles.taxKpis}>
+              <div className={styles.kpi}>
+                <div className={styles.kpiLabel}>Taxable income</div>
+                <div className={`${styles.kpiVal} ${moneyCls(tot?.taxable_income)}`}>
+                  {tot?.taxable_income == null ? 'N/A' : fmtUsd(tot.taxable_income, 0)}
+                </div>
+                <div className={styles.kpiHint}>Div + interest, excluding IRA</div>
+              </div>
+              <div className={styles.kpi}>
+                <div className={styles.kpiLabel}>Dividends</div>
+                <div className={`${styles.kpiVal} ${moneyCls(tot?.dividends)}`}>
+                  {fmtUsd(tot?.dividends ?? 0, 0)}
+                </div>
+                <div className={styles.kpiHint}>
+                  {tot?.substitute_dividends
+                    ? `incl. PIL ${fmtUsd(tot.substitute_dividends, 0)}`
+                    : 'Cash + stock + PIL'}
+                </div>
+              </div>
+              <div className={styles.kpi}>
+                <div className={styles.kpiLabel}>Interest</div>
+                <div className={`${styles.kpiVal} ${moneyCls(tot?.interest)}`}>
+                  {fmtUsd(tot?.interest ?? 0, 0)}
+                </div>
+              </div>
+              <div className={styles.kpi}>
+                <div className={styles.kpiLabel}>Fees / tax withheld</div>
+                <div className={styles.kpiVal}>
+                  {fmtUsd(tot?.fees ?? 0, 0)}
+                  <span className={styles.kpiHint}>
+                    {' '}
+                    / {fmtUsd(tot?.tax_withheld ?? 0, 0)}
+                  </span>
+                </div>
+              </div>
+              <div className={styles.kpi}>
+                <div className={styles.kpiLabel}>Sell proceeds</div>
+                <div className={styles.kpiVal}>
+                  {fmtUsd(tot?.sell_proceeds ?? 0, 0)}
+                </div>
+                <div className={styles.kpiHint}>Gross cash in — not gain vs cost</div>
+              </div>
+            </div>
+            {(t.accounts || []).map((a, i) => {
+              const key = a.account_id || a.fund_id || String(i)
+              const open = !!props.expand[key]
+              const title =
+                a.assigned_as || a.account_name || a.fund_name || 'Account'
+              return (
+                <section key={key} className={styles.taxAcct}>
+                  <button
+                    type="button"
+                    className={styles.taxAcctHead}
+                    onClick={() => props.onToggle(key)}
+                  >
+                    <span>
+                      {title}
+                      {a.ira ? (
+                        <span className={styles.badgeIra}>IRA · N/A</span>
+                      ) : null}
+                      {a.missing ? (
+                        <span className={styles.badgeMiss}>no SnapTrade</span>
+                      ) : null}
+                    </span>
+                    <span className={styles.taxAcctSum}>
+                      {a.ira
+                        ? 'Not currently taxable'
+                        : fmtUsd(a.income_total ?? 0, 0)}
+                      <span className={styles.chev}>{open ? '▾' : '▸'}</span>
+                    </span>
+                  </button>
+                  {open && (
+                    <div className={styles.taxAcctBody}>
+                      {a.missing ? (
+                        <p className={styles.hint}>
+                          This SMA is on the planning sheet but has no Fidelity
+                          activity through SnapTrade yet.
+                        </p>
+                      ) : (
+                        <>
+                          <div className={styles.taxMini}>
+                            <span>Div {fmtUsd(a.dividends ?? 0, 2)}</span>
+                            <span>Int {fmtUsd(a.interest ?? 0, 2)}</span>
+                            <span>Fees {fmtUsd(a.fees ?? 0, 2)}</span>
+                            <span>Tax {fmtUsd(a.tax_withheld ?? 0, 2)}</span>
+                            <span>Sells {fmtUsd(a.sell_proceeds ?? 0, 0)}</span>
+                            {(a.rei ?? 0) !== 0 && (
+                              <span>Reinvested {fmtUsd(a.rei ?? 0, 2)}</span>
+                            )}
+                            {(a.return_of_capital ?? 0) !== 0 && (
+                              <span>ROC {fmtUsd(a.return_of_capital ?? 0, 2)}</span>
+                            )}
+                          </div>
+                          {(a.by_symbol || []).length > 0 && (
+                            <p className={styles.taxSyms}>
+                              {(a.by_symbol || []).slice(0, 8).map((s) => (
+                                <span key={s.symbol || 'none'}>
+                                  {s.symbol || '—'}{' '}
+                                  {fmtUsd(
+                                    (s.dividends || 0) + (s.interest || 0) + (s.other || 0),
+                                    0,
+                                  )}
+                                </span>
+                              ))}
+                            </p>
+                          )}
+                          <div className={styles.taxLinesWrap}>
+                            <table className={styles.taxLines}>
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th>Type</th>
+                                  <th>Symbol</th>
+                                  <th>Description</th>
+                                  <th>Amount</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(a.lines || []).length === 0 ? (
+                                  <tr>
+                                    <td colSpan={5} className={styles.cellMuted}>
+                                      No dividend, interest, fee, tax, or sell
+                                      activity this year.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  (a.lines || []).map((ln) => (
+                                    <tr key={ln.activity_id || `${ln.date}-${ln.symbol}-${ln.type}`}>
+                                      <td>{ln.date || ''}</td>
+                                      <td>{ln.type || ln.bucket || ''}</td>
+                                      <td>{ln.symbol || ''}</td>
+                                      <td>{ln.description || ''}</td>
+                                      <td className={`${styles.numAlign} ${moneyCls(ln.amount)}`}>
+                                        {fmtUsdSigned(ln.amount, 2)}
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )
+            })}
+            {(!t.accounts || t.accounts.length === 0) && (
+              <p className={styles.hint}>
+                No SnapTrade SMAs on this planning snapshot. Morning sync
+                fills tax YTD after Fidelity accounts are assigned.
+              </p>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }

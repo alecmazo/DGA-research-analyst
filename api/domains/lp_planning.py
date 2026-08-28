@@ -1272,6 +1272,122 @@ def planning_get(lp_id: str, request: Request):
     return _planning_payload(lp_id)
 
 
+@router.get("/api/v2/gp/lp-planning/{lp_id}/tax-ytd")
+def planning_tax_ytd(lp_id: str, request: Request, year: int | None = None):
+    """GP-only: SnapTrade activity tax-YTD for this LP's assigned SMAs.
+
+    Not a 1099. Dividends, interest, fees, withholdings, sell proceeds, and
+    line-level Fidelity activity for the calendar year. IRA books stay N/A
+    for taxable income. Fund K-1s are not in SnapTrade.
+    """
+    _gp_only(request)
+    lp_id = (lp_id or "").strip()
+    if not lp_id:
+        raise HTTPException(status_code=400, detail="lp_id required")
+    yr = int(year) if year else datetime.now(timezone.utc).year
+    if yr < 2000 or yr > 2100:
+        raise HTTPException(status_code=400, detail="year out of range")
+    user = _lp_user(lp_id)
+    live = _live_books(user)
+    managed = list(live.get("managed") or [])
+    fund_ids = [str(a.get("fund_id")) for a in managed if a.get("fund_id")]
+    fn = getattr(B, "_snaptrade_refresh_tax_ytd", None)
+    if callable(fn):
+        try:
+            fn(yr)
+        except Exception:
+            pass
+    loader = getattr(B, "_snaptrade_tax_ytd_for_funds", None)
+    if not callable(loader):
+        raise HTTPException(status_code=503, detail="Tax YTD rollup is not available")
+    pack = loader(fund_ids, yr) or {}
+    by_fid: dict[str, dict] = {}
+    for acct in pack.get("accounts") or []:
+        fid = str(acct.get("fund_id") or "")
+        if fid:
+            by_fid.setdefault(fid, []).append(acct)
+    accounts = []
+    for book in managed:
+        fid = str(book.get("fund_id") or "")
+        name = book.get("assigned_as") or book.get("name") or ""
+        ira = bool(book.get("realized_na") or _is_ira_name(
+            name, book.get("short_name") or "", book.get("name") or ""))
+        snaps = by_fid.pop(fid, None) or []
+        if not snaps:
+            accounts.append({
+                "fund_id": fid,
+                "fund_name": book.get("name") or name,
+                "assigned_as": name,
+                "account_id": None,
+                "account_name": name,
+                "brokerage": None,
+                "ira": ira,
+                "realized_na": ira,
+                "missing": True,
+                "dividends": 0, "substitute_dividends": 0, "stock_dividends": 0,
+                "interest": 0, "fees": 0, "tax_withheld": 0, "sell_proceeds": 0,
+                "rei": 0, "return_of_capital": 0, "income_total": 0,
+                "lines": [], "by_symbol": [], "by_month": [],
+                "line_count": 0, "activity_count": 0,
+            })
+            continue
+        for snap in snaps:
+            item = dict(snap)
+            item["fund_name"] = book.get("name") or name
+            item["assigned_as"] = name
+            item["ira"] = ira
+            item["realized_na"] = ira
+            item["missing"] = False
+            if ira:
+                item["taxable_income"] = None
+            else:
+                item["taxable_income"] = item.get("income_total") or 0
+            accounts.append(item)
+    # SnapTrade accounts assigned to this LP's funds but not in live books.
+    for leftover in by_fid.values():
+        for snap in leftover:
+            item = dict(snap)
+            nm = item.get("account_name") or ""
+            ira = _is_ira_name(nm)
+            item["fund_name"] = nm
+            item["assigned_as"] = nm
+            item["ira"] = ira
+            item["realized_na"] = ira
+            item["missing"] = False
+            item["taxable_income"] = None if ira else (item.get("income_total") or 0)
+            accounts.append(item)
+
+    tot = dict(pack.get("totals") or {})
+    taxable_income = 0.0
+    has_taxable = False
+    for a in accounts:
+        if a.get("realized_na"):
+            continue
+        v = _f(a.get("income_total"), 0) or 0
+        taxable_income += v
+        has_taxable = True
+    lp = _public_lp(user)
+    return {
+        "lp": lp,
+        "year": yr,
+        "as_of": pack.get("as_of"),
+        "disclaimer": pack.get("disclaimer") or (
+            "Not a 1099. Activity-derived calendar-year cash from SnapTrade."
+        ),
+        "totals": {
+            **{k: tot.get(k) or 0 for k in (
+                "dividends", "substitute_dividends", "stock_dividends",
+                "interest", "fees", "tax_withheld", "sell_proceeds", "rei",
+                "return_of_capital", "income_total", "activity_count",
+                "line_count",
+            )},
+            "taxable_income": round(taxable_income, 2) if has_taxable else None,
+        },
+        "accounts": accounts,
+        "unmatched_accounts": live.get("unmatched_accounts") or [],
+    }
+
+
 def _usd_txt(v) -> str:
     n = _f(v)
     if n is None:
