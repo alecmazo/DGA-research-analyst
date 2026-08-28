@@ -741,30 +741,6 @@
       </div>
     </div>
 
-    <!-- Recent Fund Activity — latest scan results -->
-    <section class="widget">
-      <header class="widget-head">
-        <span class="widget-title">Fund Activity</span>
-        <span class="widget-badge">SCAN</span>
-        <span class="widget-action" id="activity-ts">—</span>
-      </header>
-      <div id="fund-activity">
-        <div class="widget-loading">Loading activity…</div>
-      </div>
-    </section>
-
-    <!-- Market Pulse — scan results as news, auto-refreshes every 15 min -->
-    <section class="widget">
-      <header class="widget-head">
-        <span class="widget-title">Market Pulse</span>
-        <span class="widget-badge">LIVE</span>
-        <span class="widget-action" id="market-pulse-ts">⟳ now</span>
-      </header>
-      <div id="market-pulse">
-        <div class="widget-loading">Loading…</div>
-      </div>
-    </section>
-
   </aside>
 </main>
 </div><!-- #tab-performance -->
@@ -1961,19 +1937,12 @@
   // ── Live Watchlist — LP managed-account positions ────────────────
   let _wlData = null;
   let _wlTimer = null;
-  let _heldTickers = new Set();   // symbols the LP actually holds
 
   function _renderWatchlist(data) {
     _wlData = data;
     const positions = (data.positions || []).sort((a,b)=>(b.market_weight_pct||0)-(a.market_weight_pct||0));
     const totalMV   = data.total_market_value;
     const asOf      = data.as_of || '';
-
-    // Track held tickers so Fund Activity can filter scans to LP holdings.
-    // Re-render the activity widget once the first positions payload lands.
-    const hadHeld = _heldTickers.size > 0;
-    _heldTickers = new Set(positions.map(p => p.symbol).filter(Boolean));
-    if (!hadHeld && _heldTickers.size) loadFundActivity();
 
     // ── Hero panel header ────────────────────────────────────────
     const totalEl = document.getElementById('lp-wl-total');
@@ -2059,274 +2028,6 @@
       console.warn('[lp-watchlist]', e);
       const rowsEl = document.getElementById('lp-watchlist-rows');
       if (rowsEl) rowsEl.innerHTML = '<div style="padding:20px;text-align:center;color:rgba(255,255,255,0.3);font-size:12px;">Could not load positions.</div>';
-    }
-  }
-
-  // ══════════════════════════════════════════════════════════════
-  // FUND ACTIVITY + MARKET PULSE — /api/scan/latest, fetched ONCE
-  // and shared between both widgets via a module-level promise.
-  // ══════════════════════════════════════════════════════════════
-  let _scanPromise = null;
-  function fetchLatestScan(force) {
-    if (!_scanPromise || force) {
-      _scanPromise = window.dgaFetch('/api/scan/latest')
-        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .catch(e => { _scanPromise = null; throw e; });
-    }
-    return _scanPromise;
-  }
-  // Scan entries newest-first (by per-ticker _scanned_at when available)
-  function _sortedScanEntries(results) {
-    return Object.entries(results || {}).sort((a, b) =>
-      String((b[1] || {})._scanned_at || '').localeCompare(String((a[1] || {})._scanned_at || '')));
-  }
-
-  // Fund Activity — only tickers the LP actually holds
-  async function loadFundActivity() {
-    const el = document.getElementById('fund-activity');
-    const ts = document.getElementById('activity-ts');
-    if (!el) return;
-    try {
-      const d = await fetchLatestScan();
-      if (!d.exists || !d.results || !Object.keys(d.results).length) {
-        el.innerHTML = '<div class="widget-empty">No scan data yet. Activity will appear after the next portfolio scan.</div>';
-        return;
-      }
-      if (ts) {
-        const age = d.scanned_at ? Math.round((Date.now() - _parseServerDate(d.scanned_at)) / 60000) : null;
-        ts.textContent = age != null ? `${age}m ago` : 'recent';
-      }
-      let entries = _sortedScanEntries(d.results);
-      if (_heldTickers.size) entries = entries.filter(([tk]) => _heldTickers.has(tk));
-      entries = entries.slice(0, 6);
-      if (!entries.length) {
-        el.innerHTML = '<div class="widget-empty">No recent scans for your holdings yet.</div>';
-        return;
-      }
-      el.innerHTML = entries.map(([tk, res]) => {
-        const sent = (res.sentiment || '').toUpperCase();
-        const color = sent === 'BULLISH' ? 'var(--green)' : sent === 'BEARISH' ? 'var(--red)' : 'var(--mid)';
-        const arrow = sent === 'BULLISH' ? '▲' : sent === 'BEARISH' ? '▼' : '●';
-        const summary = (res.markdown || '')
-          .replace(/#{1,3} .+\n?/g, '').replace(/\*\*?/g, '').replace(/\n/g, ' ')
-          .trim().slice(0, 65);
-        return `
-          <div class="tr-row" data-ticker="${esc(tk)}" style="cursor:pointer;">
-            <div class="tr-rank" style="color:${color};">${arrow}</div>
-            <div class="tr-main">
-              <div class="tr-tk">${esc(tk)}</div>
-              <div class="tr-meta">${esc(summary || sent || 'Update')}</div>
-            </div>
-            <div class="tr-right">
-              <div class="tr-px">${res.price != null ? '$' + fmtPx(res.price) : '—'}</div>
-              <div class="tr-chg ${cssChg(res.pct_change)}">${fmtPct(res.pct_change)}</div>
-            </div>
-          </div>`;
-      }).join('');
-      // In-app scan detail — no off-site links
-      const byTk = Object.fromEntries(entries);
-      el.querySelectorAll('.tr-row[data-ticker]').forEach(row => {
-        const tk = row.getAttribute('data-ticker');
-        row.addEventListener('click', () => _openPulseDetail(tk, byTk[tk]));
-      });
-    } catch (e) {
-      console.warn('[lp-activity]', e);
-      if (el) el.innerHTML = '<div class="widget-empty">Could not load activity.</div>';
-    }
-  }
-
-  // ══════════════════════════════════════════════════════════════
-  // SHARED — draggable + resizable dialog (mirrors GP page)
-  // ══════════════════════════════════════════════════════════════
-  (function _installResizableModalStyles() {
-    if (document.getElementById('dga-resizable-styles')) return;
-    const s = document.createElement('style');
-    s.id = 'dga-resizable-styles';
-    s.textContent = `
-      .dga-dialog {
-        position: fixed; background: #fff; border-radius: 12px;
-        border: 1px solid #e2e8f0; box-shadow: 0 8px 48px rgba(0,0,0,0.28);
-        display: flex; flex-direction: column; overflow: hidden;
-        resize: both; min-width: 340px; min-height: 260px;
-        width: min(860px,92vw); height: min(82vh,720px);
-        top: 50%; left: 50%; transform: translate(-50%,-50%);
-        z-index: 9100; will-change: transform;
-      }
-      .dga-dialog.dga-maximized {
-        width:96vw!important; height:92vh!important;
-        top:4vh!important; left:2vw!important;
-        transform:none!important; resize:none!important; border-radius:10px;
-      }
-      .dga-dialog-handle { cursor:grab; user-select:none; flex-shrink:0; }
-      .dga-dialog-handle:active { cursor:grabbing; }
-      .dga-dialog-body { flex:1; overflow-y:auto; min-height:0; }
-      .dga-dialog-body a { color:#5BB8D4; text-decoration:underline; font-weight:600; cursor:pointer; word-break:break-all; }
-      .dga-dialog-body a:hover { color:#84CCE3; }
-      .dga-max-btn {
-        background:rgba(0,0,0,0.04); border:1px solid #e2e8f0;
-        border-radius:5px; padding:3px 9px; font-size:13px;
-        cursor:pointer; line-height:1.4; color:#64748b;
-        transition:background .12s; flex-shrink:0;
-      }
-      .dga-max-btn:hover { background:rgba(91,184,212,0.12); color:#3E9AB8; }
-    `;
-    document.head.appendChild(s);
-  })();
-
-  function _initDragModal(dialog, handle) {
-    const r = dialog.getBoundingClientRect();
-    dialog.style.transform = 'none';
-    dialog.style.top  = r.top  + 'px';
-    dialog.style.left = r.left + 'px';
-    handle.addEventListener('mousedown', (e) => {
-      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
-      if (dialog.classList.contains('dga-maximized')) return;
-      e.preventDefault();
-      const startX = e.clientX, startY = e.clientY;
-      const startL = parseFloat(dialog.style.left), startT = parseFloat(dialog.style.top);
-      const onMove = (e) => {
-        dialog.style.left = (startL + e.clientX - startX) + 'px';
-        dialog.style.top  = (startT + e.clientY - startY) + 'px';
-      };
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
-  }
-
-  function _toggleMaxDialog(dialog, btn) {
-    const maximized = dialog.classList.toggle('dga-maximized');
-    if (btn) btn.textContent = maximized ? '⊡' : '⤢';
-    if (!maximized) {
-      dialog.style.top = '50%'; dialog.style.left = '50%';
-      dialog.style.transform = 'translate(-50%,-50%)';
-      dialog.style.width = ''; dialog.style.height = '';
-    }
-    return maximized;
-  }
-
-  function _openPulseDetail(ticker, res) {
-    const existing = document.getElementById('pulse-detail-modal');
-    if (existing) existing.remove();
-
-    const sent    = (res.sentiment || 'NEUTRAL').toUpperCase();
-    const sentCls = sent === 'BULLISH' ? 'low' : sent === 'BEARISH' ? 'high' : 'mid';
-    const md      = res.markdown || res.summary || 'No detail available.';
-    const scannedAt = res._scanned_at ? _parseServerDate(res._scanned_at).toLocaleString() : '';
-
-    function _mdToHtml(text) {
-      const LINK_STYLE = 'color:#5BB8D4;text-decoration:underline;font-weight:600;';
-      return text
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-        .replace(/^### (.+)$/gm, '<div style="font-size:11px;font-weight:800;color:#5BB8D4;letter-spacing:1px;margin:10px 0 4px;text-transform:uppercase;">$1</div>')
-        .replace(/^## (.+)$/gm,  '<div style="font-size:12px;font-weight:800;color:#1e293b;margin:12px 0 4px;">$1</div>')
-        .replace(/^# (.+)$/gm,   '<div style="font-size:13px;font-weight:800;color:#1e293b;margin:12px 0 4px;">$1</div>')
-        .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g,   '<em>$1</em>')
-        // Markdown links: [label](url)
-        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-          '<a href="$2" target="_blank" rel="noopener noreferrer" style="' + LINK_STYLE + '">$1</a>')
-        // Bare URLs not already in an href
-        .replace(/(?<!href=")(https?:\/\/[^\s<>")\]]+)/g,
-          '<a href="$1" target="_blank" rel="noopener noreferrer" style="' + LINK_STYLE + '">$1</a>')
-        .replace(/^- (.+)$/gm,   '<div style="padding:2px 0 2px 12px;border-left:2px solid #5BB8D4;margin:3px 0;">$1</div>')
-        .replace(/\n{2,}/g,      '<div style="height:8px;"></div>')
-        .replace(/\n/g,          ' ');
-    }
-
-    const overlay = document.createElement('div');
-    overlay.id = 'pulse-detail-modal';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9000;';
-
-    const maxBtnId = 'pdm-max-btn-' + Date.now();
-    overlay.innerHTML = `
-      <div class="dga-dialog" style="width:min(640px,92vw);height:min(72vh,600px);">
-        <div class="dga-dialog-handle" style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;">
-          <span style="font-size:15px;font-weight:800;color:#0f172a;">${ticker}</span>
-          <span class="news-impact ${sentCls}" style="font-size:9px;">${sent}</span>
-          ${res.price != null ? `<span style="font-size:12px;color:#475569;">$${fmtPx(res.price)}</span>` : ''}
-          ${res.pct_change != null ? `<span style="font-size:11px;${res.pct_change >= 0 ? 'color:#16a34a' : 'color:#dc2626'};">${res.pct_change >= 0 ? '+' : ''}${res.pct_change.toFixed(2)}%</span>` : ''}
-          ${scannedAt ? `<span style="font-size:10px;color:#94a3b8;">Scanned ${scannedAt}</span>` : ''}
-          <span style="margin-left:auto;display:flex;gap:6px;align-items:center;">
-            <button id="${maxBtnId}" class="dga-max-btn" title="Expand / restore">⤢</button>
-            <button onclick="document.getElementById('pulse-detail-modal').remove()"
-              style="background:rgba(0,0,0,0.05);border:1px solid #e2e8f0;color:#475569;border-radius:5px;padding:3px 11px;font-size:14px;cursor:pointer;line-height:1.4;">&times;</button>
-          </span>
-        </div>
-        <div class="dga-dialog-body" style="padding:16px 18px;font-size:12px;color:#334155;line-height:1.7;">
-          ${_mdToHtml(md)}
-        </div>
-      </div>`;
-
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-    document.body.appendChild(overlay);
-
-    const dlg    = overlay.querySelector('.dga-dialog');
-    const handle = overlay.querySelector('.dga-dialog-handle');
-    const maxBtn = overlay.querySelector('#' + maxBtnId);
-    if (dlg && handle) _initDragModal(dlg, handle);
-    if (dlg && maxBtn) maxBtn.addEventListener('click', () => _toggleMaxDialog(dlg, maxBtn));
-  }
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      document.getElementById('pulse-detail-modal')?.remove();
-    }
-  });
-
-  // ══════════════════════════════════════════════════════════════
-  // MARKET PULSE — latest scans (all tickers) as clickable news items
-  // Shares the /api/scan/latest fetch with Fund Activity; auto-refreshes
-  // every 15 minutes (force=true re-fetches).
-  // ══════════════════════════════════════════════════════════════
-  async function loadMarketPulse(force) {
-    const el  = document.getElementById('market-pulse');
-    const act = document.getElementById('market-pulse-ts');
-    if (!el) return;
-    try {
-      const d = await fetchLatestScan(force);
-      if (!d.exists || !d.results || !Object.keys(d.results).length) {
-        el.innerHTML = '<div class="widget-empty">Market pulse will populate after the first portfolio scan.</div>';
-        return;
-      }
-      if (act) {
-        const age = d.scanned_at
-          ? Math.round((Date.now() - _parseServerDate(d.scanned_at)) / 60000)
-          : null;
-        act.textContent = age != null ? `⟳ ${age}m ago` : '⟳ now';
-      }
-      const entries = _sortedScanEntries(d.results).slice(0, 6);
-      // Keep full result objects indexed by ticker for the detail modal
-      // (window-level so the watchlist rows can open the same detail).
-      const _pulseData = Object.fromEntries(entries);
-      window._pulseData = Object.fromEntries(_sortedScanEntries(d.results));
-
-      el.innerHTML = entries.map(([tk, res]) => {
-        const sent    = (res.sentiment || 'NEUTRAL').toUpperCase();
-        const impCls  = sent === 'BULLISH' ? 'low' : sent === 'BEARISH' ? 'high' : 'mid';
-        const summary = (res.markdown || '')
-          .replace(/#{1,3} .+\n?/g, '').replace(/\*\*?/g, '').replace(/\n/g, ' ')
-          .trim().slice(0, 110);
-        return `
-          <div class="news-row" data-ticker="${esc(tk)}" style="cursor:pointer;">
-            <div class="news-title">${esc(tk)}: ${esc(summary || 'Analysis available — click to view.')}</div>
-            <div class="news-meta">
-              <span class="news-impact ${impCls}">${sent}</span>
-              <span class="news-source">DGA Scan</span>
-              ${res.price != null ? `<span>· $${fmtPx(res.price)} <span class="${cssChg(res.pct_change)}">${fmtPct(res.pct_change)}</span></span>` : ''}
-            </div>
-          </div>`;
-      }).join('');
-      el.querySelectorAll('.news-row[data-ticker]').forEach(row => {
-        const tk = row.getAttribute('data-ticker');
-        row.addEventListener('click', () => _openPulseDetail(tk, _pulseData[tk]));
-      });
-    } catch (e) {
-      console.warn('[lp-market-pulse]', e);
-      if (el) el.innerHTML = '<div class="widget-empty">Could not load market pulse.</div>';
     }
   }
 
@@ -2691,14 +2392,11 @@
   loadQuarterlyLetter();
   loadIndices();
   loadFundPositions();
-  loadFundActivity();
-  loadMarketPulse();
 
-  // Refresh indices + positions every 60s, market pulse every 15 min.
+  // Refresh indices + positions every 60s.
   // Skip ticks while the tab is hidden; catch up as soon as it's visible again.
   setInterval(() => { if (!document.hidden) loadIndices(); },        60_000);
   setInterval(() => { if (!document.hidden) loadFundPositions(); },  60_000);
-  setInterval(() => { if (!document.hidden) loadMarketPulse(true); }, 900_000);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { loadIndices(); loadFundPositions(); }
   });
