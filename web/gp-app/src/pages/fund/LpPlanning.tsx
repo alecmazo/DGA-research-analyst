@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
-import { api } from '@/lib/api'
+import { api, downloadAuth } from '@/lib/api'
 import { fmtPct, fmtUsd, fmtUsdSigned } from '@/lib/format'
 import styles from './planning.module.css'
 
@@ -282,6 +282,8 @@ export function LpPlanning() {
   const [showHidden, setShowHidden] = useState(false)
   const [seeded, setSeeded] = useState(false)
   const [unmatched, setUnmatched] = useState<string[]>([])
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [mailBusy, setMailBusy] = useState(false)
 
   const loadRoster = useCallback(async () => {
     const d = await api<{ lps?: RosterLp[] }>('/api/v2/gp/lp-planning')
@@ -457,6 +459,51 @@ export function LpPlanning() {
     }
   }
 
+  const flushIfDirty = async () => {
+    if (!dirty) return true
+    if (!confirm('Save the snapshot first so the PDF matches what you see?')) return false
+    await save()
+    return true
+  }
+
+  const downloadPdf = async () => {
+    if (!lpId) return
+    if (!(await flushIfDirty())) return
+    setPdfBusy(true)
+    setErr(null)
+    try {
+      await downloadAuth(
+        `/api/v2/gp/lp-planning/${encodeURIComponent(lpId)}/pdf`,
+        'DGA_Planning.pdf',
+      )
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'PDF failed')
+    } finally {
+      setPdfBusy(false)
+    }
+  }
+
+  const emailPdf = async () => {
+    if (!lpId) return
+    if (!(await flushIfDirty())) return
+    const def = roster.find((x) => x.lp_id === lpId)?.email || ''
+    const to = window.prompt('Email this planning snapshot PDF to:', def)
+    if (!to) return
+    setMailBusy(true)
+    setErr(null)
+    try {
+      await api(`/api/v2/gp/lp-planning/${encodeURIComponent(lpId)}/email`, {
+        method: 'POST',
+        body: JSON.stringify({ to: to.trim() }),
+      })
+      setStatus(`Emailed ${to.trim()}`)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Email failed')
+    } finally {
+      setMailBusy(false)
+    }
+  }
+
   const totals = useMemo(() => compute(rows, expenses ?? 0), [rows, expenses])
   const selected = roster.find((x) => x.lp_id === lpId)
   const hiddenCount = rows.filter((r) => r.hidden).length
@@ -563,6 +610,22 @@ export function LpPlanning() {
           )}
           <Button size="sm" variant="secondary" onClick={() => printPlanning()}>
             Print
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!lpId || pdfBusy}
+            onClick={() => void downloadPdf()}
+          >
+            {pdfBusy ? 'PDF…' : 'PDF'}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!lpId || mailBusy}
+            onClick={() => void emailPdf()}
+          >
+            {mailBusy ? 'Sending…' : 'Email'}
           </Button>
           <Button
             size="sm"

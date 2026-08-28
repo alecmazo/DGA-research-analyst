@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui530-20260828-planning-print-landscape"
+WEB_BUILD_VERSION = "ui531-20260828-planning-pdf-email"
 
 
 @app.get("/api/build")
@@ -39163,6 +39163,11 @@ try:
         "_kv_get": _kv_get,
         "_kv_put": _kv_put,
         "_bulk_fund_market_nav": _bulk_fund_market_nav,
+        "_render_research_pdf": _render_research_pdf,
+        "_dga_logo_data_uri": _dga_logo_data_uri,
+        "_send_email_with_pdf_attachment": _send_email_with_pdf_attachment,
+        "_valid_email_addr": _valid_email_addr,
+        "_content_disposition": _content_disposition,
     })
 except Exception as _plan_err:
     print(f"[boot] lp-planning domain mount failed: {_plan_err!s:.200}", flush=True)
