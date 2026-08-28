@@ -179,7 +179,11 @@ function compute(rows: PlanRow[], expenses: number): Computed {
 
 function formatShown(value: number | null | undefined, kind?: 'usd' | 'pct'): string {
   if (value == null || Number.isNaN(Number(value))) return ''
-  if (kind === 'pct') return String(value)
+  if (kind === 'pct') {
+    const n = Number(value)
+    const body = Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+    return `${body}%`
+  }
   return new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2,
     minimumFractionDigits: 0,
@@ -200,7 +204,7 @@ function NumCell(props: {
 
   return (
     <input
-      className={styles.num}
+      className={`${styles.num} ${props.kind === 'pct' ? styles.yieldNum : ''}`}
       readOnly={props.disabled}
       value={focus ? text : shown}
       placeholder={props.placeholder || ''}
@@ -626,17 +630,29 @@ export function LpPlanning() {
           <div className={styles.sheet}>
             <div className={styles.tableWrap}>
               <table className={styles.table}>
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col className={styles.colYield} />
+                  <col />
+                  <col />
+                  <col />
+                  <col className={styles.colRealized} />
+                  <col />
+                </colgroup>
                 <thead>
                   <tr>
-                    <th className={styles.thLeft}>Line</th>
-                    <th className={styles.thLeft}>Inv</th>
+                    <th>Line</th>
+                    <th>Inv</th>
                     <th>Amount</th>
                     <th>% Tot</th>
-                    <th>Yield %</th>
+                    <th className={styles.colYield}>Yield %</th>
                     <th>P&amp;L est</th>
-                    <th>Cap gains</th>
                     <th>P&amp;L actual</th>
-                    <th className={styles.thLeft}>Notes</th>
+                    <th>Notes</th>
+                    <th className={styles.colRealized}>Realized Gains</th>
                     <th />
                   </tr>
                 </thead>
@@ -671,9 +687,9 @@ export function LpPlanning() {
                     <td style={{ textAlign: 'right' }}>
                       {fmtUsd(totals.pnl_estimate)}
                     </td>
-                    <td style={{ textAlign: 'right' }}>{fmtUsd(totals.capital_gains)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtUsd(totals.pnl_actual)}</td>
                     <td />
+                    <td style={{ textAlign: 'right' }}>{fmtUsd(totals.capital_gains)}</td>
                     <td />
                   </tr>
                   <tr className={styles.tot}>
@@ -815,7 +831,7 @@ function SectionBlock(props: {
             <td className={styles.cellMuted}>
               {props.pctTot(r) == null ? '' : fmtPct(props.pctTot(r), 1).replace('+', '')}
             </td>
-            <td>
+            <td className={styles.colYield}>
               {r.section === 'income' ? (
                 <span className={styles.cellMuted}>n/a</span>
               ) : (
@@ -828,13 +844,6 @@ function SectionBlock(props: {
               )}
             </td>
             <td className={styles.cellMuted}>{est == null ? '' : fmtUsd(est)}</td>
-            <td className={styles.cellMuted}>
-              {r.section === 'income' || r.section === 'liability'
-                ? ''
-                : r.capital_gains == null
-                  ? ''
-                  : fmtUsd(r.capital_gains)}
-            </td>
             <td>
               {linked || r.section === 'income' ? (
                 <span className={styles.cellMuted} style={{ whiteSpace: 'nowrap' }}>
@@ -855,6 +864,13 @@ function SectionBlock(props: {
                 value={r.notes}
                 onChange={(e) => props.onPatch(r.id, { notes: e.target.value })}
               />
+            </td>
+            <td className={styles.cellMuted}>
+              {r.section === 'income' || r.section === 'liability'
+                ? ''
+                : r.capital_gains == null
+                  ? ''
+                  : fmtUsd(r.capital_gains)}
             </td>
             <td>
               {linked && (
