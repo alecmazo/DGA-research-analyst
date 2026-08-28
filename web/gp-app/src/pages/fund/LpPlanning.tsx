@@ -30,6 +30,7 @@ type PlanRow = {
   commitment?: number | null
   yield_pct_live?: number | null
   capital_gains?: number | null
+  capital_gains_live?: number | null
   realized_na?: boolean
   dividends_ytd?: number | null
 }
@@ -111,6 +112,12 @@ function rowYield(r: PlanRow): number | null {
   return r.yield_pct_live ?? null
 }
 
+function rowCapitalGains(r: PlanRow): number | null {
+  if (isIraRow(r)) return null
+  if (r.capital_gains != null) return r.capital_gains
+  return r.capital_gains_live ?? null
+}
+
 function rowPnlEst(r: PlanRow): number | null {
   if (r.section === 'income') return rowAmount(r)
   const y = rowYield(r)
@@ -158,8 +165,9 @@ function compute(rows: PlanRow[], expenses: number): Computed {
       invAct += act
       hasAct = true
     }
-    if (!isIraRow(r) && r.capital_gains != null) {
-      capGains += r.capital_gains
+    const cg = rowCapitalGains(r)
+    if (cg != null) {
+      capGains += cg
       hasCap = true
     }
   }
@@ -392,6 +400,7 @@ export function LpPlanning() {
           link_id: r.link_id,
           hidden: r.hidden,
           amount_override: r.amount_override,
+          capital_gains: r.capital_gains,
         })),
       }
       const d = await api<{
@@ -873,14 +882,18 @@ function SectionBlock(props: {
                 onChange={(e) => props.onPatch(r.id, { notes: e.target.value })}
               />
             </td>
-            <td className={`${styles.cellMuted} ${styles.numAlign}`}>
-              {r.section === 'income' || r.section === 'liability'
-                ? ''
-                : isIraRow(r)
-                  ? 'N/A'
-                  : r.capital_gains == null
-                    ? ''
-                    : fmtUsd(r.capital_gains)}
+            <td className={styles.numAlign}>
+              {r.section === 'income' || r.section === 'liability' ? (
+                ''
+              ) : isIraRow(r) ? (
+                <span className={styles.cellMuted}>N/A</span>
+              ) : (
+                <NumCell
+                  value={rowCapitalGains(r)}
+                  onChange={(v) => props.onPatch(r.id, { capital_gains: v })}
+                  placeholder="gains"
+                />
+              )}
             </td>
             <td>
               {linked && (

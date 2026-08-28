@@ -94,6 +94,7 @@ def _blank_row(section: str, label: str, **extra) -> dict:
         "link_id": extra.get("link_id"),
         "hidden": bool(extra.get("hidden", False)),
         "amount_override": extra.get("amount_override"),
+        "capital_gains": extra.get("capital_gains"),
     }
 
 
@@ -130,6 +131,7 @@ def _sanitize_row(raw: dict) -> dict | None:
         "link_id": _s(raw.get("link_id"), 80) or None,
         "hidden": bool(raw.get("hidden", False)),
         "amount_override": _f(raw.get("amount_override")),
+        "capital_gains": _f(raw.get("capital_gains")),
     }
 
 
@@ -543,7 +545,7 @@ def _live_books(user: dict) -> dict:
                     "ytd_pct": ytd_pct,
                     "pnl_ytd": pnl,
                     "dividends_ytd": div_ytd,
-                    "capital_gains": None if ira else cap_gains,
+                    "capital_gains_live": None if ira else cap_gains,
                     "realized_na": ira,
                     "cash_mv": cash_mv,
                     "yield_pct_live": yield_live,
@@ -819,7 +821,7 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
             "ytd_pct": acct.get("ytd_pct"),
             "live": bool(acct.get("live")),
             "yield_pct_live": acct.get("yield_pct_live"),
-            "capital_gains": acct.get("capital_gains"),
+            "capital_gains_live": acct.get("capital_gains_live"),
             "realized_na": bool(acct.get("realized_na")),
             "dividends_ytd": acct.get("dividends_ytd"),
             "cash_mv": acct.get("cash_mv"),
@@ -1027,6 +1029,7 @@ class PlanningRowIn(BaseModel):
     link_id: str | None = None
     hidden: bool = False
     amount_override: float | None = None
+    capital_gains: float | None = None
 
 
 class PlanningPut(BaseModel):
