@@ -163,10 +163,6 @@
   line-height: 1.15;
 }
 
-.kpiHero .kpiVal {
-  font-size: 18px;
-}
-
 .kpiHint {
   margin-top: 2px;
   font-size: 9.5px;
@@ -584,9 +580,6 @@
   }
   .kpiVal {
     font-size: 12px;
-  }
-  .kpiHero .kpiVal {
-    font-size: 14px;
   }
   .secRow td {
     padding: 2px 6px;

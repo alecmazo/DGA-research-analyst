@@ -757,7 +757,7 @@ export function LpPlanning() {
                 {fmtUsd(totals.other_income)}
               </div>
             </div>
-            <div className={`${styles.kpi} ${styles.kpiHero}`}>
+            <div className={styles.kpi}>
               <div className={styles.kpiLabel}>Taxable P&amp;L</div>
               <div className={styles.kpiVal}>{fmtUsd(totals.pnl_actual)}</div>
               <div className={styles.kpiHint}>

@@ -1131,14 +1131,12 @@ def _planning_pdf_html(pack: dict) -> str:
          f"vs {_usd_txt(computed.get('annual_expenses') or snap.get('annual_expenses'))}"),
     ]
     kpi_cells = []
-    for i, (lab, val, hint) in enumerate(kpis):
-        val_sz = "10pt" if i == 3 else "8.5pt"
-        pad = "3pt 5pt"
+    for lab, val, hint in kpis:
         kpi_cells.append(
-            f'<td style="border:1px solid #e2e8f0;padding:{pad};width:20%;">'
+            f'<td style="border:1px solid #e2e8f0;padding:3pt 5pt;width:20%;">'
             f'<div style="font-size:5.5pt;color:#64748b;text-transform:uppercase;'
             f'letter-spacing:0.4pt;font-weight:bold;">{lab}</div>'
-            f'<div style="font-size:{val_sz};font-weight:bold;color:#0A1628;margin-top:1pt;">{val}</div>'
+            f'<div style="font-size:8.5pt;font-weight:bold;color:#0A1628;margin-top:1pt;">{val}</div>'
             f'<div style="font-size:5.5pt;color:#94a3b8;margin-top:1pt;">{hint}</div>'
             f"</td>"
         )
