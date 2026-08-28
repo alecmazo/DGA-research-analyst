@@ -177,6 +177,11 @@
   background: rgba(21, 115, 71, 0.08);
 }
 
+.calloutMuted {
+  border-color: var(--border-subtle);
+  background: var(--bg-subtle);
+}
+
 .calloutK {
   font-size: 10px;
   font-weight: 800;
@@ -251,14 +256,8 @@
 .secCurrent td {
   background: rgba(91, 184, 212, 0.08);
 }
-.secLong td {
-  background: rgba(124, 58, 237, 0.07);
-}
 .secLiab td {
-  background: rgba(180, 35, 24, 0.07);
-}
-.secInc td {
-  background: rgba(21, 115, 71, 0.08);
+  background: rgba(148, 163, 184, 0.16);
 }
 
 .secAdd {

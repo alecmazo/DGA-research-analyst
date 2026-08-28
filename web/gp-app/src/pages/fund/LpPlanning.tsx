@@ -57,9 +57,9 @@ type RosterLp = {
 
 const SECTIONS: { key: Section; label: string; add: string; cls: string }[] = [
   { key: 'current', label: 'Current assets', add: '+ Add asset', cls: styles.secCurrent },
-  { key: 'long_term', label: 'Long-term assets', add: '+ Add property', cls: styles.secLong },
+  { key: 'long_term', label: 'Long-term assets', add: '+ Add property', cls: styles.secCurrent },
+  { key: 'income', label: 'Other annual income', add: '+ Add income', cls: styles.secCurrent },
   { key: 'liability', label: 'Liabilities', add: '+ Add liability', cls: styles.secLiab },
-  { key: 'income', label: 'Other annual income', add: '+ Add income', cls: styles.secInc },
 ]
 
 const LS_KEY = 'dga.lpPlanning.lpId'
@@ -578,7 +578,7 @@ export function LpPlanning() {
 
           <div
             className={`${styles.callout} ${
-              totals.covered ? styles.calloutOk : styles.calloutNeed
+              totals.covered ? styles.calloutOk : styles.calloutMuted
             }`}
           >
             <span className={styles.calloutK}>Strategy number</span>
