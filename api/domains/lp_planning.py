@@ -776,6 +776,7 @@ def _compute(rows: list[dict], expenses: float) -> dict:
     required = max(0.0, expenses - income)
     inv_mark = inv_act if has_inv_act else inv_est
     total_yield = inv_mark + income
+    pnl_est_total = (inv_est + income) if (has_inv_est or income) else None
     surplus = total_yield - expenses
     gap = required - inv_mark
 
@@ -807,7 +808,7 @@ def _compute(rows: list[dict], expenses: float) -> dict:
         "net_worth": round(assets - liabilities, 2),
         "investable": round(investable, 2),
         "other_income": round(income, 2),
-        "pnl_estimate": round(inv_est, 2) if has_inv_est else None,
+        "pnl_estimate": round(pnl_est_total, 2) if pnl_est_total is not None else None,
         "pnl_actual": round(inv_act, 2) if has_inv_act else None,
         "annual_expenses": round(expenses, 2),
         "required_generation": round(required, 2),

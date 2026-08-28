@@ -184,11 +184,6 @@ function compute(rows: PlanRow[], expenses: number): Computed {
         capGains += cg
         hasCap = true
       }
-      const estInc = rowPnlEst(r)
-      if (estInc != null) {
-        invEst += estInc
-        hasEst = true
-      }
       continue
     }
     assets += amt
@@ -217,7 +212,7 @@ function compute(rows: PlanRow[], expenses: number): Computed {
     net_worth: assets - liabilities,
     investable,
     other_income: income,
-    pnl_estimate: hasEst ? invEst : null,
+    pnl_estimate: hasEst || income ? invEst + income : null,
     pnl_actual: hasCap ? capGains : null,
     ytd_performance: hasAct ? invAct : null,
     capital_gains: hasCap ? capGains : null,
