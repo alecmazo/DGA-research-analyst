@@ -689,18 +689,11 @@ export function LpPlanning() {
                 {fmtUsd(totals.other_income)}
               </div>
             </div>
-            <div className={styles.kpi}>
-              <div className={styles.kpiLabel}>YTD performance</div>
-              <div className={styles.kpiVal}>
-                {totals.ytd_performance != null
-                  ? fmtUsd(totals.ytd_performance)
-                  : totals.pnl_estimate != null
-                    ? fmtUsd(totals.pnl_estimate)
-                    : '—'}
-              </div>
+            <div className={`${styles.kpi} ${styles.kpiHero}`}>
+              <div className={styles.kpiLabel}>Taxable P&amp;L</div>
+              <div className={styles.kpiVal}>{fmtUsd(totals.pnl_actual)}</div>
               <div className={styles.kpiHint}>
-                Mark-to-market + dividends · taxable P&amp;L{' '}
-                {fmtUsd(totals.pnl_actual)}
+                YTD performance (unrealized) {fmtUsd(totals.ytd_performance)}
               </div>
             </div>
             <div className={styles.kpi}>

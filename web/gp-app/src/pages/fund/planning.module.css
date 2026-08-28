@@ -101,7 +101,7 @@
 .kpis {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 @media (max-width: 1100px) {
@@ -119,11 +119,11 @@
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-md);
-  padding: 10px 12px;
+  padding: 6px 10px;
 }
 
 .kpiLabel {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -131,20 +131,24 @@
 }
 
 .kpiVal {
-  margin-top: 4px;
+  margin-top: 2px;
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 800;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
 }
 
+.kpiHero .kpiVal {
+  font-size: 18px;
+}
+
 .kpiHint {
-  margin-top: 3px;
-  font-size: 10.5px;
+  margin-top: 2px;
+  font-size: 9.5px;
   color: var(--text-muted);
-  line-height: 1.35;
+  line-height: 1.3;
 }
 
 .pos {
@@ -256,10 +260,10 @@
 }
 
 .secRow td {
-  padding: 8px 8px 6px;
-  font-size: 10.5px;
+  padding: 4px 8px;
+  font-size: 9.5px;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   background: var(--bg-subtle);
   color: var(--text-secondary);
@@ -549,10 +553,20 @@
   }
   .kpis {
     grid-template-columns: repeat(5, 1fr);
-    gap: 6px;
+    gap: 4px;
+  }
+  .kpi {
+    padding: 4px 8px;
   }
   .kpiVal {
-    font-size: 13px;
+    font-size: 12px;
+  }
+  .kpiHero .kpiVal {
+    font-size: 14px;
+  }
+  .secRow td {
+    padding: 2px 6px;
+    font-size: 8px;
   }
   .strategy textarea {
     min-height: 36px;

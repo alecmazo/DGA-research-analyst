@@ -1090,25 +1090,13 @@ def _planning_pdf_html(pack: dict) -> str:
     as_of = _html.escape(snap.get("as_of") or "")
     notes = _html.escape(snap.get("notes") or "")
     stamp = datetime.now(timezone.utc).strftime("%B %d, %Y")
+    # Logo PNG is 240×68 (~3.53:1). xhtml2pdf stretches an <img> to the table
+    # cell unless BOTH width and height are set at the native ratio, and the
+    # cell itself is no wider than the image.
     img = (
-        f'<img src="{logo}" style="height:22pt;" />'
+        f'<img src="{logo}" width="88" height="25" alt="DGA Capital" />'
         if logo else
         '<span style="font-weight:bold;color:#0A1628;letter-spacing:1pt;">DGA CAPITAL</span>'
-    )
-    kpis = [
-        ("Net worth", _usd_txt(computed.get("net_worth"))),
-        ("Investable", _usd_txt(computed.get("investable"))),
-        ("Required P&amp;L", _usd_txt(computed.get("required_generation"))),
-        ("YTD performance", _usd_txt(computed.get("pnl_actual"))),
-        ("Expenses", _usd_txt(computed.get("annual_expenses") or snap.get("annual_expenses"))),
-    ]
-    kpi_cells = "".join(
-        f'<td style="border:1px solid #e2e8f0;padding:6pt 8pt;width:20%;">'
-        f'<div style="font-size:6.5pt;color:#64748b;text-transform:uppercase;'
-        f'letter-spacing:0.5pt;font-weight:bold;">{lab}</div>'
-        f'<div style="font-size:11pt;font-weight:bold;color:#0A1628;margin-top:2pt;">{val}</div>'
-        f"</td>"
-        for lab, val in kpis
     )
     sections = (
         ("current", "Current assets"),
@@ -1118,13 +1106,52 @@ def _planning_pdf_html(pack: dict) -> str:
     )
     body_rows = []
     vis = [r for r in (snap.get("rows") or []) if not r.get("hidden")]
+    tot_tax = 0.0
+    has_tax = False
+    tot_ytd = 0.0
+    has_ytd = False
+    for r in vis:
+        t = _row_taxable(r)
+        if t is not None:
+            tot_tax += t
+            has_tax = True
+        y = _row_ytd_perf(r)
+        if y is not None:
+            tot_ytd += y
+            has_ytd = True
+    kpis = [
+        ("Net worth", _usd_txt(computed.get("net_worth")),
+         f"Assets {_usd_txt(computed.get('total_assets'))} − debt {_usd_txt(computed.get('total_liabilities'))}"),
+        ("Investable", _usd_txt(computed.get("investable")), "Checked lines"),
+        ("Required P&amp;L", _usd_txt(computed.get("required_generation")),
+         f"Expenses {_usd_txt(computed.get('annual_expenses') or snap.get('annual_expenses'))}"),
+        ("Taxable P&amp;L", _usd_txt(tot_tax) if has_tax else "—",
+         f"YTD performance (unrealized) {_usd_txt(tot_ytd) if has_ytd else '—'}"),
+        ("Gap vs expenses", _usd_txt(computed.get("surplus")),
+         f"vs {_usd_txt(computed.get('annual_expenses') or snap.get('annual_expenses'))}"),
+    ]
+    kpi_cells = []
+    for i, (lab, val, hint) in enumerate(kpis):
+        val_sz = "10pt" if i == 3 else "8.5pt"
+        pad = "3pt 5pt"
+        kpi_cells.append(
+            f'<td style="border:1px solid #e2e8f0;padding:{pad};width:20%;">'
+            f'<div style="font-size:5.5pt;color:#64748b;text-transform:uppercase;'
+            f'letter-spacing:0.4pt;font-weight:bold;">{lab}</div>'
+            f'<div style="font-size:{val_sz};font-weight:bold;color:#0A1628;margin-top:1pt;">{val}</div>'
+            f'<div style="font-size:5.5pt;color:#94a3b8;margin-top:1pt;">{hint}</div>'
+            f"</td>"
+        )
+    kpi_cells = "".join(kpi_cells)
     for key, label in sections:
         chunk = [r for r in vis if r.get("section") == key]
+        if not chunk:
+            continue
         sub = sum(_row_amount(r) for r in chunk)
         body_rows.append(
             f'<tr><td colspan="9" style="background-color:#E8F6FA;font-weight:bold;'
-            f'font-size:8pt;letter-spacing:0.5pt;text-transform:uppercase;'
-            f'color:#0A1628;padding:5pt 6pt;">{_html.escape(label)}'
+            f'font-size:6.5pt;letter-spacing:0.4pt;text-transform:uppercase;'
+            f'color:#0A1628;padding:2pt 5pt;">{_html.escape(label)}'
             f' &nbsp; {_usd_txt(sub)}</td></tr>'
         )
         for r in chunk:
@@ -1159,7 +1186,7 @@ def _planning_pdf_html(pack: dict) -> str:
             lab = _html.escape(r.get("label") or "")
             body_rows.append(
                 "<tr>"
-                f'<td style="padding:3pt 5pt;">{lab}</td>'
+                f'<td style="padding:1.5pt 4pt;">{lab}</td>'
                 f'<td style="text-align:center;">{inv}</td>'
                 f'<td style="text-align:right;">{_usd_txt(amt)}</td>'
                 f'<td style="text-align:right;">{pct_s}</td>'
@@ -1170,19 +1197,6 @@ def _planning_pdf_html(pack: dict) -> str:
                 f'<td style="text-align:right;">{ytd_s}</td>'
                 "</tr>"
             )
-    tot_tax = 0.0
-    has_tax = False
-    tot_ytd = 0.0
-    has_ytd = False
-    for r in vis:
-        t = _row_taxable(r)
-        if t is not None:
-            tot_tax += t
-            has_tax = True
-        y = _row_ytd_perf(r)
-        if y is not None:
-            tot_ytd += y
-            has_ytd = True
     body_rows.append(
         '<tr style="font-weight:bold;background-color:#F8FAFC;">'
         f'<td colspan="2">Equity / net worth</td>'
@@ -1194,39 +1208,40 @@ def _planning_pdf_html(pack: dict) -> str:
         f'<td style="text-align:right;">{_usd_txt(tot_ytd) if has_ytd else "—"}</td>'
         "</tr>"
     )
+    notes_cut = notes[:280] + ("…" if len(notes) > 280 else "")
     notes_html = (
-        f'<div style="margin-top:10pt;font-size:8pt;color:#334155;">'
-        f'<div style="font-weight:bold;color:#64748b;font-size:7pt;letter-spacing:0.5pt;'
-        f'text-transform:uppercase;margin-bottom:3pt;">Strategy notes</div>'
-        f'{notes.replace(chr(10), "<br/>")}</div>'
+        f'<div style="margin-top:6pt;font-size:7pt;color:#334155;">'
+        f'<div style="font-weight:bold;color:#64748b;font-size:6pt;letter-spacing:0.4pt;'
+        f'text-transform:uppercase;margin-bottom:1pt;">Strategy notes</div>'
+        f'{notes_cut.replace(chr(10), "<br/>")}</div>'
         if notes else ""
     )
     css = """
       @font-face { font-family: "InterPdf"; src: url(Inter-Regular.ttf); }
       @font-face { font-family: "InterPdf"; src: url(Inter-Bold.ttf); font-weight: bold; }
-      @page { size: landscape letter; margin: 0.4in; }
-      body { font-family: "InterPdf", Helvetica, Arial; font-size: 8pt; color: #334155; }
+      @page { size: landscape letter; margin: 0.28in; }
+      body { font-family: "InterPdf", Helvetica, Arial; font-size: 7pt; color: #334155; }
       table.sheet { width: 100%; border-collapse: collapse; }
       table.sheet th {
-        font-size: 6.5pt; letter-spacing: 0.4pt; text-transform: uppercase;
-        color: #64748b; border-bottom: 1pt solid #cbd5e1; padding: 4pt 5pt;
+        font-size: 5.5pt; letter-spacing: 0.3pt; text-transform: uppercase;
+        color: #64748b; border-bottom: 0.6pt solid #cbd5e1; padding: 2pt 3pt;
         text-align: center;
       }
-      table.sheet td { border-bottom: 0.4pt solid #e2e8f0; font-size: 8pt; }
+      table.sheet td { border-bottom: 0.3pt solid #e2e8f0; font-size: 7pt; }
     """
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<style>{css}</style></head><body>"
-        '<table style="width:100%;border:none;margin-bottom:8pt;"><tr>'
-        f'<td style="border:none;width:55%;vertical-align:middle;">{img}'
-        f'<div style="font-size:7pt;color:#5BB8D4;font-weight:bold;letter-spacing:0.7pt;'
-        f'text-transform:uppercase;margin-top:2pt;">Household planning snapshot</div></td>'
+        '<table style="width:100%;border:none;margin-bottom:4pt;"><tr>'
+        f'<td style="border:none;width:96pt;vertical-align:middle;">{img}'
+        f'<div style="font-size:6pt;color:#5BB8D4;font-weight:bold;letter-spacing:0.6pt;'
+        f'text-transform:uppercase;margin-top:1pt;">Household planning snapshot</div></td>'
         f'<td style="border:none;text-align:right;vertical-align:middle;">'
-        f'<div style="font-size:12pt;font-weight:bold;color:#0A1628;">{title}</div>'
-        f'<div style="font-size:8pt;color:#64748b;">{lp_name}'
+        f'<div style="font-size:10pt;font-weight:bold;color:#0A1628;">{title}</div>'
+        f'<div style="font-size:7pt;color:#64748b;">{lp_name}'
         f'{" · as of " + as_of if as_of else ""} · {stamp}</div></td>'
         "</tr></table>"
-        f'<table style="width:100%;border-collapse:collapse;margin-bottom:8pt;"><tr>{kpi_cells}</tr></table>'
+        f'<table style="width:100%;border-collapse:collapse;margin-bottom:5pt;"><tr>{kpi_cells}</tr></table>'
         '<table class="sheet">'
         "<thead><tr>"
         "<th style='text-align:left;width:18%;'>Line</th>"
@@ -1242,7 +1257,7 @@ def _planning_pdf_html(pack: dict) -> str:
         + "".join(body_rows)
         + "</tbody></table>"
         + notes_html
-        + '<div style="margin-top:10pt;font-size:6.5pt;color:#94a3b8;">'
+        + '<div style="margin-top:5pt;font-size:6pt;color:#94a3b8;">'
         "DGA Capital · Confidential — for the intended recipient only. "
         "Not investment advice. P&amp;L actual is the taxable realized event; "
         "YTD performance is mark-to-market plus dividends (unrealized).</div>"
