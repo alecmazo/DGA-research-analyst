@@ -1,6 +1,6 @@
 /**
- * LPPlanningScreen — this login's planning worksheet only.
- * GPs never see this tab. The API refuses any other LP's book.
+ * LP Documents tab — this login's planning worksheet (nobody else's).
+ * Lives under Documents, not a standalone Planning tab.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -106,7 +106,7 @@ export default function LPPlanningScreen() {
 
   return (
     <View style={s.container}>
-      <AppHeader title="Planning" subtitle={lp.name || 'Your worksheet'} />
+      <AppHeader title="Documents" subtitle={lp.name || 'Your worksheet'} />
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
         contentContainerStyle={s.scroll}
@@ -125,7 +125,14 @@ export default function LPPlanningScreen() {
         )}
         {pack && (
           <>
-            <Text style={s.hint}>Only you and your GP can see this worksheet.</Text>
+            <View style={s.card}>
+              <Text style={s.secTitle}>Documents</Text>
+              <Text style={s.hint}>
+                K-1s, statements, and GP letters will appear here when published.
+                Your planning worksheet is below — only you and your GP can see it.
+              </Text>
+            </View>
+            <Text style={s.hint}>Planning worksheet</Text>
             <View style={s.kpiRow}>
               {[
                 ['Net worth', fmtUsd(nw)],

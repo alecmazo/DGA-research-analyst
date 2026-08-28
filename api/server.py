@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui544-20260828-lp-planning-tab"
+WEB_BUILD_VERSION = "ui545-20260828-lp-docs-planning"
 
 
 @app.get("/api/build")
@@ -35665,9 +35665,10 @@ _SNAP_SECLEND_DESC_KW = (
     "STOCK LOAN",
 )
 # Income/expense buckets for the automatic monthly balance records.
-_SNAP_DIV_TYPES   = {"DIVIDEND", "CASH_DIVIDEND"}
+_SNAP_DIV_TYPES   = {"DIVIDEND", "CASH_DIVIDEND", "SUBSTITUTE_DIVIDEND", "STOCK_DIVIDEND"}
 _SNAP_INT_TYPES   = {"INTEREST"}
 _SNAP_FEE_TYPES   = {"FEE", "MANAGEMENT_FEE", "ADMINISTRATIVE_FEE"}
+_SNAP_TAX_TYPES   = {"TAX"}
 
 
 def _snap_is_inkind_equity_insert(type_: str | None, units, amount,
@@ -37271,6 +37272,12 @@ def _snaptrade_run_sync() -> dict:
         errors.extend(act_errors)
     except Exception as e:
         errors.append({"stage": "activities", "error": _snaptrade_error_detail(e)})
+
+    try:
+        _snaptrade_sync_stage("Rolling tax YTD from activities…")
+        _snaptrade_refresh_tax_ytd()
+    except Exception as e:
+        errors.append({"stage": "tax_ytd", "error": _snaptrade_error_detail(e)})
 
     # ── Balance history (automatic) — synthesize monthly records after the last
     # CSV month for every assigned managed account, then refresh its YTD cache.
