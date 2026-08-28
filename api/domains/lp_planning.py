@@ -1293,16 +1293,18 @@ def planning_tax_ytd(lp_id: str, request: Request, year: int | None = None):
     live = _live_books(user)
     managed = list(live.get("managed") or [])
     fund_ids = [str(a.get("fund_id")) for a in managed if a.get("fund_id")]
-    fn = getattr(B, "_snaptrade_refresh_tax_ytd", None)
-    if callable(fn):
-        try:
-            fn(yr)
-        except Exception:
-            pass
     loader = getattr(B, "_snaptrade_tax_ytd_for_funds", None)
     if not callable(loader):
         raise HTTPException(status_code=503, detail="Tax YTD rollup is not available")
-    pack = loader(fund_ids, yr) or {}
+    try:
+        pack = loader(fund_ids, yr) or {}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Tax YTD failed: {type(e).__name__}: {e!s:.200}",
+        ) from e
     by_fid: dict[str, dict] = {}
     for acct in pack.get("accounts") or []:
         fid = str(acct.get("fund_id") or "")

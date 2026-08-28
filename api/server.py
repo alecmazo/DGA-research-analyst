@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui548-20260828-tax-ytd-mount"
+WEB_BUILD_VERSION = "ui549-20260828-tax-ytd-500"
 
 
 @app.get("/api/build")
@@ -37414,7 +37414,7 @@ def _snaptrade_tax_ytd_for_funds(fund_ids: list, year: int | None = None) -> dic
              WHERE status='active'
                AND COALESCE(hidden, FALSE) IS NOT TRUE
                AND fund_id::text = ANY(%s)
-               AND account_id NOT LIKE 'demo-%'
+               AND account_id NOT LIKE 'demo-%%'
              ORDER BY account_name
             """,
             (fids,),
