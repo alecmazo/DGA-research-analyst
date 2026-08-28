@@ -424,6 +424,7 @@ def _live_books(user: dict) -> dict:
     if not isinstance(memberships, dict):
         memberships = {}
     fund_names = [str(k) for k in memberships.keys() if k]
+    is_gp = (user.get("role") or "").lower() in ("gp", "admin")
 
     try:
         with B._fund_conn() as conn, conn.cursor(cursor_factory=B._RealDictCursor) as cur:
@@ -448,17 +449,28 @@ def _live_books(user: dict) -> dict:
                     )
 
             fund_rows = []
-            if fund_names:
-                cur.execute(
-                    """
-                    SELECT id, name, short_name
-                      FROM funds
-                     WHERE fund_type = 'lp_fund'
-                       AND LOWER(name) = ANY(%s)
-                     ORDER BY name
-                    """,
-                    ([n.lower() for n in fund_names],),
-                )
+            if fund_names or is_gp:
+                if fund_names and not is_gp:
+                    cur.execute(
+                        """
+                        SELECT id, name, short_name
+                          FROM funds
+                         WHERE fund_type = 'lp_fund'
+                           AND LOWER(name) = ANY(%s)
+                         ORDER BY name
+                        """,
+                        ([n.lower() for n in fund_names],),
+                    )
+                else:
+                    # GP snapshot: every LP fund's GP equity, plus any named memberships.
+                    cur.execute(
+                        """
+                        SELECT id, name, short_name
+                          FROM funds
+                         WHERE fund_type = 'lp_fund'
+                         ORDER BY name
+                        """
+                    )
                 fund_rows = [dict(r) for r in cur.fetchall()]
 
             all_fids = [str(r["id"]) for r in acct_rows] + [str(r["id"]) for r in fund_rows]
@@ -675,12 +687,15 @@ def _live_books(user: dict) -> dict:
                 using_live = market > 0
                 effective = market if using_live else snap_nav
                 gp_carry = 0.0
+                last_gp = 0.0
                 last = annual.get(fid)
-                if last and effective:
+                if last:
                     last_end = float(last.get("end_nav") or 0)
                     last_gp = float(last.get("gp_equity_end") or 0)
-                    if last_end > 0:
-                        gp_carry = (last_gp / last_end) * effective
+                    if last_end > 0 and effective:
+                        gp_carry = (last_gp / last_end) * float(effective)
+                    elif last_gp:
+                        gp_carry = last_gp
                 lp_nav = max(0.0, (effective or 0) - gp_carry)
                 tot = total_committed.get(fid, 0.0)
                 stake = None
@@ -694,6 +709,31 @@ def _live_books(user: dict) -> dict:
                     d = snap["as_of_date"]
                     as_of = d.isoformat() if hasattr(d, "isoformat") else str(d)
 
+                if is_gp and gp_carry:
+                    gp_pnl = round(gp_carry - last_gp, 2) if last_gp else None
+                    gp_ytd = None
+                    if last_gp and last_gp > 0 and gp_pnl is not None:
+                        gp_ytd = round(gp_pnl / last_gp * 100.0, 2)
+                    out["funds"].append({
+                        "fund_id": fid,
+                        "name": fname,
+                        "short_name": f.get("short_name") or "",
+                        "lp_alias": "GP",
+                        "commitment": 0.0,
+                        "total_committed": tot,
+                        "fund_nav": effective,
+                        "stake_value": round(gp_carry, 2),
+                        "stake_kind": "gp",
+                        "pnl_ytd": gp_pnl,
+                        "ytd_pct": gp_ytd,
+                        "as_of": as_of,
+                        "live": using_live,
+                    })
+                    if not (commitment > 0 and stake):
+                        continue
+
+                if not (stake or commitment):
+                    continue
                 out["funds"].append({
                     "fund_id": fid,
                     "name": fname,
@@ -703,6 +743,7 @@ def _live_books(user: dict) -> dict:
                     "total_committed": tot,
                     "fund_nav": effective,
                     "stake_value": stake,
+                    "stake_kind": "lp",
                     "as_of": as_of,
                     "live": using_live,
                 })
@@ -928,30 +969,40 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
         fid = str(fund.get("fund_id") or "")
         if not fid:
             continue
-        key = ("fund", fid)
+        kind = (fund.get("stake_kind") or "lp").lower()
+        link = f"{fid}:gp" if kind == "gp" else fid
+        key = ("fund", link)
         label = fund.get("name") or "LP fund"
         extra = {
             "live_amount": fund.get("stake_value"),
             "live_as_of": fund.get("as_of"),
             "live": bool(fund.get("live")),
             "commitment": fund.get("commitment"),
+            "pnl_actual_live": fund.get("pnl_ytd"),
+            "ytd_pct": fund.get("ytd_pct"),
         }
         existing = by_link.get(key)
+        note = "GP stake" if kind == "gp" else (
+            f"LP stake{(' · ' + fund.get('lp_alias')) if fund.get('lp_alias') else ''}"
+        )
         if existing:
             existing.update(extra)
             if not existing.get("label"):
                 existing["label"] = label
+            if (existing.get("notes") or "") in ("", "Linked SMA", "LP stake", "GP stake") or (
+                (existing.get("notes") or "").startswith("LP stake")
+            ):
+                existing["notes"] = note
         else:
             row = _blank_row(
                 "current",
                 label,
                 source="fund",
-                link_id=fid,
+                link_id=link,
                 include_in_investments=True,
             )
             row.update(extra)
-            alias = fund.get("lp_alias")
-            row["notes"] = f"LP stake{(' · ' + alias) if alias else ''}"
+            row["notes"] = note
             new_live.append(row)
             by_link[key] = row
 
@@ -974,7 +1025,15 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
 
     rows = new_live + rows
     live_keys = {("managed", str(a.get("fund_id"))) for a in (live.get("managed") or [])}
-    live_keys |= {("fund", str(f.get("fund_id"))) for f in (live.get("funds") or [])}
+    live_keys |= {
+        (
+            "fund",
+            f"{f.get('fund_id')}:gp" if (f.get("stake_kind") or "") == "gp"
+            else str(f.get("fund_id")),
+        )
+        for f in (live.get("funds") or [])
+        if f.get("fund_id")
+    }
     live_keys |= {
         ("managed", "unmatched:" + str(n).lower())
         for n in (live.get("unmatched_accounts") or [])
