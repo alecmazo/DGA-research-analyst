@@ -223,6 +223,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui550 | LP Support button (desktop + mobile) files the same GP Settings ticket queue; LPs cannot see the list |
 | ui551 | Support control is a flush vertical navy rail (GP + LP), not a floating pill |
 | ui552 | Support tab sits bottom-right, horizontal |
+| ui553 | SUP_20260829_c73797c1 — IC snapshot table (Ticker / Δ YTD / Contribution / $ P&L) required on strategist, quarterly letters, and memos |
 | ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
 | ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
@@ -255,6 +256,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - Do not auto-send email; Share on reports prompts for a recipient
 - SnapTrade: `SnapTradeAuth.commercial_api_key` when available
 - Options wheel: held names first; term tables + KPI strip
+- **Portfolio SNAPSHOT (required):** every book analysis (Portfolio Strategist), quarterly partner letter, and memo assigned to a portfolio MUST include the live attribution table — **Ticker | Position Δ YTD | Contribution | $ P&L** — with Modified Dietz YTD as a real book return (not a price-path). Same look as the IC Strategist snapshot. Do not substitute a different snapshot layout.
 
 ---
 
@@ -301,4 +303,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui552-20260829-support-corner` · Next: `ui553-YYYYMMDD-slug`*
+*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui553-20260829-book-snapshot` · Next: `ui554-YYYYMMDD-slug`*

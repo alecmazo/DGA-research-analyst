@@ -7475,7 +7475,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui552-20260829-support-corner"
+WEB_BUILD_VERSION = "ui553-20260829-book-snapshot"
 
 
 @app.get("/api/build")
@@ -23511,11 +23511,15 @@ def _render_quarterly_report_html(
               <td style='padding:5px 0 5px 10px;text-align:right;font-size:10px;color:#64748b;white-space:nowrap;width:58px;'>{_tk_str}</td>
               <td style='padding:5px 0 5px 10px;text-align:right;font-size:10px;font-weight:600;color:{_color};white-space:nowrap;width:72px;'>{_dg_str}</td>
             </tr>"""
-        attribution_section_html = f"""
+        _snap = _portfolio_book_snapshot(str(fund.get("id") or "")) if fund.get("id") else None
+        if _snap and _snap.get("html"):
+            attribution_section_html = _snap["html"]
+        else:
+            attribution_section_html = f"""
       <!-- YTD Attribution -->
       <div style='font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
-                  color:#5BB8D4;margin-bottom:8px;'>YTD Performance Attribution</div>
-      <div style='font-size:11px;color:#888;margin-bottom:12px;'>Contribution of each holding to total portfolio return — includes sold positions. Sorted by impact.</div>
+                  color:#5BB8D4;margin-bottom:8px;'>1. Snapshot</div>
+      <div style='font-size:11px;color:#888;margin-bottom:12px;'>YTD (live, Modified Dietz). Real book return — Ticker · Position Δ YTD · Contribution · $ P&amp;L.</div>
       <div style='margin-bottom:10px;'>
         <span style='font-size:11px;color:#64748b;'>Total attributed: </span>
         <span style='font-size:14px;font-weight:800;color:{_tc_color};'>{_tc_sign}{_total_contrib:.2f}%</span>
@@ -23523,9 +23527,9 @@ def _render_quarterly_report_html(
       <table width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse;margin-bottom:24px;'>
         <thead><tr style='border-bottom:2px solid #e2e8f0;'>
           <th style='padding:4px 10px 6px 0;font-size:9px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;text-transform:uppercase;text-align:left;'>Ticker</th>
-          <th style='padding:4px 6px 6px;font-size:9px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;text-transform:uppercase;text-align:left;'>Contribution to Return</th>
-          <th style='padding:4px 0 6px 10px;font-size:9px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;text-transform:uppercase;text-align:right;'>Stock Ret.</th>
-          <th style='padding:4px 0 6px 10px;font-size:9px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;text-transform:uppercase;text-align:right;'>Dollar P&amp;L</th>
+          <th style='padding:4px 6px 6px;font-size:9px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;text-transform:uppercase;text-align:left;'>Contribution</th>
+          <th style='padding:4px 0 6px 10px;font-size:9px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;text-transform:uppercase;text-align:right;'>Position Δ YTD</th>
+          <th style='padding:4px 0 6px 10px;font-size:9px;font-weight:800;color:#94a3b8;letter-spacing:0.8px;text-transform:uppercase;text-align:right;'>$ P&amp;L</th>
         </tr></thead>
         <tbody>{_attr_rows}</tbody>
       </table>"""
@@ -24510,7 +24514,7 @@ def _memo_md_flowables(md_text: str, S: dict) -> list:
 
 
 def _render_dga_memo_pdf(script: dict, gp_memo: str, fund_name: str | None,
-                          generated_at_iso: str) -> bytes:
+                          generated_at_iso: str, fund_id: str | None = None) -> bytes:
     """Render a DGA Capital memo PDF (reportlab platypus) with a branded logo
     letterhead. Analysis-style memos (research_memo) render their markdown body
     properly (headings/bullets/bold); podcast scripts keep speaker attribution.
@@ -24640,6 +24644,38 @@ def _render_dga_memo_pdf(script: dict, gp_memo: str, fund_name: str | None,
     flow.append(HRFlowable(width="100%", thickness=2, color=NAVY,
                             spaceBefore=2, spaceAfter=10))
 
+    snap = _portfolio_book_snapshot(fund_id) if fund_id else None
+    if snap and snap.get("rows") is not None:
+        flow.append(Paragraph("1. SNAPSHOT", h_eyebrow))
+        flow.append(Paragraph(_html.escape(snap.get("headline") or ""), h_meta))
+        flow.append(Spacer(1, 6))
+        hdr = ["Ticker", "Position Δ YTD", "Contribution", "$ P&L"]
+        data = [hdr]
+        for r in snap["rows"]:
+            pos = "—" if r["pos_delta_pct"] is None else f"{r['pos_delta_pct']:+.1f}%"
+            dg = r["dollar_gain"]
+            pnl = f"{'+' if dg >= 0 else '−'}${abs(dg):,.0f}"
+            tk = r["ticker"] + ("  SOLD" if r.get("sold") else "")
+            data.append([tk, pos, f"{r['contribution_pct']:.2f}", pnl])
+        if len(data) == 1:
+            data.append(["—", "—", "—", "—"])
+        col_w = [doc.width * x for x in (0.22, 0.26, 0.26, 0.26)]
+        stbl = Table(data, colWidths=col_w)
+        stbl.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("TEXTCOLOR", (0, 0), (-1, 0), GREY),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 0), (0, -1), "LEFT"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("LINEBELOW", (0, 0), (-1, 0), 1, colors.HexColor("#e2e8f0")),
+            ("LINEBELOW", (0, 1), (-1, -1), 0.4, colors.HexColor("#eef2f6")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        flow.append(stbl)
+        flow.append(Spacer(1, 12))
+
     # ── GP Note callout ──────────────────────────────────────────────────
     if (gp_memo or "").strip():
         memo_para = Paragraph(
@@ -24722,7 +24758,7 @@ def _render_dga_memo_pdf(script: dict, gp_memo: str, fund_name: str | None,
 
 
 def _render_dga_memo_html(script: dict, gp_memo: str, fund_name: str | None,
-                           generated_at_iso: str) -> str:
+                           generated_at_iso: str, fund_id: str | None = None) -> str:
     """Render a podcast script as a DGA Capital memo (HTML, print-friendly).
     Sections become narrative chapters; turns become attributed paragraphs.
     Kept around in case we wire WeasyPrint later — current PDF path uses
@@ -24766,6 +24802,10 @@ def _render_dga_memo_html(script: dict, gp_memo: str, fund_name: str | None,
                 + "".join(turn_html)
             )
 
+    snap_html = ""
+    snap = _portfolio_book_snapshot(fund_id) if fund_id else None
+    if snap and snap.get("html"):
+        snap_html = snap["html"]
     memo_block = ""
     if (gp_memo or "").strip():
         memo_block = (
@@ -24801,6 +24841,7 @@ def _render_dga_memo_html(script: dict, gp_memo: str, fund_name: str | None,
     </div>
     <div style="margin-top:8px;font-size:9pt;color:#64748b;">Coverage: {_html.escape(tickers_str)}</div>
   </div>
+  {snap_html}
   {memo_block}
   {''.join(sections_html) or '<p style="color:#94a3b8;font-style:italic;">No sections in source script.</p>'}
   <div style="margin-top:36px;padding-top:14px;border-top:1px solid #cbd5e1;font-size:8pt;color:#94a3b8;line-height:1.5;">
@@ -24874,7 +24915,8 @@ def create_memo_from_podcast(job_key: str, request: Request):
     from datetime import datetime as _dt, timezone as _tz
     gen_iso = _dt.now(_tz.utc).isoformat()
     try:
-        pdf_bytes = _render_dga_memo_pdf(src["script"], gp_memo, fund_name, gen_iso)
+        pdf_bytes = _render_dga_memo_pdf(src["script"], gp_memo, fund_name, gen_iso,
+                                         fund_id=assigned_fund_id)
     except Exception as e:
         raise HTTPException(500, f"PDF render failed: {e!s:.200}")
 
@@ -25186,7 +25228,8 @@ def update_memo(memo_id: str, request: Request):
         fund_name = _fund_name_lookup(final_fund)
         from datetime import datetime as _dt, timezone as _tz
         pdf_bytes = _render_dga_memo_pdf(script, final_memo or "", fund_name,
-                                          _dt.now(_tz.utc).isoformat())
+                                          _dt.now(_tz.utc).isoformat(),
+                                          fund_id=final_fund)
         with _fund_conn() as conn, conn.cursor() as cur:
             cur.execute("""UPDATE dga_memos
                               SET assigned_fund_id = %s, gp_memo = %s, pdf_bytes = %s
@@ -27003,6 +27046,10 @@ _LP_MEMO_SYSTEM = (
     "Output GitHub-flavored MARKDOWN with EXACTLY these sections, in this order:\n\n"
     "## Executive Summary\n"
     "2–4 sentences: the Fund's overall stance and the single most important action.\n\n"
+    "## Snapshot\n"
+    "If a LIVE BOOK SNAPSHOT table is in the source, reproduce it EXACTLY "
+    "(Ticker | Position Δ YTD | Contribution | $ P&L) plus the Modified Dietz YTD line. "
+    "Do not invent a different snapshot. If none is provided, omit this section.\n\n"
     "## Positions\n"
     "A markdown table with these exact columns:\n"
     "| Position | Weight | Thesis | View | Action |\n"
@@ -27025,7 +27072,8 @@ _LP_MEMO_SYSTEM = (
 )
 
 
-def _synthesize_lp_memo(source_text: str, fund_name: str | None = None) -> str:
+def _synthesize_lp_memo(source_text: str, fund_name: str | None = None,
+                        fund_id: str | None = None) -> str:
     """Processing step: rewrite raw analyst material into a structured LP memo
     (exec summary + per-position table + actions + risks) via Claude. Falls back
     to the original text if the model call fails, so a memo always renders."""
@@ -27035,6 +27083,9 @@ def _synthesize_lp_memo(source_text: str, fund_name: str | None = None) -> str:
     except Exception:
         return source_text
     ctx = (f"FUND: {fund_name}\n\n" if fund_name else "")
+    snap = _portfolio_book_snapshot(fund_id) if fund_id else None
+    if snap and snap.get("markdown"):
+        ctx += "LIVE BOOK SNAPSHOT (copy into ## Snapshot exactly):\n" + snap["markdown"] + "\n\n"
     user = ctx + "ANALYST MATERIAL TO CONVERT INTO THE MEMO:\n\n" + (source_text or "")[:30000]
     for mdl in (_AGENTIC_MODEL, _TRANSCRIPT_EXTRACT_MODEL):
         try:
@@ -27081,7 +27132,7 @@ def memo_from_analysis(request: Request):
     fund_name = _fund_name_lookup(assigned_fund_id)
     # Processing step — convert the conversational/raw analysis into a dry,
     # LP-grade institutional memo with a position table + actions.
-    body_text = _synthesize_lp_memo(answer, fund_name) if lp_memo else answer
+    body_text = _synthesize_lp_memo(answer, fund_name, fund_id=assigned_fund_id) if lp_memo else answer
 
     # Synthesize a script dict the memo renderer understands: the question
     # becomes a small focus line, the processed body becomes the memo body.
@@ -27099,7 +27150,8 @@ def memo_from_analysis(request: Request):
     from datetime import datetime as _dt, timezone as _tz
     gen_iso = _dt.now(_tz.utc).isoformat()
     try:
-        pdf_bytes = _render_dga_memo_pdf(script, gp_memo, fund_name, gen_iso)
+        pdf_bytes = _render_dga_memo_pdf(script, gp_memo, fund_name, gen_iso,
+                                         fund_id=assigned_fund_id)
     except Exception as e:
         raise HTTPException(500, f"PDF render failed: {e!s:.200}")
     import uuid as _uuid
@@ -27180,6 +27232,153 @@ def _load_fund_positions(fund_id: str) -> list[dict]:
     return _positions_from_valued(_load_fund_positions_valued(fund_id))
 
 
+def _portfolio_book_snapshot(fund_id: str | None) -> dict | None:
+    """Live IC snapshot for a book: Ticker | Position Δ YTD | Contribution | $ P&L.
+
+    Required on every portfolio analysis, quarterly partner letter, and memo
+    assigned to a portfolio (SUP_20260829_c73797c1). Numbers come from the
+    Modified Dietz YTD cache — not a price-path estimate.
+    """
+    fid = str(fund_id or "").strip()
+    if not fid or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return None
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT f.name, f.short_name, c.nav, c.ytd_pct, c.result_json
+                  FROM funds f
+                  LEFT JOIN managed_account_ytd_cache c ON c.fund_id = f.id
+                 WHERE f.id::text = %s
+                """,
+                (fid,),
+            )
+            row = cur.fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    name = (row.get("short_name") or row.get("name") or "Portfolio").strip()
+    ytd = None
+    try:
+        if row.get("ytd_pct") is not None:
+            ytd = float(row["ytd_pct"])
+    except (TypeError, ValueError):
+        ytd = None
+    raw = row.get("result_json") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    if ytd is None:
+        try:
+            ytd = float(raw.get("md_return_pct") or raw.get("ytd_pct") or 0)
+        except (TypeError, ValueError):
+            ytd = None
+    rows = []
+    for a in (raw.get("attribution") or []):
+        if not isinstance(a, dict):
+            continue
+        tk = (a.get("ticker") or "").strip().upper()
+        if not tk:
+            continue
+        try:
+            pos = a.get("ticker_return_pct")
+            pos = float(pos) if pos is not None else None
+        except (TypeError, ValueError):
+            pos = None
+        try:
+            contrib = float(a.get("contribution_pct") or 0)
+        except (TypeError, ValueError):
+            contrib = 0.0
+        try:
+            pnl = float(a.get("dollar_gain") or 0)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        try:
+            sold = float(a.get("end_shares") or 0) == 0
+        except (TypeError, ValueError):
+            sold = bool(a.get("sold"))
+        rows.append({
+            "ticker": tk,
+            "pos_delta_pct": pos,
+            "contribution_pct": contrib,
+            "dollar_gain": pnl,
+            "sold": sold,
+        })
+    rows.sort(key=lambda x: abs(x["contribution_pct"]), reverse=True)
+    ytd_s = f"{ytd:+.2f}%" if ytd is not None else "—"
+    headline = (
+        f"YTD (live, Modified Dietz, {name} {ytd_s}). "
+        "This is a real book return, not a price-path estimate."
+    )
+    md_lines = [
+        f"**SNAPSHOT — {name}**",
+        headline,
+        "",
+        "| Ticker | Position Δ YTD | Contribution | $ P&L |",
+        "|--------|----------------|--------------|-------|",
+    ]
+    for r in rows:
+        pos = "—" if r["pos_delta_pct"] is None else f"{r['pos_delta_pct']:+.1f}%"
+        dg = r["dollar_gain"]
+        pnl = f"{'+' if dg >= 0 else '−'}${abs(dg):,.0f}"
+        sold = " (sold)" if r["sold"] else ""
+        md_lines.append(
+            f"| {r['ticker']}{sold} | {pos} | {r['contribution_pct']:.2f} | {pnl} |"
+        )
+    html_rows = []
+    for r in rows:
+        pos = "—" if r["pos_delta_pct"] is None else f"{r['pos_delta_pct']:+.1f}%"
+        dg = r["dollar_gain"]
+        col = "#1a7a4a" if dg >= 0 else "#c0392b"
+        pnl = f"{'+' if dg >= 0 else '−'}${abs(dg):,.0f}"
+        sold = (" <span style='font-size:8px;font-weight:700;color:#94a3b8;"
+                "letter-spacing:.4px;'>SOLD</span>") if r["sold"] else ""
+        html_rows.append(
+            "<tr style='border-bottom:1px solid #eef2f6;'>"
+            f"<td style='padding:5px 8px 5px 0;font-weight:700;font-size:11px;"
+            f"color:#0A1628;white-space:nowrap;'>{r['ticker']}{sold}</td>"
+            f"<td style='padding:5px 8px;text-align:right;font-size:11px;"
+            f"font-variant-numeric:tabular-nums;color:{col};'>{pos}</td>"
+            f"<td style='padding:5px 8px;text-align:right;font-size:11px;"
+            f"font-variant-numeric:tabular-nums;color:{col};'>{r['contribution_pct']:.2f}</td>"
+            f"<td style='padding:5px 0 5px 8px;text-align:right;font-size:11px;"
+            f"font-weight:700;font-variant-numeric:tabular-nums;color:{col};'>{pnl}</td>"
+            "</tr>"
+        )
+    html = f"""
+      <div style="margin:0 0 22px 0;">
+        <div style="font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;
+                    color:#5BB8D4;margin-bottom:6px;">1. Snapshot</div>
+        <div style="font-size:12px;color:#334155;margin-bottom:10px;line-height:1.45;">{headline}</div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+          <thead><tr style="border-bottom:2px solid #e2e8f0;">
+            <th style="padding:4px 8px 6px 0;font-size:9px;font-weight:800;color:#94a3b8;
+                       letter-spacing:.8px;text-transform:uppercase;text-align:left;">Ticker</th>
+            <th style="padding:4px 8px 6px;font-size:9px;font-weight:800;color:#94a3b8;
+                       letter-spacing:.8px;text-transform:uppercase;text-align:right;">Position Δ YTD</th>
+            <th style="padding:4px 8px 6px;font-size:9px;font-weight:800;color:#94a3b8;
+                       letter-spacing:.8px;text-transform:uppercase;text-align:right;">Contribution</th>
+            <th style="padding:4px 0 6px 8px;font-size:9px;font-weight:800;color:#94a3b8;
+                       letter-spacing:.8px;text-transform:uppercase;text-align:right;">$ P&amp;L</th>
+          </tr></thead>
+          <tbody>{''.join(html_rows) or '<tr><td colspan="4" style="padding:8px 0;color:#94a3b8;font-size:11px;">No YTD attribution on file.</td></tr>'}</tbody>
+        </table>
+      </div>"""
+    return {
+        "name": name,
+        "ytd_pct": ytd,
+        "headline": headline,
+        "rows": rows,
+        "markdown": "\n".join(md_lines),
+        "html": html,
+    }
+
+
 def _combine_fund_positions(fund_ids: list[str]) -> list[dict]:
     """Combine several accounts into ONE book: aggregate each ticker's market
     value across all funds, then weight on the combined total (so e.g. ANAT-IRA +
@@ -27191,7 +27390,8 @@ def _combine_fund_positions(fund_ids: list[str]) -> list[dict]:
     return _positions_from_valued([{"ticker": tk, "mv": mv} for tk, mv in agg.items()])
 
 
-def _build_strategist_context(positions: list[dict], fund_name: str | None) -> str:
+def _build_strategist_context(positions: list[dict], fund_name: str | None,
+                              fund_ids: list | None = None) -> str:
     """Enrich positions with per-name Grok *and* Claude PT/upside (saved reports)
     and produce a grounded context block for the strategist prompt."""
     tickers = [p["ticker"] for p in positions if p.get("ticker")]
@@ -27294,6 +27494,18 @@ def _build_strategist_context(positions: list[dict], fund_name: str | None) -> s
         "report-day %. Names marked [NO report] have no thesis on file — flag "
         "that as a gap."
     )
+    snap_bits = []
+    for fid in (fund_ids or []):
+        pack = _portfolio_book_snapshot(fid)
+        if pack and pack.get("markdown"):
+            snap_bits.append(pack["markdown"])
+    if snap_bits:
+        ctx.append(
+            "\n--- LIVE BOOK SNAPSHOT (REQUIRED as section 1. SNAPSHOT — "
+            "copy this table layout exactly: Ticker | Position Δ YTD | "
+            "Contribution | $ P&L. Do not invent or replace these numbers.) ---\n"
+        )
+        ctx.extend(snap_bits)
     return "\n".join(ctx)
 
 
@@ -27319,7 +27531,11 @@ _STRATEGIST_SYSTEM = (
     "(cite them as Grok vs Claude). Do not pick one engine and ignore the other. "
     "Mechanical EV is provided per engine as the baseline you reason against.\n\n"
     "Deliver a structured dossier with these sections, in order:\n"
-    "1. SNAPSHOT — sector mix, top concentrations, real YTD (cite the tool).\n"
+    "1. SNAPSHOT — MUST open with the live attribution table in this exact "
+    "shape: Ticker | Position Δ YTD | Contribution | $ P&L, plus the real "
+    "Modified Dietz YTD line. Copy the LIVE BOOK SNAPSHOT from context when "
+    "provided; then a short attribution read (what drove / hurt the number) "
+    "and sector mix. Do not substitute a different snapshot layout.\n"
     "2. CONCENTRATION & CORRELATION X-RAY — where the book is secretly one bet.\n"
     "3. EXPECTED VALUE — the mechanical EV baseline (compute it), then your "
     "reasoned read: which high-EV suggestions to TAKE and which to VETO and why.\n"
@@ -27382,7 +27598,7 @@ def research_portfolio_strategist(req: Request, background_tasks: BackgroundTask
     positions = positions[:40]
     tickers = [p["ticker"] for p in positions]
 
-    context = _build_strategist_context(positions, fund_name)
+    context = _build_strategist_context(positions, fund_name, fund_ids=fund_ids)
     question = (
         f"Run a full investment-committee review of this book and propose grounded, "
         f"advisory adjustments to optimize expected value while controlling risk.\n\n"
