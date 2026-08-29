@@ -6,7 +6,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { api, getV2User } from '../api/client';
-import { colors } from '../design';
 
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
@@ -91,8 +90,7 @@ export default function SupportFab({ surface = 'mobile-lp' }) {
         onPress={() => { setStatus(''); setOpen(true); }}
         accessibilityLabel="File support ticket"
       >
-        <Text style={styles.fabIco}>🛟</Text>
-        <Text style={styles.fabLabel}>Support</Text>
+        <Text style={styles.fabLabel}>SUPPORT</Text>
       </TouchableOpacity>
       <Modal visible={open} animationType="fade" transparent onRequestClose={() => setOpen(false)}>
         <KeyboardAvoidingView
@@ -142,23 +140,29 @@ export default function SupportFab({ surface = 'mobile-lp' }) {
 const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
-    right: 16,
-    bottom: 88,
+    right: 0,
+    top: '38%',
     zIndex: 50,
-    height: 44,
-    paddingHorizontal: 14,
-    borderRadius: 22,
-    backgroundColor: colors.navy || '#0A1628',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    elevation: 6,
+    paddingVertical: 16,
+    paddingHorizontal: 7,
+    backgroundColor: '#0A1628',
+    borderWidth: 1,
+    borderRightWidth: 0,
+    borderColor: 'rgba(91,184,212,0.42)',
+    borderTopLeftRadius: 3,
+    borderBottomLeftRadius: 3,
+    elevation: 0,
   },
-  fabIco: { fontSize: 16 },
-  fabLabel: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  fabLabel: {
+    color: '#8ec9db',
+    fontWeight: '600',
+    fontSize: 10,
+    letterSpacing: 3.2,
+    textTransform: 'uppercase',
+    transform: [{ rotate: '90deg' }],
+    width: 72,
+    textAlign: 'center',
+  },
   bd: {
     flex: 1,
     backgroundColor: 'rgba(15,23,42,0.45)',

@@ -221,6 +221,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 | ui548 | SUP_20260828_9d392054 — bind SnapTrade tax YTD helpers on lp_planning.mount so Tax info YTD is not 503 |
 | ui549 | SUP_20260828_c77e6cf6 — Tax info YTD 500: escape `demo-%` in parameterized SnapTrade SQL |
 | ui550 | LP Support button (desktop + mobile) files the same GP Settings ticket queue; LPs cannot see the list |
+| ui551 | Support control is a flush vertical navy rail (GP + LP), not a floating pill |
 | ui496 | Grok live-search **tool traces are not reports** (RIVN); show another engine |
 | ui499 | Watchlist no longer waits on Daily Pulse; 4.5s API budget + last-list cache |
 
@@ -299,4 +300,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui550-20260829-lp-support-fab` · Next: `ui551-YYYYMMDD-slug`*
+*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui551-20260829-support-rail` · Next: `ui552-YYYYMMDD-slug`*

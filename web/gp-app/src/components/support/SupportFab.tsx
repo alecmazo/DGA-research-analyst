@@ -237,8 +237,7 @@ export function SupportFab() {
         aria-label="File support ticket"
         onClick={openModal}
       >
-        <span className={styles.fabIco}>🛟</span>
-        <span className={styles.fabLabel}>Support</span>
+        Support
       </button>
 
       {open && (
