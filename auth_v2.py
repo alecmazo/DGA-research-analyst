@@ -381,7 +381,9 @@ def login(email: str, password: str) -> Optional[dict]:
 
     # Force rotation when the account is still on a password that was ever
     # written in git (hashes alone are not enough — salts+hashes were public).
-    if (password or "") in _KNOWN_LEAKED_PASSWORDS:
+    # Demo accounts are exempt: the advertised preview password is short on
+    # purpose and must never trap a prospect in a change-password gate.
+    if (not user.get("demo_mode")) and (password or "") in _KNOWN_LEAKED_PASSWORDS:
         try:
             user = dict(user)
             user["must_change_password"] = True
@@ -418,7 +420,10 @@ def login(email: str, password: str) -> Optional[dict]:
         "name":                 user["name"],
         "email":                user["email"],
         "lp_id":                user["lp_id"],
-        "must_change_password": bool(user.get("must_change_password", False)),
+        "must_change_password": (
+            False if user.get("demo_mode")
+            else bool(user.get("must_change_password", False))
+        ),
         "fund_memberships":     user.get("fund_memberships", {}),
         "managed_account_ids":  user.get("managed_account_ids", []),
         "demo_mode":            bool(user.get("demo_mode", False)),
@@ -516,6 +521,7 @@ def list_users() -> list[dict]:
             "fund_memberships":     u.get("fund_memberships", {}),
             "managed_account_ids":  u.get("managed_account_ids", []),
             "created_at":           u.get("created_at", ""),
+            "demo_mode":            bool(u.get("demo_mode", False)),
         }
         for u in _all_credentials().values()
     ]
@@ -545,8 +551,11 @@ def create_user(
         raise ValueError("Email is required")
     if find_user_by_email(email):
         raise ValueError("Email already exists")
-    if len(password) < 6:
-        raise ValueError("Password must be at least 6 characters")
+    # Live accounts stay at 6+. The public preview login is a 4-char password
+    # on purpose (`demo`) — only allowed when demo_mode is stamped on the row.
+    min_len = 4 if demo_mode else 6
+    if len(password) < min_len:
+        raise ValueError(f"Password must be at least {min_len} characters")
     prefix = {"gp": "gp_", "admin": "admin_", "lp": "lp_"}.get(role, "lp_")
     user_id = prefix + secrets.token_hex(8)
     new_hash, new_salt = hash_password(password)

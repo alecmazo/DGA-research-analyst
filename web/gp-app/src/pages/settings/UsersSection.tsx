@@ -645,7 +645,7 @@ function AdminRoster() {
                 onChange={(e) => setDemoMode(e.target.checked)}
               />
               <label htmlFor="admin-demo" style={{ fontSize: 10.5, cursor: 'pointer' }}>
-                <strong>Demo Mode</strong> — anonymise LPs; read-only on admin writes
+                <strong>Demo Mode</strong> — synthetic sandbox only; never sees live books
               </label>
             </div>
           </div>

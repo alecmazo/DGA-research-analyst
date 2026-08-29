@@ -161,6 +161,32 @@ def _support_authed(request: Request) -> dict:
     return claims
 
 
+def _support_email_is_demo(email: str) -> bool:
+    em = (email or "").strip().lower()
+    return em == "demo@dgacapital.com" or em.endswith("@demo.dgacapital.com")
+
+
+def _support_row_is_demo(row: dict) -> bool:
+    if _support_email_is_demo(str(row.get("created_by_email") or "")):
+        return True
+    ctx = row.get("context_json") or row.get("context") or {}
+    if isinstance(ctx, str):
+        try:
+            ctx = json.loads(ctx)
+        except Exception:
+            ctx = {}
+    return bool(isinstance(ctx, dict) and ctx.get("demo_mode"))
+
+
+def _support_assert_lane(claims: dict, row: dict) -> None:
+    """Demo GP never reads live tickets (emails, screenshots, descriptions)."""
+    if bool(claims.get("demo_mode")) != _support_row_is_demo(row or {}):
+        raise HTTPException(
+            status_code=403,
+            detail="Demo mode: only the sample workspace is accessible.",
+        )
+
+
 def _support_iso_utc(v) -> str | None:
     """Serialize datetimes as clean UTC ISO ending in Z (never '+00:00Z')."""
     if v is None:
@@ -465,6 +491,7 @@ def support_ticket_create(request: Request, background_tasks: BackgroundTasks):
         "user": claims.get("email") or claims.get("lp_id") or claims.get("sub"),
         "lp_id": claims.get("lp_id") or claims.get("sub"),
         "name": claims.get("name") or "",
+        "demo_mode": bool(claims.get("demo_mode")),
     }
     surface = "LP portal" if role == "lp" else "GP terminal"
     trail0 = [_support_trail_event(
@@ -545,7 +572,7 @@ def support_ticket_create(request: Request, background_tasks: BackgroundTasks):
 @router.get("/api/support/tickets")
 def support_ticket_list(request: Request, status: str = "", limit: int = 40):
     """GP-only: list tickets (no screenshot payload)."""
-    _support_gp_only(request)
+    claims = _support_gp_only(request)
     _ensure_support_tickets_table()
     limit = max(1, min(int(limit or 40), 100))
     try:
@@ -579,8 +606,11 @@ def support_ticket_list(request: Request, status: str = "", limit: int = 40):
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
     out = []
+    want_demo = bool(claims.get("demo_mode"))
     for r in rows:
         d = dict(r)
+        if _support_row_is_demo(d) != want_demo:
+            continue
         d["screenshot_b64"] = "1" if d.pop("has_shot", False) else None
         # has_shot used above — rebuild public without huge fields
         pub = _support_row_public(d)
@@ -593,7 +623,7 @@ def support_ticket_list(request: Request, status: str = "", limit: int = 40):
 
 @router.get("/api/support/tickets/{ticket_id}")
 def support_ticket_get(ticket_id: str, request: Request, screenshot: int = 0):
-    _support_gp_only(request)
+    claims = _support_gp_only(request)
     _ensure_support_tickets_table()
     try:
         with B._fund_conn() as conn, conn.cursor(cursor_factory=B._RealDictCursor) as cur:
@@ -603,24 +633,27 @@ def support_ticket_get(ticket_id: str, request: Request, screenshot: int = 0):
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
     if not row:
         raise HTTPException(404, "Ticket not found")
+    _support_assert_lane(claims, dict(row))
     return {"ok": True, "ticket": _support_row_public(dict(row),
                                                       include_screenshot=bool(screenshot))}
 
 
 @router.get("/api/support/tickets/{ticket_id}/screenshot")
 def support_ticket_screenshot(ticket_id: str, request: Request):
-    _support_gp_only(request)
+    claims = _support_gp_only(request)
     _ensure_support_tickets_table()
     try:
         with B._fund_conn() as conn, conn.cursor(cursor_factory=B._RealDictCursor) as cur:
             cur.execute("""
-                SELECT screenshot_b64, screenshot_mime FROM support_tickets WHERE id=%s
+                SELECT screenshot_b64, screenshot_mime, created_by_email, context_json
+                  FROM support_tickets WHERE id=%s
             """, (ticket_id,))
             row = cur.fetchone()
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
     if not row or not row.get("screenshot_b64"):
         raise HTTPException(404, "No screenshot")
+    _support_assert_lane(claims, dict(row))
     import base64 as _b64
     try:
         raw = _b64.b64decode(row["screenshot_b64"])

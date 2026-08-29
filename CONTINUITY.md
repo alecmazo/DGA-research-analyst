@@ -133,6 +133,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Engine loops + research print** | **`ui518-20260827-engine-loops-print`** | Grok vs Claude 15s analysis loops; Print on Analyst/Strategist with DGA letterhead; Claude strategist thinking off |
 | **PDF tables + question** | **`ui519-20260827-pdf-table-question`** | Report/IC PDF columns sized from cell text; Strategist Question strip no longer dumps the LLM prompt |
 | **Next deploy after this** | **`ui520-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
+| **Book snapshot required** | **`ui553-20260829-book-snapshot`** | Strategist / quarterly / memos lock IC snapshot table |
+| **Anonymous demo login** | **`ui554-20260829-demo-preview`** | `demo@dgacapital.com` / `demo` — 3 synthetic books, zero live PII |
 
 ### One-click handoff (preferred)
 
@@ -257,6 +259,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - SnapTrade: `SnapTradeAuth.commercial_api_key` when available
 - Options wheel: held names first; term tables + KPI strip
 - **Portfolio SNAPSHOT (required):** every book analysis (Portfolio Strategist), quarterly partner letter, and memo assigned to a portfolio MUST include the live attribution table — **Ticker | Position Δ YTD | Contribution | $ P&L** — with Modified Dietz YTD as a real book return (not a price-path). Same look as the IC Strategist snapshot. Do not substitute a different snapshot layout.
+- **Demo sandbox (privacy):** public login `demo@dgacapital.com` / `demo`. Three synthetic books only (Northridge SMA, Harbor Tax-Exempt, Ridgecrest Partners). Never clone or mask live LPs. Fail-closed on `DEMO%` short names. Kill switch `_DEMO_DISABLED` if isolation ever bleeds.
 
 ---
 
@@ -303,4 +306,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui553-20260829-book-snapshot` · Next: `ui554-YYYYMMDD-slug`*
+*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui554-20260829-demo-preview` · Next: `ui555-YYYYMMDD-slug`*

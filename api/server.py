@@ -1529,12 +1529,12 @@ async def _invalidate_cache_on_mutation(request: Request, call_next):
 # samples for demo tokens (never a paid LLM call). Data is seeded synthetic —
 # real positions never enter these rows, so nothing can leak by construction.
 # ─────────────────────────────────────────────────────────────────────────────
-# KILL SWITCH (2026-07-08): the in-prod demo bled between real and demo
-# sessions (the registry-cache partition failed OPEN on the real side).
-# While True: demo logins are rejected outright, DEMO% funds are excluded
-# from fund_list for EVERYONE unconditionally, reseed returns 410, and a
-# boot task purges every demo row from the DB. Real functionality only.
-_DEMO_DISABLED = True
+# KILL SWITCH (2026-07-08 bleed): the registry-cache partition failed OPEN
+# on the real side. Isolation is now fail-closed on DEMO% short names (no
+# registry required) PLUS UUID middleware. Flip True only if live books
+# ever appear in a demo session again — that rejects demo logins, hides
+# DEMO% from everyone, and boots a purge.
+_DEMO_DISABLED = False
 
 _DEMO_REG_KEY = "demo.registry"
 _DEMO_REG_CACHE: dict = {"t": 0.0, "reg": None}
@@ -1583,6 +1583,34 @@ def _demo_key_set() -> set:
     reg = _DEMO_REG_CACHE["reg"] or {}
     return {str(x).lower() for x in
             (reg.get("fund_ids") or []) + (reg.get("short_names") or [])}
+
+
+def _is_demo_short_name(sn) -> bool:
+    """Hard partition key: DEMO% short names are the sandbox, always."""
+    return str(sn or "").upper().startswith("DEMO")
+
+
+def _sql_demo_short(is_demo: bool) -> str:
+    """SQL fragment (no user input) so list queries never mix lanes."""
+    return ("UPPER(COALESCE(short_name,'')) LIKE 'DEMO%'"
+            if is_demo else
+            "UPPER(COALESCE(short_name,'')) NOT LIKE 'DEMO%'")
+
+
+def _partition_fund_rows(rows, is_demo: bool) -> list:
+    """Fail-closed post-filter: demo sees only DEMO% books; live never does.
+    Short-name matching does not depend on the kv registry (2026-07-08)."""
+    out = []
+    for r in rows or []:
+        row = dict(r) if not isinstance(r, dict) else r
+        if _is_demo_short_name(row.get("short_name")) == bool(is_demo):
+            out.append(row)
+    return out
+
+
+def _users_for_session(users, is_demo: bool) -> list:
+    """Never mix live LPs into a demo roster or demo personas into live."""
+    return [u for u in (users or []) if bool(u.get("demo_mode")) == bool(is_demo)]
 
 
 def _fund_directory_refresh() -> None:
@@ -1638,17 +1666,29 @@ async def _demo_sandbox_check(request: Request):
         keys = {u.lower() for u in _DEMO_UUID_RE.findall(hay)}
         for seg in re.split(r"[/?&=]", hay):
             s = seg.lower()
-            if s and s in by_key:
+            if not s:
+                continue
+            if s in by_key:
                 keys.add(s)
+            # Registry-independent: any DEMO* token in the URL is a sandbox id.
+            if s.upper().startswith("DEMO"):
+                keys.add(s)
+        fund_scoped = bool(re.search(
+            r"/api/(?:fund(?:/|$)|v2/(?:gp|lp)/fund/)", path))
         if is_demo:
             if not demo_keys and not path.startswith("/api/v2/auth/"):
                 return JSONResponse(status_code=403, content={
                     "detail": "Demo dataset is not seeded yet — ask the GP to run the demo reseed."})
             for k in keys:
-                # Block any key that is a KNOWN fund entity and not demo.
+                # Block any key that is a KNOWN live fund entity.
                 if by_key.get(k) is False:
                     return JSONResponse(status_code=403, content={
-                        "detail": "Demo mode: only the demo fund and demo accounts are accessible."})
+                        "detail": "Demo mode: only the sample workspace is accessible."})
+                # Fund-scoped UUID that isn't in the demo registry → live, block.
+                # (Directory-cache-empty used to fail OPEN here — 2026-07-08.)
+                if fund_scoped and _DEMO_UUID_RE.fullmatch(k) and k not in demo_keys:
+                    return JSONResponse(status_code=403, content={
+                        "detail": "Demo mode: only the sample workspace is accessible."})
             if request.method not in ("GET", "HEAD", "OPTIONS"):
                 if not any(path.startswith(p) for p in _DEMO_WRITE_ALLOW_PREFIXES):
                     return JSONResponse(status_code=403, content={
@@ -1657,9 +1697,10 @@ async def _demo_sandbox_check(request: Request):
                                   "account-linking are available on a real account."})
         else:
             # Real session (v2 non-demo, legacy fund token, or v1 token):
-            # never allowed to touch demo entities by id/name.
+            # never allowed to touch demo entities by id/name. DEMO% short
+            # names are blocked even when the registry cache is empty.
             for k in keys:
-                if k in demo_keys or by_key.get(k) is True:
+                if k in demo_keys or by_key.get(k) is True or str(k).upper().startswith("DEMO"):
                     return JSONResponse(status_code=403, content={
                         "detail": "This id belongs to the demo sandbox."})
     except Exception:
@@ -1834,6 +1875,22 @@ def auth_v2_login(req: AuthV2LoginRequest, request: Request):
         _audit("login", email, ip, False, "bad_credentials")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    if result.get("demo_mode"):
+        if _DEMO_DISABLED:
+            _audit("login", email, ip, False, "demo_disabled")
+            raise HTTPException(
+                status_code=403,
+                detail="The demo environment is currently offline.",
+            )
+        try:
+            _demo_ensure_seeded()
+        except Exception as _seed_err:
+            print(f"[demo] ensure on login failed: {_seed_err}", flush=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Demo workspace is starting up — try again in a moment.",
+            )
+
     # ── Second factor (opt-in TOTP). Password is verified; gate the token on MFA. ──
     mfa = _mfa_get(result.get("lp_id"))
     if mfa and mfa.get("enabled"):
@@ -1930,11 +1987,8 @@ def admin_lp_list(request: Request):
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(status_code=403, detail="GP role required")
     users = auth_v2_mod.list_users()
-    if claims.get("demo_mode"):
-        # Demo sees ONLY demo users — never real LPs, even anonymized.
-        reg_ids = set((_demo_registry() or {}).get("user_ids") or [])
-        users = [u for u in users
-                 if u.get("demo_mode") or u.get("lp_id") in reg_ids]
+    # Symmetric: demo never sees live people; live GP never sees demo personas.
+    users = _users_for_session(users, bool(claims.get("demo_mode")))
     return {"users": users}
 
 
@@ -4384,6 +4438,8 @@ def lp_me_overview(request: Request):
     fund_memberships  = claims.get("fund_memberships", {}) or {}
     managed_accts     = claims.get("managed_account_ids", []) or []
     user_id           = str(claims.get("lp_id") or claims.get("email") or "")
+    _ov_demo          = bool(claims.get("demo_mode"))
+    _ov_pred          = _sql_demo_short(_ov_demo)
 
     # ── Hot-response cache: instant on repeat loads within TTL ──────────────
     cache_key = ("lp_overview", user_id, role)
@@ -4412,20 +4468,22 @@ def lp_me_overview(request: Request):
 
             # ── Funds ────────────────────────────────────────────────
             if role in ("gp", "admin"):
-                cur.execute("""
+                cur.execute(f"""
                     SELECT id, name, short_name, fund_type
                       FROM funds
                      WHERE fund_type = 'lp_fund'
+                       AND {_ov_pred}
                      ORDER BY name, short_name
                 """)
                 fund_rows = cur.fetchall()
             else:
                 names_lower = [n.lower() for n in fund_memberships.keys()]
                 if names_lower:
-                    cur.execute("""
+                    cur.execute(f"""
                         SELECT id, name, short_name, fund_type
                           FROM funds
                          WHERE LOWER(name) = ANY(%s)
+                           AND {_ov_pred}
                          ORDER BY name, short_name
                     """, (names_lower,))
                     fund_rows = cur.fetchall()
@@ -4434,26 +4492,30 @@ def lp_me_overview(request: Request):
 
             # ── Managed accounts ─────────────────────────────────────
             if role in ("gp", "admin"):
-                cur.execute("""
+                cur.execute(f"""
                     SELECT id, name, short_name
                       FROM funds
                      WHERE fund_type = 'managed_account'
+                       AND {_ov_pred}
                      ORDER BY name, short_name
                 """)
                 acct_rows = cur.fetchall()
             else:
                 accts_lower = [a.lower() for a in managed_accts]
                 if accts_lower:
-                    cur.execute("""
+                    cur.execute(f"""
                         SELECT id, name, short_name
                           FROM funds
                          WHERE fund_type = 'managed_account'
                            AND LOWER(name) = ANY(%s)
+                           AND {_ov_pred}
                          ORDER BY name, short_name
                     """, (accts_lower,))
                     acct_rows = cur.fetchall()
                 else:
                     acct_rows = []
+            fund_rows = _partition_fund_rows(fund_rows, _ov_demo)
+            acct_rows = _partition_fund_rows(acct_rows, _ov_demo)
 
             fund_fids = [str(f["id"]) for f in fund_rows]
             acct_fids = [str(a["id"]) for a in acct_rows]
@@ -4817,6 +4879,8 @@ def lp_me_positions(request: Request):
     is_privileged     = claims.get("role") in ("gp", "admin")
     acct_ids: list    = claims.get("managed_account_ids") or []
     fund_memberships: dict = claims.get("fund_memberships", {}) or {}
+    _pos_demo         = bool(claims.get("demo_mode"))
+    _pos_pred         = _sql_demo_short(_pos_demo)
 
     if not _PSYCOPG2_OK:
         return {"positions": [], "total_market_value": None, "account_count": 0}
@@ -4827,19 +4891,21 @@ def lp_me_positions(request: Request):
 
             # ── 1. Managed accounts ───────────────────────────────────────────
             if is_privileged:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT id, name, short_name
                       FROM funds
                      WHERE fund_type = 'managed_account' AND status != 'closed'
+                       AND {_pos_pred}
                 """)
                 managed_rows = [dict(r, source_type="managed_account", stake_pct=100.0)
                                 for r in cur.fetchall()]
             elif acct_ids:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT id, name, short_name
                       FROM funds
                      WHERE fund_type = 'managed_account'
                        AND (UPPER(short_name) = ANY(%s) OR UPPER(name) = ANY(%s))
+                       AND {_pos_pred}
                 """, ([a.upper() for a in acct_ids], [a.upper() for a in acct_ids]))
                 managed_rows = [dict(r, source_type="managed_account", stake_pct=100.0)
                                 for r in cur.fetchall()]
@@ -4848,10 +4914,11 @@ def lp_me_positions(request: Request):
 
             # ── 2. LP fund stakes ─────────────────────────────────────────────
             if is_privileged:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT id, name, short_name
                       FROM funds
                      WHERE fund_type = 'lp_fund' AND status != 'closed'
+                       AND {_pos_pred}
                 """)
                 lp_fund_rows = [dict(r, source_type="lp_fund", stake_pct=100.0)
                                 for r in cur.fetchall()]
@@ -4959,6 +5026,8 @@ def lp_me_positions(request: Request):
             else:
                 lp_fund_rows = []
 
+            managed_rows = _partition_fund_rows(managed_rows, _pos_demo)
+            lp_fund_rows = _partition_fund_rows(lp_fund_rows, _pos_demo)
             all_fund_rows = managed_rows + lp_fund_rows
             if not all_fund_rows:
                 return {"positions": [], "total_market_value": 0, "account_count": 0}
@@ -7475,7 +7544,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui553-20260829-book-snapshot"
+WEB_BUILD_VERSION = "ui554-20260829-demo-preview"
 
 
 @app.get("/api/build")
@@ -18200,6 +18269,10 @@ def fund_lps(request: Request, fund_id: str = None):
     try:
         with conn.cursor(cursor_factory=_RealDictCursor) as cur:
             fid = _resolve_fund_id(cur, fund_id)
+            cur.execute("SELECT short_name FROM funds WHERE id = %s", (fid,))
+            _sn_row = cur.fetchone() or {}
+            _is_synth_book = _is_demo_short_name(
+                (_sn_row.get("short_name") if isinstance(_sn_row, dict) else None))
 
             # Market NAV for the fund
             market_nav = _fund_market_nav(cur, fid)
@@ -18225,9 +18298,16 @@ def fund_lps(request: Request, fund_id: str = None):
                 commitment = float(r["commitment"])
                 share      = (commitment / total_committed) if total_committed > 0 else 0.0
                 cur_val    = round(market_nav * share, 2)
+                # Synthetic books already have fictitious legal names — show
+                # them. Greek labels are last-line cover if a live book ever
+                # leaked into a demo session (isolation should prevent that).
+                if _is_demo and not _is_synth_book:
+                    legal = _demo_label(i)
+                else:
+                    legal = r["legal_name"]
                 result.append({
                     "id":           str(r["id"]),
-                    "legal_name":   _demo_label(i) if _is_demo else r["legal_name"],
+                    "legal_name":   legal,
                     "entity_type":  r["entity_type"],
                     "onboarded_at": str(r["onboarded_at"]) if r["onboarded_at"] else None,
                     "commitment":   commitment,
@@ -39199,10 +39279,32 @@ _DEMO_FALLBACK_TICKERS = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "JPM", "XOM", "UNH",
     "HD", "COST", "AVGO", "LLY", "V", "PG", "CAT", "GE", "PEP", "KO", "ABBV",
 ]
-_DEMO_GP_EMAIL, _DEMO_GP_PASSWORD = "demo.gp@dgacapital.com", "DemoGP!2026"
-_DEMO_LP_EMAIL, _DEMO_LP_PASSWORD = "demo.lp@dgacapital.com", "DemoLP!2026"
-_DEMO_FUND_NAME = "Demo Growth Partners, LP"
-_DEMO_LP_ALIAS  = "Blue Harbor Family Trust"
+# One advertised login. Fake LP rows exist so the Users tab looks like a
+# real GP desk, but they get random unguessable passwords and are never
+# printed, emailed, or returned on the public login page.
+_DEMO_GP_EMAIL, _DEMO_GP_PASSWORD = "demo@dgacapital.com", "demo"
+_DEMO_GP_NAME = "DGA Preview"
+_DEMO_FUND_NAME = "Ridgecrest Partners, LP"
+_DEMO_LEGACY_EMAILS = (
+    "demo.gp@dgacapital.com",
+    "demo.lp@dgacapital.com",
+    "demo@dgacapital.com",
+)
+_DEMO_LP_PERSONAS = (
+    {
+        "email": "meridian.trust@demo.dgacapital.com",
+        "name": "Meridian Family Trust",
+        "fund_memberships": {"Ridgecrest Partners, LP": "Meridian Family Trust"},
+        "managed_account_ids": ["Northridge SMA"],
+    },
+    {
+        "email": "pinnacle.holdings@demo.dgacapital.com",
+        "name": "Pinnacle Holdings LLC",
+        "fund_memberships": {"Ridgecrest Partners, LP": "Pinnacle Holdings LLC"},
+        "managed_account_ids": ["Harbor Tax-Exempt"],
+    },
+)
+_DEMO_SEED_LOCK = threading.RLock()
 
 
 def _demo_report_md(tk: str, name: str, px: float, sector: str) -> str:
@@ -39265,23 +39367,18 @@ def _demo_reseed(n_funds: int = 1, n_managed: int = 2, wl_count: int = 10) -> di
     import random as _rnd
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         raise HTTPException(503, "Database not available")
-    n_funds   = max(1, min(4, int(n_funds)))
-    n_managed = max(0, min(6, int(n_managed)))
+    # Canonical preview is always 3 books. Args kept for API back-compat.
+    n_funds, n_managed = 1, 2
     wl_count  = max(0, min(25, int(wl_count)))
     rnd = _rnd.Random(20260707)          # deterministic across reseeds
     yr = datetime.utcnow().year
     today = datetime.utcnow().date()
     out: dict = {"ok": True}
 
-    LP_NAMES = ["Demo Growth Partners, LP", "Demo Opportunities Fund II, LP",
-                "Demo Yield Fund III, LP", "Demo Ventures IV, LP"]
-    MA_NAMES = ["Demo Core Account", "Demo Income Account", "Demo Balanced Account",
-                "Demo Aggressive Account", "Demo Tax-Exempt Account", "Demo Legacy Account"]
-    LP_ROSTER = [("Blue Harbor Family Trust", "trust", 3_500_000),
-                 ("Kestrel Point Capital LLC", "llc", 3_000_000),
-                 ("A. & M. Winslow", "individual", 2_000_000),
-                 ("Cedar Mill Holdings LLC", "llc", 2_500_000),
-                 ("The Larkspur Trust", "trust", 1_800_000)]
+    LP_NAMES = ["Ridgecrest Partners, LP"]
+    MA_NAMES = ["Northridge SMA", "Harbor Tax-Exempt"]
+    LP_ROSTER = [("Meridian Family Trust", "trust", 3_500_000),
+                 ("Pinnacle Holdings LLC", "llc", 2_750_000)]
     MA_RETS = [[2.4, -1.1, -4.2, 6.8, 3.4, -1.6], [1.5, -0.4, -2.6, 4.1, 2.2, -0.9],
                [3.1, -2.0, -3.4, 5.2, 1.9, -0.5], [0.9, 0.3, -1.8, 3.6, 2.7, -1.2],
                [1.8, -0.9, -2.2, 4.8, 1.4, -0.7], [2.2, -1.4, -3.0, 5.5, 2.0, -1.0]]
@@ -39384,8 +39481,7 @@ def _demo_reseed(n_funds: int = 1, n_managed: int = 2, wl_count: int = 10) -> di
 
         for k, fid in enumerate(lp_fund_ids):
             _snaptrade_write_lots(cur, fid, _mk_positions(_slice(k, 12), 8_400_000 - k * 900_000))
-            # LP roster: 3 on the flagship, 2 on the rest.
-            for nm, et, amt in (LP_ROSTER if k == 0 else LP_ROSTER[3:5] or LP_ROSTER[:2]):
+            for nm, et, amt in LP_ROSTER:
                 cur.execute("""INSERT INTO lps (fund_id, legal_name, entity_type, accred_type, status)
                                VALUES (%s, %s, %s, 'net_worth', 'active') RETURNING id""",
                             (fid, nm, et))
@@ -39504,24 +39600,35 @@ def _demo_reseed(n_funds: int = 1, n_managed: int = 2, wl_count: int = 10) -> di
         conn.commit()
 
     # ── 6. Demo users (auth overlay) ────────────────────────────────────────
+    # Three accounts only: one advertised GP + two fictitious LPs. LP
+    # passwords are random and never returned — prospects cannot log in as
+    # those personas, and no real email/name ever enters this overlay.
     import auth_v2 as _av2
-    lp_kw = {"fund_memberships": {LP_NAMES[0]: LP_ROSTER[0][0]}}
-    if ma_fund_ids:
-        lp_kw["managed_account_ids"] = [ma_fund_ids[0]]
+    import secrets as _secrets
+    _demo_wipe_users()
     user_ids = []
-    for email, pw, name, role, kw in [
-        (_DEMO_GP_EMAIL, _DEMO_GP_PASSWORD, "Demo GP", "gp", {}),
-        (_DEMO_LP_EMAIL, _DEMO_LP_PASSWORD, "Demo LP", "lp", lp_kw),
-    ]:
+    gp_kw = {
+        "fund_memberships": {LP_NAMES[0]: "GP"},
+        "managed_account_ids": list(MA_NAMES),
+    }
+    try:
+        uid = _av2.create_user(
+            email=_DEMO_GP_EMAIL, name=_DEMO_GP_NAME, password=_DEMO_GP_PASSWORD,
+            role="gp", must_change_password=False, demo_mode=True, **gp_kw)
+        user_ids.append(uid)
+    except Exception as _e:
+        out.setdefault("warnings", []).append(f"user {_DEMO_GP_EMAIL}: {_e!s:.120}")
+    for spec in _DEMO_LP_PERSONAS:
         try:
-            old = _av2.find_user_by_email(email)
-            if old:
-                _av2.delete_user(old["lp_id"])
-            uid = _av2.create_user(email=email, name=name, password=pw, role=role,
-                                   must_change_password=False, demo_mode=True, **kw)
+            uid = _av2.create_user(
+                email=spec["email"], name=spec["name"],
+                password=_secrets.token_urlsafe(18), role="lp",
+                must_change_password=False, demo_mode=True,
+                fund_memberships=spec["fund_memberships"],
+                managed_account_ids=spec["managed_account_ids"])
             user_ids.append(uid)
         except Exception as _e:
-            out.setdefault("warnings", []).append(f"user {email}: {_e!s:.120}")
+            out.setdefault("warnings", []).append(f"user {spec['email']}: {_e!s:.120}")
 
     # ── 7. Demo watchlist (per demo user lp_id) ─────────────────────────────
     if wl_tickers and user_ids and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
@@ -39590,8 +39697,46 @@ def _demo_reseed(n_funds: int = 1, n_managed: int = 2, wl_count: int = 10) -> di
     _demo_guard_refresh()
     out.update(fund_ids=lp_fund_ids, managed_ids=ma_fund_ids,
                watchlist=len(wl_tickers), reports=len(demo_reports),
-               users={"gp": _DEMO_GP_EMAIL, "lp": _DEMO_LP_EMAIL})
+               books=LP_NAMES + MA_NAMES,
+               users={"gp": _DEMO_GP_EMAIL,
+                      "lps": [p["email"] for p in _DEMO_LP_PERSONAS]})
     return out
+
+
+def _demo_wipe_users() -> list[str]:
+    """Remove every demo_mode / legacy-demo overlay user. Never touches live LPs."""
+    removed = []
+    try:
+        import auth_v2 as _av2
+        for u in _av2.list_users():
+            em = (u.get("email") or "").strip().lower()
+            if not (u.get("demo_mode")
+                    or em in _DEMO_LEGACY_EMAILS
+                    or em.endswith("@demo.dgacapital.com")):
+                continue
+            try:
+                if _av2.delete_user(u["lp_id"]):
+                    removed.append(em)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return removed
+
+
+def _demo_ensure_seeded() -> dict:
+    """Idempotent: seed the 3-book sandbox if missing. Safe on every boot/login."""
+    if _DEMO_DISABLED:
+        return {"ok": False, "skipped": "disabled"}
+    with _DEMO_SEED_LOCK:
+        import auth_v2 as _av2
+        gp = _av2.find_user_by_email(_DEMO_GP_EMAIL)
+        reg = _demo_registry(force=True) or {}
+        funds = list(reg.get("fund_ids") or [])
+        if gp and gp.get("demo_mode") and len(funds) >= 3:
+            return {"ok": True, "already": True, "fund_ids": funds}
+        print("[demo] seeding 3-book anonymous sandbox", flush=True)
+        return _demo_reseed()
 
 def _demo_report_lookup(ticker: str, create: bool = True) -> str | None:
     """Fetch (or lazily synthesize) a demo sample report for `ticker`."""
@@ -39722,11 +39867,7 @@ def _demo_purge_all() -> dict:
         conn.commit()
     # Demo users out of the auth overlay → their tokens/logins die.
     try:
-        import auth_v2 as _av2
-        for email in (_DEMO_GP_EMAIL, _DEMO_LP_EMAIL):
-            u = _av2.find_user_by_email(email)
-            if u:
-                _av2.delete_user(u["lp_id"])
+        out["purged_users"] = _demo_wipe_users()
     except Exception as _e:
         out.setdefault("errors", []).append(f"users: {_e!s:.120}")
     for k in ("demo.registry", "demo.reports", "demo.samples.daily_brief",
@@ -39739,18 +39880,31 @@ def _demo_purge_all() -> dict:
     return out
 
 
-def _demo_boot_purge_worker() -> None:
-    """While the kill switch is on, strip demo artifacts on every boot."""
+def _demo_boot_ensure_worker() -> None:
+    """After boot, make sure the anonymous 3-book sandbox exists."""
     import time as _t
-    _t.sleep(20)                      # let the app finish booting first
+    _t.sleep(20)
     try:
-        res = _demo_purge_all()
-        print(f"[demo] boot purge: {res}", flush=True)
+        if _DEMO_DISABLED:
+            return
+        res = _demo_ensure_seeded()
+        print(f"[demo] boot ensure: {res}", flush=True)
     except Exception as _e:
-        print(f"[demo] boot purge failed: {_e}", flush=True)
+        print(f"[demo] boot ensure failed: {_e}", flush=True)
 
 
-if _DEMO_DISABLED:
+if not _DEMO_DISABLED:
+    threading.Thread(target=_demo_boot_ensure_worker, daemon=True,
+                     name="demo-ensure").start()
+elif _DEMO_DISABLED:
+    def _demo_boot_purge_worker() -> None:
+        import time as _t
+        _t.sleep(20)
+        try:
+            res = _demo_purge_all()
+            print(f"[demo] boot purge: {res}", flush=True)
+        except Exception as _e:
+            print(f"[demo] boot purge failed: {_e}", flush=True)
     threading.Thread(target=_demo_boot_purge_worker, daemon=True,
                      name="demo-purge").start()
 
@@ -39773,11 +39927,13 @@ def demo_reseed_endpoint(request: Request):
     if claims.get("role") not in ("gp", "admin") or claims.get("demo_mode"):
         raise HTTPException(403, "Real GP role required")
     body = _request_json_sync(request) or {}
-    res = _demo_reseed(n_funds=body.get("n_funds", 1),
-                       n_managed=body.get("n_managed", 2),
-                       wl_count=body.get("wl_count", 10))
-    res["credentials"] = {"gp": {"email": _DEMO_GP_EMAIL, "password": _DEMO_GP_PASSWORD},
-                          "lp": {"email": _DEMO_LP_EMAIL, "password": _DEMO_LP_PASSWORD}}
+    with _DEMO_SEED_LOCK:
+        res = _demo_reseed(n_funds=1, n_managed=2,
+                           wl_count=body.get("wl_count", 10))
+    res["credentials"] = {
+        "login": {"email": _DEMO_GP_EMAIL, "password": _DEMO_GP_PASSWORD},
+        "books": res.get("books") or [],
+    }
     return res
 
 
@@ -39787,10 +39943,14 @@ def demo_status_endpoint(request: Request):
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP role required")
     reg = _demo_registry(force=True)
+    creds = None
+    if not claims.get("demo_mode"):
+        creds = {
+            "login": {"email": _DEMO_GP_EMAIL, "password": _DEMO_GP_PASSWORD},
+            "books": ["Northridge SMA", "Harbor Tax-Exempt", "Ridgecrest Partners, LP"],
+        }
     return {"seeded": bool(reg.get("fund_ids")), "registry": reg,
-            "credentials": ({"gp": {"email": _DEMO_GP_EMAIL, "password": _DEMO_GP_PASSWORD},
-                             "lp": {"email": _DEMO_LP_EMAIL, "password": _DEMO_LP_PASSWORD}}
-                            if not claims.get("demo_mode") else None)}
+            "credentials": creds, "disabled": _DEMO_DISABLED}
 
 
 

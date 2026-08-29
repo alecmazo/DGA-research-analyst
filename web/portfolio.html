@@ -163,6 +163,20 @@
   }
   #login-hint strong { color: var(--blue); font-weight: 700; }
 
+  #login-demo {
+    margin-top: 22px;
+    background: none;
+    border: none;
+    color: var(--blue);
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    padding: 6px 4px;
+    text-decoration: none;
+  }
+  #login-demo:hover { color: var(--blue-light); text-decoration: underline; }
+
   /* Tiny spinner inside button while logging in */
   .spinner {
     display: inline-block;
@@ -229,6 +243,8 @@
     <div id="login-hint">
       GP &amp; LP login · <strong>portfolio.dgacapital.com</strong>
     </div>
+
+    <button type="button" id="login-demo">Preview a sample workspace</button>
   </div>
 </div>
 
@@ -370,6 +386,7 @@
         must_change_password: data.must_change_password,
         fund_memberships:     data.fund_memberships || {},
         managed_account_ids:  data.managed_account_ids || [],
+        demo_mode:            !!data.demo_mode,
       }));
 
       // Route to the appropriate dashboard (admin has full GP access),
@@ -398,6 +415,23 @@
   $email.addEventListener('keypress', e => { if (e.key === 'Enter') $pw.focus(); });
   $pw.addEventListener('keypress', e => { if (e.key === 'Enter') handleLogin(); });
   if ($code) $code.addEventListener('keypress', e => { if (e.key === 'Enter') handleLogin(); });
+
+  (function setupDemoPreview() {
+    const $demo = document.getElementById('login-demo');
+    if (!$demo) return;
+    try {
+      const host = (window.location.hostname || '').toLowerCase();
+      if (host.indexOf('sliw') !== -1) {
+        $demo.style.display = 'none';
+        return;
+      }
+    } catch (_) {}
+    $demo.addEventListener('click', function () {
+      $email.value = 'demo@dgacapital.com';
+      $pw.value = 'demo';
+      handleLogin();
+    });
+  })();
 
   setTimeout(() => $email.focus(), 80);
 </script>

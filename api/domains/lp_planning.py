@@ -191,6 +191,19 @@ def _lp_user(lp_id: str) -> dict:
     return user
 
 
+def _is_demo_book(row: dict) -> bool:
+    return str((row or {}).get("short_name") or "").upper().startswith("DEMO")
+
+
+def _assert_demo_lane(claims: dict, user: dict) -> None:
+    """Demo sessions may only open demo personas; live GP never opens them."""
+    if bool(claims.get("demo_mode")) != bool(user.get("demo_mode")):
+        raise HTTPException(
+            status_code=403,
+            detail="Demo mode: only the sample workspace is accessible.",
+        )
+
+
 def _tokens(s: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", (s or "").lower())
 
@@ -488,6 +501,8 @@ def _live_books(user: dict) -> dict:
         roster = _auth_mod().list_users()
     except Exception:
         roster = []
+    _demo_u = bool(user.get("demo_mode"))
+    roster = [u for u in roster if bool(u.get("demo_mode")) == _demo_u]
     acct_names = [
         n for n in acct_names
         if not _assignment_belongs_elsewhere(n, user, roster)
@@ -544,6 +559,10 @@ def _live_books(user: dict) -> dict:
                         """
                     )
                 fund_rows = [dict(r) for r in cur.fetchall()]
+
+            _demo_u = bool(user.get("demo_mode"))
+            acct_rows = [r for r in acct_rows if _is_demo_book(r) == _demo_u]
+            fund_rows = [r for r in fund_rows if _is_demo_book(r) == _demo_u]
 
             all_fids = [str(r["id"]) for r in acct_rows] + [str(r["id"]) for r in fund_rows]
             mkt = {}
@@ -1186,8 +1205,8 @@ def planning_roster(request: Request):
     """GP-only: Settings LPs plus whether a planning snapshot exists."""
     claims = _gp_only(request)
     users = _auth_mod().list_users()
-    if claims.get("demo_mode"):
-        users = [u for u in users if u.get("demo_mode")]
+    is_demo = bool(claims.get("demo_mode"))
+    users = [u for u in users if bool(u.get("demo_mode")) == is_demo]
     saved = _saved_ids()
     lps = []
     for u in users:
@@ -1267,10 +1286,11 @@ def lp_planning_self_pdf(request: Request):
 @router.get("/api/v2/gp/lp-planning/{lp_id}")
 def planning_get(lp_id: str, request: Request):
     """GP-only: merged snapshot + live linked books + computed P&L gap."""
-    _gp_only(request)
+    claims = _gp_only(request)
     lp_id = (lp_id or "").strip()
     if not lp_id:
         raise HTTPException(status_code=400, detail="lp_id required")
+    _assert_demo_lane(claims, _lp_user(lp_id))
     return _planning_payload(lp_id)
 
 
@@ -1282,10 +1302,11 @@ def planning_tax_ytd(lp_id: str, request: Request, year: int | None = None):
     line-level Fidelity activity for the calendar year. IRA books stay N/A
     for taxable income. Fund K-1s are not in SnapTrade.
     """
-    _gp_only(request)
+    claims = _gp_only(request)
     lp_id = (lp_id or "").strip()
     if not lp_id:
         raise HTTPException(status_code=400, detail="lp_id required")
+    _assert_demo_lane(claims, _lp_user(lp_id))
     yr = int(year) if year else datetime.now(timezone.utc).year
     if yr < 2000 or yr > 2100:
         raise HTTPException(status_code=400, detail="year out of range")
@@ -1662,10 +1683,11 @@ def _planning_pdf_bytes(pack: dict) -> bytes:
 @router.get("/api/v2/gp/lp-planning/{lp_id}/pdf")
 def planning_pdf(lp_id: str, request: Request):
     """GP-only: landscape PDF of the household planning snapshot."""
-    _gp_only(request)
+    claims = _gp_only(request)
     lp_id = (lp_id or "").strip()
     if not lp_id:
         raise HTTPException(status_code=400, detail="lp_id required")
+    _assert_demo_lane(claims, _lp_user(lp_id))
     pack = _planning_payload(lp_id)
     try:
         pdf = _planning_pdf_bytes(pack)

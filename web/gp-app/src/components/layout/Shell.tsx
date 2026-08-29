@@ -14,6 +14,12 @@ type Props = {
 export function Shell({ user, build }: Props) {
   return (
     <div className={styles.shell}>
+      {user?.demo_mode && (
+        <div className={styles.demoRibbon} data-print="hide">
+          SAMPLE WORKSPACE — fictitious books with live market prices. AI notes
+          are pre-generated; imports and account linking are off.
+        </div>
+      )}
       <div data-print="hide">
         <Topbar user={user} build={build} />
       </div>

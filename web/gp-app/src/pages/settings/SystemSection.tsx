@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
+import { getCachedUser } from '@/lib/auth'
 import { fmtUsd } from '@/lib/format'
 import styles from '../SettingsPage.module.css'
 
@@ -290,9 +291,6 @@ function EmailCard() {
 
 function DemoCard() {
   const [statusHtml, setStatusHtml] = useState('—')
-  const [nFunds, setNFunds] = useState(1)
-  const [nManaged, setNManaged] = useState(2)
-  const [wlCount, setWlCount] = useState(10)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -300,26 +298,32 @@ function DemoCard() {
     try {
       const d = await api<{
         seeded?: boolean
+        disabled?: boolean
         registry?: { seeded_at?: string }
         credentials?: {
-          gp?: { email?: string; password?: string }
-          lp?: { email?: string; password?: string }
+          login?: { email?: string; password?: string }
+          books?: string[]
         }
       }>('/api/v2/admin/demo/status')
+      if (d.disabled) {
+        setStatusHtml('○ Demo is currently disabled (kill switch).')
+        return
+      }
       if (d.seeded) {
         const c = d.credentials || {}
+        const books = (c.books || []).join(', ')
         let t = `● Seeded${
           d.registry?.seeded_at
             ? ' · ' + String(d.registry.seeded_at).slice(0, 16).replace('T', ' ') + ' UTC'
             : ''
         }`
-        if (c.gp) {
-          t += `\nGP: ${c.gp.email} / ${c.gp.password}`
-          if (c.lp) t += `\nLP: ${c.lp.email} / ${c.lp.password}`
+        if (c.login) {
+          t += `\nLogin: ${c.login.email} / ${c.login.password}`
         }
+        if (books) t += `\nBooks: ${books}`
         setStatusHtml(t)
       } else {
-        setStatusHtml('○ Not seeded yet — click the button below.')
+        setStatusHtml('○ Not seeded yet — click Reset below.')
       }
     } catch (e) {
       setStatusHtml('Status unavailable: ' + (e instanceof Error ? e.message : e))
@@ -331,12 +335,9 @@ function DemoCard() {
   }, [load])
 
   const reseed = async () => {
-    const nf = Math.max(1, Math.min(4, nFunds))
-    const nm = Math.max(0, Math.min(6, nManaged))
-    const wl = Math.max(0, Math.min(25, wlCount))
     if (
       !confirm(
-        `Seed / reset the demo sandbox as ${nf} fund(s) + ${nm} managed account(s)?\n\nThis OVERRIDES any existing demo data. No real data is touched.`,
+        'Reset the anonymous sample workspace?\n\nThis rebuilds 3 fictitious books (Northridge SMA, Harbor Tax-Exempt, Ridgecrest Partners). No live LP data is copied or touched.',
       )
     )
       return
@@ -351,10 +352,10 @@ function DemoCard() {
         warnings?: unknown[]
       }>('/api/v2/admin/demo/reseed', {
         method: 'POST',
-        body: JSON.stringify({ n_funds: nf, n_managed: nm, wl_count: wl }),
+        body: JSON.stringify({ n_funds: 1, n_managed: 2, wl_count: 10 }),
       })
       setNote(
-        `✓ Seeded ${d.fund_ids?.length || 0} fund(s), ${d.managed_ids?.length || 0} account(s), ${d.watchlist || 0} watchlist, ${d.reports || 0} reports` +
+        `✓ Seeded ${d.fund_ids?.length || 0} fund, ${d.managed_ids?.length || 0} SMAs, ${d.watchlist || 0} watchlist, ${d.reports || 0} reports` +
           (d.warnings?.length ? ` · ${d.warnings.length} warnings` : ''),
       )
       await load()
@@ -368,52 +369,16 @@ function DemoCard() {
   return (
     <CollapsibleCard title="🎭 Demo sandbox" badge="PROSPECTS" defaultOpen={false}>
       <div className={styles.hint} style={{ marginBottom: 6 }}>
-        Synthetic fund + managed accounts for demos. Demo sessions never see real data.
+        Public login <code>demo@dgacapital.com</code> / <code>demo</code> opens a
+        3-book sample workspace. Fully synthetic names — live LPs never appear,
+        even anonymized.
       </div>
       <pre className={styles.mono} style={{ marginBottom: 6, whiteSpace: 'pre-wrap' }}>
         {statusHtml}
       </pre>
-      <div className={styles.row} style={{ marginBottom: 6 }}>
-        <label style={{ fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 4 }}>
-          LP funds
-          <input
-            className={styles.input}
-            type="number"
-            min={1}
-            max={4}
-            style={{ width: 48, height: 24 }}
-            value={nFunds}
-            onChange={(e) => setNFunds(parseInt(e.target.value, 10) || 1)}
-          />
-        </label>
-        <label style={{ fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 4 }}>
-          Managed
-          <input
-            className={styles.input}
-            type="number"
-            min={0}
-            max={6}
-            style={{ width: 48, height: 24 }}
-            value={nManaged}
-            onChange={(e) => setNManaged(parseInt(e.target.value, 10) || 0)}
-          />
-        </label>
-        <label style={{ fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 4 }}>
-          Watchlist
-          <input
-            className={styles.input}
-            type="number"
-            min={0}
-            max={25}
-            style={{ width: 48, height: 24 }}
-            value={wlCount}
-            onChange={(e) => setWlCount(parseInt(e.target.value, 10) || 0)}
-          />
-        </label>
-      </div>
       <div className={styles.row}>
         <Button size="sm" variant="primary" disabled={busy} onClick={() => void reseed()}>
-          {busy ? '⏳ Seeding…' : '↻ Seed / Reset'}
+          {busy ? '⏳ Seeding…' : '↻ Reset sample workspace'}
         </Button>
         {note && <span className={styles.meta}>{note}</span>}
       </div>
@@ -549,11 +514,12 @@ function SystemInfoCard() {
 }
 
 export function SystemSection() {
+  const isDemo = !!getCachedUser()?.demo_mode
   return (
     <>
       <RailwayCard />
       <EmailCard />
-      <DemoCard />
+      {!isDemo && <DemoCard />}
       <SystemInfoCard />
     </>
   )
