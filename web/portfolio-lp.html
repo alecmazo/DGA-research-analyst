@@ -3030,5 +3030,214 @@ async function loadLpReportsTab() {
 })();
 </script>
 
+<!-- ── LP Support FAB (same ticket queue as GP; LPs cannot see the list) ── -->
+<style>
+  #dga-lp-support-fab {
+    position: fixed; right: 18px; bottom: 18px; z-index: 9990;
+    height: 46px; padding: 0 16px 0 14px;
+    display: flex; align-items: center; gap: 8px;
+    border: none; border-radius: 999px;
+    background: linear-gradient(135deg, #0a1628 0%, #1e3a5f 100%);
+    color: #fff; font-size: 13px; font-weight: 700; letter-spacing: 0.2px;
+    box-shadow: 0 6px 20px rgba(10,22,40,0.28), 0 0 0 1px rgba(91,184,212,0.35);
+    cursor: pointer;
+  }
+  #dga-lp-support-bd {
+    display: none; position: fixed; inset: 0; z-index: 9998;
+    background: rgba(15,23,42,0.45);
+    align-items: center; justify-content: center; padding: 16px;
+  }
+  #dga-lp-support-bd.open { display: flex; }
+  #dga-lp-support-modal {
+    width: min(520px, 100%); max-height: min(90vh, 720px); overflow: auto;
+    background: #fff; border-radius: 14px; border: 1px solid #e2e8f0;
+    box-shadow: 0 24px 60px rgba(15,23,42,0.28); padding: 18px;
+    font-family: inherit;
+  }
+  #dga-lp-support-modal h3 { margin: 0 0 6px; font-size: 16px; color: #0A1628; }
+  #dga-lp-support-modal .sub { font-size: 11.5px; color: #6a7890; line-height: 1.5; margin: 0 0 12px; }
+  #dga-lp-support-ta {
+    width: 100%; min-height: 110px; resize: vertical; box-sizing: border-box;
+    border: 1px solid #E8ECF2; border-radius: 8px; padding: 10px 12px;
+    font-size: 13px; font-family: inherit; background: #F5F7FA; color: #0A1628;
+  }
+  #dga-lp-support-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  #dga-lp-support-actions button {
+    height: 34px; padding: 0 14px; border-radius: 8px; font-size: 12.5px;
+    font-weight: 700; cursor: pointer;
+  }
+  #dga-lp-support-cancel { border: 1px solid #E8ECF2; background: #fff; color: #6a7890; }
+  #dga-lp-support-go { border: none; background: #0a1628; color: #fff; }
+  #dga-lp-support-go:disabled { opacity: 0.55; cursor: wait; }
+  #dga-lp-support-status { margin-top: 10px; font-size: 12px; color: #3D4A5C; }
+  #dga-lp-support-shot { margin-top: 10px; border: 1px solid #E8ECF2; border-radius: 8px;
+    overflow: hidden; background: #0f172a; min-height: 80px; display: flex;
+    align-items: center; justify-content: center; }
+  #dga-lp-support-shot img { max-width: 100%; max-height: 180px; display: block; }
+  #dga-lp-support-meta { font-size: 11px; color: #8A95A8; margin-top: 8px; }
+</style>
+<button type="button" id="dga-lp-support-fab" title="Report a problem — captures this page" aria-label="File support ticket">
+  <span>🛟</span><span>Support</span>
+</button>
+<div id="dga-lp-support-bd" role="dialog" aria-modal="true" aria-labelledby="dga-lp-support-title">
+  <div id="dga-lp-support-modal">
+    <h3 id="dga-lp-support-title">Report a problem</h3>
+    <p class="sub">Describe what broke. A screenshot of this page is attached automatically. The GP desk receives the ticket — you will not see a ticket list.</p>
+    <textarea id="dga-lp-support-ta" placeholder="e.g. My documents page is blank; Performance YTD looks wrong…"></textarea>
+    <div id="dga-lp-support-meta">Capturing page…</div>
+    <div id="dga-lp-support-shot"><div style="color:#94a3b8;font-size:11.5px;padding:18px;">Screenshot preview</div></div>
+    <div id="dga-lp-support-actions">
+      <button type="button" id="dga-lp-support-cancel">Cancel</button>
+      <button type="button" id="dga-lp-support-go">Submit ticket</button>
+    </div>
+    <div id="dga-lp-support-status"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var fab = document.getElementById('dga-lp-support-fab');
+  var bd = document.getElementById('dga-lp-support-bd');
+  var ta = document.getElementById('dga-lp-support-ta');
+  var meta = document.getElementById('dga-lp-support-meta');
+  var shotEl = document.getElementById('dga-lp-support-shot');
+  var go = document.getElementById('dga-lp-support-go');
+  var cancel = document.getElementById('dga-lp-support-cancel');
+  var statusEl = document.getElementById('dga-lp-support-status');
+  var shotData = null;
+  var errs = [];
+  function pushErr(e) {
+    errs.push(e);
+    if (errs.length > 20) errs.shift();
+  }
+  window.addEventListener('error', function (e) {
+    pushErr({ type: 'error', msg: String(e.message || 'error').slice(0, 400), ts: new Date().toISOString() });
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    pushErr({ type: 'unhandledrejection', msg: String(e.reason || 'rejection').slice(0, 400), ts: new Date().toISOString() });
+  });
+  function loadH2c() {
+    return new Promise(function (resolve, reject) {
+      if (window.html2canvas) return resolve(window.html2canvas);
+      var s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      s.async = true;
+      s.onload = function () {
+        if (window.html2canvas) resolve(window.html2canvas);
+        else reject(new Error('html2canvas missing'));
+      };
+      s.onerror = function () { reject(new Error('Could not load screenshot library')); };
+      document.head.appendChild(s);
+    });
+  }
+  async function capture() {
+    meta.textContent = 'Capturing page…';
+    var fabDisp = fab.style.display;
+    var bdVis = bd.style.visibility;
+    try {
+      fab.style.display = 'none';
+      bd.style.visibility = 'hidden';
+      var h2c = await loadH2c();
+      var canvas = await h2c(document.body, {
+        scale: Math.min(1, 1200 / Math.max(document.documentElement.scrollWidth, 1)),
+        useCORS: true, allowTaint: true, logging: false,
+        windowWidth: document.documentElement.clientWidth,
+        windowHeight: Math.min(document.documentElement.scrollHeight, 2400)
+      });
+      var out = canvas;
+      if (canvas.width > 1280) {
+        var c2 = document.createElement('canvas');
+        c2.width = 1280;
+        c2.height = Math.round(canvas.height * (1280 / canvas.width));
+        c2.getContext('2d').drawImage(canvas, 0, 0, c2.width, c2.height);
+        out = c2;
+      }
+      var q = 0.58, dataUrl = out.toDataURL('image/jpeg', q);
+      while (dataUrl.length > 700000 && q > 0.28) {
+        q -= 0.08;
+        dataUrl = out.toDataURL('image/jpeg', q);
+      }
+      shotData = dataUrl;
+      meta.textContent = 'Screenshot ready · ~' + Math.round((dataUrl.length * 0.75) / 1024) + ' KB';
+      shotEl.innerHTML = '';
+      var img = document.createElement('img');
+      img.src = dataUrl;
+      img.alt = 'Page screenshot';
+      shotEl.appendChild(img);
+      return dataUrl;
+    } catch (e) {
+      shotData = null;
+      meta.textContent = 'Screenshot skipped';
+      return null;
+    } finally {
+      fab.style.display = fabDisp;
+      bd.style.visibility = bdVis || '';
+    }
+  }
+  function activeTab() {
+    var el = document.querySelector('.topbar-link.active[data-tab]');
+    return (el && el.getAttribute('data-tab')) || 'performance';
+  }
+  function openModal() {
+    statusEl.textContent = '';
+    bd.classList.add('open');
+    setTimeout(function () { capture(); }, 80);
+  }
+  function closeModal() { bd.classList.remove('open'); }
+  fab.addEventListener('click', openModal);
+  cancel.addEventListener('click', closeModal);
+  bd.addEventListener('click', function (e) { if (e.target === bd) closeModal(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && bd.classList.contains('open')) closeModal();
+  });
+  go.addEventListener('click', async function () {
+    var text = (ta.value || '').trim();
+    if (text.length < 8) {
+      statusEl.textContent = 'Please describe the issue in a sentence or two.';
+      return;
+    }
+    go.disabled = true;
+    statusEl.textContent = 'Uploading ticket…';
+    if (!shotData) {
+      try { await capture(); } catch (_) {}
+    }
+    var me = window.DGA_USER || {};
+    try {
+      var r = await window.dgaFetch('/api/support/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: text,
+          page_url: location.href,
+          page_path: location.pathname + location.search + location.hash,
+          active_tab: activeTab(),
+          user_agent: navigator.userAgent,
+          viewport: {
+            w: window.innerWidth, h: window.innerHeight,
+            dpr: window.devicePixelRatio || 1, scrollY: window.scrollY || 0
+          },
+          console_errors: errs.slice(-20),
+          context: {
+            theme: 'lp', title: document.title, role: 'lp',
+            user: me.email || me.lp_id || null, name: me.name || ''
+          },
+          screenshot_b64: shotData || null,
+          screenshot_mime: 'image/jpeg',
+          priority: 'normal'
+        })
+      });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok || !j.ok) throw new Error(j.error || j.detail || ('HTTP ' + r.status));
+      statusEl.textContent = '✓ Ticket ' + (j.id || '') + ' sent. The GP desk will take it from here.';
+      ta.value = '';
+      setTimeout(closeModal, 1800);
+    } catch (e) {
+      statusEl.textContent = '❌ ' + (e.message || 'failed');
+    } finally {
+      go.disabled = false;
+    }
+  });
+})();
+</script>
+
 </body>
 </html>

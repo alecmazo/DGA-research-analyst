@@ -196,8 +196,9 @@ export function SupportFab() {
           context: {
             theme: document.documentElement.getAttribute('data-theme') || '',
             title: document.title,
-            role: 'gp',
+            role: user?.role || 'gp',
             user: user?.email || user?.lp_id || null,
+            name: user?.name || '',
           },
           screenshot_b64: shotData || null,
           screenshot_mime: 'image/jpeg',
@@ -232,7 +233,7 @@ export function SupportFab() {
         ref={fabRef}
         type="button"
         className={styles.fab}
-        title="Report a problem (GP only) — captures this page"
+        title="Report a problem — captures this page"
         aria-label="File support ticket"
         onClick={openModal}
       >

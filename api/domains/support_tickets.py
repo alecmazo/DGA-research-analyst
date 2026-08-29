@@ -146,6 +146,21 @@ def _support_gp_only(request: Request) -> dict:
     return claims
 
 
+def _support_authed(request: Request) -> dict:
+    """GP or LP may file a ticket. Listing / fixing stays GP-only."""
+    if _support_agent_token_ok(request):
+        return {
+            "role": "admin",
+            "email": "agent@support.local",
+            "sub": "support-agent",
+            "agent": True,
+        }
+    claims = B._claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin", "lp"):
+        raise HTTPException(403, "Sign in required to file a support ticket")
+    return claims
+
+
 def _support_iso_utc(v) -> str | None:
     """Serialize datetimes as clean UTC ISO ending in Z (never '+00:00Z')."""
     if v is None:
@@ -365,16 +380,27 @@ def _support_auto_diagnose(ticket_id: str) -> None:
             _support_write_inbox_file(pub)
         # Optional email ping to GP who filed (or GMAIL_USER)
         try:
-            to = (row.get("created_by_email")
-                  or os.environ.get("SUPPORT_NOTIFY_EMAIL")
+            ctx = row.get("context_json") or {}
+            if isinstance(ctx, str):
+                try:
+                    ctx = json.loads(ctx)
+                except Exception:
+                    ctx = {}
+            filer_role = str((ctx or {}).get("role") or "").lower()
+            to = (os.environ.get("SUPPORT_NOTIFY_EMAIL")
                   or os.environ.get("GMAIL_USER") or "")
+            if filer_role != "lp":
+                to = row.get("created_by_email") or to
             if to and "@" in str(to):
+                who = row.get("created_by_email") or row.get("created_by") or ""
                 html = (
-                    f"<p>Support ticket <b>{ticket_id}</b> diagnosed.</p>"
-                    f"<p><b>Page:</b> {page}<br><b>Tab:</b> {tab}</p>"
+                    f"<p>Support ticket <b>{ticket_id}</b> diagnosed"
+                    f"{' (filed by LP)' if filer_role == 'lp' else ''}.</p>"
+                    f"<p><b>From:</b> {who}<br><b>Page:</b> {page}<br><b>Tab:</b> {tab}</p>"
                     f"<pre style='white-space:pre-wrap;font-size:12px'>"
                     f"{(diagnosis or '')[:2500]}</pre>"
-                    f"<p>Open Settings → Support tickets in the GP terminal for the full trail.</p>"
+                    f"<p>Open Settings → Support tickets in the GP terminal. "
+                    f"LPs cannot see the ticket list.</p>"
                 )
                 B._send_via_gmail(str(to), f"[DGA Support] {ticket_id} diagnosed", html)
         except Exception:
@@ -397,8 +423,12 @@ def _support_auto_diagnose(ticket_id: str) -> None:
 
 @router.post("/api/support/tickets")
 def support_ticket_create(request: Request, background_tasks: BackgroundTasks):
-    """GP-only: file a trouble ticket with optional page screenshot (base64)."""
-    claims = _support_gp_only(request)
+    """GP or LP: file a trouble ticket with optional page screenshot (base64).
+
+    LPs can submit (screenshot + description). They cannot list, view, or
+    update tickets — that stays on the GP Settings trail for 'fix ticket'.
+    """
+    claims = _support_authed(request)
     try:
         body = B._request_json_sync(request) or {}
     except Exception:
@@ -427,10 +457,20 @@ def support_ticket_create(request: Request, background_tasks: BackgroundTasks):
         shot = ""
         mime = None
     tid = "SUP_" + datetime.utcnow().strftime("%Y%m%d_") + _uuid.uuid4().hex[:8]
+    role = str(claims.get("role") or "gp").lower()
+    ctx_in = body.get("context") if isinstance(body.get("context"), dict) else {}
+    ctx_in = {
+        **ctx_in,
+        "role": role,
+        "user": claims.get("email") or claims.get("lp_id") or claims.get("sub"),
+        "lp_id": claims.get("lp_id") or claims.get("sub"),
+        "name": claims.get("name") or "",
+    }
+    surface = "LP portal" if role == "lp" else "GP terminal"
     trail0 = [_support_trail_event(
-        claims.get("email") or claims.get("sub") or "gp",
+        claims.get("email") or claims.get("sub") or role,
         "submitted",
-        "Ticket filed from GP terminal with "
+        f"Ticket filed from {surface} with "
         + ("screenshot" if shot else "no screenshot") + ".")]
     _ensure_support_tickets_table()
     try:
@@ -459,7 +499,7 @@ def support_ticket_create(request: Request, background_tasks: BackgroundTasks):
                 (body.get("user_agent") or request.headers.get("user-agent") or "")[:400],
                 json.dumps(body.get("viewport") or {}),
                 json.dumps((body.get("console_errors") or [])[:30]),
-                json.dumps(body.get("context") or {}),
+                json.dumps(ctx_in),
                 mime,
                 shot or None,
                 json.dumps(trail0),

@@ -25,6 +25,7 @@ import WatchlistScreen        from './src/screens/WatchlistScreen';
 import FinancialsScreen       from './src/screens/FinancialsScreen';
 import MoreScreen             from './src/screens/MoreScreen';
 import CustomTabBar           from './src/components/CustomTabBar';
+import SupportFab             from './src/components/SupportFab';
 
 import { whoamiV2, getV2User, logoutV2 } from './src/api/client';
 import { isBiometricEnabled, disableBiometric } from './src/api/biometric';
@@ -90,20 +91,23 @@ function GPTabs({ onLogout, isDemo, onSwitchToLP }) {
 // ── LP navigator: Positions first, no Research tab ───────────────────────────
 function LPTabs({ onLogout, isDemo, onSwitchToAdmin }) {
   return (
-    <Tab.Navigator
-      tabBar={(props) => <CustomTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
-    >
-      <Tab.Screen name="Positions" component={WatchlistScreen} />
-      <Tab.Screen name="Performance">
-        {() => <LPPerformanceScreen onLogout={onLogout} isDemo={isDemo} onSwitchToAdmin={onSwitchToAdmin} />}
-      </Tab.Screen>
-      <Tab.Screen name="Documents" component={LPPlanningScreen} />
-      <Tab.Screen name="Podcast"   component={PodcastScreen} />
-      <Tab.Screen name="Settings">
-        {() => <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={null} isLpMode={true} onSwitchToAdmin={onSwitchToAdmin} />}
-      </Tab.Screen>
-    </Tab.Navigator>
+    <View style={{ flex: 1 }}>
+      <Tab.Navigator
+        tabBar={(props) => <CustomTabBar {...props} />}
+        screenOptions={{ headerShown: false }}
+      >
+        <Tab.Screen name="Positions" component={WatchlistScreen} />
+        <Tab.Screen name="Performance">
+          {() => <LPPerformanceScreen onLogout={onLogout} isDemo={isDemo} onSwitchToAdmin={onSwitchToAdmin} />}
+        </Tab.Screen>
+        <Tab.Screen name="Documents" component={LPPlanningScreen} />
+        <Tab.Screen name="Podcast"   component={PodcastScreen} />
+        <Tab.Screen name="Settings">
+          {() => <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={null} isLpMode={true} onSwitchToAdmin={onSwitchToAdmin} />}
+        </Tab.Screen>
+      </Tab.Navigator>
+      <SupportFab surface="mobile-lp" />
+    </View>
   );
 }
 

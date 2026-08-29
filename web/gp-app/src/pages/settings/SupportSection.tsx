@@ -23,6 +23,9 @@ type Ticket = {
   fix_trail?: TrailEvent[]
   has_screenshot?: boolean
   fixed_summary?: string
+  created_by?: string
+  created_by_email?: string
+  context?: { role?: string; user?: string; name?: string; lp_id?: string }
 }
 
 function fmtPT(s?: string): string {
@@ -132,8 +135,9 @@ export function SupportSection() {
       }
     >
       <p className={styles.hint}>
-        Use <strong>🛟 Support</strong> (bottom-right) to file with auto-screenshot. Diagnosis runs
-        in background; code fixes need a coding-agent session.
+        Use <strong>🛟 Support</strong> (bottom-right) to file with auto-screenshot. LPs have the
+        same button on their portal — they cannot see this list. Diagnosis runs in the background;
+        ask the coding agent to <strong>fix ticket</strong>.
       </p>
       {err && <div className={styles.statusErr} style={{ marginBottom: 8 }}>{err}</div>}
       {loading && <div className={styles.statusMuted}>Loading…</div>}
@@ -159,7 +163,15 @@ export function SupportSection() {
               </div>
               <div className={styles.ticketDesc}>{(t.description || '').slice(0, 240)}</div>
               <div className={styles.ticketMeta}>
-                {fmtPT(t.created_at)}
+                {(() => {
+                  const ctx = t.context || {}
+                  const role = String(ctx.role || '').toLowerCase()
+                  const who =
+                    ctx.name || t.created_by_email || ctx.user || t.created_by || ''
+                  const tag = role === 'lp' ? 'LP' : role === 'gp' ? 'GP' : ''
+                  return [tag, who].filter(Boolean).join(' · ')
+                })()}
+                {t.created_at ? ` · ${fmtPT(t.created_at)}` : ''}
                 {t.fixed_at ? ` · fixed ${fmtPT(t.fixed_at)}` : ''}
                 {t.active_tab ? ` · ${t.active_tab}` : ''}
                 {t.page_path ? ` · ${t.page_path}` : ''}

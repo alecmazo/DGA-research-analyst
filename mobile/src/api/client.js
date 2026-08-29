@@ -335,6 +335,12 @@ export const api = {
   deleteAnalystReview: (id) =>
     request(`/api/research/analyst/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  fileSupportTicket: (body) =>
+    request('/api/support/tickets', {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    }),
+
   // Portfolio Strategist (whole-book IC review — same job poller as agentic)
   startPortfolioStrategist: (body = {}) =>
     request('/api/research/portfolio-strategist', {
