@@ -167,6 +167,7 @@ def _load_saved(lp_id: str) -> dict | None:
         clean = _sanitize_row(r)
         if clean:
             rows.append(clean)
+    by = raw.get("updated_by")
     return {
         "title": _s(raw.get("title"), 160),
         "as_of": _s(raw.get("as_of"), 32),
@@ -174,6 +175,7 @@ def _load_saved(lp_id: str) -> dict | None:
         "annual_expenses": _f(raw.get("annual_expenses"), 0.0) or 0.0,
         "rows": rows[:200],
         "updated_at": raw.get("updated_at"),
+        "updated_by": by if isinstance(by, dict) else None,
     }
 
 
@@ -1165,6 +1167,7 @@ def _merge(saved: dict | None, live: dict, user: dict) -> dict:
         "notes": notes,
         "annual_expenses": expenses,
         "updated_at": (saved or {}).get("updated_at"),
+        "updated_by": (saved or {}).get("updated_by"),
         "seeded": seeded,
         "mm_yield_pct": mm,
         "rows": kept,
@@ -1245,13 +1248,17 @@ def _planning_payload(lp_id: str) -> dict:
 
 
 def _planning_lp_pack(lp_id: str) -> dict:
-    """Own-book payload for the LP portal: no GP strategy notes, no hidden lines."""
+    """Own-book payload for the LP portal. Same worksheet the GP sees.
+
+    Hidden lines stay GP scratch (not returned). Everything else — including
+    planning notes — is shared so the latest save is what both parties see.
+    """
     pack = _planning_payload(lp_id)
     snap = dict(pack.get("snapshot") or {})
-    snap["notes"] = ""
     snap["rows"] = [r for r in (snap.get("rows") or []) if not r.get("hidden")]
     pack["snapshot"] = snap
     pack.pop("live", None)
+    pack["editable"] = True
     return pack
 
 
@@ -1789,28 +1796,61 @@ class PlanningPut(BaseModel):
     rows: list[PlanningRowIn] = Field(default_factory=list)
 
 
-@router.put("/api/v2/gp/lp-planning/{lp_id}")
-def planning_put(lp_id: str, request: Request, body: PlanningPut):
-    """GP-only: persist editable household lines for this LP."""
-    claims = _gp_only(request)
-    if claims.get("demo_mode"):
-        raise HTTPException(status_code=403, detail="Write operations disabled in demo mode")
-    lp_id = (lp_id or "").strip()
-    if not lp_id:
-        raise HTTPException(status_code=400, detail="lp_id required")
+def _actor_stamp(claims: dict) -> dict:
+    return {
+        "lp_id": claims.get("lp_id") or claims.get("sub") or "",
+        "email": claims.get("email") or "",
+        "name": claims.get("name") or "",
+        "role": (claims.get("role") or "").lower(),
+    }
+
+
+def _persist_planning(
+    lp_id: str,
+    body: PlanningPut,
+    claims: dict,
+    *,
+    preserve_hidden: bool,
+) -> dict:
+    """Last write wins. GP and LP share one kv row per lp_id."""
     user = _lp_user(lp_id)
-    rows = []
+    incoming: list[dict] = []
     for raw in (body.rows or [])[:200]:
         clean = _sanitize_row(raw.model_dump())
         if clean:
-            rows.append(clean)
+            incoming.append(clean)
+
+    prev = _load_saved(lp_id) or {}
+    prev_rows = list(prev.get("rows") or [])
+    if preserve_hidden:
+        seen = {r["id"] for r in incoming}
+        for r in prev_rows:
+            if r.get("hidden") and r.get("id") not in seen:
+                incoming.append(r)
+        prev_by_id = {r["id"]: r for r in prev_rows if r.get("id")}
+        for r in incoming:
+            old = prev_by_id.get(r["id"])
+            if old and old.get("source") in ("managed", "fund"):
+                r["source"] = old["source"]
+                r["link_id"] = old.get("link_id")
+                # LP cannot un-hide GP scratch or retarget a live book.
+                if old.get("hidden"):
+                    r["hidden"] = True
+            elif r.get("source") in ("managed", "fund") and not old:
+                r["source"] = "manual"
+                r["link_id"] = None
+
+    title = _s(body.title, 160) or prev.get("title") or (
+        f"{user.get('name') or 'LP'} — planning snapshot"
+    )
     payload = {
-        "title": _s(body.title, 160) or f"{user.get('name') or 'LP'} — planning snapshot",
-        "as_of": _s(body.as_of, 32),
+        "title": title,
+        "as_of": _s(body.as_of, 32) or prev.get("as_of") or "",
         "notes": _s(body.notes, 4000),
         "annual_expenses": _f(body.annual_expenses, 0.0) or 0.0,
-        "rows": rows,
+        "rows": incoming,
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "updated_by": _actor_stamp(claims),
     }
     ok = B._kv_put(_kv_key(lp_id), payload)
     if not ok:
@@ -1819,7 +1859,7 @@ def planning_put(lp_id: str, request: Request, body: PlanningPut):
     snap = _merge(payload, live, user)
     computed = _compute(snap["rows"], snap["annual_expenses"])
     snap["rows"] = computed.pop("rows")
-    return {
+    out = {
         "ok": True,
         "lp": _public_lp(user),
         "snapshot": snap,
@@ -1827,3 +1867,34 @@ def planning_put(lp_id: str, request: Request, body: PlanningPut):
         "computed": computed,
         "has_snapshot": True,
     }
+    if preserve_hidden:
+        snap_lp = dict(snap)
+        snap_lp["rows"] = [r for r in (snap.get("rows") or []) if not r.get("hidden")]
+        out["snapshot"] = snap_lp
+        out.pop("live", None)
+        out["editable"] = True
+    return out
+
+
+@router.put("/api/v2/lp/planning")
+def lp_planning_put(request: Request, body: PlanningPut):
+    """LP: save this login's worksheet. Same document the GP sees."""
+    claims = _lp_only(request)
+    if claims.get("demo_mode"):
+        raise HTTPException(status_code=403, detail="Write operations disabled in demo mode")
+    return _persist_planning(
+        _caller_lp_id(claims), body, claims, preserve_hidden=True
+    )
+
+
+@router.put("/api/v2/gp/lp-planning/{lp_id}")
+def planning_put(lp_id: str, request: Request, body: PlanningPut):
+    """GP: persist editable household lines for this LP (shared with the LP)."""
+    claims = _gp_only(request)
+    if claims.get("demo_mode"):
+        raise HTTPException(status_code=403, detail="Write operations disabled in demo mode")
+    lp_id = (lp_id or "").strip()
+    if not lp_id:
+        raise HTTPException(status_code=400, detail="lp_id required")
+    _assert_demo_lane(claims, _lp_user(lp_id))
+    return _persist_planning(lp_id, body, claims, preserve_hidden=False)

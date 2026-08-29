@@ -135,6 +135,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Next deploy after this** | **`ui520-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 | **Book snapshot required** | **`ui553-20260829-book-snapshot`** | Strategist / quarterly / memos lock IC snapshot table |
 | **Anonymous demo login** | **`ui554-20260829-demo-preview`** | `demo@dgacapital.com` / `demo` — 3 synthetic books, zero live PII |
+| **LP planning edit** | **`ui555-20260829-lp-plan-edit`** | LP can edit/save the shared planning worksheet; latest save is what GP sees |
 
 ### One-click handoff (preferred)
 
@@ -260,6 +261,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - Options wheel: held names first; term tables + KPI strip
 - **Portfolio SNAPSHOT (required):** every book analysis (Portfolio Strategist), quarterly partner letter, and memo assigned to a portfolio MUST include the live attribution table — **Ticker | Position Δ YTD | Contribution | $ P&L** — with Modified Dietz YTD as a real book return (not a price-path). Same look as the IC Strategist snapshot. Do not substitute a different snapshot layout.
 - **Demo sandbox (privacy):** public login `demo@dgacapital.com` / `demo`. Three synthetic books only (Northridge SMA, Harbor Tax-Exempt, Ridgecrest Partners). Never clone or mask live LPs. Fail-closed on `DEMO%` short names. Kill switch `_DEMO_DISABLED` if isolation ever bleeds.
+- **Planning worksheet is shared:** LP and GP edit the same snapshot (`lp.planning:{lp_id}`). Latest save is what both see. LP cannot see GP-hidden scratch lines.
 
 ---
 
@@ -306,4 +308,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui554-20260829-demo-preview` · Next: `ui555-YYYYMMDD-slug`*
+*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui555-20260829-lp-plan-edit` · Next: `ui556-YYYYMMDD-slug`*

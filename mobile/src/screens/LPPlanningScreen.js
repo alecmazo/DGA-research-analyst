@@ -5,7 +5,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, RefreshControl,
-  ActivityIndicator, TouchableOpacity,
+  ActivityIndicator, TouchableOpacity, TextInput, Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppResume } from '../hooks/useAppResume';
@@ -14,11 +14,24 @@ import AppHeader from '../components/AppHeader';
 import { haptics, useTheme } from '../design';
 
 const SECTIONS = [
-  { key: 'current', label: 'Current assets' },
-  { key: 'long_term', label: 'Long-term assets' },
-  { key: 'income', label: 'Other annual income' },
-  { key: 'liability', label: 'Liabilities' },
+  { key: 'current', label: 'Current assets', add: '+ Asset' },
+  { key: 'long_term', label: 'Long-term assets', add: '+ Property' },
+  { key: 'income', label: 'Other annual income', add: '+ Income' },
+  { key: 'liability', label: 'Liabilities', add: '+ Liability' },
 ];
+
+function nid() {
+  return 'r' + Math.random().toString(16).slice(2, 12);
+}
+function parseNum(raw) {
+  const t = String(raw || '').trim().replace(/[$,%\s]/g, '').replace(/^\((.+)\)$/, '-$1');
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+function isLive(r) {
+  return r && (r.source === 'managed' || r.source === 'fund');
+}
 
 function fmtUsd(v) {
   if (v == null || Number.isNaN(Number(v))) return '—';
@@ -57,9 +70,28 @@ export default function LPPlanningScreen() {
   const { theme: t } = useTheme();
   const s = useMemo(() => makeS(t), [t]);
   const [pack, setPack] = useState(null);
+  const [rows, setRows] = useState([]);
+  const [expenses, setExpenses] = useState(0);
+  const [notes, setNotes] = useState('');
+  const [asOf, setAsOf] = useState('');
+  const [title, setTitle] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+
+  const applyPack = (d) => {
+    const snap = d?.snapshot || {};
+    setPack(d);
+    setRows((snap.rows || []).filter((r) => !r.hidden));
+    setExpenses(Number(snap.annual_expenses || 0));
+    setNotes(snap.notes || '');
+    setAsOf(snap.as_of || '');
+    setTitle(snap.title || '');
+    setDirty(false);
+  };
 
   const load = useCallback(async () => {
     setError(null);
@@ -67,7 +99,7 @@ export default function LPPlanningScreen() {
       const resp = await v2Fetch('/api/v2/lp/planning');
       if (resp.status === 403) throw new Error('Planning is only on your LP login.');
       if (!resp.ok) throw new Error('Could not load planning (' + resp.status + ')');
-      setPack(await resp.json());
+      applyPack(await resp.json());
     } catch (e) {
       setError(e?.message || 'Could not load your planning worksheet.');
     } finally {
@@ -75,19 +107,26 @@ export default function LPPlanningScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
-  useAppResume(() => { load(); });
+  useFocusEffect(useCallback(() => {
+    if (!dirty) load();
+  }, [load, dirty]));
+  useAppResume(() => { if (!dirty) load(); });
 
   const onRefresh = async () => {
+    if (dirty) {
+      Alert.alert('Unsaved changes', 'Save first so you don’t lose household edits.', [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => { setDirty(false); load(); } },
+      ]);
+      return;
+    }
     haptics.onPressTab?.();
     setRefreshing(true);
     await load();
     setRefreshing(false);
   };
 
-  const snap = pack?.snapshot || {};
   const lp = pack?.lp || {};
-  const rows = (snap.rows || []).filter((r) => !r.hidden);
   let assets = 0, liab = 0, invest = 0, taxTot = 0, ytdTot = 0, hasTax = false, hasYtd = false;
   rows.forEach((r) => {
     const a = amt(r);
@@ -103,6 +142,59 @@ export default function LPPlanningScreen() {
     const yv = ytd(r); if (yv != null) { ytdTot += yv; hasYtd = true; }
   });
   const nw = assets - liab;
+
+  const patch = (id, partial) => {
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...partial } : r)));
+    setDirty(true);
+    setSaveMsg('');
+  };
+  const addRow = (section) => {
+    const n = rows.filter((r) => r.section === section).length;
+    const labels = {
+      current: n ? `Other asset ${n}` : 'Other asset',
+      long_term: n ? `Property ${n + 1} (FMV)` : 'Real estate (FMV)',
+      liability: n ? `Liability ${n + 1}` : 'Mortgage / property debt',
+      income: n ? `Income source ${n + 1}` : 'Social Security (annual)',
+    };
+    setRows((rs) => [...rs, {
+      id: nid(), section, label: labels[section] || 'Line',
+      amount: null, yield_pct: null, notes: '',
+      include_in_investments: section === 'current', source: 'manual',
+      hidden: false,
+    }]);
+    setDirty(true);
+  };
+  const save = async () => {
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      const resp = await v2Fetch('/api/v2/lp/planning', {
+        method: 'PUT',
+        body: JSON.stringify({
+          title, as_of: asOf, notes, annual_expenses: expenses || 0,
+          rows: rows.map((r) => ({
+            id: r.id, section: r.section, label: r.label, amount: r.amount,
+            yield_pct: r.yield_pct, pnl_actual: r.pnl_actual, notes: r.notes || '',
+            include_in_investments: !!r.include_in_investments,
+            source: r.source || 'manual', link_id: r.link_id || null,
+            hidden: !!r.hidden, amount_override: r.amount_override,
+            capital_gains: r.capital_gains,
+          })),
+        }),
+      });
+      if (!resp.ok) {
+        let msg = 'Save failed (' + resp.status + ')';
+        try { const j = await resp.json(); msg = j.detail || j.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      applyPack(await resp.json());
+      setSaveMsg('Saved — your GP sees this version');
+    } catch (e) {
+      setSaveMsg(e?.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <View style={s.container}>
@@ -129,16 +221,27 @@ export default function LPPlanningScreen() {
               <Text style={s.secTitle}>Documents</Text>
               <Text style={s.hint}>
                 K-1s, statements, and GP letters will appear here when published.
-                Your planning worksheet is below — only you and your GP can see it.
+                The planning worksheet is shared with your GP — latest save wins.
               </Text>
             </View>
-            <Text style={s.hint}>Planning worksheet</Text>
+            <View style={s.headRow}>
+              <Text style={s.hint}>Planning worksheet</Text>
+              <TouchableOpacity
+                style={[s.saveBtn, (!dirty || saving) && { opacity: 0.45 }]}
+                disabled={!dirty || saving}
+                onPress={() => { haptics.onPressTab?.(); save(); }}
+              >
+                <Text style={s.saveBtnTxt}>{saving ? 'SAVING…' : 'SAVE'}</Text>
+              </TouchableOpacity>
+            </View>
+            {!!saveMsg && <Text style={s.saveMsg}>{saveMsg}</Text>}
             <View style={s.kpiRow}>
               {[
                 ['Net worth', fmtUsd(nw)],
                 ['Investable', fmtUsd(invest)],
                 ['Taxable P&L', hasTax ? fmtUsd(taxTot) : '—'],
                 ['YTD unrl.', hasYtd ? fmtUsd(ytdTot) : '—'],
+                ['Expenses', fmtUsd(expenses)],
               ].map(([lab, val]) => (
                 <View key={lab} style={s.kpi}>
                   <Text style={s.kpiL}>{lab}</Text>
@@ -146,17 +249,31 @@ export default function LPPlanningScreen() {
                 </View>
               ))}
             </View>
+            <View style={s.card}>
+              <Text style={s.secTitle}>Annual expenses</Text>
+              <TextInput
+                style={s.input}
+                keyboardType="decimal-pad"
+                value={expenses ? String(expenses) : ''}
+                placeholder="200000"
+                placeholderTextColor="#A8B2C1"
+                onChangeText={(v) => { setExpenses(parseNum(v) || 0); setDirty(true); }}
+              />
+            </View>
             {SECTIONS.map((sec) => {
               const chunk = rows.filter((r) => r.section === sec.key);
-              if (!chunk.length) return null;
               const sub = chunk.reduce((n, r) => n + amt(r), 0);
               return (
                 <View key={sec.key} style={s.card}>
                   <View style={s.secHead}>
                     <Text style={s.secTitle}>{sec.label}</Text>
-                    <Text style={s.secAmt}>{fmtUsd(sub)}</Text>
+                    <TouchableOpacity onPress={() => addRow(sec.key)}>
+                      <Text style={s.addBtn}>{sec.add}</Text>
+                    </TouchableOpacity>
                   </View>
+                  <Text style={s.secAmt}>{fmtUsd(sub)}</Text>
                   {chunk.map((r) => {
+                    const live = isLive(r);
                     const a = amt(r);
                     const tv = tax(r);
                     const yv = ytd(r);
@@ -168,11 +285,36 @@ export default function LPPlanningScreen() {
                     return (
                       <View key={r.id || r.label} style={s.line}>
                         <View style={{ flex: 1, paddingRight: 10 }}>
-                          <Text style={s.lineName}>{r.label || '—'}</Text>
-                          {!!r.notes && <Text style={s.lineNote}>{r.notes}</Text>}
+                          {live ? (
+                            <Text style={s.lineName}>{r.label || '—'}</Text>
+                          ) : (
+                            <TextInput
+                              style={s.lineInput}
+                              value={r.label || ''}
+                              onChangeText={(v) => patch(r.id, { label: v })}
+                            />
+                          )}
+                          <TextInput
+                            style={s.noteInput}
+                            value={r.notes || ''}
+                            placeholder="Note for your GP"
+                            placeholderTextColor="#A8B2C1"
+                            onChangeText={(v) => patch(r.id, { notes: v })}
+                          />
                         </View>
-                        <View style={{ alignItems: 'flex-end' }}>
-                          <Text style={s.lineAmt}>{fmtUsd(a)}</Text>
+                        <View style={{ alignItems: 'flex-end', minWidth: 110 }}>
+                          {live ? (
+                            <Text style={s.lineAmt}>{fmtUsd(a)}</Text>
+                          ) : (
+                            <TextInput
+                              style={s.amtInput}
+                              keyboardType="decimal-pad"
+                              value={r.amount != null ? String(r.amount) : ''}
+                              placeholder="0"
+                              placeholderTextColor="#A8B2C1"
+                              onChangeText={(v) => patch(r.id, { amount: parseNum(v) })}
+                            />
+                          )}
                           {!!taxS && <Text style={s.lineSub}>P&L {taxS}</Text>}
                           {yv != null && <Text style={s.lineSub}>YTD {fmtUsd(yv)}</Text>}
                         </View>
@@ -182,6 +324,17 @@ export default function LPPlanningScreen() {
                 </View>
               );
             })}
+            <View style={s.card}>
+              <Text style={s.secTitle}>Planning notes (shared with GP)</Text>
+              <TextInput
+                style={s.notesBox}
+                multiline
+                value={notes}
+                placeholder="Property details, Social Security, liquidity needs…"
+                placeholderTextColor="#A8B2C1"
+                onChangeText={(v) => { setNotes(v); setDirty(true); }}
+              />
+            </View>
             <View style={[s.card, s.totCard]}>
               <Text style={s.secTitle}>Equity / net worth</Text>
               <Text style={s.totAmt}>{fmtUsd(nw)}</Text>
@@ -200,6 +353,27 @@ function makeS(t) {
     center: { alignItems: 'center', paddingVertical: 40, gap: 10 },
     muted: { fontSize: 12, color: t.textSecondary || '#8A95A8' },
     hint: { fontSize: 12, color: t.textSecondary || '#6a7890', marginBottom: 12, lineHeight: 17 },
+    headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+    saveBtn: {
+      backgroundColor: '#0A1628', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 6,
+    },
+    saveBtnTxt: { color: '#F5C242', fontSize: 11, fontWeight: '800', letterSpacing: 0.8 },
+    saveMsg: { fontSize: 12, fontWeight: '600', color: '#166534', marginBottom: 8 },
+    input: {
+      marginTop: 8, borderWidth: 1, borderColor: '#E8ECF2', borderRadius: 6,
+      paddingHorizontal: 10, paddingVertical: 8, fontSize: 15, fontWeight: '700', color: '#0A1628',
+    },
+    addBtn: { fontSize: 11, fontWeight: '800', color: '#3E9AB8' },
+    lineInput: { fontSize: 13, fontWeight: '600', color: '#0A1628', paddingVertical: 2 },
+    noteInput: { fontSize: 11, color: '#5b6b82', paddingVertical: 2, marginTop: 2 },
+    amtInput: {
+      minWidth: 100, textAlign: 'right', fontSize: 13, fontWeight: '800', color: '#0A1628',
+      borderWidth: 1, borderColor: '#E8ECF2', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4,
+    },
+    notesBox: {
+      marginTop: 8, minHeight: 80, borderWidth: 1, borderColor: '#E8ECF2', borderRadius: 8,
+      padding: 10, fontSize: 13, color: '#0A1628', textAlignVertical: 'top',
+    },
     errBox: { padding: 16, backgroundColor: 'rgba(220,38,38,0.08)', borderRadius: 8 },
     errText: { color: '#b91c1c', fontSize: 13, marginBottom: 8 },
     retry: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8, color: '#0A1628' },

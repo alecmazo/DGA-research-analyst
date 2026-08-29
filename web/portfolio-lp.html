@@ -543,16 +543,57 @@
     padding: 6px 8px;
   }
   .plan-tot td { font-weight: 800; background: var(--offwhite); }
-  .plan-actions { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 12px; }
+  .plan-actions { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
   .plan-btn {
     height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line);
     background: white; font-size: 12px; font-weight: 700; cursor: pointer; color: var(--ink);
   }
+  .plan-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .plan-btn-save {
+    background: linear-gradient(180deg, #84CCE3, #5BB8D4 50%, #3E9AB8);
+    border-color: transparent; color: #0A1628; font-weight: 800; letter-spacing: 0.04em;
+  }
   .plan-meta { font-size: 12px; color: var(--dim); margin: 0 0 12px; }
+  .plan-in {
+    width: 100%; max-width: 160px; height: 28px; border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 7px; font: inherit; color: var(--ink); background: #fff;
+    text-align: right;
+  }
+  .plan-in-wide { max-width: none; text-align: left; }
+  .plan-in-notes { max-width: none; text-align: left; min-width: 120px; }
+  td.plan-live { color: var(--mid); font-weight: 700; }
+  .plan-add {
+    margin-left: 10px; border: none; background: none; color: var(--blue-dark);
+    font-size: 11px; font-weight: 800; cursor: pointer; letter-spacing: 0.02em;
+  }
+  .plan-del {
+    border: none; background: none; color: var(--mid); font-size: 14px;
+    cursor: pointer; padding: 0 4px; line-height: 1;
+  }
+  .plan-del:hover { color: #b91c1c; }
+  .plan-exp-row {
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end;
+    margin: 0 0 14px;
+  }
+  .plan-exp-row label { font-size: 10px; font-weight: 800; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--mid); display: flex; flex-direction: column; gap: 4px; }
+  .plan-notes-box { margin-top: 14px; }
+  .plan-notes-box .plan-lbl {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--mid); display: block; margin-bottom: 6px;
+  }
+  .plan-notes-box textarea {
+    width: 100%; min-height: 88px; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font: inherit; font-size: 13px; color: var(--ink); resize: vertical;
+  }
+  .plan-hint { font-size: 11px; color: var(--dim); margin: 8px 0 0; line-height: 1.45; }
+  .plan-status { font-size: 12px; font-weight: 700; color: #15803d; }
+  .plan-status.err { color: #b91c1c; }
   @media print {
-    .topbar, .ribbon-wrap, .plan-actions, .status-dot { display: none !important; }
+    .topbar, .ribbon-wrap, .plan-actions, .status-dot, .plan-add, .plan-del, #dga-demo-ribbon { display: none !important; }
     .tab-panel { display: none !important; }
     #tab-documents.tab-panel.active, #tab-documents { display: block !important; }
+    .plan-in, .plan-notes-box textarea { border: none !important; padding: 0 !important; background: transparent !important; }
   }
 
   /* Loading / empty states */
@@ -754,14 +795,16 @@
     <div class="card" style="margin-bottom:16px;">
       <div class="card-head">
         <span class="card-title">Planning</span>
-        <span class="card-badge">Your worksheet</span>
+        <span class="card-badge">Shared with GP</span>
       </div>
       <div style="padding:16px 18px 20px;">
         <div class="plan-actions">
+          <span class="plan-status" id="plan-status"></span>
           <button type="button" class="plan-btn" id="plan-print">Print</button>
           <button type="button" class="plan-btn" id="plan-pdf">PDF</button>
+          <button type="button" class="plan-btn plan-btn-save" id="plan-save" disabled>Save</button>
         </div>
-        <p class="plan-meta" id="plan-meta">Your planning worksheet — only you and your GP can see it.</p>
+        <p class="plan-meta" id="plan-meta">Your planning worksheet — you and your GP share the latest save.</p>
         <div id="plan-body">
           <div class="widget-loading">Loading your planning worksheet…</div>
         </div>
@@ -982,10 +1025,254 @@
     return r.pnl_actual_live != null ? Number(r.pnl_actual_live) : null;
   }
 
+  let _planState = null;
+  let _planDirty = false;
+  const _PLAN_SECTIONS = [
+    ['current', 'Current assets', '+ Add asset'],
+    ['long_term', 'Long-term assets', '+ Add property'],
+    ['income', 'Other annual income', '+ Add income'],
+    ['liability', 'Liabilities', '+ Add liability'],
+  ];
+
+  function _planNid() {
+    return 'r' + Math.random().toString(16).slice(2, 12);
+  }
+  function _planParseNum(raw) {
+    const t = String(raw || '').trim().replace(/[$,%\s]/g, '').replace(/^\((.+)\)$/, '-$1');
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  function _planIsLive(row) {
+    return row && (row.source === 'managed' || row.source === 'fund');
+  }
+  function _planSetDirty(on) {
+    _planDirty = !!on;
+    const btn = document.getElementById('plan-save');
+    if (btn) btn.disabled = !_planDirty;
+    const st = document.getElementById('plan-status');
+    if (st && _planDirty) { st.textContent = 'Unsaved changes'; st.className = 'plan-status'; }
+  }
+  function _planLastSaved(snap, lp) {
+    const by = (snap && snap.updated_by) || {};
+    const when = snap && snap.updated_at;
+    const who = by.name || by.email || '';
+    const role = (by.role || '').toUpperCase();
+    let s = (lp && lp.name) || 'Your worksheet';
+    if (snap && snap.as_of) s += ' · as of ' + snap.as_of;
+    if (who && when) {
+      const d = _parseServerDate(when);
+      const t = d && !isNaN(d.getTime())
+        ? d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+        : String(when).slice(0, 16).replace('T', ' ');
+      s += ' · last saved by ' + who + (role ? ' (' + role + ')' : '') + ' · ' + t;
+    } else {
+      s += ' · you and your GP share the latest save';
+    }
+    return s;
+  }
+  function _planTotals(rows, expenses) {
+    let assets = 0, liab = 0, invest = 0, income = 0, tax = 0, ytd = 0, hasTax = false, hasYtd = false;
+    (rows || []).forEach(row => {
+      if (row.hidden) return;
+      const amt = _planAmt(row);
+      if (row.section === 'liability') { liab += amt; return; }
+      if (row.section === 'income') {
+        income += amt;
+        const t = _planTax(row);
+        if (t != null) { tax += t; hasTax = true; }
+        return;
+      }
+      assets += amt;
+      if (row.include_in_investments) invest += amt;
+      const t = _planTax(row); if (t != null) { tax += t; hasTax = true; }
+      const y = _planYtd(row); if (y != null) { ytd += y; hasYtd = true; }
+    });
+    return { assets, liab, invest, income, tax, ytd, hasTax, hasYtd, nw: assets - liab, expenses: Number(expenses || 0) };
+  }
+  function _planRowHtml(row, assets) {
+    const live = _planIsLive(row);
+    const amt = _planAmt(row);
+    const yld = _planYld(row);
+    const taxV = _planTax(row);
+    const ytdV = _planYtd(row);
+    const ira = _planIra(row.label, row.realized_na);
+    let taxS = '';
+    if (row.section === 'liability' || row.section === 'long_term') taxS = '';
+    else if (ira && row.section !== 'income') taxS = 'N/A';
+    else if (taxV != null) taxS = _planUsd(taxV);
+    let ytdS = ytdV != null ? _planUsd(ytdV) : '';
+    if (ytdV != null && row.ytd_pct != null) ytdS += ' (' + fmtPct(row.ytd_pct) + ')';
+    const pct = (row.section === 'current' || row.section === 'long_term' || row.section === 'liability') && assets
+      ? (amt / assets * 100).toFixed(1) + '%' : '';
+    let estS = '';
+    if (row.section === 'income') estS = _planUsd(amt);
+    else if (row.section !== 'long_term' && row.section !== 'liability' && yld != null) estS = _planUsd(amt * yld / 100);
+    const yldShow = (row.section !== 'income' && row.section !== 'long_term');
+    const id = esc(row.id || '');
+    const labelCell = live
+      ? esc(row.label || '')
+      : '<input class="plan-in plan-in-wide" data-plan-field="label" data-plan-id="' + id + '" value="' + esc(row.label || '') + '">';
+    const amtCell = live
+      ? '<span class="plan-live">' + _planUsd(amt) + '</span>'
+      : '<input class="plan-in" data-plan-field="amount" data-plan-id="' + id + '" value="' + (row.amount != null ? row.amount : '') + '" inputmode="decimal" placeholder="0">';
+    const yldCell = (!yldShow)
+      ? ''
+      : (live
+        ? ((yld != null) ? (String(yld).replace(/\.0+$/, '') + '%') : '')
+        : '<input class="plan-in" data-plan-field="yield_pct" data-plan-id="' + id + '" value="' + (row.yield_pct != null ? row.yield_pct : '') + '" inputmode="decimal" placeholder="%">');
+    const del = live ? '' : '<button type="button" class="plan-del" data-plan-del="' + id + '" title="Remove line">×</button>';
+    return '<tr data-plan-row="' + id + '"><td>' + labelCell + '</td>' +
+      '<td>' + amtCell + '</td><td>' + pct + '</td><td>' + yldCell + '</td>' +
+      '<td>' + estS + '</td><td>' + taxS + '</td>' +
+      '<td class="plan-notes"><input class="plan-in plan-in-notes" data-plan-field="notes" data-plan-id="' + id + '" value="' + esc(row.notes || '') + '"></td>' +
+      '<td>' + ytdS + ' ' + del + '</td></tr>';
+  }
+  function _renderPlanning() {
+    const body = document.getElementById('plan-body');
+    const meta = document.getElementById('plan-meta');
+    if (!body || !_planState) return;
+    const snap = _planState;
+    const rows = snap.rows || [];
+    const lp = snap.lp || {};
+    const tot = _planTotals(rows, snap.annual_expenses);
+    if (meta) meta.textContent = _planLastSaved(snap, lp);
+    const kpis = [
+      ['Net worth', _planUsd(tot.nw), 'Assets ' + _planUsd(tot.assets) + ' − debt ' + _planUsd(tot.liab)],
+      ['Investable', _planUsd(tot.invest), 'DGA-relevant book'],
+      ['Taxable P&L', tot.hasTax ? _planUsd(tot.tax) : '—', 'Realized'],
+      ['YTD (unrealized)', tot.hasYtd ? _planUsd(tot.ytd) : '—', 'Mark-to-market + dividends'],
+      ['Annual expenses', _planUsd(tot.expenses), 'Edit below'],
+    ];
+    let html = '<div class="plan-kpis">' + kpis.map(k =>
+      '<div class="plan-kpi"><div class="plan-kpi-l">' + k[0] + '</div>' +
+      '<div class="plan-kpi-v">' + k[1] + '</div>' +
+      (k[2] ? '<div class="plan-kpi-h">' + k[2] + '</div>' : '') + '</div>'
+    ).join('') + '</div>';
+    html += '<div class="plan-exp-row">' +
+      '<label>As of<input class="plan-in" type="date" data-plan-top="as_of" value="' + esc(snap.as_of || '') + '"></label>' +
+      '<label>Annual expenses<input class="plan-in" data-plan-top="annual_expenses" value="' + (snap.annual_expenses != null ? snap.annual_expenses : '') + '" inputmode="decimal" placeholder="200000"></label>' +
+      '</div>';
+    html += '<div class="plan-table-wrap"><table class="plan-table"><thead><tr>' +
+      '<th>Line</th><th>Amount</th><th>% Tot</th><th>Yield %</th><th>P&amp;L est</th>' +
+      '<th>P&amp;L actual</th><th>Notes</th><th>YTD (unrealized)</th>' +
+      '</tr></thead><tbody>';
+    _PLAN_SECTIONS.forEach(([key, label, add]) => {
+      const chunk = rows.filter(x => x.section === key && !x.hidden);
+      const sub = chunk.reduce((s, x) => s + _planAmt(x), 0);
+      html += '<tr class="plan-sec"><td colspan="8">' + esc(label) + ' &nbsp; ' + _planUsd(sub) +
+        ' <button type="button" class="plan-add" data-plan-add="' + key + '">' + esc(add) + '</button></td></tr>';
+      chunk.forEach(row => { html += _planRowHtml(row, tot.assets); });
+    });
+    html += '<tr class="plan-tot"><td>Equity / net worth</td><td>' + _planUsd(tot.nw) +
+      '</td><td></td><td></td><td></td><td>' + (tot.hasTax ? _planUsd(tot.tax) : '—') +
+      '</td><td class="plan-notes"></td><td>' + (tot.hasYtd ? _planUsd(tot.ytd) : '—') + '</td></tr>';
+    html += '</tbody></table></div>';
+    html += '<div class="plan-notes-box"><span class="plan-lbl">Planning notes (shared with your GP)</span>' +
+      '<textarea data-plan-top="notes" placeholder="Property details, Social Security start, liquidity needs, anything your GP may not have on file…">' +
+      esc(snap.notes || '') + '</textarea></div>';
+    html += '<p class="plan-hint">Linked DGA accounts update from the books. Add household lines — cash, real estate, mortgages, other income — and Save. The latest save is what you and your GP both see.</p>';
+    body.innerHTML = html;
+  }
+  function _planApplyTop(field, value) {
+    if (!_planState) return;
+    if (field === 'annual_expenses') _planState.annual_expenses = _planParseNum(value) || 0;
+    else if (field === 'as_of') _planState.as_of = value;
+    else if (field === 'notes') _planState.notes = value;
+    _planSetDirty(true);
+  }
+  function _planApplyField(id, field, value) {
+    if (!_planState) return;
+    const row = (_planState.rows || []).find(r => r.id === id);
+    if (!row) return;
+    if (field === 'amount' || field === 'yield_pct') row[field] = _planParseNum(value);
+    else row[field] = value;
+    _planSetDirty(true);
+  }
+  function _planAddRow(section) {
+    if (!_planState) return;
+    const n = (_planState.rows || []).filter(r => r.section === section && !r.hidden).length;
+    const labels = {
+      current: n ? 'Other asset ' + n : 'Other asset',
+      long_term: n ? 'Property ' + (n + 1) + ' (FMV)' : 'Real estate (FMV)',
+      liability: n ? 'Liability ' + (n + 1) : 'Mortgage / property debt',
+      income: n ? 'Income source ' + (n + 1) : 'Social Security (annual)',
+    };
+    _planState.rows = _planState.rows || [];
+    _planState.rows.push({
+      id: _planNid(), section: section, label: labels[section] || 'Line',
+      amount: null, yield_pct: null, pnl_actual: null, notes: '',
+      include_in_investments: section === 'current', source: 'manual',
+      link_id: null, hidden: false, amount_override: null,
+    });
+    _planSetDirty(true);
+    _renderPlanning();
+  }
+  function _planDelRow(id) {
+    if (!_planState) return;
+    const row = (_planState.rows || []).find(r => r.id === id);
+    if (!row || _planIsLive(row)) return;
+    _planState.rows = _planState.rows.filter(r => r.id !== id);
+    _planSetDirty(true);
+    _renderPlanning();
+  }
+  async function _savePlanning() {
+    if (!_planState) return;
+    const btn = document.getElementById('plan-save');
+    const st = document.getElementById('plan-status');
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+      if (st) { st.textContent = ''; st.className = 'plan-status'; }
+      const body = {
+        title: _planState.title || '',
+        as_of: _planState.as_of || '',
+        notes: _planState.notes || '',
+        annual_expenses: _planState.annual_expenses || 0,
+        rows: (_planState.rows || []).map(r => ({
+          id: r.id, section: r.section, label: r.label, amount: r.amount,
+          yield_pct: r.yield_pct, pnl_actual: r.pnl_actual, notes: r.notes || '',
+          include_in_investments: !!r.include_in_investments, source: r.source || 'manual',
+          link_id: r.link_id || null, hidden: !!r.hidden,
+          amount_override: r.amount_override, capital_gains: r.capital_gains,
+        })),
+      };
+      const r = await window.dgaFetch('/api/v2/lp/planning', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        let msg = 'Save failed (' + r.status + ')';
+        try { const j = await r.json(); msg = j.detail || j.error || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+      const d = await r.json();
+      const snap = d.snapshot || {};
+      _planState = {
+        title: snap.title || _planState.title,
+        as_of: snap.as_of || '',
+        notes: snap.notes || '',
+        annual_expenses: snap.annual_expenses || 0,
+        rows: (snap.rows || []).filter(x => !x.hidden),
+        lp: d.lp || _planState.lp,
+        updated_at: snap.updated_at,
+        updated_by: snap.updated_by,
+      };
+      _planDirty = false;
+      _renderPlanning();
+      if (st) { st.textContent = 'Saved — your GP sees this version'; st.className = 'plan-status'; }
+    } catch (e) {
+      if (st) { st.textContent = e.message || 'Save failed'; st.className = 'plan-status err'; }
+    } finally {
+      if (btn) { btn.textContent = 'Save'; btn.disabled = !_planDirty; }
+    }
+  }
+
   async function loadPlanningTab() {
     const body = document.getElementById('plan-body');
     const meta = document.getElementById('plan-meta');
     if (!body) return;
+    if (_planDirty && _planState) return; // keep in-progress edits if they switch tabs
     body.innerHTML = '<div class="widget-loading">Loading your planning worksheet…</div>';
     try {
       const r = await window.dgaFetch('/api/v2/lp/planning');
@@ -993,86 +1280,57 @@
       if (!r.ok) throw new Error('Could not load planning (' + r.status + ')');
       const d = await r.json();
       const snap = d.snapshot || {};
-      const rows = (snap.rows || []).filter(x => !x.hidden);
-      const lp = d.lp || {};
-      const expenses = Number(snap.annual_expenses || 0);
-      let assets = 0, liab = 0, invest = 0, income = 0, tax = 0, ytd = 0, hasTax = false, hasYtd = false;
-      rows.forEach(row => {
-        const amt = _planAmt(row);
-        if (row.section === 'liability') { liab += amt; return; }
-        if (row.section === 'income') { income += amt; const t = _planTax(row); if (t != null) { tax += t; hasTax = true; } return; }
-        assets += amt;
-        if (row.include_in_investments) invest += amt;
-        const t = _planTax(row); if (t != null) { tax += t; hasTax = true; }
-        const y = _planYtd(row); if (y != null) { ytd += y; hasYtd = true; }
-      });
-      const nw = assets - liab;
-      const asOf = snap.as_of ? ' · as of ' + esc(snap.as_of) : '';
-      if (meta) meta.textContent = (lp.name || 'Your worksheet') + asOf + ' · only you and your GP can see this.';
-      const kpis = [
-        ['Net worth', _planUsd(nw), 'Assets ' + _planUsd(assets) + ' − debt ' + _planUsd(liab)],
-        ['Investable', _planUsd(invest), 'Checked lines'],
-        ['Taxable P&L', hasTax ? _planUsd(tax) : '—', 'Realized'],
-        ['YTD (unrealized)', hasYtd ? _planUsd(ytd) : '—', 'Mark-to-market + dividends'],
-        ['Annual expenses', _planUsd(expenses), ''],
-      ];
-      const sections = [
-        ['current', 'Current assets'],
-        ['long_term', 'Long-term assets'],
-        ['income', 'Other annual income'],
-        ['liability', 'Liabilities'],
-      ];
-      let html = '<div class="plan-kpis">' + kpis.map(k =>
-        '<div class="plan-kpi"><div class="plan-kpi-l">' + k[0] + '</div>' +
-        '<div class="plan-kpi-v">' + k[1] + '</div>' +
-        (k[2] ? '<div class="plan-kpi-h">' + k[2] + '</div>' : '') + '</div>'
-      ).join('') + '</div>';
-      html += '<div class="plan-table-wrap"><table class="plan-table"><thead><tr>' +
-        '<th>Line</th><th>Amount</th><th>% Tot</th><th>Yield %</th><th>P&amp;L est</th>' +
-        '<th>P&amp;L actual</th><th>Notes</th><th>YTD (unrealized)</th>' +
-        '</tr></thead><tbody>';
-      sections.forEach(([key, label]) => {
-        const chunk = rows.filter(x => x.section === key);
-        if (!chunk.length) return;
-        const sub = chunk.reduce((s, x) => s + _planAmt(x), 0);
-        html += '<tr class="plan-sec"><td colspan="8">' + esc(label) + ' &nbsp; ' + _planUsd(sub) + '</td></tr>';
-        chunk.forEach(row => {
-          const amt = _planAmt(row);
-          const yld = _planYld(row);
-          const taxV = _planTax(row);
-          const ytdV = _planYtd(row);
-          const ira = _planIra(row.label, row.realized_na);
-          let taxS = '';
-          if (row.section === 'liability' || row.section === 'long_term') taxS = '';
-          else if (ira && row.section !== 'income') taxS = 'N/A';
-          else if (taxV != null) taxS = _planUsd(taxV);
-          let ytdS = ytdV != null ? _planUsd(ytdV) : '';
-          if (ytdV != null && row.ytd_pct != null) ytdS += ' (' + fmtPct(row.ytd_pct) + ')';
-          const pct = (row.section === 'current' || row.section === 'long_term' || row.section === 'liability') && assets
-            ? (amt / assets * 100).toFixed(1) + '%' : '';
-          const yldS = (yld != null && row.section !== 'income' && row.section !== 'long_term') ? (String(yld).replace(/\.0+$/, '') + '%') : '';
-          let estS = '';
-          if (row.section === 'income') estS = _planUsd(amt);
-          else if (row.section !== 'long_term' && row.section !== 'liability' && yld != null) estS = _planUsd(amt * yld / 100);
-          html += '<tr><td>' + esc(row.label || '') + '</td>' +
-            '<td>' + _planUsd(amt) + '</td><td>' + pct + '</td><td>' + yldS + '</td>' +
-            '<td>' + estS + '</td><td>' + taxS + '</td>' +
-            '<td class="plan-notes">' + esc(row.notes || '') + '</td><td>' + ytdS + '</td></tr>';
-        });
-      });
-      html += '<tr class="plan-tot"><td>Equity / net worth</td><td>' + _planUsd(nw) +
-        '</td><td></td><td></td><td></td><td>' + (hasTax ? _planUsd(tax) : '—') +
-        '</td><td class="plan-notes"></td><td>' + (hasYtd ? _planUsd(ytd) : '—') + '</td></tr>';
-      html += '</tbody></table></div>';
-      body.innerHTML = html;
+      _planState = {
+        title: snap.title || '',
+        as_of: snap.as_of || '',
+        notes: snap.notes || '',
+        annual_expenses: snap.annual_expenses || 0,
+        rows: (snap.rows || []).filter(x => !x.hidden),
+        lp: d.lp || {},
+        updated_at: snap.updated_at,
+        updated_by: snap.updated_by,
+      };
+      _planDirty = false;
+      _renderPlanning();
+      const btn = document.getElementById('plan-save');
+      if (btn) btn.disabled = true;
     } catch (e) {
+      if (meta) meta.textContent = '';
       body.innerHTML = '<div class="widget-empty">' + esc(e.message || 'Could not load planning') + '</div>';
     }
   }
 
+  const _planBodyEl = document.getElementById('plan-body');
+  _planBodyEl?.addEventListener('input', (e) => {
+    const el = e.target;
+    if (!el) return;
+    if (el.dataset.planTop) {
+      _planApplyTop(el.dataset.planTop, el.value);
+      if (el.dataset.planTop === 'annual_expenses') {
+        // refresh KPI number without stealing focus
+        const v = document.querySelector('.plan-kpis .plan-kpi:last-child .plan-kpi-v');
+        if (v) v.textContent = _planUsd(_planState.annual_expenses);
+      }
+      return;
+    }
+    if (el.dataset.planField && el.dataset.planId) {
+      _planApplyField(el.dataset.planId, el.dataset.planField, el.value);
+    }
+  });
+  _planBodyEl?.addEventListener('click', (e) => {
+    const add = e.target.closest && e.target.closest('[data-plan-add]');
+    if (add) { e.preventDefault(); _planAddRow(add.getAttribute('data-plan-add')); return; }
+    const del = e.target.closest && e.target.closest('[data-plan-del]');
+    if (del) { e.preventDefault(); _planDelRow(del.getAttribute('data-plan-del')); }
+  });
+  document.getElementById('plan-save')?.addEventListener('click', () => void _savePlanning());
   document.getElementById('plan-print')?.addEventListener('click', () => window.print());
   document.getElementById('plan-pdf')?.addEventListener('click', async () => {
     const btn = document.getElementById('plan-pdf');
+    if (_planDirty) {
+      if (!confirm('Save first so the PDF matches what you see?')) return;
+      await _savePlanning();
+    }
     try {
       if (btn) { btn.disabled = true; btn.textContent = 'PDF…'; }
       const r = await window.dgaFetch('/api/v2/lp/planning/pdf');

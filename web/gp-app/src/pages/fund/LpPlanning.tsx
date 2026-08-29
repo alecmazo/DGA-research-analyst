@@ -345,6 +345,12 @@ export function LpPlanning() {
   const [tax, setTax] = useState<TaxYtd | null>(null)
   const [taxErr, setTaxErr] = useState<string | null>(null)
   const [taxExpand, setTaxExpand] = useState<Record<string, boolean>>({})
+  const [updatedAt, setUpdatedAt] = useState('')
+  const [updatedBy, setUpdatedBy] = useState<{
+    name?: string
+    email?: string
+    role?: string
+  } | null>(null)
 
   const loadRoster = useCallback(async () => {
     const d = await api<{ lps?: RosterLp[] }>('/api/v2/gp/lp-planning')
@@ -370,6 +376,8 @@ export function LpPlanning() {
           annual_expenses?: number
           rows?: PlanRow[]
           seeded?: boolean
+          updated_at?: string
+          updated_by?: { name?: string; email?: string; role?: string }
         }
         live?: { unmatched_accounts?: string[] }
       }>(`/api/v2/gp/lp-planning/${encodeURIComponent(id)}`)
@@ -381,6 +389,8 @@ export function LpPlanning() {
       setRows(s.rows || [])
       setSeeded(Boolean(s.seeded))
       setUnmatched(d.live?.unmatched_accounts || [])
+      setUpdatedAt(s.updated_at || '')
+      setUpdatedBy(s.updated_by || null)
       setDirty(false)
       setStatus('')
     } catch (e) {
@@ -423,6 +433,32 @@ export function LpPlanning() {
     }
     void loadSnap(lpId)
   }, [lpId, loadSnap])
+
+  const lastSaved = useMemo(() => {
+    if (!updatedAt && !updatedBy) return ''
+    const who = updatedBy?.name || updatedBy?.email || ''
+    const role = (updatedBy?.role || '').toUpperCase()
+    let when = updatedAt
+    try {
+      if (updatedAt) {
+        const raw =
+          /Z$|[+-]\d\d:\d\d$/.test(updatedAt) ? updatedAt : `${updatedAt}Z`
+        const d = new Date(raw)
+        if (!Number.isNaN(d.getTime())) {
+          when = d.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          })
+        }
+      }
+    } catch {
+      /* keep raw */
+    }
+    const whoBit = who ? `${who}${role ? ` (${role})` : ''}` : ''
+    return [whoBit, when].filter(Boolean).join(' · ')
+  }, [updatedAt, updatedBy])
 
   const mark = (next: PlanRow[] | ((r: PlanRow[]) => PlanRow[])) => {
     setRows(next)
@@ -503,6 +539,8 @@ export function LpPlanning() {
           notes?: string
           annual_expenses?: number
           rows?: PlanRow[]
+          updated_at?: string
+          updated_by?: { name?: string; email?: string; role?: string }
         }
       }>(`/api/v2/gp/lp-planning/${encodeURIComponent(lpId)}`, {
         method: 'PUT',
@@ -512,7 +550,9 @@ export function LpPlanning() {
       setRows(s.rows || rows)
       setDirty(false)
       setSeeded(false)
-      setStatus('Saved')
+      setUpdatedAt(s.updated_at || '')
+      setUpdatedBy(s.updated_by || null)
+      setStatus('Saved — this is the version the LP sees')
       await loadRoster()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Save failed')
@@ -631,7 +671,7 @@ export function LpPlanning() {
     return (
       <Empty
         title="No LPs in Settings"
-        sub="Create an LP under Settings → Users, then assign managed accounts and fund memberships. Planning snapshots are GP-only."
+        sub="Create an LP under Settings → Users, then assign managed accounts and fund memberships. The LP can edit the same worksheet; the latest save is what both of you see."
       />
     )
   }
@@ -793,6 +833,9 @@ export function LpPlanning() {
 
       {err && <div className={styles.callout}>{err}</div>}
       {status && !dirty && <div className={styles.statusOk}>{status}</div>}
+      {lastSaved && !dirty && (
+        <p className={styles.status}>Last saved by {lastSaved}. Same version the LP sees.</p>
+      )}
       {seeded && (
         <p className={styles.status}>
           Starter lines added — edit amounts or delete anything you don’t need.
@@ -980,14 +1023,14 @@ export function LpPlanning() {
           </div>
 
           <label className={styles.strategy}>
-            <span className={styles.lbl}>Strategy notes (GP only)</span>
+            <span className={styles.lbl}>Planning notes (shared with the LP)</span>
             <textarea
               value={notes}
               onChange={(e) => {
                 setNotes(e.target.value)
                 setDirty(true)
               }}
-              placeholder="Approach for this LP — growth vs income sleeve, liquidity needs, when Social Security starts, tax lots to avoid, etc."
+              placeholder="Shared worksheet — growth vs income sleeve, liquidity needs, when Social Security starts, property details, tax lots to avoid. Latest save is what both of you see."
             />
           </label>
         </>
