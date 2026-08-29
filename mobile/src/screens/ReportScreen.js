@@ -8,7 +8,7 @@ import Markdown from 'react-native-markdown-display';
 import { api } from '../api/client';
 import AppHeader, { BackButton } from '../components/AppHeader';
 import {
-  makeMdStyles, formatDate, haptics, useTheme,
+  makeReportMdStyles, reportMdRules, formatDate, haptics, useTheme,
   MarkdownTOC, TOCToggle, extractHeadings,
 } from '../design';
 
@@ -30,7 +30,8 @@ export default function ReportScreen({ route, navigation }) {
   const provider = (routeProvider || 'grok').toLowerCase();
   const { theme: t } = useTheme();
   const s = useMemo(() => makeStyles(t), [t]);
-  const md = useMemo(() => makeMdStyles(t, true), [t]);
+  const md = useMemo(() => makeReportMdStyles(t), [t]);
+  const mdRules = useMemo(() => reportMdRules(), []);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -238,6 +239,7 @@ export default function ReportScreen({ route, navigation }) {
       >
         <Markdown
           style={md}
+          rules={mdRules}
           onLinkPress={(url) => {
             Linking.openURL(url).catch(() => {});
             return false; // prevent default behaviour
@@ -298,7 +300,7 @@ function makeStyles(t) {
   generatedAt: { fontSize: 11, color: t.textSecondary },
 
   scroll: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 60 },
+  scrollContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 72 },
 
   // Floating "back to top" button (visible after scrolling > 600px)
   backToTop: {

@@ -11,6 +11,7 @@ import AppHeader from '../components/AppHeader';
 import { spacing, radius, shadow, fontSize, useTheme } from '../design';
 
 const ITEMS = [
+  { route: 'Planning',     icon: 'clipboard-text-outline', title: 'Planning', sub: 'Shared LP household worksheet' },
   { route: 'Podcast',      icon: 'microphone', title: 'DGA HiTech Podcast', sub: 'AI-narrated episodes' },
   { route: 'PaperTracker', icon: 'chart-timeline-variant', title: 'Paper Tracker', sub: 'Paper portfolios vs SPY + live book' },
   { route: 'Settings',     icon: 'tune',       title: 'Settings',           sub: 'Server, security, automation' },

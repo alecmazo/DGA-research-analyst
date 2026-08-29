@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
 import { colors } from '../components/theme';
 import { api, getFundToken, setFundToken, clearFundToken } from '../api/client';
+import LPPlanningScreen from './LPPlanningScreen';
 
 const LAST_PORTFOLIO_KEY = '@dga_last_portfolio';
 
@@ -48,7 +49,7 @@ const fmtCat = (cat) =>
 const pctColor = (x) =>
   x == null ? '#8090a8' : x > 0 ? '#16A34A' : x < 0 ? '#DC2626' : '#8090a8';
 
-const BRANCHES = ['LP Fund', 'Managed Account', 'Rebalanced'];
+const BRANCHES = ['LP Fund', 'Managed', 'Rebalanced', 'Planning'];
 const LP_TABS  = ['Overview', 'LPs', 'Positions', 'Activity', 'Waterfall'];
 
 export default function FundScreen({ navigation }) {
@@ -1828,8 +1829,12 @@ export default function FundScreen({ navigation }) {
   return (
     <View style={s.screen}>
       <AppHeader
-        title="Fund Admin"
-        subtitle={activeFundId ? activeFundName : 'DGA Capital'}
+        title={branch === 'Planning' ? 'Planning' : 'Fund Admin'}
+        subtitle={
+          branch === 'Planning'
+            ? 'Shared with the LP'
+            : (activeFundId ? activeFundName : 'DGA Capital')
+        }
       />
 
       {/* Top branch selector */}
@@ -1843,7 +1848,7 @@ export default function FundScreen({ navigation }) {
               if (b === 'LP Fund') {
                 if (activeFundId) closeFundDetail();
               }
-              if (b === 'Managed Account') {
+              if (b === 'Managed') {
                 loadYtdSnapshots();
                 loadManagedAccList(activeManagedAccId);
               }
@@ -1855,7 +1860,9 @@ export default function FundScreen({ navigation }) {
         ))}
       </View>
 
-      {branch === 'Rebalanced' ? (
+      {branch === 'Planning' ? (
+        <LPPlanningScreen gpMode embedded />
+      ) : branch === 'Rebalanced' ? (
         <ScrollView
           style={s.scroll}
           contentContainerStyle={s.scrollContent}
@@ -1863,7 +1870,7 @@ export default function FundScreen({ navigation }) {
         >
           <RebalancedPanel />
         </ScrollView>
-      ) : branch === 'Managed Account' ? (
+      ) : branch === 'Managed' ? (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}

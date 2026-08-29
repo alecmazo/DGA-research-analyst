@@ -51,6 +51,9 @@ function FundStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="FundHome"        component={FundScreen} />
       <Stack.Screen name="PortfolioSummary" component={PortfolioSummaryScreen} />
+      <Stack.Screen name="Planning">
+        {() => <LPPlanningScreen gpMode />}
+      </Stack.Screen>
     </Stack.Navigator>
   );
 }
@@ -60,6 +63,9 @@ function MoreStack({ onLogout, isDemo, onSwitchToLP }) {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="MoreHome"      component={MoreScreen} />
+      <Stack.Screen name="Planning">
+        {() => <LPPlanningScreen gpMode />}
+      </Stack.Screen>
       <Stack.Screen name="Podcast"       component={PodcastScreen} />
       <Stack.Screen name="PaperTracker"  component={PaperTrackerScreen} />
       <Stack.Screen name="Settings">

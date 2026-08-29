@@ -66,7 +66,7 @@ function ytd(r) {
   return r.pnl_actual_live != null ? Number(r.pnl_actual_live) : null;
 }
 
-export default function LPPlanningScreen() {
+export default function LPPlanningScreen({ gpMode = false, embedded = false }) {
   const { theme: t } = useTheme();
   const s = useMemo(() => makeS(t), [t]);
   const [pack, setPack] = useState(null);
@@ -81,6 +81,8 @@ export default function LPPlanningScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [roster, setRoster] = useState([]);
+  const [lpId, setLpId] = useState('');
 
   const applyPack = (d) => {
     const snap = d?.snapshot || {};
@@ -93,19 +95,37 @@ export default function LPPlanningScreen() {
     setDirty(false);
   };
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (explicitId) => {
     setError(null);
     try {
-      const resp = await v2Fetch('/api/v2/lp/planning');
-      if (resp.status === 403) throw new Error('Planning is only on your LP login.');
-      if (!resp.ok) throw new Error('Could not load planning (' + resp.status + ')');
-      applyPack(await resp.json());
+      if (gpMode) {
+        const rList = await v2Fetch('/api/v2/gp/lp-planning');
+        if (!rList.ok) throw new Error('Could not load LP list (' + rList.status + ')');
+        const list = (await rList.json())?.lps || [];
+        setRoster(list);
+        const pick = explicitId || lpId || list[0]?.lp_id || '';
+        if (pick && pick !== lpId) setLpId(pick);
+        if (!pick) {
+          setPack(null);
+          setRows([]);
+          setLoading(false);
+          return;
+        }
+        const resp = await v2Fetch('/api/v2/gp/lp-planning/' + encodeURIComponent(pick));
+        if (!resp.ok) throw new Error('Could not load planning (' + resp.status + ')');
+        applyPack(await resp.json());
+      } else {
+        const resp = await v2Fetch('/api/v2/lp/planning');
+        if (resp.status === 403) throw new Error('This worksheet is only on your LP login.');
+        if (!resp.ok) throw new Error('Could not load planning (' + resp.status + ')');
+        applyPack(await resp.json());
+      }
     } catch (e) {
       setError(e?.message || 'Could not load your planning worksheet.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [gpMode, lpId]);
 
   useFocusEffect(useCallback(() => {
     if (!dirty) load();
@@ -165,10 +185,14 @@ export default function LPPlanningScreen() {
     setDirty(true);
   };
   const save = async () => {
+    if (gpMode && !lpId) return;
     setSaving(true);
     setSaveMsg('');
     try {
-      const resp = await v2Fetch('/api/v2/lp/planning', {
+      const path = gpMode
+        ? '/api/v2/gp/lp-planning/' + encodeURIComponent(lpId)
+        : '/api/v2/lp/planning';
+      const resp = await v2Fetch(path, {
         method: 'PUT',
         body: JSON.stringify({
           title, as_of: asOf, notes, annual_expenses: expenses || 0,
@@ -188,7 +212,7 @@ export default function LPPlanningScreen() {
         throw new Error(msg);
       }
       applyPack(await resp.json());
-      setSaveMsg('Saved — your GP sees this version');
+      setSaveMsg(gpMode ? 'Saved — this is the version the LP sees' : 'Saved — your GP sees this version');
     } catch (e) {
       setSaveMsg(e?.message || 'Save failed');
     } finally {
@@ -196,9 +220,28 @@ export default function LPPlanningScreen() {
     }
   };
 
+  const pickLp = (id) => {
+    if (id === lpId) return;
+    if (dirty) {
+      Alert.alert('Unsaved changes', 'Save first, or discard and switch LPs.', [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => { setDirty(false); setLpId(id); load(id); } },
+      ]);
+      return;
+    }
+    setLpId(id);
+    setLoading(true);
+    load(id);
+  };
+
   return (
     <View style={s.container}>
-      <AppHeader title="Documents" subtitle={lp.name || 'Your worksheet'} />
+      {!embedded && (
+        <AppHeader
+          title={gpMode ? 'Planning' : 'Documents'}
+          subtitle={lp.name || (gpMode ? 'Pick an LP' : 'Your worksheet')}
+        />
+      )}
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
         contentContainerStyle={s.scroll}
@@ -215,8 +258,29 @@ export default function LPPlanningScreen() {
             <TouchableOpacity onPress={load}><Text style={s.retry}>RETRY</Text></TouchableOpacity>
           </View>
         )}
+        {gpMode && roster.length > 0 && (
+          <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} style={s.picker} contentContainerStyle={s.pickerRow}>
+            {roster.map((u) => {
+              const on = u.lp_id === lpId;
+              return (
+                <TouchableOpacity key={u.lp_id} onPress={() => pickLp(u.lp_id)} style={[s.chip, on && s.chipOn]}>
+                  <Text style={[s.chipTxt, on && s.chipTxtOn]} numberOfLines={1}>
+                    {u.name || u.email || u.lp_id}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+        {gpMode && !roster.length && !loading && !error && (
+          <View style={s.card}>
+            <Text style={s.secTitle}>No LPs yet</Text>
+            <Text style={s.hint}>Add LPs under Settings → Users on the web desk, then come back here.</Text>
+          </View>
+        )}
         {pack && (
           <>
+            {!gpMode && (
             <View style={s.card}>
               <Text style={s.secTitle}>Documents</Text>
               <Text style={s.hint}>
@@ -224,6 +288,12 @@ export default function LPPlanningScreen() {
                 The planning worksheet is shared with your GP — latest save wins.
               </Text>
             </View>
+            )}
+            {gpMode && (
+              <Text style={s.hint}>
+                Same worksheet the LP sees. Latest save wins — they can fill household lines you may not have.
+              </Text>
+            )}
             <View style={s.headRow}>
               <Text style={s.hint}>Planning worksheet</Text>
               <TouchableOpacity
@@ -374,6 +444,15 @@ function makeS(t) {
       marginTop: 8, minHeight: 80, borderWidth: 1, borderColor: '#E8ECF2', borderRadius: 8,
       padding: 10, fontSize: 13, color: '#0A1628', textAlignVertical: 'top',
     },
+    picker: { marginBottom: 10, maxHeight: 44 },
+    pickerRow: { paddingRight: 8, gap: 8 },
+    chip: {
+      paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16,
+      backgroundColor: t.surface || '#fff', borderWidth: 1, borderColor: t.border || '#E8ECF2',
+    },
+    chipOn: { backgroundColor: '#0A1628', borderColor: '#0A1628' },
+    chipTxt: { fontSize: 12, fontWeight: '700', color: '#0A1628', maxWidth: 160 },
+    chipTxtOn: { color: '#F5C242' },
     errBox: { padding: 16, backgroundColor: 'rgba(220,38,38,0.08)', borderRadius: 8 },
     errText: { color: '#b91c1c', fontSize: 13, marginBottom: 8 },
     retry: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8, color: '#0A1628' },
