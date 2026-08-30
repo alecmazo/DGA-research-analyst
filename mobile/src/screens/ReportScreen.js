@@ -8,7 +8,7 @@ import Markdown from 'react-native-markdown-display';
 import { api } from '../api/client';
 import AppHeader, { BackButton } from '../components/AppHeader';
 import {
-  makeReportMdStyles, reportMdRules, formatDate, haptics, useTheme,
+  makeReportMdStyles, reportMdRules, compactReportMd, formatDate, haptics, useTheme,
   MarkdownTOC, TOCToggle, extractHeadings,
 } from '../design';
 
@@ -16,7 +16,7 @@ import {
 // treats them as normal inline links instead of leaving them as literal text.
 function fixMd(md) {
   if (!md) return md;
-  return md.replace(/\[\[([^\]]+)\]\]\(([^)]+)\)/g, '[$1]($2)');
+  return compactReportMd(md.replace(/\[\[([^\]]+)\]\]\(([^)]+)\)/g, '[$1]($2)'));
 }
 
 // Approximate vertical pixels per markdown line — used for TOC scroll.

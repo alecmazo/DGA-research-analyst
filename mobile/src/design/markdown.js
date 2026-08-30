@@ -115,100 +115,181 @@ export function makeMdStyles(t, report = false) {
 
 /**
  * Long-form saved reports on a phone. Desktop report window stays as-is.
- * Default markdown-display tables use flex:1 so every column is crushed into
- * the viewport — here columns keep a readable min-width and the table scrolls
- * sideways. Body type is also a step larger for reading, not scanning.
+ *
+ * Layout rules:
+ *  - 1–3 column tables shrink to the page (cover / key-value).
+ *  - 4+ column tables keep cell width and scroll sideways. The inner view
+ *    is alignSelf:flex-start so RN actually sizes to the row, not the screen
+ *    (otherwise overflow is clipped and there is nothing to scroll).
+ *  - List items (Recent Developments) stay tight: no extra paragraph gaps,
+ *    and minWidth:0 so text wraps instead of running off the right edge.
  */
 export function makeReportMdStyles(t) {
   return {
     body: {
       color: t.textPrimary,
-      fontSize: 16.5,
-      lineHeight: 26,
+      fontSize: 16,
+      lineHeight: 24,
     },
     paragraph: {
-      marginTop: 8,
-      marginBottom: 10,
+      marginTop: 4,
+      marginBottom: 6,
       flexWrap: 'wrap',
       flexDirection: 'row',
-      width: '100%',
+      alignItems: 'flex-start',
     },
-    text: { fontSize: 16.5, lineHeight: 26, color: t.textPrimary },
+    text: { fontSize: 16, lineHeight: 24, color: t.textPrimary },
     heading1: {
-      color: t.textPrimary, fontSize: 23, fontWeight: '800',
-      marginTop: 22, marginBottom: 10, lineHeight: 30,
+      color: t.textPrimary, fontSize: 22, fontWeight: '800',
+      marginTop: 16, marginBottom: 8, lineHeight: 28,
     },
     heading2: {
-      color: t.textPrimary, fontSize: 19, fontWeight: '700',
-      marginTop: 22, marginBottom: 8, paddingBottom: 5, lineHeight: 26,
+      color: t.textPrimary, fontSize: 18, fontWeight: '700',
+      marginTop: 16, marginBottom: 6, paddingBottom: 4, lineHeight: 24,
       borderBottomWidth: 1, borderBottomColor: t.border,
     },
     heading3: {
-      color: t.textSecondary, fontSize: 16.5, fontWeight: '700',
-      marginTop: 16, marginBottom: 6, lineHeight: 22,
+      color: t.textSecondary, fontSize: 16, fontWeight: '700',
+      marginTop: 12, marginBottom: 4, lineHeight: 22,
     },
     strong: { fontWeight: '800', color: t.textPrimary },
     em: { fontStyle: 'italic', color: t.textSecondary },
-    hr: { backgroundColor: t.border, height: 1, marginVertical: 16 },
+    hr: { backgroundColor: t.border, height: 1, marginVertical: 10 },
     blockquote: {
       backgroundColor: t.surfaceAlt, borderLeftWidth: 3, borderLeftColor: t.primary,
-      paddingLeft: 12, paddingVertical: 8, marginVertical: 10, borderRadius: 4,
+      paddingLeft: 10, paddingVertical: 4, marginVertical: 6, borderRadius: 4,
     },
-    bullet_list: { marginVertical: 6 },
-    ordered_list: { marginVertical: 6 },
-    list_item: { marginVertical: 3 },
-    bullet_list_content: { flex: 1, flexWrap: 'wrap' },
-    ordered_list_content: { flex: 1, flexWrap: 'wrap' },
+    bullet_list: { marginTop: 2, marginBottom: 6 },
+    ordered_list: { marginTop: 2, marginBottom: 6 },
+    list_item: {
+      marginTop: 0,
+      marginBottom: 4,
+      alignItems: 'flex-start',
+    },
+    bullet_list_icon: { marginLeft: 0, marginRight: 8, lineHeight: 22 },
+    ordered_list_icon: { marginLeft: 0, marginRight: 8, minWidth: 16, lineHeight: 22 },
+    // minWidth:0 is what lets flex children wrap instead of overflowing.
+    bullet_list_content: { flex: 1, minWidth: 0 },
+    ordered_list_content: { flex: 1, minWidth: 0 },
     code_inline: {
       backgroundColor: t.surfaceAlt, color: t.textPrimary, fontFamily: monoFamily,
-      fontSize: 14, paddingHorizontal: 4, borderRadius: 3,
+      fontSize: 13.5, paddingHorizontal: 4, borderRadius: 3,
     },
     fence: {
       backgroundColor: t.surfaceAlt, color: t.textPrimary, fontFamily: monoFamily,
-      fontSize: 13, lineHeight: 20, padding: 12, borderRadius: 6, marginVertical: 10,
+      fontSize: 12.5, lineHeight: 18, padding: 10, borderRadius: 6,
+    },
+    code_block: {
+      backgroundColor: t.surfaceAlt, color: t.textPrimary, fontFamily: monoFamily,
+      fontSize: 12.5, lineHeight: 18, padding: 10, borderRadius: 6,
     },
     link: { color: t.primary, textDecorationLine: 'underline' },
     table: {
-      borderWidth: 1, borderColor: t.border, borderRadius: 6, overflow: 'hidden',
+      borderWidth: 1, borderColor: t.border, borderRadius: 6,
     },
     thead: { backgroundColor: t.chromeNavy || '#0A1628' },
     tbody: {},
     tr: {
       flexDirection: 'row',
+      flexWrap: 'nowrap',
       borderBottomWidth: 1,
       borderColor: t.border,
+      alignSelf: 'flex-start',
     },
-    // flex:0 overrides the library default flex:1 that crushes columns.
     th: {
-      flex: 0, flexGrow: 0, flexShrink: 0, flexBasis: 'auto',
-      minWidth: 92, maxWidth: 280,
-      paddingVertical: 8, paddingHorizontal: 10,
-      color: '#FFFFFF', fontWeight: '700', fontSize: 13, lineHeight: 18,
+      paddingVertical: 7, paddingHorizontal: 8,
+      color: '#FFFFFF', fontWeight: '700', fontSize: 12.5, lineHeight: 17,
     },
     td: {
-      flex: 0, flexGrow: 0, flexShrink: 0, flexBasis: 'auto',
-      minWidth: 92, maxWidth: 280,
-      paddingVertical: 8, paddingHorizontal: 10,
-      color: t.textPrimary, fontSize: 13.5, lineHeight: 19,
+      paddingVertical: 7, paddingHorizontal: 8,
+      color: t.textPrimary, fontSize: 13, lineHeight: 18,
     },
   };
 }
 
+function tableColCount(node) {
+  if (!node) return 0;
+  if (node.type === 'tr') return (node.children || []).length;
+  let max = 0;
+  for (const c of node.children || []) max = Math.max(max, tableColCount(c));
+  return max;
+}
+
+function ancestor(parent, type) {
+  const arr = Array.isArray(parent) ? parent : [];
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i] && arr[i].type === type) return arr[i];
+  }
+  return null;
+}
+
+function inList(parent) {
+  return !!(ancestor(parent, 'list_item') || ancestor(parent, 'bullet_list') || ancestor(parent, 'ordered_list'));
+}
+
+const WIDE_CELL = {
+  flex: 0, flexGrow: 0, flexShrink: 0, flexBasis: 'auto', minWidth: 104, maxWidth: 200,
+};
+const FIT_CELL = {
+  flex: 1, flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0,
+};
+
 export function reportMdRules() {
   return {
-    table: (node, children, parent, styles) => (
-      <ScrollView
+    paragraph: (node, children, parent, styles) => (
+      <View
         key={node.key}
-        horizontal
-        nestedScrollEnabled
-        showsHorizontalScrollIndicator
-        bounces
-        style={{ marginVertical: 12 }}
-        contentContainerStyle={{ flexGrow: 1, paddingRight: 8 }}
+        style={[
+          styles._VIEW_SAFE_paragraph,
+          inList(parent) && { marginTop: 0, marginBottom: 2 },
+        ]}
       >
-        <View style={styles._VIEW_SAFE_table}>{children}</View>
-      </ScrollView>
+        {children}
+      </View>
     ),
+    table: (node, children, parent, styles) => {
+      const wide = tableColCount(node) >= 4;
+      const inner = (
+        <View
+          style={[
+            styles._VIEW_SAFE_table,
+            wide ? { alignSelf: 'flex-start' } : { alignSelf: 'stretch', width: '100%' },
+          ]}
+        >
+          {children}
+        </View>
+      );
+      if (!wide) {
+        return <View key={node.key} style={{ marginVertical: 8 }}>{inner}</View>;
+      }
+      return (
+        <ScrollView
+          key={node.key}
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator
+          style={{ marginVertical: 8 }}
+        >
+          {inner}
+        </ScrollView>
+      );
+    },
+    th: (node, children, parent, styles) => {
+      const wide = tableColCount(ancestor(parent, 'table')) >= 4;
+      return (
+        <View key={node.key} style={[styles._VIEW_SAFE_th, wide ? WIDE_CELL : FIT_CELL]}>
+          {children}
+        </View>
+      );
+    },
+    td: (node, children, parent, styles) => {
+      const wide = tableColCount(ancestor(parent, 'table')) >= 4;
+      return (
+        <View key={node.key} style={[styles._VIEW_SAFE_td, wide ? WIDE_CELL : FIT_CELL]}>
+          {children}
+        </View>
+      );
+    },
     fence: (node, children, parent, styles) => {
       let content = typeof node.content === 'string' ? node.content : '';
       if (content.endsWith('\n')) content = content.slice(0, -1);
@@ -218,11 +299,55 @@ export function reportMdRules() {
           horizontal
           nestedScrollEnabled
           showsHorizontalScrollIndicator
-          style={{ marginVertical: 10 }}
+          style={{ marginVertical: 8 }}
         >
-          <Text style={styles.fence}>{content}</Text>
+          <Text style={[styles.fence, { alignSelf: 'flex-start' }]}>{content}</Text>
+        </ScrollView>
+      );
+    },
+    code_block: (node, children, parent, styles) => {
+      let content = typeof node.content === 'string' ? node.content : '';
+      if (content.endsWith('\n')) content = content.slice(0, -1);
+      return (
+        <ScrollView
+          key={node.key}
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator
+          style={{ marginVertical: 8 }}
+        >
+          <Text style={[styles.code_block, { alignSelf: 'flex-start' }]}>{content}</Text>
         </ScrollView>
       );
     },
   };
+}
+
+/** Tighten list gaps in stored report markdown (mobile display only). */
+export function compactReportMd(md) {
+  if (!md) return md;
+  let s = String(md).replace(/\r\n/g, '\n');
+  s = s.replace(/\n{3,}/g, '\n\n');
+  const lines = s.split('\n');
+  const out = [];
+  const isItem = (l) => /^\s*(?:[*+\-]|\d+\.)\s+/.test(l);
+  const isBlank = (l) => /^\s*$/.test(l);
+  for (let i = 0; i < lines.length; i++) {
+    // Drop a blank line sitting between two list items so markdown-it
+    // keeps one list instead of N one-item lists with huge gaps.
+    if (
+      isBlank(lines[i]) &&
+      out.length &&
+      isItem(out[out.length - 1]) &&
+      i + 1 < lines.length &&
+      isItem(lines[i + 1])
+    ) {
+      continue;
+    }
+    out.push(lines[i]);
+  }
+  s = out.join('\n');
+  // Bold lead-in on its own line, then a blank, then the body — keep together.
+  s = s.replace(/(^|\n)(\*\*[^*\n]{4,120}\*\*[^\n]*)\n\n+(?=\S)/g, '$1$2\n');
+  return s;
 }
