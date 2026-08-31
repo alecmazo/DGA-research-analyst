@@ -68,6 +68,19 @@ function quotePct(q?: Quote | null): number | null {
   return v == null || Number.isNaN(Number(v)) ? null : Number(v)
 }
 
+type WlSort = 'day' | 'ytd' | 'last' | 'ticker'
+type SortDir = 'desc' | 'asc'
+
+function cmpNum(a: number | null, b: number | null, dir: SortDir): number {
+  const aN = a == null || Number.isNaN(a)
+  const bN = b == null || Number.isNaN(b)
+  if (aN && bN) return 0
+  if (aN) return 1
+  if (bN) return -1
+  const d = a - b
+  return dir === 'desc' ? -d : d
+}
+
 const WL_CACHE_KEY = 'dga.desk.wl.v1'
 
 function readWlCache(): WatchlistResponse | null {
@@ -112,6 +125,8 @@ export function DeskPage() {
   const [reportsKey, setReportsKey] = useState(0)
   const [earningsTk, setEarningsTk] = useState<string | null>(null)
   const [peekTk, setPeekTk] = useState<string | null>(null)
+  const [wlSort, setWlSort] = useState<WlSort>('day')
+  const [wlDir, setWlDir] = useState<SortDir>('desc')
 
   const loadWatchlist = useCallback(async () => {
     const ac = new AbortController()
@@ -174,10 +189,39 @@ export function DeskPage() {
         const ytd =
           ytdRaw == null || Number.isNaN(Number(ytdRaw)) ? null : Number(ytdRaw)
         const earn = earnings[tk] || null
-        return { tk, q, pct, ytd, ytdStatus, earn, abs: pct == null ? -1 : Math.abs(pct) }
+        const last =
+          q.price == null || Number.isNaN(Number(q.price)) ? null : Number(q.price)
+        return {
+          tk,
+          q,
+          pct,
+          ytd,
+          ytdStatus,
+          earn,
+          last,
+          abs: pct == null ? -1 : Math.abs(pct),
+        }
       })
-      .sort((a, b) => b.abs - a.abs)
-  }, [wl])
+      .sort((a, b) => {
+        if (wlSort === 'ticker') {
+          const d = String(a.tk).localeCompare(String(b.tk))
+          return wlDir === 'desc' ? -d : d
+        }
+        if (wlSort === 'ytd') return cmpNum(a.ytd, b.ytd, wlDir)
+        if (wlSort === 'last') return cmpNum(a.last, b.last, wlDir)
+        // Day % default: |move| so the biggest print stays on top.
+        return cmpNum(a.abs, b.abs, wlDir)
+      })
+  }, [wl, wlSort, wlDir])
+
+  const clickWlSort = (col: WlSort) => {
+    if (wlSort === col) {
+      setWlDir((d) => (d === 'desc' ? 'asc' : 'desc'))
+      return
+    }
+    setWlSort(col)
+    setWlDir(col === 'ticker' ? 'asc' : 'desc')
+  }
 
   const addTicker = async () => {
     const tk = tickerIn.trim().toUpperCase()
@@ -277,11 +321,55 @@ export function DeskPage() {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Ticker</th>
-                  <th className="tabular">Last</th>
-                  <th className={`tabular ${styles.colDay}`}>Day %</th>
-                  <th className={`tabular ${styles.colYtd}`} title="Calendar year-to-date return">
-                    YTD
+                  <th>
+                    <button
+                      type="button"
+                      className={`${styles.thSort} ${wlSort === 'ticker' ? styles.thSortOn : ''}`}
+                      onClick={() => clickWlSort('ticker')}
+                    >
+                      Ticker
+                      {wlSort === 'ticker' && (
+                        <span className={styles.sortMark}>{wlDir === 'desc' ? '▼' : '▲'}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th className="tabular">
+                    <button
+                      type="button"
+                      className={`${styles.thSort} ${wlSort === 'last' ? styles.thSortOn : ''}`}
+                      onClick={() => clickWlSort('last')}
+                    >
+                      Last
+                      {wlSort === 'last' && (
+                        <span className={styles.sortMark}>{wlDir === 'desc' ? '▼' : '▲'}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th className={`tabular ${styles.colDay}`}>
+                    <button
+                      type="button"
+                      className={`${styles.thSort} ${wlSort === 'day' ? styles.thSortOn : ''}`}
+                      title="Biggest |day %| first — click to reverse"
+                      onClick={() => clickWlSort('day')}
+                    >
+                      Day %
+                      {wlSort === 'day' && (
+                        <span className={styles.sortMark}>{wlDir === 'desc' ? '▼' : '▲'}</span>
+                      )}
+                    </button>
+                  </th>
+                  <th className={`tabular ${styles.colYtd}`}>
+                    <button
+                      type="button"
+                      className={`${styles.thSort} ${wlSort === 'ytd' ? styles.thSortOn : ''}`}
+                      title="Calendar year-to-date return — click for largest first"
+                      onClick={() => clickWlSort('ytd')}
+                    >
+                      YTD
+                      {wlSort === 'ytd' && (
+                        <span className={styles.sortMark}>{wlDir === 'desc' ? '▼' : '▲'}</span>
+                      )}
+                    </button>
                   </th>
                   <th />
                 </tr>

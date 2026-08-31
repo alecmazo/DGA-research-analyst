@@ -112,6 +112,33 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.thSort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.thSort:hover { color: var(--text-primary); }
+.thSortOn { color: var(--text-secondary); }
+.colDay .thSort,
+.colYtd .thSort {
+  width: 100%;
+  justify-content: flex-end;
+}
+.sortMark {
+  font-size: 8px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
 .table td {
   padding: 7px 12px;
   border-bottom: 1px solid var(--border-subtle);

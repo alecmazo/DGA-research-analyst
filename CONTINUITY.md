@@ -136,6 +136,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Book snapshot required** | **`ui553-20260829-book-snapshot`** | Strategist / quarterly / memos lock IC snapshot table |
 | **Anonymous demo login** | **`ui554-20260829-demo-preview`** | `demo@dgacapital.com` / `demo` — 3 synthetic books, zero live PII |
 | **LP planning edit** | **`ui555-20260829-lp-plan-edit`** | LP can edit/save the shared planning worksheet; latest save is what GP sees |
+| **Desk column sort** | **`ui556-20260831-desk-sort`** | Watchlist headers sort (default |day %|); Saved Reports TGT/Upside sorts by Grok upside |
 
 ### One-click handoff (preferred)
 
@@ -308,4 +309,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-29 · Agent: Grok Build · Live: `ui555-20260829-lp-plan-edit` · Next: `ui556-YYYYMMDD-slug`*
+*Last updated: 2026-08-31 · Agent: Grok Build · Live: `ui556-20260831-desk-sort` · Next: `ui557-YYYYMMDD-slug`*

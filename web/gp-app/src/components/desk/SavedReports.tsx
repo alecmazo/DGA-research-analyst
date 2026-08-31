@@ -70,6 +70,8 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [busyTk, setBusyTk] = useState<string | null>(null)
+  const [sortKey, setSortKey] = useState<'recent' | 'upside'>('recent')
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
 
   const openRep = (ticker: string, provider?: string) => {
     openReportWindow(ticker, provider || 'grok')
@@ -120,15 +122,51 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
     return () => window.clearInterval(id)
   }, [load, anyRunning])
 
+  const grokUpsideOf = useCallback(
+    (rep: SavedReport): number | null => {
+      const q = quotes[rep.ticker] || {}
+      const price =
+        q.price != null
+          ? Number(q.price)
+          : rep.current_price != null
+            ? Number(rep.current_price)
+            : null
+      const grokPt =
+        rep.grok_price_target != null ? Number(rep.grok_price_target) : null
+      return liveUpside(grokPt, price, rep.grok_upside_pct)
+    },
+    [quotes],
+  )
+
   const sorted = useMemo(
     () =>
       [...reports].sort((a, b) => {
+        if (sortKey === 'upside') {
+          const au = grokUpsideOf(a)
+          const bu = grokUpsideOf(b)
+          const aN = au == null || Number.isNaN(au)
+          const bN = bu == null || Number.isNaN(bu)
+          if (aN && bN) return freshnessMs(b) - freshnessMs(a)
+          if (aN) return 1
+          if (bN) return -1
+          const d = au - bu
+          return sortDir === 'desc' ? -d : d
+        }
         const d = freshnessMs(b) - freshnessMs(a)
-        if (d !== 0) return d
+        if (d !== 0) return sortDir === 'desc' ? d : -d
         return String(a.ticker || '').localeCompare(String(b.ticker || ''))
       }),
-    [reports],
+    [reports, sortKey, sortDir, grokUpsideOf],
   )
+
+  const clickSort = (key: 'recent' | 'upside') => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
+      return
+    }
+    setSortKey(key)
+    setSortDir('desc')
+  }
 
   const remove = async (tk: string, e: MouseEvent) => {
     e.stopPropagation()
@@ -159,9 +197,33 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
         <table className={styles.repTable}>
           <thead>
             <tr>
-              <th>Ticker</th>
+              <th>
+                <button
+                  type="button"
+                  className={`${styles.thSort} ${sortKey === 'recent' ? styles.thSortOn : ''}`}
+                  title="Default: most recently run report first"
+                  onClick={() => clickSort('recent')}
+                >
+                  Ticker
+                  {sortKey === 'recent' && (
+                    <span className={styles.sortMark}>{sortDir === 'desc' ? '▼' : '▲'}</span>
+                  )}
+                </button>
+              </th>
               <th className={styles.num}>Price</th>
-              <th className={styles.num}>TGT / Upside</th>
+              <th className={styles.num}>
+                <button
+                  type="button"
+                  className={`${styles.thSort} ${styles.thSortRight} ${sortKey === 'upside' ? styles.thSortOn : ''}`}
+                  title="Sort by Grok 12m upside vs live last — largest first"
+                  onClick={() => clickSort('upside')}
+                >
+                  TGT / Upside
+                  {sortKey === 'upside' && (
+                    <span className={styles.sortMark}>{sortDir === 'desc' ? '▼' : '▲'}</span>
+                  )}
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
