@@ -7544,7 +7544,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui557-20260831-print-aliases"
+WEB_BUILD_VERSION = "ui558-20260831-pdf-metrics"
 
 
 @app.get("/api/build")
@@ -29139,28 +29139,32 @@ def _dga_saved_report_pdf_html(
         prov = "grok"
     alias = _print_engine_alias(prov) or "Rock"
     prov_e = _html.escape(alias.upper())
-    prov_bg = _PROVIDER_BADGE_BG[prov]
     when_e = _html.escape((when or "").strip())
     ver_e = _html.escape((version_label or "").strip())
     note_e = _html.escape((note or "").strip())
     dash = "—"
 
-    def _cell(label: str, value: str | None, color: str = "#0a1628") -> str:
+    def _th(label: str) -> str:
+        return f'<th class="mlab">{_html.escape(label)}</th>'
+
+    def _td(value: str | None, color: str = "#0a1628") -> str:
         v = _html.escape((value or "").strip() or dash)
-        return (
-            f'<td class="mcell">'
-            f'<div class="mlab">{_html.escape(label)}</div>'
-            f'<div class="mval" style="color:{color};">{v}</div>'
-            f"</td>"
-        )
+        return f'<td class="mval" style="color:{color};">{v}</td>'
 
     metrics = (
-        '<table class="metrics"><tr>'
-        + _cell("Price", price)
-        + _cell("Day", day, _pdf_tone_color(day_tone))
-        + _cell("Rating", rating)
-        + _cell("Target", target)
-        + _cell("Upside", upside, _pdf_tone_color(upside_tone))
+        '<table class="metrics">'
+        "<tr>"
+        + _th("Price")
+        + _th("Day")
+        + _th("Rating")
+        + _th("Target")
+        + _th("Upside")
+        + "</tr><tr>"
+        + _td(price)
+        + _td(day, _pdf_tone_color(day_tone))
+        + _td(rating)
+        + _td(target)
+        + _td(upside, _pdf_tone_color(upside_tone))
         + "</tr></table>"
     )
 
@@ -29193,7 +29197,6 @@ def _dga_saved_report_pdf_html(
     head = (
         '<table class="head"><tr><td>'
         f'<span class="tk">{tk_e}</span>'
-        f'<span class="prov" style="background-color:{prov_bg};">{prov_e}</span>'
         f"{ver_html}{when_html}{note_html}"
         "</td></tr></table>"
     )
@@ -29237,8 +29240,8 @@ def _dga_saved_report_pdf_html(
       table.mast td { border: none; vertical-align: middle; padding: 0 0 4pt 0; }
       .brand { font-size: 10pt; font-weight: bold; color: #0A1628; letter-spacing: 1pt; }
       .mast-doc {
-        font-size: 6.5pt; font-weight: bold; color: #5BB8D4;
-        letter-spacing: 0.8pt; text-transform: uppercase; margin-top: 1pt;
+        font-size: 10pt; font-weight: bold; color: #5BB8D4;
+        letter-spacing: 0.4pt; text-transform: uppercase; margin-top: 2pt;
       }
       .mast-meta { text-align: right; font-size: 6.5pt; color: #64748b; line-height: 1.3; }
       .mast-meta .conf {
@@ -29261,29 +29264,33 @@ def _dga_saved_report_pdf_html(
         font-size: 12pt; font-weight: bold; color: #0a1628;
         letter-spacing: 0.4pt;
       }
-      .prov {
-        color: #ffffff; font-size: 6.5pt; font-weight: bold;
-        letter-spacing: 0.5pt; padding: 1.5pt 6pt;
-      }
       .ver {
-        font-size: 7pt; font-weight: bold; color: #0369a1;
-        background-color: #e0f2fe; padding: 1pt 6pt;
+        font-size: 8pt; font-weight: bold; color: #0369a1;
+        background-color: #e0f2fe; padding: 1pt 5pt; margin-left: 6pt;
       }
-      .when { font-size: 8pt; color: #64748b; }
+      .when { font-size: 9pt; color: #64748b; margin-left: 8pt; }
       .note {
-        font-size: 8pt; color: #92400e; background-color: #fffbeb;
-        padding: 2pt 6pt; margin-top: 4pt;
+        font-size: 9pt; color: #92400e; background-color: #fffbeb;
+        padding: 1pt 6pt; margin-top: 2pt;
       }
-      table.metrics td.mcell {
-        border: none; border-bottom: 0.7pt solid #e2e8f0;
-        background-color: #f8fafc; width: 20%;
-        padding: 7pt 4pt 8pt 0; vertical-align: top;
+      table.metrics th.mlab,
+      table.metrics td.mval {
+        width: 20%;
+        border: none;
+        border-bottom: 0.7pt solid #e2e8f0;
+        background-color: #f8fafc;
+        padding: 2pt 6pt 2pt 0;
+        vertical-align: middle;
+        text-align: left;
       }
-      .mlab {
-        font-size: 6.5pt; font-weight: bold; letter-spacing: 0.5pt;
-        text-transform: uppercase; color: #64748b; margin-bottom: 1.5pt;
+      table.metrics th.mlab {
+        font-size: 10pt; font-weight: bold; letter-spacing: 0.15pt;
+        color: #64748b; padding-top: 3pt; padding-bottom: 0;
       }
-      .mval { font-size: 10.5pt; font-weight: bold; color: #0a1628; }
+      table.metrics td.mval {
+        font-size: 10pt; font-weight: bold; color: #0a1628;
+        padding-top: 1pt; padding-bottom: 3pt;
+      }
       table.delta td {
         border: none; border-bottom: 0.7pt solid #bae6fd;
         background-color: #e0f2fe; padding: 8pt 10pt;

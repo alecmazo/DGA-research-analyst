@@ -138,6 +138,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **LP planning edit** | **`ui555-20260829-lp-plan-edit`** | LP can edit/save the shared planning worksheet; latest save is what GP sees |
 | **Desk column sort** | **`ui556-20260831-desk-sort`** | Watchlist headers sort (default |day %|); Saved Reports TGT/Upside sorts by Grok upside |
 | **Print engine aliases** | **`ui557-20260831-print-aliases`** | Printed/PDF reports: Grok → Rock, Claude → Laudia |
+| **PDF report chrome** | **`ui558-20260831-pdf-metrics`** | Drop colored engine chip; compact metrics; larger Research Report title |
 
 ### One-click handoff (preferred)
 
@@ -310,4 +311,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-08-31 · Agent: Grok Build · Live: `ui557-20260831-print-aliases` · Next: `ui558-YYYYMMDD-slug`*
+*Last updated: 2026-08-31 · Agent: Grok Build · Live: `ui558-20260831-pdf-metrics` · Next: `ui559-YYYYMMDD-slug`*
