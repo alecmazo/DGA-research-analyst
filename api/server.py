@@ -7544,7 +7544,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui556-20260831-desk-sort"
+WEB_BUILD_VERSION = "ui557-20260831-print-aliases"
 
 
 @app.get("/api/build")
@@ -8842,7 +8842,7 @@ def email_saved_report_pdf(ticker: str, body: SavedReportEmailRequest, request: 
     except Exception as e:
         raise HTTPException(500, f"PDF render failed: {e!s:.200}")
     import html as _html
-    prov_u = provider.upper()
+    prov_u = (_print_engine_alias(provider) or "Rock").upper()
     subject = (body.subject or f"DGA Capital — {tk} {prov_u} report").strip()
     when_e = _html.escape((body.when or "").strip())
     email_html = (
@@ -29023,7 +29023,7 @@ def _dga_research_pdf_html(title: str, question: str, answer_html: str,
         'Page <pdf:pagenumber> of <pdf:pagecount>'
         '</div>'
     )
-    body = _fix_md_table_widths(answer_html or "")
+    body = _scrub_print_engine_names(_fix_md_table_widths(answer_html or ""))
     verify = _research_verify_html(verification)
     return (
         f'<!doctype html><html><head><meta charset="utf-8">'
@@ -29079,6 +29079,35 @@ _PROVIDER_BADGE_BG = {
 }
 
 
+def _print_engine_alias(provider_or_model: str | None) -> str:
+    """Client-facing engine name on printed/PDF research reports."""
+    m = (provider_or_model or "").strip().lower()
+    if not m:
+        return ""
+    if any(tok in m for tok in ("claude", "opus", "sonnet", "anthropic")):
+        return "Laudia"
+    if "grok" in m or m == "xai":
+        return "Rock"
+    if "kimi" in m:
+        return "Kimi"
+    if "deepseek" in m:
+        return "DeepSeek"
+    return (provider_or_model or "").strip()
+
+
+def _scrub_print_engine_names(text: str) -> str:
+    if not text:
+        return text
+    s = text
+    s = re.sub(r"\bClaude\b", "Laudia", s)
+    s = re.sub(r"\bCLAUDE\b", "LAUDIA", s)
+    s = re.sub(r"\bclaude\b", "laudia", s)
+    s = re.sub(r"\bGrok\b", "Rock", s)
+    s = re.sub(r"\bGROK\b", "ROCK", s)
+    s = re.sub(r"\bgrok\b", "rock", s)
+    return s
+
+
 def _dga_saved_report_pdf_html(
     ticker: str,
     provider: str,
@@ -29108,7 +29137,8 @@ def _dga_saved_report_pdf_html(
     prov = (provider or "grok").lower().strip()
     if prov not in _PROVIDER_BADGE_BG:
         prov = "grok"
-    prov_e = _html.escape(prov.upper())
+    alias = _print_engine_alias(prov) or "Rock"
+    prov_e = _html.escape(alias.upper())
     prov_bg = _PROVIDER_BADGE_BG[prov]
     when_e = _html.escape((when or "").strip())
     ver_e = _html.escape((version_label or "").strip())
@@ -29337,7 +29367,9 @@ def _dga_saved_report_pdf_html(
         'Page <pdf:pagenumber> of <pdf:pagecount>'
         '</div>'
     )
-    body = _fix_md_table_widths(_sanitize_saved_report_html(body_html or ""))
+    body = _scrub_print_engine_names(
+        _fix_md_table_widths(_sanitize_saved_report_html(body_html or ""))
+    )
     return (
         f'<!doctype html><html><head><meta charset="utf-8">'
         f'<style>{css}</style></head><body>'

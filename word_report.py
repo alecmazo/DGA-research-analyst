@@ -348,6 +348,13 @@ def render_report(
     rating_hint: str = "",
 ) -> str:
     """Render Grok's markdown report into a polished .docx."""
+    markdown_text = (
+        (markdown_text or "")
+        .replace("Claude", "Laudia")
+        .replace("CLAUDE", "LAUDIA")
+        .replace("Grok", "Rock")
+        .replace("GROK", "ROCK")
+    )
     doc = Document()
 
     # Global default font.

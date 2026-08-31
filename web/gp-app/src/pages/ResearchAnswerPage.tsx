@@ -13,7 +13,7 @@ import {
   type AgenticJob,
   type AgenticResult,
 } from '@/lib/agentic'
-import { relativeTime } from '@/lib/format'
+import { printEngineName, relativeTime, scrubPrintEngineNames } from '@/lib/format'
 import { renderMd } from '@/lib/md'
 import { AnalysisScene } from '@/components/ui/AnalysisScene'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
@@ -285,9 +285,13 @@ export function ResearchAnswerPage() {
   const question =
     kind === 'strategist' && looksLikeAgentPrompt(questionRaw) ? '' : questionRaw
   const answer = review?.answer || ''
-  const html = useMemo(() => (answer ? renderMd(answer) : ''), [answer])
+  const html = useMemo(
+    () => (answer ? scrubPrintEngineNames(renderMd(answer)) : ''),
+    [answer],
+  )
   const model = review?.model || ''
   const shownProv = providerFromModel(model)
+  const printName = printEngineName(shownProv || model)
   const sceneEngine = inferSceneEngine(
     engineHint || job?.label || model,
     shownProv || 'claude',
@@ -310,7 +314,7 @@ export function ResearchAnswerPage() {
       ? new Date(review.generated_at).toLocaleString()
       : undefined,
     kind,
-    model: model || undefined,
+    model: printName || undefined,
     fund_name: review?.fund_name,
     tickers: review?.tickers,
     cost_usd: review?.cost_usd,
@@ -447,7 +451,7 @@ export function ResearchAnswerPage() {
 
       <PrintLetterhead
         doc={printDoc}
-        meta={[printStamp, model, shownProv ? shownProv.toUpperCase() : '']}
+        meta={[printStamp, printName]}
       />
 
       {(review?.fund_name || review?.tickers || question) && (

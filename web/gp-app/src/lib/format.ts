@@ -61,3 +61,32 @@ export function relativeTime(iso: string | null | undefined): string {
     return ''
   }
 }
+
+/** Client-facing names on printed/PDF research reports. Desk UI stays Grok/Claude. */
+export function printEngineName(providerOrModel?: string | null): string {
+  const m = (providerOrModel || '').toLowerCase()
+  if (!m) return ''
+  if (
+    m.includes('claude') ||
+    m.includes('opus') ||
+    m.includes('sonnet') ||
+    m.includes('anthropic')
+  ) {
+    return 'Laudia'
+  }
+  if (m.includes('grok') || m === 'xai') return 'Rock'
+  if (m.includes('kimi')) return 'Kimi'
+  if (m.includes('deepseek')) return 'DeepSeek'
+  return providerOrModel || ''
+}
+
+export function scrubPrintEngineNames(text: string): string {
+  if (!text) return text
+  return text
+    .replace(/\bClaude\b/g, 'Laudia')
+    .replace(/\bCLAUDE\b/g, 'LAUDIA')
+    .replace(/\bclaude\b/g, 'laudia')
+    .replace(/\bGrok\b/g, 'Rock')
+    .replace(/\bGROK\b/g, 'ROCK')
+    .replace(/\bgrok\b/g, 'rock')
+}

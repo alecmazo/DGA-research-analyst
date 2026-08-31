@@ -10,7 +10,7 @@ import {
   type ReportHistoryVersion,
 } from '@/lib/api'
 import { getCachedUser } from '@/lib/auth'
-import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
+import { fmtPct, fmtPx, pctClass, printEngineName, relativeTime, scrubPrintEngineNames } from '@/lib/format'
 import { renderMd, reportMarkdown } from '@/lib/md'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import styles from './ReportPage.module.css'
@@ -64,7 +64,7 @@ export function ReportPage() {
 
   useEffect(() => {
     document.title = ticker
-      ? `${ticker} · ${provider.toUpperCase()} report · DGA`
+      ? `${ticker} · ${printEngineName(provider)} report · DGA`
       : 'Report · DGA'
   }, [ticker, provider])
 
@@ -146,9 +146,13 @@ export function ReportPage() {
 
   const currentMd = reportMarkdown(data)
   const md = viewId === 'current' ? currentMd : viewMd || ''
-  const html = useMemo(() => (md ? renderMd(md) : ''), [md])
+  const html = useMemo(
+    () => (md ? scrubPrintEngineNames(renderMd(md)) : ''),
+    [md],
+  )
   const pct = quote?.pct ?? quote?.pct_change ?? null
   const shownProvider = (data?.provider || provider).toLowerCase()
+  const printName = printEngineName(shownProvider)
 
   const dlt =
     data?.delta_from_prior ||
@@ -239,7 +243,7 @@ export function ReportPage() {
         doc="Research Report"
         meta={[
           ticker,
-          shownProvider.toUpperCase(),
+          printName,
           displayWhen ? relativeTime(displayWhen) : '',
         ]}
       />
@@ -247,7 +251,7 @@ export function ReportPage() {
         <div className={styles.title}>
           <strong>{ticker || '—'}</strong>
           <span className={styles.prov} data-p={shownProvider}>
-            {shownProvider.toUpperCase()}
+            {printName.toUpperCase()}
           </span>
           {vc > 1 && (
             <span className={styles.verBadge} title="Analyze re-run count for this ticker/engine">
