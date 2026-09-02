@@ -6035,7 +6035,6 @@
                 'style="background:none;border:none;cursor:pointer;padding:0 2px;font-size:12px;line-height:1;color:var(--dim);opacity:0.6;" ' +
                 'onclick="event.stopPropagation();">×</button>' +
             '</span>' +
-            (rep.has_docx !== false ? '<span class="rep-pill rep-pill-doc">DOC</span>' : '') +
             (function () {
               const st = String(rep.stock_style || '').toLowerCase();
               const map = {

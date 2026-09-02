@@ -63,6 +63,7 @@ export function ReportPage() {
   const [histBusy, setHistBusy] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [excelBusy, setExcelBusy] = useState(false)
+  const [docBusy, setDocBusy] = useState(false)
 
   useEffect(() => {
     document.title = ticker
@@ -203,6 +204,21 @@ export function ReportPage() {
     }
   }
 
+  const downloadDocx = async () => {
+    if (!ticker) return
+    setDocBusy(true)
+    try {
+      await downloadAuth(
+        `/api/download/${encodeURIComponent(ticker)}/docx`,
+        `${ticker}_DGA_Report.docx`,
+      )
+    } catch (e) {
+      alert('Word download failed: ' + (e instanceof Error ? e.message : e))
+    } finally {
+      setDocBusy(false)
+    }
+  }
+
   const sharePdf = async () => {
     if (!html || !ticker) return
     const def = getCachedUser()?.email || ''
@@ -294,6 +310,15 @@ export function ReportPage() {
               GAMMA
             </a>
           )}
+          <button
+            type="button"
+            className={styles.doc}
+            onClick={() => void downloadDocx()}
+            disabled={loading || docBusy || !ticker || data?.has_docx === false}
+            title="Download Word report"
+          >
+            {docBusy ? 'Word…' : 'Word'}
+          </button>
           <button
             type="button"
             className={styles.excel}

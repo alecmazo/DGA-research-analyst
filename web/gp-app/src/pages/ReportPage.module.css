@@ -174,7 +174,8 @@
 .close,
 .print,
 .share,
-.excel {
+.excel,
+.doc {
   border: 1px solid var(--border-default, #cbd5e1);
   background: var(--bg-subtle, #f8fafc);
   color: var(--text-secondary, #475569);
@@ -197,6 +198,12 @@
   color: #fff;
 }
 
+.doc {
+  background: #0369a1;
+  border-color: #075985;
+  color: #fff;
+}
+
 .share {
   background: #0a6b8a;
   border-color: #0a6b8a;
@@ -205,7 +212,8 @@
 
 .print:disabled,
 .share:disabled,
-.excel:disabled {
+.excel:disabled,
+.doc:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }

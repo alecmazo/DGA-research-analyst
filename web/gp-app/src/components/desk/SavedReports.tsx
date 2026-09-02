@@ -382,9 +382,6 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                         </button>
                       </div>
                       <div className={styles.repPills}>
-                        {rep.has_docx !== false && (
-                          <span className={`${styles.pill} ${styles.pillDoc}`}>DOC</span>
-                        )}
                         {(() => {
                           const st = stylePill(rep.stock_style)
                           if (!st) return null
