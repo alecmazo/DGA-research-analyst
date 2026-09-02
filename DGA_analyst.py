@@ -12267,39 +12267,49 @@ def _dropbox_folder() -> str:
 
 # Each file type gets its own Dropbox subfolder for tidy browsing.
 DROPBOX_PRESENTATIONS_SUBFOLDER = "Presentations"   # .pptx
-DROPBOX_REPORTS_SUBFOLDER       = "Reports"         # .docx
+DROPBOX_REPORTS_SUBFOLDER       = "Reports"         # .docx + IB Excel models
 DROPBOX_MD_SUBFOLDER            = "MD cached"       # .md  (markdown reports)
 DROPBOX_REBALANCED_SUBFOLDER    = "Rebalanced"      # .xlsx (portfolio rebalance files)
 
 
-def _dropbox_dest_for(file_name: str) -> str:
+def _dropbox_dest_for(file_name: str, subfolder: str | None = None) -> str:
     """Pick the Dropbox destination path for a given file name.
 
     Routes each file type to its own subfolder:
       .pptx  → <base>/Presentations/
       .docx  → <base>/Reports/
       .md    → <base>/MD cached/
-      .xlsx  → <base>/Rebalanced/
+      *_DGA_Model.xlsx → <base>/Reports/   (saved-report IB models)
+      .xlsx  → <base>/Rebalanced/          (portfolio rebalance files)
       other  → <base>/   (e.g. .json metadata files)
+
+    Pass *subfolder* to force a destination (e.g. ``Reports``).
     """
     base = _dropbox_folder()
     name_lower = file_name.lower()
+    sub = (subfolder or "").strip("/")
 
-    if name_lower.endswith(".pptx"):
-        sub = DROPBOX_PRESENTATIONS_SUBFOLDER
-    elif name_lower.endswith(".docx"):
-        sub = DROPBOX_REPORTS_SUBFOLDER
-    elif name_lower.endswith(".md"):
-        sub = DROPBOX_MD_SUBFOLDER
-    elif name_lower.endswith(".xlsx"):
-        sub = DROPBOX_REBALANCED_SUBFOLDER
-    else:
-        return f"{base}/{file_name}" if base else f"/{file_name}"
+    if not sub:
+        if name_lower.endswith(".pptx"):
+            sub = DROPBOX_PRESENTATIONS_SUBFOLDER
+        elif name_lower.endswith(".docx"):
+            sub = DROPBOX_REPORTS_SUBFOLDER
+        elif name_lower.endswith(".md"):
+            sub = DROPBOX_MD_SUBFOLDER
+        elif name_lower.endswith(".xlsx"):
+            # Research models sit next to Word reports; rebalance books stay
+            # in Rebalanced so the two xlsx families don't mix.
+            if "_dga_model" in name_lower:
+                sub = DROPBOX_REPORTS_SUBFOLDER
+            else:
+                sub = DROPBOX_REBALANCED_SUBFOLDER
+        else:
+            return f"{base}/{file_name}" if base else f"/{file_name}"
 
     return f"{base}/{sub}/{file_name}" if base else f"/{sub}/{file_name}"
 
 
-def push_to_dropbox(file_paths: list[Path | str]) -> dict:
+def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None = None) -> dict:
     """Upload files to the Dropbox 'DGA Research Reports' folder.
 
     Returns {"ok": True, "uploaded": [...], "folder": "..."} or
@@ -12322,8 +12332,7 @@ def push_to_dropbox(file_paths: list[Path | str]) -> dict:
         p = Path(fp)
         if not p.exists():
             continue
-        # Route .pptx files to the dedicated /Presentations subfolder.
-        dest = _dropbox_dest_for(p.name)
+        dest = _dropbox_dest_for(p.name, dest_subfolder)
         try:
             dbx.files_upload(
                 p.read_bytes(),

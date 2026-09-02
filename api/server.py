@@ -7544,7 +7544,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui558-20260831-pdf-metrics"
+WEB_BUILD_VERSION = "ui559-20260902-excel-model"
 
 
 @app.get("/api/build")
@@ -8902,6 +8902,155 @@ def download_pptx(ticker: str):
         path=str(path),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=path.name,
+    )
+
+
+def _load_financials_for_model(ticker: str) -> dict:
+    """Historicals for the IB Excel model — DB first, on-disk SEC Excel fallback."""
+    try:
+        import excel_financials as _xf
+    except Exception:
+        return {}
+    data = None
+    try:
+        data = _xf.extract_financials_from_db(ticker)
+    except Exception as e:
+        print(f"[xlsx-export] db financials {ticker}: {e!s:.160}", flush=True)
+    if not data:
+        try:
+            data = _xf.extract_financials(ticker)
+        except Exception as e:
+            print(f"[xlsx-export] excel financials {ticker}: {e!s:.160}", flush=True)
+    return data if isinstance(data, dict) else {}
+
+
+def _bg_push_model_xlsx(path_str: str) -> None:
+    """Best-effort Dropbox upload into Apps/DGA Research/Reports/."""
+    try:
+        p = Path(path_str)
+        if not p.exists():
+            return
+        res = analyst.push_to_dropbox([p], dest_subfolder="Reports")
+        print(f"[xlsx-export] dropbox {p.name}: {res}", flush=True)
+    except Exception as e:
+        print(f"[xlsx-export] dropbox failed: {e!s:.200}", flush=True)
+
+
+@app.get("/api/download/{ticker}/xlsx")
+def download_xlsx(
+    ticker: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    provider: str = "grok",
+):
+    """Build an IB-style Excel model for a saved report and return .xlsx.
+
+    Sheets: Cover, Financial Model (historicals + pro forma), Valuation,
+    Scenarios, Street, Quarterly. Also copies the file to Dropbox
+    ``/Apps/DGA Research/Reports/`` in the background.
+    """
+    _claims_or_401(request)
+    if not _OPENPYXL_OK:
+        raise HTTPException(status_code=400, detail="openpyxl not installed on this server")
+    tk = (ticker or "").strip().upper()
+    if not tk or not re.fullmatch(r"[A-Z0-9.\-]{1,12}", tk):
+        raise HTTPException(status_code=422, detail="Invalid ticker")
+    provider = (provider or "grok").lower().strip()
+    if provider == "volume":
+        provider = "kimi"
+    if provider not in ("grok", "claude", "kimi", "deepseek"):
+        provider = "grok"
+
+    payload: dict = {}
+    try:
+        payload = get_report(tk, provider=provider, request=request) or {}
+    except HTTPException as he:
+        if he.status_code != 404:
+            raise
+        payload = {}
+
+    md = (
+        (payload.get("report_md") or payload.get("markdown") or payload.get("content") or "")
+        if isinstance(payload, dict) else ""
+    )
+    financials = _load_financials_for_model(tk)
+    if not md.strip() and not (financials.get("annuals") or financials.get("ttm")):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved report or financials for {tk}",
+        )
+
+    summary: dict = {}
+    if md:
+        try:
+            summary = analyst.extract_summary_from_report(md) or {}
+        except Exception:
+            summary = {}
+    # Prefer structured fields from the saved-report row when present.
+    for key in ("rating", "price_target", "upside_pct"):
+        if payload.get(key) not in (None, ""):
+            summary[key] = payload.get(key)
+
+    quote: dict = {}
+    try:
+        import market_data as _md
+        quote = (_md.get_quotes([tk]) or {}).get(tk) or {}
+    except Exception:
+        quote = {}
+
+    engine = _print_engine_alias(payload.get("provider") or provider) or provider
+    as_of = payload.get("generated_at") or datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        import excel_model as _em
+        raw = _em.build_ib_model_bytes(
+            tk,
+            financials=financials,
+            report_md=md,
+            summary=summary,
+            quote=quote,
+            engine=engine,
+            entity_name=financials.get("entity_name") or tk,
+            sector=summary.get("sector") or "",
+            source=financials.get("source") or "company_financials",
+            dropbox_note="Copy saved to Dropbox /Apps/DGA Research/Reports/",
+            generated_at=str(as_of),
+        )
+    except Exception as e:
+        print(f"[xlsx-export] build failed {tk}: {e!s:.300}", flush=True)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Excel model failed: {e!s:.180}") from e
+
+    if not raw:
+        raise HTTPException(status_code=500, detail="Excel model produced an empty file")
+
+    fname = f"{tk}_DGA_Model.xlsx"
+    out_path: Path | None = None
+    try:
+        cand = analyst.STOCKS_FOLDER / fname
+        cand.parent.mkdir(parents=True, exist_ok=True)
+        cand.write_bytes(raw)
+        out_path = cand
+    except Exception as e:
+        print(f"[xlsx-export] stocks write {tk}: {e!s:.200}", flush=True)
+        try:
+            import tempfile as _tf
+            cand = Path(_tf.gettempdir()) / fname
+            cand.write_bytes(raw)
+            out_path = cand
+        except Exception as e2:
+            print(f"[xlsx-export] temp write {tk}: {e2!s:.200}", flush=True)
+    if out_path is not None and not _request_is_demo(request):
+        background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
+
+    from fastapi.responses import Response as _Resp
+    return _Resp(
+        content=raw,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+            "X-Dropbox-Folder": "/Reports",
+            "Cache-Control": "no-store",
+        },
     )
 
 

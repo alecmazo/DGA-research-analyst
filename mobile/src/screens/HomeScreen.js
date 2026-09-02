@@ -447,6 +447,7 @@ export default function HomeScreen({ navigation, route }) {
     if (item.has_docx !== false) {
       buttons.push({ text: 'Open .docx', onPress: () => downloadAndOpen('docx') });
     }
+    buttons.push({ text: 'Open Excel model', onPress: () => downloadAndOpen('xlsx') });
     if (item.has_pptx) {
       buttons.push({ text: 'Open .pptx', onPress: () => downloadAndOpen('pptx') });
     }

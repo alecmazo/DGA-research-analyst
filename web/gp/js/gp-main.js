@@ -6036,6 +6036,9 @@
                 'onclick="event.stopPropagation();">×</button>' +
             '</span>' +
             (rep.has_docx !== false ? '<span class="rep-pill rep-pill-doc">DOC</span>' : '') +
+            '<span class="rep-pill rep-pill-xlsx rep-pill-clickable" data-rep-xlsx="' + rep.ticker + '"'
+              + ' title="Download IB Excel model (financials, pro forma, valuation) · Dropbox /Reports"'
+              + ' onclick="event.stopPropagation();">EXCEL</span>' +
             (rep.has_pptx
               ? '<span class="rep-pill rep-pill-ppt' + (rep.pptx_stale ? ' stale' : '') + '"'
                 + ' title="' + (rep.pptx_stale
@@ -6179,6 +6182,7 @@
           if (e.target.closest('[data-rep-delete]')) return;
           if (e.target.closest('[data-compare-ticker]')) return;
           if (e.target.closest('[data-rep-open]')) return;
+          if (e.target.closest('[data-rep-xlsx]')) return;
           if (e.target.closest('[data-rep-retry]')) return;
           if (e.target.closest('[data-rep-gf]')) return;   // ticker → GuruFocus
           openReport(tr.getAttribute('data-ticker'));
@@ -6190,6 +6194,20 @@
         span.addEventListener('click', (e) => {
           e.stopPropagation();
           openGuruFocus(span.getAttribute('data-rep-gf'));
+        });
+      });
+
+      tbody.querySelectorAll('[data-rep-xlsx]').forEach(span => {
+        span.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const tk = span.getAttribute('data-rep-xlsx');
+          if (!tk) return;
+          span.textContent = '…';
+          downloadViaFetch(
+            '/api/download/' + encodeURIComponent(tk) + '/xlsx',
+            tk + '_DGA_Model.xlsx'
+          );
+          setTimeout(function () { span.textContent = 'EXCEL'; }, 2500);
         });
       });
 
@@ -17914,6 +17932,8 @@
                style="display:none;background:rgba(91,184,212,0.12);color:var(--blue);font-size:10px;font-weight:800;padding:4px 12px;border-radius:5px;border:1px solid rgba(91,184,212,0.30);letter-spacing:0.6px;cursor:pointer;">Compare</button>
             <a id="rm-gamma-btn" href="#" target="_blank" rel="noopener"
                style="display:none;background:linear-gradient(180deg,var(--blue-light),var(--blue));color:var(--navy);font-size:10px;font-weight:800;padding:4px 12px;border-radius:5px;text-decoration:none;letter-spacing:1px;">GAMMA</a>
+            <button id="rm-xlsx-btn"
+               style="background:#217346;color:#fff;font-size:10px;font-weight:800;padding:4px 12px;border-radius:5px;border:1px solid #1a5c38;letter-spacing:1px;cursor:pointer;">EXCEL</button>
             <button id="rm-docx-btn"
                style="display:none;background:rgba(91,184,212,0.12);color:var(--blue);font-size:10px;font-weight:800;padding:4px 12px;border-radius:5px;border:1px solid rgba(91,184,212,0.30);letter-spacing:1px;cursor:pointer;">DOCX</button>
             <button id="rm-pptx-btn"
@@ -17960,6 +17980,13 @@
     const gammaBtn = overlay.querySelector('#rm-gamma-btn');
     const docxBtn  = overlay.querySelector('#rm-docx-btn');
     const pptxBtn  = overlay.querySelector('#rm-pptx-btn');
+    const xlsxBtn  = overlay.querySelector('#rm-xlsx-btn');
+    if (xlsxBtn) {
+      xlsxBtn.onclick = () => downloadViaFetch(
+        '/api/download/' + encodeURIComponent(ticker) + '/xlsx?provider=' + encodeURIComponent(provider || 'grok'),
+        ticker + '_DGA_Model.xlsx'
+      );
+    }
     const cmpBtn   = overlay.querySelector('#rm-compare-btn');
     const freshEl  = overlay.querySelector('#rm-fresh');
     const freshRow = overlay.querySelector('#rm-fresh-row');

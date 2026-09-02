@@ -1199,6 +1199,7 @@
     margin-left: 5px; vertical-align: middle;
   }
   .rep-pill-doc { background: var(--navy-mid); color: var(--navy); border: 1px solid var(--panel-edge); }
+  .rep-pill-xlsx { background: #217346; color: #fff; }
   .rep-pill-ppt { background: var(--blue); color: var(--navy); }
   /* LLM provider badge — shown next to DOC/PPT so user knows which engine
      produced (or both produced) this saved report */

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { SupportFab } from '@/components/support/SupportFab'
 import {
   api,
+  downloadAuth,
   type Quote,
   type ReportDelta,
   type ReportDetail,
@@ -61,6 +62,7 @@ export function ReportPage() {
   const [loading, setLoading] = useState(true)
   const [histBusy, setHistBusy] = useState(false)
   const [sharing, setSharing] = useState(false)
+  const [excelBusy, setExcelBusy] = useState(false)
 
   useEffect(() => {
     document.title = ticker
@@ -186,6 +188,21 @@ export function ReportPage() {
       ? data?.generated_at || data?.report_date
       : viewSnap?.generated_at || viewSnap?.report_date
 
+  const downloadExcel = async () => {
+    if (!ticker) return
+    setExcelBusy(true)
+    try {
+      await downloadAuth(
+        `/api/download/${encodeURIComponent(ticker)}/xlsx?provider=${encodeURIComponent(shownProvider)}`,
+        `${ticker}_DGA_Model.xlsx`,
+      )
+    } catch (e) {
+      alert('Excel export failed: ' + (e instanceof Error ? e.message : e))
+    } finally {
+      setExcelBusy(false)
+    }
+  }
+
   const sharePdf = async () => {
     if (!html || !ticker) return
     const def = getCachedUser()?.email || ''
@@ -277,6 +294,15 @@ export function ReportPage() {
               GAMMA
             </a>
           )}
+          <button
+            type="button"
+            className={styles.excel}
+            onClick={() => void downloadExcel()}
+            disabled={loading || excelBusy || !ticker}
+            title="Download IB Excel model — financials, pro forma, valuation. Also saved to Dropbox /Reports"
+          >
+            {excelBusy ? 'Excel…' : 'Excel'}
+          </button>
           <button
             type="button"
             className={styles.print}

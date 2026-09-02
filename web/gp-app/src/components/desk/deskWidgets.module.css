@@ -615,6 +615,16 @@
   cursor: default;
 }
 
+.pillExcel {
+  background: #217346;
+  color: #fff;
+}
+
+.pillExcel:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .pillVer {
   background: #e0f2fe;
   color: #0369a1;

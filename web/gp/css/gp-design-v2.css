@@ -2688,6 +2688,10 @@ html[data-theme="dark"] .bl-inline-input:focus {
 
 
 /* ── Report thesis history (ui381) ───────────────────────────── */
+.rep-pill-xlsx {
+  background: #217346 !important;
+  color: #fff !important;
+}
 .rep-pill-ver {
   background: var(--brand-50) !important;
   color: var(--brand-800) !important;
