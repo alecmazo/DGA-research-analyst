@@ -5,7 +5,8 @@ Produces a Goldman / MS / BofA-style workbook:
 
   Cover            — rating, 12m PT, capital structure, thesis
   Financial Model  — historicals (A) + TTM + pro forma (E), 3-statement
-  Valuation        — trading multiples, DCF, target bridge, peer comps
+  Valuation        — WACC build, pro forma years, DCF ladder, TV/equity
+                     bridge, live WACC×g sensitivity, comps / PT weights
   Scenarios        — bull / base / bear + expected value
   Street           — sell-side consensus table from the report
   Quarterly        — last eight reported quarters
@@ -245,7 +246,43 @@ def extract_forecasts(tables: list[dict]) -> dict[int, dict[str, float]]:
     return out
 
 
+def parse_embedded_number(raw: str) -> Optional[float]:
+    """Like parse_cell_number but finds the first number anywhere in the cell."""
+    v = parse_cell_number(raw)
+    if v is not None:
+        return v
+    s = _strip_md(raw)
+    if not s:
+        return None
+    m = re.search(r"(\d+(?:\.\d+)?)\s*%", s)
+    if m:
+        try:
+            return float(m.group(1)) / 100.0
+        except ValueError:
+            return None
+    m = re.search(
+        r"\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.[0-9]+|[0-9]+)\s*(bn|b|mm|m|k|x|×)?",
+        s,
+        re.I,
+    )
+    if not m:
+        return None
+    try:
+        val = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    unit = (m.group(2) or "").lower()
+    if unit in ("bn", "b"):
+        val *= 1000.0
+    elif unit == "k":
+        val /= 1000.0
+    if s.strip().startswith("(") or re.search(r"(^|\s)[-−]", s):
+        val = -abs(val)
+    return val
+
+
 def extract_dcf(md: str) -> dict[str, Any]:
+    """Pull DCF scalars from prose (tables are handled separately)."""
     text = md or ""
     out: dict[str, Any] = {}
 
@@ -255,6 +292,15 @@ def extract_dcf(md: str) -> dict[str, Any]:
             return None
         try:
             return float(m.group(1)) / 100.0
+        except ValueError:
+            return None
+
+    def _num(pat: str) -> Optional[float]:
+        m = re.search(pat, text, re.I)
+        if not m:
+            return None
+        try:
+            return float(m.group(1).replace(",", ""))
         except ValueError:
             return None
 
@@ -271,17 +317,43 @@ def extract_dcf(md: str) -> dict[str, Any]:
             val *= 1000.0
         return val
 
+    out["rf"] = _pct(r"risk[-\s]*free(?:\s+rate)?[^%]{0,40}?(\d+(?:\.\d+)?)\s*%")
+    out["erp"] = _pct(
+        r"(?:equity risk premium|\bERP\b|market risk premium)[^%]{0,40}?(\d+(?:\.\d+)?)\s*%"
+    )
+    out["beta"] = _num(r"\bbeta\b(?:\s*\(levered\))?[^0-9]{0,24}(\d+(?:\.\d+)?)")
+    out["ke"] = _pct(r"cost of equity[^%]{0,40}?(\d+(?:\.\d+)?)\s*%")
+    out["kd_pretax"] = _pct(
+        r"(?:pre[-\s]*tax\s+)?cost of debt[^%]{0,40}?(\d+(?:\.\d+)?)\s*%"
+    )
+    out["we"] = _pct(r"E\s*/\s*\(?D\s*\+\s*E\)?[^%]{0,24}?(\d+(?:\.\d+)?)\s*%")
+    out["wd"] = _pct(r"D\s*/\s*\(?D\s*\+\s*E\)?[^%]{0,24}?(\d+(?:\.\d+)?)\s*%")
     out["wacc"] = _pct(r"\bWACC\b[^%]{0,48}?(\d+(?:\.\d+)?)\s*%")
     out["terminal_growth"] = _pct(
         r"terminal\s+growth(?:\s+rate)?[^%]{0,48}?(\d+(?:\.\d+)?)\s*%"
     )
     out["tax_rate"] = _pct(r"(?:tax\s+rate|effective\s+tax)[^%]{0,40}?(\d+(?:\.\d+)?)\s*%")
+    out["shares"] = _num(
+        r"(?:diluted\s+)?shares(?:\s+outstanding)?[^0-9]{0,28}?(\d{1,6}(?:\.\d+)?)\s*(?:m|mm|million)?"
+    )
+    out["net_debt"] = _money(
+        r"net\s+debt[^\$]{0,40}\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)"
+        r"\s*(bn|b|mm|m)?"
+    )
+    out["year0_fcf"] = _money(
+        r"(?:year[-\s]*0|base)\s+FCF[^\$]{0,40}\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)"
+        r"\s*(bn|b|mm|m)?"
+    )
     out["enterprise_value"] = _money(
         r"(?:implied\s+)?enterprise\s+value[^\$]{0,40}\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)"
         r"\s*(bn|b|mm|m)?"
     )
     out["equity_value"] = _money(
         r"(?:implied\s+)?equity\s+value[^\$]{0,40}\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)"
+        r"\s*(bn|b|mm|m)?"
+    )
+    out["terminal_value"] = _money(
+        r"terminal\s+value(?:\s*\(exit\))?[^\$]{0,40}\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)"
         r"\s*(bn|b|mm|m)?"
     )
     m = re.search(
@@ -294,7 +366,202 @@ def extract_dcf(md: str) -> dict[str, Any]:
             out["implied_price"] = float(m.group(1).replace(",", ""))
         except ValueError:
             pass
+    m = re.search(r"DCF value\s*/\s*share[^\$]{0,20}\$\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)", text, re.I)
+    if m and out.get("implied_price") is None:
+        try:
+            out["implied_price"] = float(m.group(1).replace(",", ""))
+        except ValueError:
+            pass
     return {k: v for k, v in out.items() if v is not None}
+
+
+_WACC_LABELS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"risk[-\s]*free", re.I), "rf"),
+    (re.compile(r"equity risk premium|\berp\b|market risk premium", re.I), "erp"),
+    (re.compile(r"\bbeta\b", re.I), "beta"),
+    (re.compile(r"cost of equity|^ke\b", re.I), "ke"),
+    (re.compile(r"after[-\s]*tax cost of debt", re.I), "kd_aftertax"),
+    (re.compile(r"(?:pre[-\s]*tax\s+)?cost of debt|^kd\b", re.I), "kd_pretax"),
+    (re.compile(r"tax rate|effective tax", re.I), "tax_rate"),
+    (re.compile(r"e\s*/\s*\(?d\s*\+\s*e|equity weight", re.I), "we"),
+    (re.compile(r"d\s*/\s*\(?d\s*\+\s*e|debt weight", re.I), "wd"),
+    (re.compile(r"\bwacc\b", re.I), "wacc"),
+    (re.compile(r"terminal growth|^g\b", re.I), "terminal_growth"),
+    (re.compile(r"net debt|net cash", re.I), "net_debt"),
+    (re.compile(r"diluted shares|share count|shares \(m", re.I), "shares"),
+    (re.compile(r"dcf value|implied (?:share )?price|value / share", re.I), "implied_price"),
+    (re.compile(r"enterprise value", re.I), "enterprise_value"),
+    (re.compile(r"equity value", re.I), "equity_value"),
+    (re.compile(r"terminal value", re.I), "terminal_value"),
+]
+
+
+def _wacc_key(label: str) -> Optional[str]:
+    s = _strip_md(label)
+    for pat, key in _WACC_LABELS:
+        if pat.search(s):
+            return key
+    return None
+
+
+def extract_wacc_build(tables: list[dict]) -> dict[str, Any]:
+    """Component / Value WACC build table + any KV valuation table."""
+    out: dict[str, Any] = {}
+    for tbl in tables:
+        headers = [h.lower() for h in (tbl.get("headers") or [])]
+        title = (tbl.get("title") or "").lower()
+        rows = tbl.get("rows") or []
+        if "sensitivity" in title or "sensitivity" in (headers[0] if headers else ""):
+            continue
+        if "ladder" in title or "comparable" in title or "peer" in title:
+            continue
+        labs = " ".join(_strip_md(r[0]) if r else "" for r in rows).lower()
+        looks = (
+            "wacc" in title
+            or "wacc" in " ".join(headers)
+            or "risk-free" in labs
+            or "cost of equity" in labs
+            or "component" in (headers[0] if headers else "")
+            or "step" in (headers[0] if headers else "")
+        )
+        if not looks:
+            continue
+        for row in rows:
+            if not row:
+                continue
+            key = _wacc_key(row[0])
+            if not key:
+                continue
+            val = parse_embedded_number(row[1]) if len(row) > 1 else None
+            if val is None:
+                continue
+            # Shares stored as millions; a raw 1.5e9 would be unusual in this table.
+            if key == "beta" and val > 10:
+                continue
+            if key in ("we", "wd", "wacc", "rf", "erp", "ke", "kd_pretax", "kd_aftertax",
+                       "tax_rate", "terminal_growth") and val > 1.5:
+                val = val / 100.0
+            out[key] = val
+            if len(row) > 2 and _strip_md(row[2]):
+                out[f"{key}_notes"] = _strip_md(row[2])
+    return out
+
+
+def extract_dcf_ladder(tables: list[dict]) -> list[dict[str, Any]]:
+    """Year-by-year DCF Projection Ladder rows (skip totals)."""
+    for tbl in tables:
+        headers = tbl.get("headers") or []
+        hlow = [h.lower() for h in headers]
+        title = (tbl.get("title") or "").lower()
+        if not (
+            "ladder" in title
+            or (any("fcf" in h for h in hlow) and any("discount" in h for h in hlow))
+            or any("pv of fcf" in h or "pv fcf" in h for h in hlow)
+        ):
+            continue
+        idx: dict[str, int] = {}
+        for i, h in enumerate(hlow):
+            if "fiscal" in h:
+                idx["fy"] = i
+            elif re.search(r"^year\b", h) or h.strip() == "t":
+                idx["year"] = i
+            elif "rev growth" in h or "revenue growth" in h:
+                idx["rev_g"] = i
+            elif "revenue" in h:
+                idx["revenue"] = i
+            elif "fcf growth" in h:
+                idx["fcf_g"] = i
+            elif "discount" in h:
+                idx["df"] = i
+            elif "pv" in h:
+                idx["pv"] = i
+            elif "fcf" in h:
+                idx["fcf"] = i
+        rows_out: list[dict[str, Any]] = []
+        for row in tbl.get("rows") or []:
+            if not row:
+                continue
+            lab = _strip_md(row[0]).lower()
+            if any(k in lab for k in ("sum", "total", "pv explicit")):
+                continue
+            item: dict[str, Any] = {}
+            year_raw = row[idx["year"]] if "year" in idx and idx["year"] < len(row) else row[0]
+            ym = re.search(r"(\d+)", year_raw or "")
+            if ym:
+                item["t"] = int(ym.group(1))
+            if "(a)" in lab or re.search(r"\bA\b", year_raw or ""):
+                item["kind"] = "A"
+            elif "(e)" in lab or re.search(r"\bE\b", year_raw or ""):
+                item["kind"] = "E"
+            if "fy" in idx and idx["fy"] < len(row):
+                item["fy"] = _year_from_header(row[idx["fy"]])
+            for key in ("revenue", "fcf", "rev_g", "fcf_g", "df", "pv"):
+                if key not in idx or idx[key] >= len(row):
+                    continue
+                val = parse_embedded_number(row[idx[key]])
+                if val is None:
+                    continue
+                item[key] = val
+            if item.get("t") is None and not item.get("fcf") and not item.get("revenue"):
+                continue
+            rows_out.append(item)
+        if rows_out:
+            return rows_out
+    return []
+
+
+def extract_sensitivity(tables: list[dict]) -> Optional[dict[str, Any]]:
+    """WACC × terminal-growth sensitivity grid of DCF $/share."""
+    for tbl in tables:
+        headers = tbl.get("headers") or []
+        title = (tbl.get("title") or "").lower()
+        h0 = (headers[0] if headers else "").lower()
+        if "sensitivity" not in title and "sensitivity" not in h0:
+            if not any(re.search(r"\btgr\b|terminal", h, re.I) for h in headers[1:]):
+                continue
+        tgrs: list[float] = []
+        for h in headers[1:]:
+            v = parse_embedded_number(h)
+            if v is None:
+                continue
+            if v > 1:
+                v = v / 100.0
+            tgrs.append(v)
+        if len(tgrs) < 2:
+            continue
+        waccs: list[float] = []
+        cells: dict[tuple[float, float], float] = {}
+        for row in tbl.get("rows") or []:
+            if not row:
+                continue
+            w = parse_embedded_number(row[0])
+            if w is None:
+                continue
+            if w > 1:
+                w = w / 100.0
+            waccs.append(w)
+            for i, g in enumerate(tgrs):
+                if i + 1 >= len(row):
+                    continue
+                px = parse_embedded_number(row[i + 1])
+                if px is None:
+                    continue
+                cells[(round(w, 4), round(g, 4))] = px
+        if waccs and cells:
+            return {"waccs": waccs, "tgrs": tgrs, "cells": cells, "table": tbl}
+    return None
+
+
+def extract_bridge_table(tables: list[dict]) -> Optional[dict]:
+    for tbl in tables:
+        title = (tbl.get("title") or "").lower()
+        headers = " ".join(h.lower() for h in (tbl.get("headers") or []))
+        labs = " ".join(_strip_md(r[0]) if r else "" for r in (tbl.get("rows") or [])).lower()
+        if "bridge" in title or (
+            "terminal value" in labs and "equity" in labs
+        ) or ("step" in headers and "amount" in headers):
+            return tbl
+    return None
 
 
 def extract_scenarios(md: str) -> list[dict[str, Any]]:
@@ -949,50 +1216,535 @@ def _dump_md_table(ws, start_row: int, title: str, tbl: dict, S) -> int:
     return r + 1
 
 
-def _valuation_sheet(wb, *, capital, dcf, derivation, comps, pt, price, S):
+def _section_title(ws, row: int, col: int, ncols: int, title: str, S) -> None:
+    ws.merge_cells(start_row=row, start_column=col, end_row=row, end_column=col + ncols - 1)
+    cell = ws.cell(row, col, title)
+    cell.font = S["font_section"]
+    cell.fill = S["section_fill"]
+    cell.alignment = S["left"]
+    for c in range(col, col + ncols):
+        ws.cell(row, c).fill = S["section_fill"]
+        ws.cell(row, c).font = S["font_section"]
+
+
+def _put_input(ws, row, col, value, fmt, S, *, input_cell=True):
+    c = ws.cell(row, col, value)
+    c.font = S["font"]
+    c.alignment = S["right"]
+    c.border = S["thin"]
+    if fmt:
+        c.number_format = fmt
+    if input_cell:
+        c.fill = S["input_fill"]
+    return c
+
+
+def _put_formula(ws, row, col, formula, fmt, S, *, gold=False, bold=False):
+    c = ws.cell(row, col, formula)
+    c.font = S["font_bold"] if bold else S["font"]
+    c.alignment = S["right"]
+    c.border = S["thin"]
+    if fmt:
+        c.number_format = fmt
+    if gold:
+        c.fill = S["pale_gold"]
+        c.font = S["font_kpi"]
+    return c
+
+
+def _build_dcf_horizon(
+    financials: dict,
+    forecasts: dict[int, dict[str, float]],
+    ladder: list[dict],
+    n: int = 5,
+) -> list[dict[str, Any]]:
+    """Year 0 actual + n explicit forecast years for the DCF ladder / pro forma."""
+    annuals = _annuals_oldest_first(financials)
+    last = annuals[-1] if annuals else {}
+    try:
+        last_fy = int(last["fy"]) if last.get("fy") is not None else None
+    except (TypeError, ValueError):
+        last_fy = None
+    by_t = {int(r["t"]): r for r in ladder if r.get("t") is not None}
+    by_fy = {int(r["fy"]): r for r in ladder if r.get("fy") is not None}
+
+    def _rev(src, period=None, already=True):
+        if src and src.get("revenue") is not None:
+            return src["revenue"]
+        if src and src.get("Revenue") is not None:
+            return to_model_units("Revenue", src["Revenue"], already_millions=already)
+        if period:
+            return _period_money(period, "Revenue", already_millions=already)
+        return None
+
+    def _fcf(src, period=None, already=True):
+        if src and src.get("fcf") is not None:
+            return src["fcf"]
+        if src and src.get("FreeCashFlow") is not None:
+            return to_model_units("FreeCashFlow", src["FreeCashFlow"], already_millions=already)
+        if period:
+            return _period_money(period, "FreeCashFlow", already_millions=already)
+        return None
+
+    years: list[dict[str, Any]] = []
+    y0 = {
+        "t": 0,
+        "fy": last_fy,
+        "kind": "A",
+        "revenue": _rev(by_t.get(0) or by_fy.get(last_fy or -1), last, already=False),
+        "fcf": _fcf(by_t.get(0) or by_fy.get(last_fy or -1), last, already=False),
+        "ebit": _period_money(last, "OperatingIncome"),
+        "ebitda": _period_money(last, "EBITDA"),
+        "ni": _period_money(last, "NetIncome"),
+        "eps": _f(last.get("DilutedEPS")),
+        "gp": _period_money(last, "GrossProfit"),
+        "hard_fcf": True,
+        "hard_rev": True,
+    }
+    years.append(y0)
+    for t in range(1, n + 1):
+        fy = (last_fy + t) if last_fy else None
+        src_l = by_t.get(t) or (by_fy.get(fy) if fy else None) or {}
+        src_f = forecasts.get(fy) or {}
+        item = {
+            "t": t,
+            "fy": fy,
+            "kind": "E",
+            "revenue": _rev(src_l, None, already=True) or _rev(src_f, None, already=True),
+            "fcf": _fcf(src_l, None, already=True) or _fcf(src_f, None, already=True),
+            "ebit": to_model_units("OperatingIncome", src_f.get("OperatingIncome"), already_millions=True)
+                    if src_f else None,
+            "ebitda": to_model_units("EBITDA", src_f.get("EBITDA"), already_millions=True) if src_f else None,
+            "ni": to_model_units("NetIncome", src_f.get("NetIncome"), already_millions=True) if src_f else None,
+            "eps": _f(src_f.get("DilutedEPS")) if src_f else None,
+            "gp": to_model_units("GrossProfit", src_f.get("GrossProfit"), already_millions=True) if src_f else None,
+        }
+        item["hard_fcf"] = item["fcf"] is not None
+        item["hard_rev"] = item["revenue"] is not None
+        years.append(item)
+    return years
+
+
+def _dcf_price_formula(wacc_ref: str, g_ref: str, fcf_refs: list[str],
+                       nd_ref: str, sh_ref: str) -> str:
+    """Equity value / share at a given WACC and g, using explicit FCF years 1..n."""
+    n = len(fcf_refs)
+    pvs = "+".join(f"{fcf_refs[i]}/(1+{wacc_ref})^{i+1}" for i in range(n))
+    last = fcf_refs[-1]
+    tv = f"{last}*(1+{g_ref})/({wacc_ref}-{g_ref})/(1+{wacc_ref})^{n}"
+    return (
+        f'IF(OR({sh_ref}=0,{sh_ref}="",{wacc_ref}<={g_ref}),"nm",'
+        f"({pvs}+{tv}-{nd_ref})/{sh_ref})"
+    )
+
+
+def _valuation_sheet(
+    wb,
+    *,
+    capital: dict,
+    dcf: dict,
+    wacc_build: dict,
+    ladder: list,
+    sensitivity: Optional[dict],
+    forecasts: dict,
+    financials: dict,
+    derivation,
+    comps,
+    bridge_tbl,
+    pt,
+    price,
+    S,
+):
+    from openpyxl.utils import get_column_letter
+
     ws = wb.create_sheet("Valuation")
-    _write_banner(ws, 8, "VALUATION", "Trading multiples · DCF · target derivation · peer comps", S)
+    _write_banner(
+        ws, 12,
+        "VALUATION  ·  DCF BUILD",
+        "Yellow = inputs  ·  Formulas audit WACC, ladder, terminal value, and the WACC × g grid  ·  $ millions except per-share",
+        S,
+    )
 
+    merged = {**dcf, **wacc_build}
+    horizon = _build_dcf_horizon(financials, forecasts, ladder, n=5)
+    n = max((y["t"] for y in horizon), default=0)
+
+    # Seed capital-structure weights from the BS if the report omitted them.
+    nd = merged.get("net_debt")
+    if nd is None:
+        nd = capital.get("net_debt")
+    shares = merged.get("shares")
+    if shares is None:
+        shares = capital.get("shares")
+    elif shares and shares > 50_000:
+        shares = shares / 1_000_000.0
     mkt = capital.get("market_cap")
-    ev = capital.get("enterprise_value")
-    rows = [
-        ("Last price", capital.get("price"), _FMT_SH, False),
-        ("Market cap ($m)", mkt, _FMT_MM, False),
-        ("Enterprise value ($m)", ev, _FMT_MM, False),
-        ("P / E", capital.get("pe"), _FMT_X, False),
-        ("EV / EBITDA", capital.get("ev_ebitda"), _FMT_X, False),
-        ("EV / Sales", capital.get("ev_sales"), _FMT_X, False),
-        ("P / B", capital.get("pb"), _FMT_X, False),
-        ("FCF yield", capital.get("fcf_yield"), _FMT_PCT, False),
-        ("12-month price target", pt, _FMT_SH, False),
-        ("Implied upside", None if (pt is None or not price) else (pt / price - 1.0), _FMT_PCT, False),
-    ]
-    r = _write_kv_table(ws, 4, "TRADING MULTIPLES (LAST REPORTED FY / TTM)", rows, S)
+    we = merged.get("we")
+    wd = merged.get("wd")
+    if we is None and wd is not None:
+        we = 1.0 - wd
+    if we is None and mkt and nd is not None:
+        ev = mkt + nd
+        if ev:
+            we = max(0.0, min(1.0, mkt / ev))
+    if we is None:
+        we = 0.85
+    if wd is None:
+        wd = 1.0 - we
 
-    dcf_rows = [
-        ("WACC", dcf.get("wacc"), _FMT_PCT, True),
-        ("Terminal growth", dcf.get("terminal_growth"), _FMT_PCT, True),
-        ("Tax rate", dcf.get("tax_rate"), _FMT_PCT, True),
-        ("Enterprise value ($m)", dcf.get("enterprise_value"), _FMT_MM, False),
-        ("Equity value ($m)", dcf.get("equity_value"), _FMT_MM, False),
-        ("DCF implied price", dcf.get("implied_price"), _FMT_SH, False),
-    ]
-    if not dcf:
-        dcf_rows = [("No explicit DCF inputs parsed from the report", None, None, False)]
-    r = _write_kv_table(ws, r, "DISCOUNTED CASH FLOW (FROM REPORT)", dcf_rows, S)
+    rf = merged.get("rf") if merged.get("rf") is not None else 0.04
+    erp = merged.get("erp") if merged.get("erp") is not None else 0.05
+    beta = merged.get("beta") if merged.get("beta") is not None else 1.0
+    kd = merged.get("kd_pretax") if merged.get("kd_pretax") is not None else 0.05
+    tax = merged.get("tax_rate") if merged.get("tax_rate") is not None else 0.21
+    g = merged.get("terminal_growth") if merged.get("terminal_growth") is not None else 0.025
+    # FCF growth used only to fill missing explicit years.
+    known_fcf = [y for y in horizon if y.get("fcf") is not None]
+    fcf_g = 0.08
+    if len(known_fcf) >= 2:
+        a, b = known_fcf[0]["fcf"], known_fcf[1]["fcf"]
+        if a:
+            fcf_g = b / a - 1.0
+    elif horizon[0].get("fcf") and len(horizon) > 1 and horizon[1].get("fcf"):
+        if horizon[0]["fcf"]:
+            fcf_g = horizon[1]["fcf"] / horizon[0]["fcf"] - 1.0
+    rev_g = 0.08
+    known_rev = [y for y in horizon if y.get("revenue") is not None]
+    if len(known_rev) >= 2 and known_rev[0]["revenue"]:
+        rev_g = known_rev[1]["revenue"] / known_rev[0]["revenue"] - 1.0
 
+    # ── WACC BUILD (A–C) ────────────────────────────────────────────────
+    _section_title(ws, 4, 1, 3, "WACC BUILD", S)
+    ws.cell(5, 1, "Component").font = S["font_h"]
+    ws.cell(5, 2, "Value").font = S["font_h"]
+    ws.cell(5, 3, "Notes").font = S["font_h"]
+    for c in range(1, 4):
+        ws.cell(5, c).fill = S["navy_fill"]
+        ws.cell(5, c).font = S["font_h"]
+        ws.cell(5, c).border = S["thin"]
+
+    wacc_rows = [
+        (6, "Risk-free rate", rf, _FMT_PCT, True, merged.get("rf_notes") or "10y / source in report"),
+        (7, "Equity risk premium", erp, _FMT_PCT, True, merged.get("erp_notes") or ""),
+        (8, "Beta (levered)", beta, "0.00", True, merged.get("beta_notes") or ""),
+        (9, "Cost of equity", None, _FMT_PCT, False, "rf + β × ERP"),
+        (10, "Pre-tax cost of debt", kd, _FMT_PCT, True, merged.get("kd_pretax_notes") or ""),
+        (11, "Tax rate", tax, _FMT_PCT, True, merged.get("tax_rate_notes") or ""),
+        (12, "After-tax cost of debt", None, _FMT_PCT, False, "kd × (1 − tax)"),
+        (13, "E / (D+E)", we, _FMT_PCT, True, merged.get("we_notes") or "equity weight"),
+        (14, "D / (D+E)", None, _FMT_PCT, False, "1 − E/(D+E)"),
+        (15, "WACC (base)", None, _FMT_PCT, False, "ke×we + kd_at×wd"),
+        (16, "Terminal growth (g)", g, _FMT_PCT, True, merged.get("terminal_growth_notes") or "long-run GDP / inflation"),
+        (17, "FCF growth (missing yrs)", fcf_g, _FMT_PCT, True, "used only when a forecast year has no FCF"),
+        (18, "Revenue growth (missing yrs)", rev_g, _FMT_PCT, True, "used only when a forecast year has no revenue"),
+        (19, "Net debt / (cash) ($m)", nd if nd is not None else 0.0, _FMT_MM, True, "latest BS; cash-rich → negative"),
+        (20, "Diluted shares (m)", shares, _FMT_SHARES, True, merged.get("shares_notes") or ""),
+        (21, "Last price", price, _FMT_SH, True, ""),
+        (22, "Report 12m PT", pt, _FMT_SH, False, ""),
+    ]
+    for row, lab, val, fmt, is_in, notes in wacc_rows:
+        ws.cell(row, 1, lab).font = S["font_bold"] if row in (15, 16) else S["font"]
+        ws.cell(row, 1).border = S["thin"]
+        ws.cell(row, 3, notes).font = S["font_muted"]
+        ws.cell(row, 3).border = S["thin"]
+        if row == 9:
+            _put_formula(ws, row, 2, "=B6+B8*B7", fmt, S)
+        elif row == 12:
+            _put_formula(ws, row, 2, "=B10*(1-B11)", fmt, S)
+        elif row == 14:
+            _put_formula(ws, row, 2, "=1-B13", fmt, S)
+        elif row == 15:
+            _put_formula(ws, row, 2, "=B9*B13+B12*B14", fmt, S, gold=True, bold=True)
+        else:
+            _put_input(ws, row, 2, val, fmt, S, input_cell=is_in)
+
+    # ── PRO FORMA YEARS (E–L) ───────────────────────────────────────────
+    pf_start_col = 5  # E
+    _section_title(ws, 4, pf_start_col, max(len(horizon) + 1, 4), "PRO FORMA YEARS  ($ millions)", S)
+    ws.cell(5, pf_start_col, "Metric").font = S["font_h"]
+    ws.cell(5, pf_start_col).fill = S["navy_fill"]
+    ws.cell(5, pf_start_col).border = S["thin"]
+    pf_cols = []  # (excel_col, year_dict)
+    for i, y in enumerate(horizon):
+        col = pf_start_col + 1 + i
+        fy = y.get("fy")
+        lab = f"FY{fy}{'A' if y['kind']=='A' else 'E'}" if fy else f"Y{y['t']}"
+        cell = ws.cell(5, col, lab)
+        cell.font = S["font_h"]
+        cell.fill = S["gold_fill"] if y["kind"] == "E" else S["navy_fill"]
+        cell.alignment = S["center"]
+        cell.border = S["thin"]
+        pf_cols.append((col, y))
+
+    pf_metrics = [
+        (6, "Revenue", "revenue", _FMT_MM),
+        (7, "  YoY growth", "rev_g", _FMT_PCT),
+        (8, "Gross profit", "gp", _FMT_MM),
+        (9, "Operating income", "ebit", _FMT_MM),
+        (10, "  Operating margin", "om", _FMT_PCT),
+        (11, "EBITDA", "ebitda", _FMT_MM),
+        (12, "Net income", "ni", _FMT_MM),
+        (13, "Diluted EPS", "eps", _FMT_SH),
+        (14, "Free cash flow", "fcf", _FMT_MM),
+        (15, "  FCF growth", "fcf_g", _FMT_PCT),
+        (16, "  FCF margin", "fcf_m", _FMT_PCT),
+    ]
+    for row, lab, key, fmt in pf_metrics:
+        ws.cell(row, pf_start_col, lab).font = S["font"]
+        ws.cell(row, pf_start_col).border = S["thin"]
+        for i, (col, y) in enumerate(pf_cols):
+            letter = get_column_letter(col)
+            prev = get_column_letter(pf_cols[i - 1][0]) if i else None
+            cell = ws.cell(row, col)
+            cell.border = S["thin"]
+            cell.alignment = S["right"]
+            cell.number_format = fmt
+            if key == "rev_g":
+                if prev:
+                    cell.value = f'=IF(OR({prev}6="",{prev}6=0),"—",({letter}6-{prev}6)/{prev}6)'
+                    cell.font = S["font"]
+                else:
+                    cell.value = "—"
+                    cell.font = S["font_muted"]
+            elif key == "om":
+                cell.value = f'=IF(OR({letter}6="",{letter}6=0),"—",{letter}9/{letter}6)'
+                cell.font = S["font"]
+            elif key == "fcf_g":
+                if prev:
+                    cell.value = f'=IF(OR({prev}14="",{prev}14=0),"—",({letter}14-{prev}14)/{prev}14)'
+                    cell.font = S["font"]
+                else:
+                    cell.value = "—"
+                    cell.font = S["font_muted"]
+            elif key == "fcf_m":
+                cell.value = f'=IF(OR({letter}6="",{letter}6=0),"—",{letter}14/{letter}6)'
+                cell.font = S["font"]
+            elif key == "revenue":
+                if y.get("hard_rev") and y.get("revenue") is not None:
+                    cell.value = y["revenue"]
+                    cell.fill = S["input_fill"] if y["kind"] == "E" else S["white_fill"]
+                    cell.font = S["font_est"] if y["kind"] == "E" else S["font"]
+                elif prev:
+                    cell.value = f"={prev}6*(1+$B$18)"
+                    cell.font = S["font_est"]
+                else:
+                    cell.value = y.get("revenue")
+                    cell.font = S["font"]
+            elif key == "fcf":
+                if y.get("hard_fcf") and y.get("fcf") is not None:
+                    cell.value = y["fcf"]
+                    cell.fill = S["input_fill"] if y["kind"] == "E" else S["white_fill"]
+                    cell.font = S["font_est"] if y["kind"] == "E" else S["font"]
+                elif prev:
+                    cell.value = f"={prev}14*(1+$B$17)"
+                    cell.font = S["font_est"]
+                else:
+                    cell.value = y.get("fcf")
+                    cell.font = S["font"]
+            else:
+                cell.value = y.get(key)
+                cell.font = S["font_est"] if y["kind"] == "E" else S["font"]
+                if y["kind"] == "E" and y.get(key) is not None:
+                    cell.fill = S["input_fill"]
+
+    # ── DCF PROJECTION LADDER ───────────────────────────────────────────
+    lad_row = 24
+    _section_title(ws, lad_row, 1, 8, "DCF PROJECTION LADDER (BASE CASE)  ·  FCFF, year-end discounting", S)
+    lad_headers = [
+        "Year", "Fiscal", "Revenue ($m)", "Rev growth",
+        "FCF ($m)", "FCF growth", "Discount factor", "PV of FCF ($m)",
+    ]
+    hdr = lad_row + 1
+    for i, h in enumerate(lad_headers, start=1):
+        c = ws.cell(hdr, i, h)
+        c.font = S["font_h"]
+        c.fill = S["navy_fill"]
+        c.alignment = S["center"]
+        c.border = S["thin"]
+
+    # Map t → pro forma column letter (revenue row 6, fcf row 14)
+    pf_by_t = {y["t"]: get_column_letter(col) for col, y in pf_cols}
+    fcf_cells: list[str] = []  # years 1..n absolute refs
+    first_exp = hdr + 2  # year 1 row
+    last_exp = hdr + 1 + n
+    for y in horizon:
+        r = hdr + 1 + y["t"]
+        t = y["t"]
+        ws.cell(r, 1, f"{t} ({y['kind']})").font = S["font_bold"]
+        ws.cell(r, 1).border = S["thin"]
+        fy = y.get("fy")
+        ws.cell(r, 2, f"FY{fy}" if fy else "").border = S["thin"]
+        ws.cell(r, 2).alignment = S["center"]
+        pf_let = pf_by_t.get(t)
+        # Revenue / FCF linked to pro forma so one set of inputs drives both
+        if pf_let:
+            _put_formula(ws, r, 3, f"={pf_let}6", _FMT_MM, S)
+            _put_formula(ws, r, 5, f"={pf_let}14", _FMT_MM, S)
+        else:
+            _put_input(ws, r, 3, y.get("revenue"), _FMT_MM, S, input_cell=y["kind"] == "E")
+            _put_input(ws, r, 5, y.get("fcf"), _FMT_MM, S, input_cell=y["kind"] == "E")
+        if t == 0:
+            ws.cell(r, 4, "—").border = S["thin"]
+            ws.cell(r, 6, "—").border = S["thin"]
+            _put_formula(ws, r, 7, 1, "0.000", S)
+            ws.cell(r, 8, "—").border = S["thin"]
+        else:
+            prev_r = r - 1
+            _put_formula(ws, r, 4, f'=IF(OR(C{prev_r}="",C{prev_r}=0),"—",(C{r}-C{prev_r})/C{prev_r})', _FMT_PCT, S)
+            _put_formula(ws, r, 6, f'=IF(OR(E{prev_r}="",E{prev_r}=0),"—",(E{r}-E{prev_r})/E{prev_r})', _FMT_PCT, S)
+            _put_formula(ws, r, 7, f"=1/(1+$B$15)^{t}", "0.000", S)
+            _put_formula(ws, r, 8, f"=E{r}*G{r}", _FMT_MM, S)
+            fcf_cells.append(f"$E${r}")
+        for c in range(1, 9):
+            ws.cell(r, c).border = S["thin"]
+
+    sum_row = hdr + 2 + n
+    ws.cell(sum_row, 1, "Sum PV explicit FCF").font = S["font_bold"]
+    ws.cell(sum_row, 1).fill = S["pale_navy"]
+    for c in range(1, 8):
+        ws.cell(sum_row, c).fill = S["pale_navy"]
+        ws.cell(sum_row, c).border = S["thin"]
+    _put_formula(ws, sum_row, 8, f"=SUM(H{first_exp}:H{last_exp})", _FMT_MM, S, gold=True, bold=True)
+
+    # ── TERMINAL VALUE & EQUITY BRIDGE ──────────────────────────────────
+    br = sum_row + 2
+    _section_title(ws, br, 1, 3, "TERMINAL VALUE & EQUITY BRIDGE", S)
+    last_fcf_row = last_exp
+    bridge = [
+        (br + 1, "Year-n FCF ($m)", f"=E{last_fcf_row}", _FMT_MM, False),
+        (br + 2, "Terminal growth g", "=$B$16", _FMT_PCT, False),
+        (br + 3, "WACC", "=$B$15", _FMT_PCT, False),
+        (br + 4, "Terminal value (Gordon)", f"=IF(B{br+3}<=B{br+2},\"nm\",B{br+1}*(1+B{br+2})/(B{br+3}-B{br+2}))", _FMT_MM, False),
+        (br + 5, "PV of terminal value", f"=IF(OR(B{br+4}=\"nm\",B{br+4}=\"\"),\"nm\",B{br+4}*G{last_fcf_row})", _FMT_MM, False),
+        (br + 6, "Enterprise value", f"=H{sum_row}+IF(B{br+5}=\"nm\",0,B{br+5})", _FMT_MM, True),
+        (br + 7, "(−) Net debt / (+) net cash", "=$B$19", _FMT_MM, False),
+        (br + 8, "Equity value", f"=B{br+6}-B{br+7}", _FMT_MM, True),
+        (br + 9, "Diluted shares (m)", "=$B$20", _FMT_SHARES, False),
+        (br + 10, "DCF value / share", f"=IF(B{br+9}=0,\"nm\",B{br+8}/B{br+9})", _FMT_SH, True),
+        (br + 11, "Last price", "=$B$21", _FMT_SH, False),
+        (br + 12, "Upside / (downside)", f"=IF(OR(B{br+11}=0,B{br+10}=\"nm\"),\"nm\",B{br+10}/B{br+11}-1)", _FMT_PCT, True),
+        (br + 13, "Report 12m PT", "=$B$22", _FMT_SH, False),
+        (br + 14, "DCF vs report PT", f"=IF(OR(B{br+13}=0,B{br+10}=\"nm\"),\"nm\",B{br+10}/B{br+13}-1)", _FMT_PCT, False),
+    ]
+    for row, lab, formula, fmt, gold in bridge:
+        ws.cell(row, 1, lab).font = S["font_bold"] if gold else S["font"]
+        ws.cell(row, 1).border = S["thin"]
+        _put_formula(ws, row, 2, formula, fmt, S, gold=gold, bold=gold)
+        ws.cell(row, 3, "").border = S["thin"]
+
+    # Gordon note
+    note_r = br + 15
+    ws.merge_cells(start_row=note_r, start_column=1, end_row=note_r + 1, end_column=3)
+    ws.cell(
+        note_r, 1,
+        "TV = FCFn × (1+g) / (WACC − g).  Discount factor = 1/(1+WACC)^t (year-end).  "
+        "Change yellow cells — ladder, EV, $/share, and the sensitivity grid all recast.",
+    ).font = S["font_muted"]
+    ws.cell(note_r, 1).alignment = Alignment_wrap(S)
+
+    # ── SENSITIVITY GRID ────────────────────────────────────────────────
+    sens_row = 24
+    sens_col = 10  # J
+    _section_title(ws, sens_row, sens_col, 6, "DCF SENSITIVITY  ($ / share)  ·  WACC × terminal growth", S)
+    base_wacc = merged.get("wacc")
+    if base_wacc is None:
+        # approximate from seeded build-up so the gold cell lands near the formula WACC
+        ke = rf + beta * erp
+        kd_at = kd * (1 - tax)
+        base_wacc = ke * we + kd_at * wd
+    base_g = g
+    if sensitivity and sensitivity.get("waccs") and sensitivity.get("tgrs"):
+        wacc_axis = list(sensitivity["waccs"])
+        g_axis = list(sensitivity["tgrs"])
+    else:
+        wacc_axis = sorted({round(base_wacc + d, 4) for d in (-0.02, -0.01, 0.0, 0.01, 0.02)})
+        g_axis = [0.01, 0.02, 0.025, 0.03, 0.035]
+        if round(base_g, 4) not in [round(x, 4) for x in g_axis]:
+            g_axis = sorted(g_axis + [round(base_g, 4)])
+
+    # Header row: TGR values
+    ws.cell(sens_row + 1, sens_col, "WACC \\ g").font = S["font_h"]
+    ws.cell(sens_row + 1, sens_col).fill = S["navy_fill"]
+    ws.cell(sens_row + 1, sens_col).border = S["thin"]
+    for j, gv in enumerate(g_axis):
+        c = ws.cell(sens_row + 1, sens_col + 1 + j, gv)
+        c.font = S["font_h"]
+        c.fill = S["navy_fill"]
+        c.number_format = _FMT_PCT
+        c.alignment = S["center"]
+        c.border = S["thin"]
+
+    nd_ref, sh_ref = "$B$19", "$B$20"
+    for i, wv in enumerate(wacc_axis):
+        r = sens_row + 2 + i
+        wc = ws.cell(r, sens_col, wv)
+        wc.number_format = _FMT_PCT
+        wc.font = S["font_bold"]
+        wc.fill = S["pale_navy"]
+        wc.border = S["thin"]
+        wacc_cell = f"{get_column_letter(sens_col)}{r}"
+        for j, gv in enumerate(g_axis):
+            g_cell = f"{get_column_letter(sens_col + 1 + j)}${sens_row + 1}"
+            formula = "=" + _dcf_price_formula(wacc_cell, g_cell, fcf_cells, nd_ref, sh_ref)
+            cell = ws.cell(r, sens_col + 1 + j, formula)
+            cell.number_format = _FMT_SH
+            cell.border = S["thin"]
+            cell.alignment = S["center"]
+            if abs(wv - base_wacc) < 0.0006 and abs(gv - base_g) < 0.0006:
+                cell.fill = S["pale_gold"]
+                cell.font = S["font_kpi"]
+
+    ws.cell(sens_row + 3 + len(wacc_axis), sens_col,
+            "Gold cell = base WACC & g. Grid is live — it uses the same FCF ladder as the bridge.").font = S["font_muted"]
+    ws.merge_cells(
+        start_row=sens_row + 3 + len(wacc_axis), start_column=sens_col,
+        end_row=sens_row + 3 + len(wacc_axis), end_column=sens_col + min(5, len(g_axis)),
+    )
+
+    # ── Trading multiples + comps / derivation below ────────────────────
+    tm_row = max(note_r + 3, br + 17, sens_row + 6 + len(wacc_axis))
+    _section_title(ws, tm_row, 1, 3, "TRADING MULTIPLES (LAST REPORTED FY / TTM)", S)
+    tm_rows = [
+        ("Market cap ($m)", capital.get("market_cap"), _FMT_MM),
+        ("Enterprise value ($m)", capital.get("enterprise_value"), _FMT_MM),
+        ("P / E", capital.get("pe"), _FMT_X),
+        ("EV / EBITDA", capital.get("ev_ebitda"), _FMT_X),
+        ("EV / Sales", capital.get("ev_sales"), _FMT_X),
+        ("P / B", capital.get("pb"), _FMT_X),
+        ("FCF yield", capital.get("fcf_yield"), _FMT_PCT),
+    ]
+    rr = tm_row + 1
+    for lab, val, fmt in tm_rows:
+        ws.cell(rr, 1, lab).font = S["font"]
+        ws.cell(rr, 1).border = S["thin"]
+        c = ws.cell(rr, 2, val)
+        c.font = S["font"]
+        c.border = S["thin"]
+        c.alignment = S["right"]
+        if isinstance(val, (int, float)):
+            c.number_format = fmt
+        rr += 1
+
+    extra = rr + 1
     if derivation:
-        r = _dump_md_table(ws, r, "PRICE TARGET DERIVATION", derivation, S)
+        extra = _dump_md_table(ws, extra, "PRICE TARGET DERIVATION (FROM REPORT)", derivation, S)
     if comps:
-        r = _dump_md_table(ws, r, "COMPARABLE COMPANIES", comps, S)
+        extra = _dump_md_table(ws, extra, "COMPARABLE COMPANIES (FROM REPORT)", comps, S)
+    if bridge_tbl:
+        extra = _dump_md_table(ws, extra, "REPORT EQUITY BRIDGE (AS WRITTEN)", bridge_tbl, S)
+    if sensitivity and sensitivity.get("table"):
+        extra = _dump_md_table(ws, extra, "REPORT SENSITIVITY GRID (AS WRITTEN)", sensitivity["table"], S)
 
-    ws.column_dimensions["A"].width = 36
-    ws.column_dimensions["B"].width = 18
-    for ch in "CDEFGH":
-        ws.column_dimensions[ch].width = 14
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 28
+    ws.column_dimensions["D"].width = 12
+    for i in range(5, 20):
+        ws.column_dimensions[get_column_letter(i)].width = 13
     ws.freeze_panes = "A4"
     _print_setup(ws, landscape=True)
     ws.sheet_properties.tabColor = GOLD
+    ws.print_title_rows = "1:2"
 
 
 def _scenarios_sheet(wb, scenarios, price, pt, S):
@@ -1247,6 +1999,10 @@ def build_ib_model_bytes(
     tables = parse_md_tables(md)
     forecasts = extract_forecasts(tables)
     dcf = extract_dcf(md)
+    wacc_build = extract_wacc_build(tables)
+    ladder = extract_dcf_ladder(tables)
+    sensitivity = extract_sensitivity(tables)
+    bridge_tbl = extract_bridge_table(tables)
     scenarios = extract_scenarios(md)
     street = extract_street_table(tables)
     comps = extract_comps_table(tables)
@@ -1288,7 +2044,22 @@ def build_ib_model_bytes(
         S=S,
     )
     _model_sheet(wb, cols, S)
-    _valuation_sheet(wb, capital=capital, dcf=dcf, derivation=derivation, comps=comps, pt=pt, price=price, S=S)
+    _valuation_sheet(
+        wb,
+        capital=capital,
+        dcf=dcf,
+        wacc_build=wacc_build,
+        ladder=ladder,
+        sensitivity=sensitivity,
+        forecasts=forecasts,
+        financials=financials,
+        derivation=derivation,
+        comps=comps,
+        bridge_tbl=bridge_tbl,
+        pt=pt,
+        price=price,
+        S=S,
+    )
     _scenarios_sheet(wb, scenarios, price, pt, S)
     _street_sheet(wb, street, S)
     _quarterly_sheet(wb, financials, S)

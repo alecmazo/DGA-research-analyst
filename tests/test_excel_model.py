@@ -45,6 +45,51 @@ Acme is the low-cost producer in widgets with a widening moat.
 WACC 8.5%. Terminal growth 2.5%. Implied share price $47.00.
 Enterprise value $9,400m.
 
+| Component | Value | Notes |
+|-----------|-------|-------|
+| Risk-free rate | 4.0% | 10y UST |
+| Equity risk premium | 5.0% | Damodaran |
+| Beta (levered) | 1.10 | |
+| Cost of equity | 9.5% | rf + β×ERP |
+| Pre-tax cost of debt | 5.0% | |
+| Tax rate | 21.0% | |
+| After-tax cost of debt | 3.95% | |
+| E / (D+E) | 90.0% | |
+| D / (D+E) | 10.0% | |
+| **WACC (base)** | **8.5%** | |
+
+### DCF Projection Ladder (Base Case)
+
+| Year | Fiscal | Revenue ($M) | Rev Growth % | FCF ($M) | FCF Growth % | Discount Factor | PV of FCF ($M) |
+|------|--------|--------------|--------------|----------|--------------|-----------------|----------------|
+| 0 (A) | FY2025 | 1000.0 | — | 140.0 | — | 1.00 | — |
+| 1 (E) | FY2026 | 1200.0 | 20.0% | 180.0 | 28.6% | 0.922 | 166.0 |
+| 2 (E) | FY2027 | 1320.0 | 10.0% | 210.0 | 16.7% | 0.849 | 178.3 |
+| 3 (E) | FY2028 | 1450.0 | 9.8% | 240.0 | 14.3% | 0.783 | 187.9 |
+| 4 (E) | FY2029 | 1595.0 | 10.0% | 260.0 | 8.3% | 0.722 | 187.7 |
+| 5 (E) | FY2030 | 1754.5 | 10.0% | 280.0 | 7.7% | 0.665 | 186.2 |
+| **Sum PV explicit FCF** | — | — | — | — | — | — | **906.1** |
+
+| Step | Amount ($M) | Formula / note |
+|------|-------------|----------------|
+| Year-5 FCF | 280.0 | from ladder |
+| Terminal growth (g) | 2.5% | GDP |
+| Terminal value (exit) | 4783.3 | FCF5×(1+g)/(WACC−g) |
+| PV of terminal value | 3181.0 | TV / (1+WACC)^5 |
+| Enterprise value | 4087.1 | Σ PV FCF + PV(TV) |
+| (−) Net debt | 120.0 | |
+| Equity value | 3967.1 | |
+| Diluted shares (M) | 100.0 | |
+| **DCF value / share** | **$39.67** | |
+
+| DCF Sensitivity | TGR: 1.0% | TGR: 2.0% | TGR: 2.5% | TGR: 3.0% | TGR: 3.5% |
+|-----------------|-----------|-----------|-----------|-----------|-----------|
+| WACC: 7.0% | $48.00 | $52.00 | $55.00 | $58.00 | $62.00 |
+| WACC: 8.0% | $42.00 | $45.00 | $47.00 | $50.00 | $53.00 |
+| WACC: 8.5% | $39.00 | $42.00 | **$44.00** | $47.00 | $50.00 |
+| WACC: 9.0% | $36.00 | $39.00 | $41.00 | $44.00 | $47.00 |
+| WACC: 10.0% | $31.00 | $33.00 | $35.00 | $37.00 | $40.00 |
+
 | Method | Value | Weight |
 |---|---|---|
 | DCF | $47.00 | 60% |
@@ -148,6 +193,25 @@ def test_dcf_and_scenarios():
     assert abs(cases["Bull"]["probability"] - 0.30) < 1e-9
 
 
+def test_wacc_ladder_sensitivity_parsers():
+    tables = em.parse_md_tables(SAMPLE_MD)
+    wacc = em.extract_wacc_build(tables)
+    assert abs(wacc["rf"] - 0.04) < 1e-9
+    assert abs(wacc["erp"] - 0.05) < 1e-9
+    assert abs(wacc["beta"] - 1.10) < 1e-9
+    assert abs(wacc["wacc"] - 0.085) < 1e-9
+    assert abs(wacc["we"] - 0.90) < 1e-9
+    ladder = em.extract_dcf_ladder(tables)
+    by_t = {r["t"]: r for r in ladder}
+    assert by_t[1]["fcf"] == 180.0
+    assert by_t[5]["fcf"] == 280.0
+    assert by_t[1]["fy"] == 2026
+    sens = em.extract_sensitivity(tables)
+    assert sens is not None
+    assert 0.025 in [round(g, 4) for g in sens["tgrs"]]
+    assert round(sens["cells"][(0.085, 0.025)], 2) == 44.0
+
+
 def test_workbook_sheets_and_pro_forma(tmp_path):
     import openpyxl
     from io import BytesIO
@@ -199,13 +263,33 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
     assert "DGA CAPITAL" in str(cover["A1"].value)
     assert cover["A7"].value == "Buy"
     val = wb["Valuation"]
-    # WACC input on valuation
-    found_wacc = False
-    for r in range(1, 40):
-        if val.cell(r, 1).value == "WACC":
-            found_wacc = True
-            assert abs(val.cell(r, 2).value - 0.085) < 1e-9
-    assert found_wacc
+    labels = {val.cell(r, 1).value: r for r in range(1, 80)}
+    assert "WACC (base)" in labels
+    assert val.cell(labels["WACC (base)"], 2).value == "=B9*B13+B12*B14"
+    assert "Risk-free rate" in labels
+    assert abs(val.cell(labels["Risk-free rate"], 2).value - 0.04) < 1e-9
+    assert "Terminal growth (g)" in labels
+    assert "DCF value / share" in labels
+    # Pro forma years header includes FY2026E
+    pf_headers = [val.cell(5, c).value for c in range(5, 14)]
+    assert "FY2026E" in pf_headers
+    assert "FY2025A" in pf_headers
+    # Ladder FCF for year 1 is linked to the pro forma FCF row
+    assert any(
+        isinstance(val.cell(r, 1).value, str) and val.cell(r, 1).value.startswith("1 (E)")
+        for r in range(20, 45)
+    )
+    # Live sensitivity grid uses WACC × g formulas
+    found_sens = False
+    for r in range(20, 50):
+        lab = str(val.cell(r, 10).value or "")
+        if lab.startswith("WACC") and "g" in lab and "share" not in lab.lower():
+            found_sens = True
+            # first data row is a WACC rate with a formula in K
+            k = val.cell(r + 1, 11).value
+            assert isinstance(k, str) and k.startswith("="), k
+            break
+    assert found_sens
     street = wb["Street"]
     blob = " ".join(
         str(street.cell(r, c).value or "")
