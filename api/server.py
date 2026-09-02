@@ -6347,6 +6347,12 @@ def _persist_analysis_text(
     except Exception:
         pass
 
+    try:
+        import excel_model as _em
+        text = _em.inject_cover_dcf_target(text)
+    except Exception:
+        pass
+
     # Extract summary (best-effort — NULL price_target is fine, the badge
     # only requires the timestamp)
     try:
@@ -7544,7 +7550,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui565-20260902-report-switch"
+WEB_BUILD_VERSION = "ui566-20260902-cover-dcf-pt"
 
 
 @app.get("/api/build")
@@ -8392,6 +8398,11 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                 raw = analyst.normalize_dga_report_md(raw)
             except Exception:
                 pass
+            try:
+                import excel_model as _em
+                raw = _em.inject_cover_dcf_target(raw)
+            except Exception:
+                pass
             payload["report_md"] = raw
             return _finish_report_payload(payload, row)
         if row:
@@ -8418,6 +8429,11 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                 payload["provider"] = alt
                 try:
                     alt_md = analyst.normalize_dga_report_md(alt_md)
+                except Exception:
+                    pass
+                try:
+                    import excel_model as _em
+                    alt_md = _em.inject_cover_dcf_target(alt_md)
                 except Exception:
                     pass
                 payload["report_md"] = alt_md

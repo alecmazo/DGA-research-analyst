@@ -45,12 +45,14 @@ COVER BLOCK  (render as a markdown table — this is the report header)
 | DGA CAPITAL RESEARCH                          | [Today's Date]              |
 |-----------------------------------------------|-----------------------------|
 | **[COMPANY NAME]** ([TICKER]: [EXCHANGE])     | Equity Research             |
-| **Rating:** [BUY / HOLD / SELL]               | [★ CONVICTION PICK] if top-conviction |
+| **Rating:** [BUY / HOLD / SELL]               | **DCF Target:** $[XXX]      |
 | **12-Month Price Target:** $[XXX]             | Implied Return: [+/-XX%]    |
 | **Current Price:** $[XXX] (as of [date])      | 52-Week Range: $[XX]–$[XX]  |
 | **Market Cap:** $[X.X]Bn                      | Enterprise Value: $[X.X]Bn  |
 | **Sector:** [X]   **Industry:** [X]           | Fiscal Year End: [Month DD] |
 | **Analyst:** DGA Capital Research Team        | Rating Change: [Yes/No]     |
+
+The Rating row's RIGHT cell is **DCF Target only** — the DCF implied $/share from Section 7A (not the blended 12-month PT). Never leave it blank. The **12-Month Price Target** row remains the blended PT with implied return.
 
 Quality Scorecard (DGA Factor Profile — 1=Bottom Decile, 10=Top Decile):
 | Growth Momentum | Earnings Quality | Capital Returns | Valuation | Moat Strength |

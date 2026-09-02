@@ -328,6 +328,27 @@ def test_classify_stock_style():
     assert empty["style"] is None
 
 
+def test_inject_cover_dcf_target():
+    cover = """| DGA CAPITAL RESEARCH | August 28, 2026 |
+|-----------------------------------------------|-----------------------------|
+| **CIENA CORP** (CIEN: NYSE) | Equity Research |
+| **Rating:** BUY | |
+| **12-Month Price Target:** $485 | Implied Return: +28.2% |
+| **Current Price:** $378.44 | 52-Week Range: $90–$637 |
+
+# SECTION 7
+| **DCF value / share** | **$181.35** |
+"""
+    out = em.inject_cover_dcf_target(cover)
+    assert "DCF Target" in out
+    assert "$181.35" in out
+    # blended PT row must stay
+    assert "**12-Month Price Target:** $485" in out
+    # idempotent
+    again = em.inject_cover_dcf_target(out)
+    assert again.count("DCF Target") == 1
+
+
 def test_rank_dcf_undervalued():
     rows = em.rank_dcf_undervalued([
         {"ticker": "CHEAP", "dcf_value": 50, "price": 40},   # +25%

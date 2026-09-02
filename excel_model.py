@@ -569,6 +569,67 @@ def extract_dcf(md: str) -> dict[str, Any]:
     return {k: v for k, v in out.items() if v is not None}
 
 
+def _fmt_dcf_pt(v: float) -> str:
+    if abs(v - round(v)) < 0.049:
+        return f"${round(v):,.0f}"
+    return f"${v:,.2f}"
+
+
+def inject_cover_dcf_target(md: str, dcf_value: Optional[float] = None) -> str:
+    """Put the DCF-only $/share in the cover table Rating row, right cell.
+
+    The 12-month PT row stays the blended target. Empty / conviction-pick
+    placeholders are replaced. Existing DCF Target cells are left alone.
+    """
+    if not md:
+        return md
+    val = _f(dcf_value)
+    if val is None:
+        val = _f((extract_dcf(md) or {}).get("implied_price"))
+    if val is None or val <= 0:
+        return md
+    label = f"**DCF Target:** {_fmt_dcf_pt(val)}"
+    lines = md.replace("\r\n", "\n").split("\n")
+    i = 0
+    n = len(lines)
+    while i < n and "|" not in lines[i]:
+        i += 1
+    if i >= n:
+        return md
+    j = i
+    while j < n and "|" in lines[j]:
+        j += 1
+    changed = False
+    for k in range(i, j):
+        raw = lines[k]
+        if not re.search(r"rating\s*:", raw, re.I):
+            continue
+        if re.search(r"dcf\s+target", raw, re.I):
+            break
+        s = raw.rstrip("\n")
+        trail_pipe = s.rstrip().endswith("|")
+        body = s.strip()
+        if body.startswith("|"):
+            body = body[1:]
+        if body.endswith("|"):
+            body = body[:-1]
+        cells = body.split("|")
+        if len(cells) < 2:
+            break
+        right = _strip_md(cells[1])
+        placeholder = (not right) or bool(
+            re.fullmatch(r"★?\s*CONVICTION PICK", right, re.I)
+        )
+        if not placeholder:
+            break
+        cells[1] = f" {label} "
+        rebuilt = "|" + "|".join(cells) + ("|" if trail_pipe else "")
+        lines[k] = rebuilt
+        changed = True
+        break
+    return "\n".join(lines) if changed else md
+
+
 _WACC_LABELS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"risk[-\s]*free", re.I), "rf"),
     (re.compile(r"equity risk premium|\berp\b|market risk premium", re.I), "erp"),
