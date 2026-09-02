@@ -7544,7 +7544,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui564-20260902-report-word"
+WEB_BUILD_VERSION = "ui565-20260902-report-switch"
 
 
 @app.get("/api/build")
@@ -8393,7 +8393,7 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
             except Exception:
                 pass
             payload["report_md"] = raw
-            return payload
+            return _finish_report_payload(payload, row)
         if row:
             alts = (
                 ("claude", "report_md_claude", "claude_generated_at",
@@ -8430,7 +8430,7 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                     f"instead of a report. Showing {alt.upper()} until you re-run "
                     f"Analyze with {provider.upper()}."
                 )
-                return payload
+                return _finish_report_payload(payload, row)
         try:
             payload["report_md"] = analyst.incomplete_report_placeholder(
                 ticker, payload.get("provider") or provider,
@@ -8446,6 +8446,20 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
         payload["rating"] = None
         payload["price_target"] = None
         payload["upside_pct"] = None
+        return _finish_report_payload(payload, row)
+
+    def _finish_report_payload(payload: dict, row) -> dict:
+        if row is not None:
+            engines: list[str] = []
+            if (row.get("report_md") or "").strip():
+                engines.append("grok")
+            if (row.get("report_md_claude") or "").strip():
+                engines.append("claude")
+            if (row.get("report_md_kimi") or "").strip():
+                engines.append("kimi")
+            if (row.get("report_md_deepseek") or "").strip():
+                engines.append("deepseek")
+            payload["providers"] = engines
         return payload
 
     def _iso(v):

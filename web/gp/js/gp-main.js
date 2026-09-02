@@ -6049,38 +6049,6 @@
               const title = (rep.stock_style_note || m.hint).replace(/"/g, '&quot;');
               return '<span class="rep-pill ' + m.cls + '" title="' + title + '">' + m.lab + '</span>';
             })() +
-            (rep.has_pptx
-              ? '<span class="rep-pill rep-pill-ppt' + (rep.pptx_stale ? ' stale' : '') + '"'
-                + ' title="' + (rep.pptx_stale
-                    ? 'PowerPoint was generated from an earlier report run. Re-run the analyzer with the Gamma checkbox to refresh.'
-                    : 'PowerPoint presentation') + '">PPT</span>'
-              : '') +
-            // LLM provider pills — each opens that engine's saved report.
-            // Grok / Claude / Kimi K3 / DeepSeek all get a labeled pill.
-            ((rep.providers || []).includes('grok')
-              ? '<span class="rep-pill rep-pill-llm rep-pill-llm-grok rep-pill-clickable" '
-                + 'data-rep-open="' + rep.ticker + '" data-rep-provider="grok"'
-                + ' title="Click to open Grok report"'
-                + ' onclick="event.stopPropagation();">GROK</span>'
-              : '') +
-            ((rep.providers || []).includes('claude')
-              ? '<span class="rep-pill rep-pill-llm rep-pill-llm-claude rep-pill-clickable" '
-                + 'data-rep-open="' + rep.ticker + '" data-rep-provider="claude"'
-                + ' title="Click to open Claude report"'
-                + ' onclick="event.stopPropagation();">CLAUDE</span>'
-              : '') +
-            ((rep.providers || []).includes('kimi')
-              ? '<span class="rep-pill rep-pill-llm rep-pill-llm-kimi rep-pill-clickable" '
-                + 'data-rep-open="' + rep.ticker + '" data-rep-provider="kimi"'
-                + ' title="Click to open Kimi K3 report"'
-                + ' onclick="event.stopPropagation();">KIMI</span>'
-              : '') +
-            ((rep.providers || []).includes('deepseek')
-              ? '<span class="rep-pill rep-pill-llm rep-pill-llm-deepseek rep-pill-clickable" '
-                + 'data-rep-open="' + rep.ticker + '" data-rep-provider="deepseek"'
-                + ' title="Click to open DeepSeek report"'
-                + ' onclick="event.stopPropagation();">DEEPSEEK</span>'
-              : '') +
             '<button class="rep-compare-btn" data-compare-ticker="' + rep.ticker + '"'
               + ' title="Compare Grok / Claude / DeepSeek / Kimi side-by-side (≈2-3 min per engine)"'
               + ' onclick="event.stopPropagation();">🔬</button>' +

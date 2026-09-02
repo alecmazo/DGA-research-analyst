@@ -160,6 +160,45 @@
   align-items: center;
 }
 
+.engineSwitch {
+  display: inline-flex;
+  gap: 3px;
+  margin-right: 4px;
+}
+
+.engineBtn {
+  border: 1px solid var(--border-default, #cbd5e1);
+  background: var(--bg-subtle, #f8fafc);
+  color: var(--text-secondary, #475569);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.engineBtn:hover:not(:disabled) {
+  border-color: #94a3b8;
+}
+
+.engineOn[data-p='grok'] {
+  background: #0a1628;
+  border-color: #0a1628;
+  color: #fff;
+}
+
+.engineOn[data-p='claude'] {
+  background: #d97706;
+  border-color: #d97706;
+  color: #fff;
+}
+
+.engineBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .gamma {
   font-size: 10px;
   font-weight: 800;

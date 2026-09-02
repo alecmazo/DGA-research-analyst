@@ -84,20 +84,6 @@ function stylePill(style?: string | null): {
   }
 }
 
-function preferredProvider(rep: SavedReport): string {
-  const available = new Set(rep.providers || [])
-  const cands: Array<[string, number]> = [
-    ['claude', tsMs(rep.claude_generated_at)],
-    ['kimi', tsMs(rep.kimi_generated_at)],
-    ['deepseek', tsMs(rep.deepseek_generated_at)],
-    ['grok', tsMs(rep.generated_at)],
-  ]
-  const ranked = cands
-    .filter(([p, t]) => t > 0 && (available.size === 0 || available.has(p)))
-    .sort((a, b) => b[1] - a[1])
-  return ranked[0]?.[0] || (rep.providers || [])[0] || 'grok'
-}
-
 type Props = {
   refreshKey?: number
   onAnalyze?: (ticker: string) => void
@@ -114,8 +100,8 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
   const [sortKey, setSortKey] = useState<'recent' | 'upside'>('recent')
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
 
-  const openRep = (ticker: string, provider?: string) => {
-    openReportWindow(ticker, provider || 'grok')
+  const openRep = (ticker: string) => {
+    openReportWindow(ticker, 'grok')
   }
 
   const load = useCallback(async () => {
@@ -318,7 +304,6 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
               const upside = liveUpside(target, price, rep.upside_pct)
               const runMs = freshnessMs(rep)
               const runIso = runMs ? new Date(runMs).toISOString() : rep.last_attempt_at
-              const providers = rep.providers || []
               const failed = rep.last_attempt_status === 'failed'
               const running =
                 rep.last_attempt_status === 'running' ||
@@ -328,13 +313,13 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                 <tr
                   key={rep.ticker}
                   className={styles.repRow}
-                  onClick={() => openRep(rep.ticker, preferredProvider(rep))}
+                  onClick={() => openRep(rep.ticker)}
                 >
                     <td>
                       <div className={styles.repTkRow}>
                         {running ? (
                           <span title="Analyze in progress">⏳</span>
-                        ) : providers.length ? (
+                        ) : (rep.providers || []).length || grokPt != null || claudePt != null ? (
                           <>
                             <span title="OK">✅</span>
                             {failed && (
@@ -394,63 +379,6 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                             </span>
                           )
                         })()}
-                        {rep.has_pptx && (
-                          <span
-                            className={`${styles.pill} ${styles.pillPpt}${
-                              rep.pptx_stale ? ` ${styles.pillStale}` : ''
-                            }`}
-                          >
-                            PPT
-                          </span>
-                        )}
-                        {providers.includes('grok') && (
-                          <button
-                            type="button"
-                            className={`${styles.pill} ${styles.pillGrok}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openRep(rep.ticker, 'grok')
-                            }}
-                          >
-                            GROK
-                          </button>
-                        )}
-                        {providers.includes('claude') && (
-                          <button
-                            type="button"
-                            className={`${styles.pill} ${styles.pillClaude}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openRep(rep.ticker, 'claude')
-                            }}
-                          >
-                            CLAUDE
-                          </button>
-                        )}
-                        {providers.includes('kimi') && (
-                          <button
-                            type="button"
-                            className={`${styles.pill} ${styles.pillKimi}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openRep(rep.ticker, 'kimi')
-                            }}
-                          >
-                            KIMI
-                          </button>
-                        )}
-                        {providers.includes('deepseek') && (
-                          <button
-                            type="button"
-                            className={`${styles.pill} ${styles.pillDeep}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openRep(rep.ticker, 'deepseek')
-                            }}
-                          >
-                            DEEPSEEK
-                          </button>
-                        )}
                         {onAnalyze && (
                           <button
                             type="button"

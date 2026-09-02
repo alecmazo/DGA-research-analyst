@@ -48,7 +48,7 @@ function deltaBits(dlt: ReportDelta | null | undefined): string[] {
 }
 
 export function ReportPage() {
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const ticker = (params.get('ticker') || '').toUpperCase()
   const provider = (params.get('provider') || 'grok').toLowerCase()
 
@@ -156,6 +156,18 @@ export function ReportPage() {
   const pct = quote?.pct ?? quote?.pct_change ?? null
   const shownProvider = (data?.provider || provider).toLowerCase()
   const printName = printEngineName(shownProvider)
+  const engines = new Set(
+    (data?.providers || []).map((p) => String(p || '').toLowerCase()),
+  )
+  if (shownProvider) engines.add(shownProvider)
+  const switchGrok = engines.has('grok')
+  const switchClaude = engines.has('claude')
+  const showEngineSwitch = switchGrok && switchClaude
+
+  const switchEngine = (pv: string) => {
+    if (!ticker || pv === shownProvider) return
+    setParams({ ticker, provider: pv })
+  }
 
   const dlt =
     data?.delta_from_prior ||
@@ -300,6 +312,34 @@ export function ReportPage() {
           {data?.note && <span className={styles.note}>{data.note}</span>}
         </div>
         <div className={`${styles.actions} ${styles.noPrint}`}>
+          {showEngineSwitch && (
+            <div className={styles.engineSwitch} role="tablist" aria-label="Report engine">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={shownProvider === 'grok'}
+                className={`${styles.engineBtn} ${shownProvider === 'grok' ? styles.engineOn : ''}`}
+                data-p="grok"
+                disabled={loading}
+                onClick={() => switchEngine('grok')}
+                title="Show Grok report"
+              >
+                Grok
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={shownProvider === 'claude'}
+                className={`${styles.engineBtn} ${shownProvider === 'claude' ? styles.engineOn : ''}`}
+                data-p="claude"
+                disabled={loading}
+                onClick={() => switchEngine('claude')}
+                title="Show Claude report"
+              >
+                Claude
+              </button>
+            </div>
+          )}
           {data?.gamma_url && (
             <a
               href={data.gamma_url}

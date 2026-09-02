@@ -338,4 +338,5 @@ export type ReportDetail = {
   note?: string
   version_count?: number
   delta_from_prior?: ReportDelta | null
+  providers?: string[]
 }

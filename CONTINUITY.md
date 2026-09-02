@@ -145,6 +145,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Saved-report style pills** | **`ui562-20260902-style-pills`** | VALUE / GROWTH / GARP / RICH / CORE on the card; Excel only on the open report |
 | **Builder DCF value board** | **`ui563-20260902-dcf-value-board`** | Top 10 Value watchlist on Builder — cheapest saved-report DCFs vs last |
 | **Word on open report** | **`ui564-20260902-report-word`** | DOC pill off the saved-reports card; Word download next to Excel on the open report |
+| **Report card cleanup** | **`ui565-20260902-report-switch`** | Saved reports: style + ⚡ only; open defaults to Grok; Grok/Claude switch on the report |
 
 ### One-click handoff (preferred)
 
@@ -317,4 +318,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-02 · Agent: Grok Build · Live: `ui564-20260902-report-word` · Next: `ui565-YYYYMMDD-slug`*
+*Last updated: 2026-09-02 · Agent: Grok Build · Live: `ui565-20260902-report-switch` · Next: `ui566-YYYYMMDD-slug`*
