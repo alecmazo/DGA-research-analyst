@@ -392,6 +392,37 @@ def style_from_metrics(
     }
 
 
+def rank_dcf_undervalued(
+    items: list[dict[str, Any]],
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Top N names cheapest on DCF vs last price. DCF only — no PT / style mix.
+
+    Each item: {ticker, dcf_value, price}. Drops missing/non-positive prices
+    and anything not strictly undervalued (dcf > last). Sorted by gap desc.
+    """
+    ranked: list[dict[str, Any]] = []
+    for it in items or []:
+        tk = str((it or {}).get("ticker") or "").strip().upper()
+        dcf = _f((it or {}).get("dcf_value"))
+        px = _f((it or {}).get("price"))
+        if not tk or dcf is None or px is None or dcf <= 0 or px <= 0:
+            continue
+        gap = dcf / px - 1.0
+        if gap <= 0:
+            continue
+        ranked.append({
+            "ticker": tk,
+            "dcf_value": dcf,
+            "price": px,
+            "dcf_gap": gap,
+            "dcf_gap_pct": round(gap * 100.0, 2),
+        })
+    ranked.sort(key=lambda r: (-r["dcf_gap"], r["ticker"]))
+    return ranked[: max(0, int(limit or 0))]
+
+
 def classify_stock_style(
     md: str,
     *,

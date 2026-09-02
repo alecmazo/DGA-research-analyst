@@ -143,6 +143,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Excel DCF detail** | **`ui560-20260902-excel-dcf`** | Valuation sheet: full WACC build, DCF ladder, live WACC×g sensitivity, pro forma years |
 | **Excel DCF verdict** | **`ui561-20260902-dcf-verdict`** | Valuation: UNDERVALUED / FAIR VALUED / OVERVALUED vs last, from this DCF |
 | **Saved-report style pills** | **`ui562-20260902-style-pills`** | VALUE / GROWTH / GARP / RICH / CORE on the card; Excel only on the open report |
+| **Builder DCF value board** | **`ui563-20260902-dcf-value-board`** | Top 10 Value watchlist on Builder — cheapest saved-report DCFs vs last |
 
 ### One-click handoff (preferred)
 
@@ -315,4 +316,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-02 · Agent: Grok Build · Live: `ui562-20260902-style-pills` · Next: `ui563-YYYYMMDD-slug`*
+*Last updated: 2026-09-02 · Agent: Grok Build · Live: `ui563-20260902-dcf-value-board` · Next: `ui564-YYYYMMDD-slug`*

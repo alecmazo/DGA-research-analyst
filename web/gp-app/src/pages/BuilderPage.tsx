@@ -30,6 +30,10 @@ type BoardRow = {
   since_entry_pct?: number | null
   note?: string
   dga_score?: number | null
+  dcf_value?: number | null
+  dcf_gap_pct?: number | null
+  fair_value?: number | null
+  fv_upside_pct?: number | null
 }
 
 type Board = {
@@ -173,10 +177,15 @@ export function BuilderPage() {
     setLists(arr)
     setActive((prev) => {
       if (prev) return prev
+      const dcf = arr.find(
+        (l) =>
+          (l.name || '').toLowerCase() === 'top 10 value' ||
+          l.source === 'dcf_value',
+      )
       const dga = arr.find(
         (l) => (l.name || '').toLowerCase() === 'dga scored',
       )
-      return dga?.id || arr[0]?.id || null
+      return dcf?.id || dga?.id || arr[0]?.id || null
     })
     return arr
   }, [])
@@ -461,6 +470,30 @@ export function BuilderPage() {
     }
   }
 
+  const refreshDcfValue = async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      const d = await api<{
+        id?: string
+        n?: number
+        lists?: BoardList[]
+        board?: Board
+      }>('/api/v2/builder/lists/dcf-value', { method: 'POST' })
+      if (d.lists) setLists(d.lists)
+      if (d.id) setActive(d.id)
+      if (d.board) setBoard(d.board)
+      else if (d.id) await loadBoard(d.id)
+      setStatus(
+        `Top 10 Value · ${d.n ?? 0} names cheapest on DCF vs last.`,
+      )
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not refresh Top 10 Value')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const refreshDgaScored = async () => {
     setBusy(true)
     setErr(null)
@@ -504,12 +537,9 @@ export function BuilderPage() {
   }
 
   const scoredBoard = (board?.rows || []).some((r) => r.dga_score != null)
-  const boardRows = [...(board?.rows || [])].sort((a, b) => {
-    if (scoredBoard) {
-      return (b.dga_score ?? -1) - (a.dga_score ?? -1)
-    }
-    return (b.since_entry_pct ?? -999) - (a.since_entry_pct ?? -999)
-  })
+  const dcfBoard = (board?.rows || []).some(
+    (r) => r.dcf_gap_pct != null || r.dcf_value != null,
+  )
   const boardTitle =
     board?.list?.name || lists.find((l) => l.id === active)?.name || 'Board'
   const activeList = lists.find((l) => l.id === active)
@@ -517,6 +547,19 @@ export function BuilderPage() {
     (activeList?.name || '').toLowerCase() === 'dga scored' ||
     activeList?.source === 'dga_score' ||
     scoredBoard
+  const isDcfValue =
+    (activeList?.name || '').toLowerCase() === 'top 10 value' ||
+    activeList?.source === 'dcf_value' ||
+    (dcfBoard && !isDgaScored)
+  const boardRows = [...(board?.rows || [])].sort((a, b) => {
+    if (isDcfValue) {
+      return (b.dcf_gap_pct ?? -999) - (a.dcf_gap_pct ?? -999)
+    }
+    if (scoredBoard) {
+      return (b.dga_score ?? -1) - (a.dga_score ?? -1)
+    }
+    return (b.since_entry_pct ?? -999) - (a.since_entry_pct ?? -999)
+  })
   const constructRows = result?.rows || []
   const sum = result?.summary
 
@@ -933,9 +976,11 @@ export function BuilderPage() {
                   <div className={split.sideTitle}>{l.name}</div>
                   <div className={split.sideSub}>
                     {l.n_tickers ?? 0} names ·{' '}
-                    {l.source === 'dga_score'
-                      ? 'score > 90'
-                      : l.sector || l.source || 'manual'}
+                    {l.source === 'dcf_value'
+                      ? 'DCF vs last'
+                      : l.source === 'dga_score'
+                        ? 'score > 90'
+                        : l.sector || l.source || 'manual'}
                   </div>
                 </button>
               ))}
@@ -975,7 +1020,15 @@ export function BuilderPage() {
                   badge={`${boardRows.length} names`}
                   flush
                   action={
-                    isDgaScored ? (
+                    isDcfValue ? (
+                      <Button
+                        size="sm"
+                        onClick={() => void refreshDcfValue()}
+                        disabled={busy}
+                      >
+                        Refresh DCF
+                      </Button>
+                    ) : isDgaScored ? (
                       <Button
                         size="sm"
                         onClick={() => void refreshDgaScored()}
@@ -986,6 +1039,12 @@ export function BuilderPage() {
                     ) : null
                   }
                 >
+                  {isDcfValue ? (
+                    <p className={styles.hint} style={{ padding: '10px 12px 0' }}>
+                      Auto watchlist · 10 cheapest saved reports on DCF vs last
+                      price. Re-runs when you open the board.
+                    </p>
+                  ) : (
                   <div className={split.addBar}>
                     <input
                       className={split.addInput}
@@ -1003,10 +1062,15 @@ export function BuilderPage() {
                       Add
                     </Button>
                   </div>
+                  )}
                   {!boardRows.length ? (
                     <Empty
-                      title="Empty board"
-                      sub="Add tickers or create one from Construct → Track as board."
+                      title={isDcfValue ? 'No DCF-cheap names yet' : 'Empty board'}
+                      sub={
+                        isDcfValue
+                          ? 'Need saved reports with a DCF value above last price. Run Analyze, then Refresh DCF.'
+                          : 'Add tickers or create one from Construct → Track as board.'
+                      }
                     />
                   ) : (
                     <div className={split.tableWrap}>
@@ -1018,6 +1082,22 @@ export function BuilderPage() {
                               <th className="tabular" title="DGA Score (0–100)">
                                 DGA
                               </th>
+                            )}
+                            {isDcfValue && (
+                              <>
+                                <th
+                                  className="tabular"
+                                  title="DCF value per share from the saved report"
+                                >
+                                  DCF
+                                </th>
+                                <th
+                                  className="tabular"
+                                  title="(DCF − last) / last — only DCF, not the 12m PT"
+                                >
+                                  Undervalued
+                                </th>
+                              </>
                             )}
                             <th className="tabular">Last</th>
                             <th className="tabular">Day %</th>
@@ -1046,6 +1126,16 @@ export function BuilderPage() {
                                 <td className="tabular">
                                   {r.dga_score != null ? r.dga_score : '—'}
                                 </td>
+                              )}
+                              {isDcfValue && (
+                                <>
+                                  <td className="tabular">{fmtPx(r.dcf_value)}</td>
+                                  <td
+                                    className={`tabular ${pctClass(r.dcf_gap_pct)}`}
+                                  >
+                                    {fmtPct(r.dcf_gap_pct)}
+                                  </td>
+                                </>
                               )}
                               <td className="tabular">{fmtPx(r.price)}</td>
                               <td className={`tabular ${pctClass(r.pct)}`}>

@@ -7544,7 +7544,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui562-20260902-style-pills"
+WEB_BUILD_VERSION = "ui563-20260902-dcf-value-board"
 
 
 @app.get("/api/build")
@@ -11266,6 +11266,7 @@ def _builder_list_id() -> str:
 
 
 _DGA_SCORED_BOARD_NAME = "DGA Scored"
+_DCF_VALUE_BOARD_NAME = "Top 10 Value"
 
 
 def _builder_parse_dga_note(note: str | None) -> float | None:
@@ -11373,6 +11374,163 @@ def _builder_sync_dga_scored_board(lp_id: str, force: bool = False) -> dict:
         "min_score": 90,
         "tickers": [r.get("ticker") for r in ranked],
         "scores": {r.get("ticker"): r.get("dga_score") for r in ranked},
+    }
+
+
+def _builder_parse_dcf_note(note: str | None) -> tuple[float | None, float | None]:
+    """Parse `DCF +18.4% · $47.00` → (dcf_value, dcf_gap_pct)."""
+    raw = note or ""
+    gap = None
+    dcf = None
+    m = re.search(r"DCF\s+([+\-]?\d+(?:\.\d+)?)\s*%", raw, flags=re.I)
+    if m:
+        try:
+            gap = float(m.group(1))
+        except (TypeError, ValueError):
+            gap = None
+    m2 = re.search(r"\$\s*([0-9]{1,6}(?:\.[0-9]+)?)", raw)
+    if m2:
+        try:
+            dcf = float(m2.group(1))
+        except (TypeError, ValueError):
+            dcf = None
+    return dcf, gap
+
+
+def _builder_collect_dcf_undervalued(limit: int = 10) -> list[dict]:
+    """Saved-report DCF vs live last — top N cheapest. DCF only."""
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return []
+    try:
+        _ensure_analyst_reports_table_schema()
+    except Exception:
+        pass
+    rows: list[dict] = []
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT ticker, dcf_value
+                  FROM analyst_reports
+                 WHERE archived IS NOT TRUE
+                   AND dcf_value IS NOT NULL
+                   AND dcf_value > 0
+            """)
+            rows = [dict(r) for r in (cur.fetchall() or [])]
+    except Exception as e:
+        print(f"[builder-lists] dcf collect: {e!s:.160}", flush=True)
+        return []
+    if not rows:
+        return []
+    tickers = [(r.get("ticker") or "").upper() for r in rows if r.get("ticker")]
+    qmap: dict = {}
+    try:
+        raw_q = batch_quotes(",".join(tickers)) or {}
+        for tk in tickers:
+            q = raw_q.get(tk) or {}
+            qmap[tk] = q.get("price")
+    except Exception:
+        qmap = {}
+    items = []
+    for r in rows:
+        tk = (r.get("ticker") or "").upper()
+        items.append({
+            "ticker": tk,
+            "dcf_value": r.get("dcf_value"),
+            "price": qmap.get(tk),
+        })
+    try:
+        import excel_model as _em
+        return _em.rank_dcf_undervalued(items, limit=limit)
+    except Exception as e:
+        print(f"[builder-lists] dcf rank: {e!s:.160}", flush=True)
+        return []
+
+
+def _builder_sync_dcf_value_board(lp_id: str, force: bool = False) -> dict:
+    """Create or refresh the Top 10 Value board from saved-report DCFs."""
+    _ensure_builder_lists_tables()
+    ranked = _builder_collect_dcf_undervalued(limit=10)
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    lid = None
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT id, updated_at FROM builder_lists
+             WHERE lp_id=%s AND lower(name)=lower(%s)
+             LIMIT 1
+        """, (lp_id, _DCF_VALUE_BOARD_NAME))
+        row = cur.fetchone()
+        if row and not force:
+            ua = row[1]
+            try:
+                if ua is not None:
+                    if getattr(ua, "tzinfo", None) is None:
+                        ua = ua.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - ua).total_seconds()
+                    if age < 15 * 60 and ranked:
+                        return {"ok": True, "id": row[0], "n": None, "skipped": True}
+            except Exception:
+                pass
+        if row:
+            lid = row[0]
+            cur.execute("""
+                UPDATE builder_lists
+                   SET sector=%s, source='dcf_value', sort_order=-20, updated_at=now()
+                 WHERE id=%s AND lp_id=%s
+            """, ("DCF undervalued vs last", lid, lp_id))
+        else:
+            lid = _builder_list_id()
+            cur.execute("""
+                INSERT INTO builder_lists
+                    (id, lp_id, name, sector, source, sort_order)
+                VALUES (%s, %s, %s, %s, 'dcf_value', -20)
+            """, (lid, lp_id, _DCF_VALUE_BOARD_NAME, "DCF undervalued vs last"))
+        cur.execute("SELECT ticker FROM builder_list_tickers WHERE list_id=%s", (lid,))
+        have = {(r[0] or "").upper() for r in (cur.fetchall() or [])}
+        want = [r["ticker"] for r in ranked]
+        want_set = set(want)
+        drop = have - want_set
+        if drop:
+            cur.execute(
+                "DELETE FROM builder_list_tickers WHERE list_id=%s AND ticker = ANY(%s)",
+                (lid, list(drop)),
+            )
+        for r in ranked:
+            tk = r["ticker"]
+            gap_pct = r.get("dcf_gap_pct")
+            dcf = r.get("dcf_value")
+            note = f"DCF {gap_pct:+.1f}% · ${float(dcf):.2f}" if gap_pct is not None and dcf else "DCF"
+            px = r.get("price")
+            fv = float(dcf) if dcf is not None else None
+            if tk in have:
+                cur.execute("""
+                    UPDATE builder_list_tickers
+                       SET note=%s, fair_value=%s
+                     WHERE list_id=%s AND ticker=%s
+                """, (note, fv, lid, tk))
+            elif px is not None:
+                cur.execute("""
+                    INSERT INTO builder_list_tickers
+                        (list_id, ticker, entry_price, entry_date, note, fair_value)
+                    VALUES (%s, %s, %s, %s::date, %s, %s)
+                    ON CONFLICT (list_id, ticker) DO UPDATE SET
+                        note=EXCLUDED.note, fair_value=EXCLUDED.fair_value
+                """, (lid, tk, float(px), today, note, fv))
+            else:
+                cur.execute("""
+                    INSERT INTO builder_list_tickers
+                        (list_id, ticker, entry_date, note, fair_value)
+                    VALUES (%s, %s, %s::date, %s, %s)
+                    ON CONFLICT (list_id, ticker) DO UPDATE SET
+                        note=EXCLUDED.note, fair_value=EXCLUDED.fair_value
+                """, (lid, tk, today, note, fv))
+        conn.commit()
+    return {
+        "ok": True,
+        "id": lid,
+        "n": len(ranked),
+        "tickers": want,
+        "gaps": {r["ticker"]: r.get("dcf_gap_pct") for r in ranked},
     }
 
 
@@ -11727,14 +11885,20 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
                 fv_upside = round((float(fv) - float(price)) / abs(float(price)) * 100.0, 2)
         except (TypeError, ValueError):
             pass
+        note = rm.get("note") or ""
+        dcf_from_note, gap_from_note = _builder_parse_dcf_note(note)
+        dcf_val = fv if fv is not None else dcf_from_note
+        dcf_gap = fv_upside if fv_upside is not None else gap_from_note
         board_rows.append({
             "ticker": tk,
             "name": names.get(tk) or "",
-            "note": rm.get("note") or "",
-            "dga_score": _builder_parse_dga_note(rm.get("note")),
+            "note": note,
+            "dga_score": _builder_parse_dga_note(note),
             "entry_price": entry,
             "entry_date": rm.get("entry_date"),  # YYYY-MM-DD
             "fair_value": fv,
+            "dcf_value": dcf_val,
+            "dcf_gap_pct": dcf_gap,
             "added_at": rm.get("added_at"),
             "price": price,
             "pct": q.get("pct"),
@@ -11838,6 +12002,10 @@ def builder_lists_get(request: Request):
             _builder_sync_dga_scored_board(lp_id, force=False)
     except Exception as e:
         print(f"[builder-lists] dga scored ensure: {e!s:.160}", flush=True)
+    try:
+        _builder_sync_dcf_value_board(lp_id, force=False)
+    except Exception as e:
+        print(f"[builder-lists] dcf value ensure: {e!s:.160}", flush=True)
     lists = _builder_lists_for_user(lp_id)
     return {"ok": True, "lists": lists, "seeded": len(lists) > 0}
 
@@ -11887,6 +12055,10 @@ def builder_lists_seed(request: Request):
         _builder_sync_dga_scored_board(lp_id, force=True)
     except Exception as e:
         print(f"[builder-lists] seed dga scored: {e!s:.120}", flush=True)
+    try:
+        _builder_sync_dcf_value_board(lp_id, force=True)
+    except Exception as e:
+        print(f"[builder-lists] seed dcf value: {e!s:.120}", flush=True)
     return {"ok": True, "created": created, "lists": _builder_lists_for_user(lp_id)}
 
 
@@ -11922,6 +12094,23 @@ def builder_lists_create(request: Request):
     return {"ok": True, "id": lid, "lists": _builder_lists_for_user(lp_id)}
 
 
+@app.post("/api/v2/builder/lists/dcf-value")
+def builder_dcf_value_refresh(request: Request):
+    """Rebuild Top 10 Value: most DCF-cheap saved reports vs last price."""
+    claims = _claims_or_401(request)
+    lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
+    out = _builder_sync_dcf_value_board(lp_id, force=True)
+    if not out.get("ok"):
+        raise HTTPException(503, out.get("error") or "Could not rank DCF value")
+    out["lists"] = _builder_lists_for_user(lp_id)
+    if out.get("id"):
+        try:
+            out["board"] = _builder_list_board(out["id"], lp_id)
+        except Exception as e:
+            print(f"[builder-lists] dcf board load: {e!s:.120}", flush=True)
+    return out
+
+
 @app.post("/api/v2/builder/lists/dga-scored")
 def builder_dga_scored_refresh(request: Request):
     """Rebuild the DGA Scored board: top 30 companies with DGA Score > 90."""
@@ -11944,6 +12133,19 @@ def builder_list_board_get(list_id: str, request: Request):
     claims = _claims_or_401(request)
     lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
     _ensure_builder_lists_tables()
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT source, name FROM builder_lists WHERE id=%s AND lp_id=%s",
+                (list_id, lp_id),
+            )
+            meta = cur.fetchone()
+        src = ((meta[0] if meta else "") or "").lower()
+        nm = ((meta[1] if meta else "") or "").lower()
+        if src == "dcf_value" or nm == _DCF_VALUE_BOARD_NAME.lower():
+            _builder_sync_dcf_value_board(lp_id, force=True)
+    except Exception as e:
+        print(f"[builder-lists] dcf refresh on get: {e!s:.120}", flush=True)
     return _builder_list_board(list_id, lp_id)
 
 

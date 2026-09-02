@@ -328,6 +328,26 @@ def test_classify_stock_style():
     assert empty["style"] is None
 
 
+def test_rank_dcf_undervalued():
+    rows = em.rank_dcf_undervalued([
+        {"ticker": "CHEAP", "dcf_value": 50, "price": 40},   # +25%
+        {"ticker": "MEH", "dcf_value": 41, "price": 40},     # +2.5%
+        {"ticker": "RICH", "dcf_value": 30, "price": 40},    # overvalued
+        {"ticker": "FAIR", "dcf_value": 40, "price": 40},    # flat
+        {"ticker": "NO", "dcf_value": None, "price": 40},
+        {"ticker": "BEST", "dcf_value": 80, "price": 40},    # +100%
+    ], limit=10)
+    assert [r["ticker"] for r in rows] == ["BEST", "CHEAP", "MEH"]
+    assert rows[0]["dcf_gap_pct"] == 100.0
+    top2 = em.rank_dcf_undervalued(
+        [{"ticker": "A", "dcf_value": 12, "price": 10},
+         {"ticker": "B", "dcf_value": 15, "price": 10},
+         {"ticker": "C", "dcf_value": 11, "price": 10}],
+        limit=2,
+    )
+    assert [r["ticker"] for r in top2] == ["B", "A"]
+
+
 def test_dcf_verdict_formulas():
     f = em._dcf_verdict_formulas("B44", "$B$21")
     assert f["label"].startswith("=")
