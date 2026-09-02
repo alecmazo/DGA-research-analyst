@@ -1325,6 +1325,38 @@ def _build_dcf_horizon(
     return years
 
 
+_FAIR_BAND = 0.05  # |DCF/last − 1| inside this band → FAIR VALUED
+
+
+def _dcf_verdict_formulas(dcf_ref: str, last_ref: str, band: float = _FAIR_BAND) -> dict[str, str]:
+    """Live Excel formulas: UNDERVALUED / FAIR VALUED / OVERVALUED vs last price."""
+    label = (
+        f'IF(OR({dcf_ref}="nm",{dcf_ref}="",{last_ref}="",{last_ref}=0),"—",'
+        f'IF(ABS({dcf_ref}/{last_ref}-1)<{band},"FAIR VALUED",'
+        f'IF({dcf_ref}>{last_ref},"UNDERVALUED","OVERVALUED")))'
+    )
+    byline = (
+        f'IF(OR({dcf_ref}="nm",{last_ref}="",{last_ref}=0),"—",'
+        f'IF(ABS({dcf_ref}/{last_ref}-1)<{band},'
+        f'"within ±5%  ·  "&TEXT({dcf_ref}-{last_ref},"$#,##0.00")&"/sh",'
+        f'TEXT(ABS({dcf_ref}/{last_ref}-1),"0.0%")'
+        f'&IF({dcf_ref}>{last_ref}," cheap  ·  "," rich  ·  ")'
+        f'&TEXT({dcf_ref}-{last_ref},"$#,##0.00")&"/sh"))'
+    )
+    gap_pct = (
+        f'IF(OR({dcf_ref}="nm",{last_ref}="",{last_ref}=0),"—",{dcf_ref}/{last_ref}-1)'
+    )
+    gap_px = (
+        f'IF(OR({dcf_ref}="nm",{last_ref}="",{last_ref}=0),"—",{dcf_ref}-{last_ref})'
+    )
+    return {
+        "label": "=" + label,
+        "byline": "=" + byline,
+        "gap_pct": "=" + gap_pct,
+        "gap_px": "=" + gap_px,
+    }
+
+
 def _dcf_price_formula(wacc_ref: str, g_ref: str, fcf_refs: list[str],
                        nd_ref: str, sh_ref: str) -> str:
     """Equity value / share at a given WACC and g, using explicit FCF years 1..n."""
@@ -1626,14 +1658,64 @@ def _valuation_sheet(
         (br + 13, "Report 12m PT", "=$B$22", _FMT_SH, False),
         (br + 14, "DCF vs report PT", f"=IF(OR(B{br+13}=0,B{br+10}=\"nm\"),\"nm\",B{br+10}/B{br+13}-1)", _FMT_PCT, False),
     ]
+    dcf_ref = f"B{br+10}"
+    last_ref = "$B$21"
+    vf = _dcf_verdict_formulas(dcf_ref, last_ref)
+    bridge.extend([
+        (br + 15, "DCF verdict (vs last)", vf["label"], None, True),
+        (br + 16, "Mispricing vs last", vf["gap_pct"], _FMT_PCT, True),
+        (br + 17, "$ / sh vs last", vf["gap_px"], _FMT_SH, False),
+    ])
     for row, lab, formula, fmt, gold in bridge:
         ws.cell(row, 1, lab).font = S["font_bold"] if gold else S["font"]
         ws.cell(row, 1).border = S["thin"]
         _put_formula(ws, row, 2, formula, fmt, S, gold=gold, bold=gold)
         ws.cell(row, 3, "").border = S["thin"]
 
+    # Quick label under the banner — recasts with the live DCF.
+    from openpyxl.formatting.rule import CellIsRule
+    from openpyxl.styles import Font, PatternFill
+    ws.row_dimensions[3].height = 22
+    lab = ws.cell(3, 1, "DCF vs last")
+    lab.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
+    lab.fill = S["section_fill"]
+    lab.alignment = S["center"]
+    lab.border = S["thin"]
+    vcell = ws.cell(3, 2, vf["label"])
+    vcell.font = Font(name="Calibri", size=14, bold=True, color=NAVY)
+    vcell.alignment = S["center"]
+    vcell.border = S["thin"]
+    vcell.fill = S["pale_gold"]
+    ws.merge_cells("C3:F3")
+    by = ws.cell(3, 3, vf["byline"])
+    by.font = S["font"]
+    by.alignment = S["left"]
+    by.border = S["thin"]
+    for col in range(3, 7):
+        ws.cell(3, col).border = S["thin"]
+        ws.cell(3, col).fill = S["pale_navy"]
+    ws.merge_cells("G3:I3")
+    hint = ws.cell(3, 7, "This DCF only  ·  fair = ±5% of last  ·  yellow inputs recast")
+    hint.font = S["font_muted"]
+    hint.alignment = S["left"]
+    ws.conditional_formatting.add("B3", CellIsRule(
+        operator="equal", formula=['"UNDERVALUED"'],
+        fill=PatternFill("solid", fgColor=GREEN_POS),
+        font=Font(name="Calibri", size=14, bold=True, color=WHITE),
+    ))
+    ws.conditional_formatting.add("B3", CellIsRule(
+        operator="equal", formula=['"OVERVALUED"'],
+        fill=PatternFill("solid", fgColor=RED_NEG),
+        font=Font(name="Calibri", size=14, bold=True, color=WHITE),
+    ))
+    ws.conditional_formatting.add("B3", CellIsRule(
+        operator="equal", formula=['"FAIR VALUED"'],
+        fill=PatternFill("solid", fgColor=GOLD),
+        font=Font(name="Calibri", size=14, bold=True, color=NAVY),
+    ))
+
     # Gordon note
-    note_r = br + 15
+    note_r = br + 18
     ws.merge_cells(start_row=note_r, start_column=1, end_row=note_r + 1, end_column=3)
     ws.cell(
         note_r, 1,

@@ -141,6 +141,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **PDF report chrome** | **`ui558-20260831-pdf-metrics`** | Drop colored engine chip; compact metrics; larger Research Report title |
 | **Saved-report Excel model** | **`ui559-20260902-excel-model`** | EXCEL button builds IB workbook (financials + pro forma + valuation) and saves to Dropbox `/Apps/DGA Research/Reports/` |
 | **Excel DCF detail** | **`ui560-20260902-excel-dcf`** | Valuation sheet: full WACC build, DCF ladder, live WACC×g sensitivity, pro forma years |
+| **Excel DCF verdict** | **`ui561-20260902-dcf-verdict`** | Valuation: UNDERVALUED / FAIR VALUED / OVERVALUED vs last, from this DCF |
 
 ### One-click handoff (preferred)
 
@@ -313,4 +314,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-02 · Agent: Grok Build · Live: `ui560-20260902-excel-dcf` · Next: `ui561-YYYYMMDD-slug`*
+*Last updated: 2026-09-02 · Agent: Grok Build · Live: `ui561-20260902-dcf-verdict` · Next: `ui562-YYYYMMDD-slug`*

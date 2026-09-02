@@ -270,6 +270,12 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
     assert abs(val.cell(labels["Risk-free rate"], 2).value - 0.04) < 1e-9
     assert "Terminal growth (g)" in labels
     assert "DCF value / share" in labels
+    assert val.cell(3, 1).value == "DCF vs last"
+    v3 = str(val.cell(3, 2).value or "")
+    assert "UNDERVALUED" in v3 and "OVERVALUED" in v3 and "FAIR VALUED" in v3
+    assert "DCF verdict (vs last)" in labels
+    assert "Mispricing vs last" in labels
+    assert "$ / sh vs last" in labels
     # Pro forma years header includes FY2026E
     pf_headers = [val.cell(5, c).value for c in range(5, 14)]
     assert "FY2026E" in pf_headers
@@ -299,6 +305,16 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
     sc = wb["Scenarios"]
     cases = [sc.cell(r, 1).value for r in range(5, 10)]
     assert "Bull" in cases and "Base" in cases and "Bear" in cases
+
+
+def test_dcf_verdict_formulas():
+    f = em._dcf_verdict_formulas("B44", "$B$21")
+    assert f["label"].startswith("=")
+    assert "UNDERVALUED" in f["label"]
+    assert "OVERVALUED" in f["label"]
+    assert "FAIR VALUED" in f["label"]
+    assert "0.05" in f["label"]
+    assert "cheap" in f["byline"] and "rich" in f["byline"]
 
 
 def test_to_model_units():
