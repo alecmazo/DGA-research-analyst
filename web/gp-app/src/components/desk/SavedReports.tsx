@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
-import { api, downloadAuth, type Quote, type SavedReport } from '@/lib/api'
+import { api, type Quote, type SavedReport } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
 import styles from './deskWidgets.module.css'
@@ -43,6 +43,47 @@ function freshnessMs(rep: SavedReport): number {
 }
 
 /** Open the engine that actually just ran, not always Grok. */
+function stylePill(style?: string | null): {
+  label: string
+  cls: string
+  hint: string
+} | null {
+  switch (String(style || '').toLowerCase()) {
+    case 'value':
+      return {
+        label: 'VALUE',
+        cls: styles.pillStyleValue,
+        hint: 'DCF undervalued — cheap on the model',
+      }
+    case 'growth':
+      return {
+        label: 'GROWTH',
+        cls: styles.pillStyleGrowth,
+        hint: 'Forward revenue/earnings growth; not yet cheap on DCF',
+      }
+    case 'garp':
+      return {
+        label: 'GARP',
+        cls: styles.pillStyleGarp,
+        hint: 'DCF cheap and growing — growth at a reasonable price',
+      }
+    case 'expensive':
+      return {
+        label: 'RICH',
+        cls: styles.pillStyleRich,
+        hint: 'DCF above last — rich vs the model',
+      }
+    case 'core':
+      return {
+        label: 'CORE',
+        cls: styles.pillStyleCore,
+        hint: 'Fair on DCF, no standout forward growth',
+      }
+    default:
+      return null
+  }
+}
+
 function preferredProvider(rep: SavedReport): string {
   const available = new Set(rep.providers || [])
   const cands: Array<[string, number]> = [
@@ -70,7 +111,6 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [busyTk, setBusyTk] = useState<string | null>(null)
-  const [excelTk, setExcelTk] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<'recent' | 'upside'>('recent')
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
 
@@ -167,24 +207,6 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
     }
     setSortKey(key)
     setSortDir('desc')
-  }
-
-  const downloadExcel = async (tk: string, e: MouseEvent, provider?: string) => {
-    e.stopPropagation()
-    if (excelTk) return
-    setExcelTk(tk)
-    setErr(null)
-    try {
-      const q = provider ? `?provider=${encodeURIComponent(provider)}` : ''
-      await downloadAuth(
-        `/api/download/${encodeURIComponent(tk)}/xlsx${q}`,
-        `${tk}_DGA_Model.xlsx`,
-      )
-    } catch (err) {
-      setErr(err instanceof Error ? err.message : 'Excel export failed')
-    } finally {
-      setExcelTk(null)
-    }
   }
 
   const remove = async (tk: string, e: MouseEvent) => {
@@ -363,17 +385,18 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                         {rep.has_docx !== false && (
                           <span className={`${styles.pill} ${styles.pillDoc}`}>DOC</span>
                         )}
-                        <button
-                          type="button"
-                          className={`${styles.pill} ${styles.pillExcel}`}
-                          title="Download IB Excel model (financials, pro forma, valuation) · also saved to Dropbox /Reports"
-                          disabled={excelTk === rep.ticker}
-                          onClick={(e) =>
-                            void downloadExcel(rep.ticker, e, preferredProvider(rep))
-                          }
-                        >
-                          {excelTk === rep.ticker ? '…' : 'EXCEL'}
-                        </button>
+                        {(() => {
+                          const st = stylePill(rep.stock_style)
+                          if (!st) return null
+                          return (
+                            <span
+                              className={`${styles.pill} ${st.cls}`}
+                              title={rep.stock_style_note || st.hint}
+                            >
+                              {st.label}
+                            </span>
+                          )
+                        })()}
                         {rep.has_pptx && (
                           <span
                             className={`${styles.pill} ${styles.pillPpt}${

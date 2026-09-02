@@ -2688,10 +2688,11 @@ html[data-theme="dark"] .bl-inline-input:focus {
 
 
 /* ── Report thesis history (ui381) ───────────────────────────── */
-.rep-pill-xlsx {
-  background: #217346 !important;
-  color: #fff !important;
-}
+.rep-pill-style-value { background: #0A1628 !important; color: #C9A84C !important; }
+.rep-pill-style-growth { background: #1d4ed8 !important; color: #fff !important; }
+.rep-pill-style-garp { background: #C9A84C !important; color: #0A1628 !important; }
+.rep-pill-style-rich { background: #9B1C1C !important; color: #fff !important; }
+.rep-pill-style-core { background: #e2e8f0 !important; color: #334155 !important; }
 .rep-pill-ver {
   background: var(--brand-50) !important;
   color: var(--brand-800) !important;

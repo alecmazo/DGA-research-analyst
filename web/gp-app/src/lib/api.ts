@@ -267,6 +267,12 @@ export type SavedReport = {
   deepseek_price_target?: number | null
   kimi_upside_pct?: number | null
   deepseek_upside_pct?: number | null
+  /** Desk style: value | growth | garp | expensive | core */
+  stock_style?: string | null
+  stock_style_note?: string | null
+  dcf_value?: number | null
+  fwd_rev_growth?: number | null
+  fwd_eps_growth?: number | null
 }
 
 export type JobStatus = {

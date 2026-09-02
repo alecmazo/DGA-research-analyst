@@ -615,14 +615,34 @@
   cursor: default;
 }
 
-.pillExcel {
-  background: #217346;
-  color: #fff;
+.pillStyleValue {
+  background: #0a1628;
+  color: #c9a84c;
+  cursor: default;
 }
 
-.pillExcel:disabled {
-  opacity: 0.55;
-  cursor: wait;
+.pillStyleGrowth {
+  background: #1d4ed8;
+  color: #fff;
+  cursor: default;
+}
+
+.pillStyleGarp {
+  background: #c9a84c;
+  color: #0a1628;
+  cursor: default;
+}
+
+.pillStyleRich {
+  background: #9b1c1c;
+  color: #fff;
+  cursor: default;
+}
+
+.pillStyleCore {
+  background: #e2e8f0;
+  color: #334155;
+  cursor: default;
 }
 
 .pillVer {

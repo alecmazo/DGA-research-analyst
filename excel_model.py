@@ -246,6 +246,169 @@ def extract_forecasts(tables: list[dict]) -> dict[int, dict[str, float]]:
     return out
 
 
+def extract_actuals(tables: list[dict]) -> dict[int, dict[str, float]]:
+    """Same as extract_forecasts, but FY actual columns (not E / TTM)."""
+    out: dict[int, dict[str, float]] = {}
+    for tbl in tables:
+        headers = tbl.get("headers") or []
+        for col_i, h in enumerate(headers):
+            if col_i == 0:
+                continue
+            if _col_is_estimate(h) or _col_is_ttm(h):
+                continue
+            year = _year_from_header(h)
+            if year is None:
+                continue
+            bucket = out.setdefault(year, {})
+            for row in tbl.get("rows") or []:
+                if not row:
+                    continue
+                key = _metric_from_label(row[0] if row else "")
+                if not key or col_i >= len(row):
+                    continue
+                val = parse_cell_number(row[col_i])
+                if val is None:
+                    continue
+                bucket[key] = val
+    return out
+
+
+def _cagr(start: Optional[float], end: Optional[float], years: int) -> Optional[float]:
+    if start is None or end is None or not years or start <= 0:
+        return None
+    try:
+        return (end / start) ** (1.0 / years) - 1.0
+    except (ValueError, ZeroDivisionError, OverflowError):
+        return None
+
+
+def forward_growth(tables: list[dict]) -> dict[str, Optional[float]]:
+    """Near-term and multi-year forward revenue / EPS growth from report tables."""
+    act = extract_actuals(tables)
+    est = extract_forecasts(tables)
+    rev_g: Optional[float] = None
+    eps_g: Optional[float] = None
+
+    def _pick(cur: Optional[float], nxt: Optional[float]) -> Optional[float]:
+        if nxt is None:
+            return cur
+        if cur is None:
+            return nxt
+        # Prefer the more conservative (lower) of two positive rates; if signs
+        # differ, keep the near-term figure.
+        if cur >= 0 and nxt >= 0:
+            return max(cur, nxt)
+        return nxt if abs(nxt) > abs(cur) else cur
+
+    if act and est:
+        ay, ey = max(act), min(est)
+        n = max(1, ey - ay)
+        rev_g = _pick(rev_g, _cagr(act[ay].get("Revenue"), est[ey].get("Revenue"), n))
+        eps_g = _pick(eps_g, _cagr(act[ay].get("DilutedEPS"), est[ey].get("DilutedEPS"), n))
+    years = sorted(est.keys())
+    if len(years) >= 2:
+        y0, y1 = years[0], years[1]
+        r0, r1 = est[y0].get("Revenue"), est[y1].get("Revenue")
+        if r0 and r1 and r0 > 0:
+            rev_g = _pick(rev_g, r1 / r0 - 1.0)
+        e0, e1 = est[y0].get("DilutedEPS"), est[y1].get("DilutedEPS")
+        if e0 and e1 and e0 > 0:
+            eps_g = _pick(eps_g, e1 / e0 - 1.0)
+        last_y = years[-1]
+        span = last_y - y0
+        if span >= 2:
+            rev_g = _pick(rev_g, _cagr(est[y0].get("Revenue"), est[last_y].get("Revenue"), span))
+            eps_g = _pick(eps_g, _cagr(est[y0].get("DilutedEPS"), est[last_y].get("DilutedEPS"), span))
+    return {"rev": rev_g, "eps": eps_g}
+
+
+VALUE_CUT = 0.05    # |DCF/last − 1| ≥ 5% → cheap / rich
+GROWTH_CUT = 0.15   # 15%+ forward rev or EPS → growth
+
+STYLE_LABELS = {
+    "value": "VALUE",
+    "growth": "GROWTH",
+    "garp": "GARP",
+    "expensive": "RICH",
+    "core": "CORE",
+}
+
+
+def style_from_metrics(
+    dcf_value: Optional[float],
+    last: Optional[float],
+    rev_g: Optional[float] = None,
+    eps_g: Optional[float] = None,
+) -> dict[str, Any]:
+    """Desk style: VALUE / GROWTH / GARP / RICH / CORE from DCF vs last + fwd growth."""
+    dcf_gap = None
+    if dcf_value and last and last > 0:
+        dcf_gap = dcf_value / float(last) - 1.0
+    undervalued = dcf_gap is not None and dcf_gap >= VALUE_CUT
+    overvalued = dcf_gap is not None and dcf_gap <= -VALUE_CUT
+    growing = (rev_g is not None and rev_g >= GROWTH_CUT) or (
+        eps_g is not None and eps_g >= GROWTH_CUT
+    )
+    if dcf_gap is None and not growing:
+        style = None
+    elif undervalued and growing:
+        style = "garp"
+    elif undervalued:
+        style = "value"
+    elif growing:
+        style = "growth"
+    elif overvalued:
+        style = "expensive"
+    else:
+        style = "core"
+
+    bits: list[str] = []
+    if dcf_gap is not None:
+        bits.append(f"DCF {dcf_gap * 100:+.0f}% vs last")
+    elif dcf_value is None:
+        bits.append("No DCF $/sh in report")
+    if rev_g is not None:
+        bits.append(f"fwd rev {rev_g * 100:+.0f}%")
+    if eps_g is not None:
+        bits.append(f"fwd EPS {eps_g * 100:+.0f}%")
+    explain = {
+        "value": "DCF undervalued — cheap on the model",
+        "growth": "Forward revenue/earnings growth; not yet cheap on DCF",
+        "garp": "DCF cheap and growing — growth at a reasonable price",
+        "expensive": "DCF above last — rich vs the model",
+        "core": "Fair on DCF, no standout forward growth",
+    }
+    note = (explain.get(style) or "Not enough DCF / growth to classify")
+    if bits:
+        note = note + " · " + " · ".join(bits)
+    return {
+        "style": style,
+        "label": STYLE_LABELS.get(style or "", ""),
+        "note": note,
+        "dcf_value": dcf_value,
+        "dcf_gap": dcf_gap,
+        "fwd_rev_growth": rev_g,
+        "fwd_eps_growth": eps_g,
+    }
+
+
+def classify_stock_style(
+    md: str,
+    *,
+    summary: Optional[dict] = None,
+    price: Optional[float] = None,
+) -> dict[str, Any]:
+    """Parse a saved report and return style_from_metrics()."""
+    summary = summary if isinstance(summary, dict) else {}
+    tables = parse_md_tables(md or "")
+    dcf = extract_dcf(md or "")
+    wacc = extract_wacc_build(tables)
+    implied = _f(dcf.get("implied_price")) or _f(wacc.get("implied_price"))
+    last = _f(price) or _f(summary.get("current_price"))
+    g = forward_growth(tables)
+    return style_from_metrics(implied, last, g.get("rev"), g.get("eps"))
+
+
 def parse_embedded_number(raw: str) -> Optional[float]:
     """Like parse_cell_number but finds the first number anywhere in the cell."""
     v = parse_cell_number(raw)

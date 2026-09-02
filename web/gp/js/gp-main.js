@@ -6036,9 +6036,20 @@
                 'onclick="event.stopPropagation();">×</button>' +
             '</span>' +
             (rep.has_docx !== false ? '<span class="rep-pill rep-pill-doc">DOC</span>' : '') +
-            '<span class="rep-pill rep-pill-xlsx rep-pill-clickable" data-rep-xlsx="' + rep.ticker + '"'
-              + ' title="Download IB Excel model (financials, pro forma, valuation) · Dropbox /Reports"'
-              + ' onclick="event.stopPropagation();">EXCEL</span>' +
+            (function () {
+              const st = String(rep.stock_style || '').toLowerCase();
+              const map = {
+                value:     { lab: 'VALUE',  cls: 'rep-pill-style-value', hint: 'DCF undervalued' },
+                growth:    { lab: 'GROWTH', cls: 'rep-pill-style-growth', hint: 'Forward growth, not yet cheap on DCF' },
+                garp:      { lab: 'GARP',   cls: 'rep-pill-style-garp', hint: 'DCF cheap and growing' },
+                expensive: { lab: 'RICH',   cls: 'rep-pill-style-rich', hint: 'DCF above last' },
+                core:      { lab: 'CORE',   cls: 'rep-pill-style-core', hint: 'Fair on DCF' },
+              };
+              const m = map[st];
+              if (!m) return '';
+              const title = (rep.stock_style_note || m.hint).replace(/"/g, '&quot;');
+              return '<span class="rep-pill ' + m.cls + '" title="' + title + '">' + m.lab + '</span>';
+            })() +
             (rep.has_pptx
               ? '<span class="rep-pill rep-pill-ppt' + (rep.pptx_stale ? ' stale' : '') + '"'
                 + ' title="' + (rep.pptx_stale
@@ -6182,7 +6193,6 @@
           if (e.target.closest('[data-rep-delete]')) return;
           if (e.target.closest('[data-compare-ticker]')) return;
           if (e.target.closest('[data-rep-open]')) return;
-          if (e.target.closest('[data-rep-xlsx]')) return;
           if (e.target.closest('[data-rep-retry]')) return;
           if (e.target.closest('[data-rep-gf]')) return;   // ticker → GuruFocus
           openReport(tr.getAttribute('data-ticker'));
@@ -6194,20 +6204,6 @@
         span.addEventListener('click', (e) => {
           e.stopPropagation();
           openGuruFocus(span.getAttribute('data-rep-gf'));
-        });
-      });
-
-      tbody.querySelectorAll('[data-rep-xlsx]').forEach(span => {
-        span.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const tk = span.getAttribute('data-rep-xlsx');
-          if (!tk) return;
-          span.textContent = '…';
-          downloadViaFetch(
-            '/api/download/' + encodeURIComponent(tk) + '/xlsx',
-            tk + '_DGA_Model.xlsx'
-          );
-          setTimeout(function () { span.textContent = 'EXCEL'; }, 2500);
         });
       });
 

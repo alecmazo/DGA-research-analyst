@@ -7544,7 +7544,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui561-20260902-dcf-verdict"
+WEB_BUILD_VERSION = "ui562-20260902-style-pills"
 
 
 @app.get("/api/build")
@@ -13356,6 +13356,98 @@ def _metric_history(ticker: str, keys: list[str], limit: int = 36) -> dict:
     return out
 
 
+def _stamp_stock_style(ticker: str, md_text: str, summary: dict | None = None) -> None:
+    """Classify VALUE/GROWTH/GARP/RICH/CORE from the saved report and store it."""
+    tk = (ticker or "").strip().upper()
+    if not tk or not (md_text or "").strip():
+        return
+    if not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        import excel_model as _em
+        st = _em.classify_stock_style(md_text, summary=summary or {})
+    except Exception as e:
+        print(f"[stock-style] classify {tk}: {e!s:.160}", flush=True)
+        return
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE analyst_reports
+                   SET stock_style = %s,
+                       stock_style_note = %s,
+                       dcf_value = %s,
+                       fwd_rev_growth = %s,
+                       fwd_eps_growth = %s
+                 WHERE ticker = %s
+                """,
+                (
+                    st.get("style"),
+                    (st.get("note") or "")[:400] or None,
+                    st.get("dcf_value"),
+                    st.get("fwd_rev_growth"),
+                    st.get("fwd_eps_growth"),
+                    tk,
+                ),
+            )
+        print(f"[stock-style] {tk} → {st.get('label') or '—'} ({st.get('note') or ''})"[0:180],
+              flush=True)
+    except Exception as e:
+        print(f"[stock-style] update {tk}: {e!s:.160}", flush=True)
+
+
+def _backfill_stock_styles(limit: int = 48) -> None:
+    """Background: classify saved reports that have no style yet."""
+    if not _PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        _ensure_analyst_reports_table_schema()
+    except Exception:
+        pass
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT ticker, report_md, report_md_claude,
+                       report_md_kimi, report_md_deepseek,
+                       rating, price_target, upside_pct
+                  FROM analyst_reports
+                 WHERE archived IS NOT TRUE
+                   AND stock_style IS NULL
+                 ORDER BY GREATEST(
+                    COALESCE(generated_at, TIMESTAMP '1970-01-01'),
+                    COALESCE(claude_generated_at, TIMESTAMP '1970-01-01'),
+                    COALESCE(last_attempt_at, TIMESTAMP '1970-01-01')
+                 ) DESC NULLS LAST
+                 LIMIT %s
+                """,
+                (int(limit),),
+            )
+            rows = cur.fetchall() or []
+    except Exception as e:
+        print(f"[stock-style] backfill select: {e!s:.160}", flush=True)
+        return
+    n = 0
+    for r in rows:
+        md = (
+            r.get("report_md") or r.get("report_md_claude")
+            or r.get("report_md_kimi") or r.get("report_md_deepseek") or ""
+        )
+        if len(md) < 400:
+            continue
+        try:
+            _stamp_stock_style(r["ticker"], md, {
+                "rating": r.get("rating"),
+                "price_target": r.get("price_target"),
+                "upside_pct": r.get("upside_pct"),
+            })
+            n += 1
+        except Exception:
+            continue
+    if n:
+        print(f"[stock-style] backfilled {n} report(s)", flush=True)
+
+
 def _db_upsert_report(
     ticker: str,
     md_text: str,
@@ -13650,6 +13742,10 @@ def _db_upsert_report(
                 }, {"provider": provider, "rating": summary.get("rating")})
             except Exception:
                 pass
+            try:
+                _stamp_stock_style(ticker, md_text, summary)
+            except Exception as _se:
+                print(f"[stock-style] stamp {ticker}: {_se!s:.160}", flush=True)
 
             if attempt > 1:
                 print(f"✅ [db-upsert] {ticker}/{provider} committed on attempt {attempt} "
@@ -14279,6 +14375,10 @@ def list_reports(request: Request = None):
                 _backfill_report_dates()
             except Exception as e:
                 print(f"[reports] bg date backfill: {e!s:.120}", flush=True)
+            try:
+                _backfill_stock_styles()
+            except Exception as e:
+                print(f"[reports] bg stock-style backfill: {e!s:.120}", flush=True)
 
         threading.Thread(target=_bg_hydrate, daemon=True, name="reports-hydrate").start()
 
@@ -14301,7 +14401,9 @@ def list_reports(request: Request = None):
                            kimi_rating, kimi_price_target, kimi_upside_pct,
                            deepseek_rating, deepseek_price_target, deepseek_upside_pct,
                            COALESCE(version_count, 1) AS version_count,
-                           delta_from_prior
+                           delta_from_prior,
+                           stock_style, stock_style_note, dcf_value,
+                           fwd_rev_growth, fwd_eps_growth
                     FROM analyst_reports
                     WHERE archived IS NOT TRUE
                     ORDER BY GREATEST(
@@ -14413,6 +14515,11 @@ def list_reports(request: Request = None):
                         "last_attempt_at":     r["last_attempt_at"].isoformat() if r.get("last_attempt_at") else None,
                         "last_attempt_status": r.get("last_attempt_status"),
                         "last_attempt_error":  r.get("last_attempt_error"),
+                        "stock_style":         r.get("stock_style"),
+                        "stock_style_note":    r.get("stock_style_note"),
+                        "dcf_value":           float(r["dcf_value"]) if r.get("dcf_value") is not None else None,
+                        "fwd_rev_growth":      float(r["fwd_rev_growth"]) if r.get("fwd_rev_growth") is not None else None,
+                        "fwd_eps_growth":      float(r["fwd_eps_growth"]) if r.get("fwd_eps_growth") is not None else None,
                     })
                 # Prices from process cache + market_quotes store ONLY.
                 # Full-book Yahoo here blocked the Saved Reports panel for
@@ -14454,6 +14561,21 @@ def list_reports(request: Request = None):
                                 try:
                                     row["upside_pct"] = round(
                                         (float(row["price_target"]) - px) / px * 100.0, 2)
+                                except Exception:
+                                    pass
+                            # Re-cut VALUE/GROWTH vs live last (DCF $ stored at persist).
+                            if row.get("dcf_value") is not None:
+                                try:
+                                    import excel_model as _em
+                                    live = _em.style_from_metrics(
+                                        row.get("dcf_value"),
+                                        px,
+                                        row.get("fwd_rev_growth"),
+                                        row.get("fwd_eps_growth"),
+                                    )
+                                    if live.get("style"):
+                                        row["stock_style"] = live["style"]
+                                        row["stock_style_note"] = live.get("note")
                                 except Exception:
                                     pass
                 except Exception as e:
@@ -17193,6 +17315,12 @@ def _ensure_analyst_reports_table(conn) -> None:
         ("deepseek_price_target", "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS deepseek_price_target NUMERIC"),
         ("deepseek_upside_pct",   "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS deepseek_upside_pct NUMERIC"),
         ("deepseek_report_date",  "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS deepseek_report_date TEXT"),
+        # Desk style pill (VALUE / GROWTH / GARP / RICH / CORE)
+        ("stock_style",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style VARCHAR(16)"),
+        ("stock_style_note",  "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style_note TEXT"),
+        ("dcf_value",         "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS dcf_value NUMERIC"),
+        ("fwd_rev_growth",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS fwd_rev_growth NUMERIC"),
+        ("fwd_eps_growth",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS fwd_eps_growth NUMERIC"),
     ]:
         _safe(sql, f"add_{col_name}")
 

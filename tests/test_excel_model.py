@@ -307,6 +307,27 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
     assert "Bull" in cases and "Base" in cases and "Bear" in cases
 
 
+def test_classify_stock_style():
+    st = em.classify_stock_style(
+        SAMPLE_MD, summary={"current_price": 40.0},
+    )
+    # DCF ~$47 vs $40 = cheap; fwd rev 1000→1200 = +20% → GARP
+    assert st["style"] == "garp"
+    assert st["label"] == "GARP"
+    assert st["dcf_gap"] is not None and st["dcf_gap"] > 0.05
+    assert st["fwd_rev_growth"] is not None and st["fwd_rev_growth"] >= 0.15
+    cheap = em.style_from_metrics(50.0, 40.0, 0.05, 0.04)
+    assert cheap["style"] == "value"
+    grow = em.style_from_metrics(40.0, 40.0, 0.25, None)
+    assert grow["style"] == "growth"
+    rich = em.style_from_metrics(30.0, 40.0, 0.02, None)
+    assert rich["style"] == "expensive" and rich["label"] == "RICH"
+    core = em.style_from_metrics(40.0, 40.0, 0.04, None)
+    assert core["style"] == "core"
+    empty = em.style_from_metrics(None, 40.0, None, None)
+    assert empty["style"] is None
+
+
 def test_dcf_verdict_formulas():
     f = em._dcf_verdict_formulas("B44", "$B$21")
     assert f["label"].startswith("=")

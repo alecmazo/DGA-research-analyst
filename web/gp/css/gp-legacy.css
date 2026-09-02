@@ -1199,7 +1199,11 @@
     margin-left: 5px; vertical-align: middle;
   }
   .rep-pill-doc { background: var(--navy-mid); color: var(--navy); border: 1px solid var(--panel-edge); }
-  .rep-pill-xlsx { background: #217346; color: #fff; }
+  .rep-pill-style-value { background: #0A1628; color: #C9A84C; }
+  .rep-pill-style-growth { background: #1d4ed8; color: #fff; }
+  .rep-pill-style-garp { background: #C9A84C; color: #0A1628; }
+  .rep-pill-style-rich { background: #9B1C1C; color: #fff; }
+  .rep-pill-style-core { background: #e2e8f0; color: #334155; }
   .rep-pill-ppt { background: var(--blue); color: var(--navy); }
   /* LLM provider badge — shown next to DOC/PPT so user knows which engine
      produced (or both produced) this saved report */
