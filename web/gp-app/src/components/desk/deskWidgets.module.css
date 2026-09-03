@@ -1625,6 +1625,35 @@ a.pulseHeadline:hover {
   font-weight: 700;
 }
 
+.pulseValRow {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 1px;
+}
+
+.valChip {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.valUnder0 { background: #d1fae5; color: #14532d; }
+.valUnder1 { background: #6ee7b7; color: #064e3b; }
+.valUnder2 { background: #059669; color: #ecfdf5; }
+.valUnder3 { background: #047857; color: #ecfdf5; }
+.valOver0 { background: #fee2e2; color: #7f1d1d; }
+.valOver1 { background: #fca5a5; color: #7f1d1d; }
+.valOver2 { background: #dc2626; color: #fef2f2; }
+.valOver3 { background: #b91c1c; color: #fef2f2; }
+.valFair { background: #e2e8f0; color: #0f172a; }
+.valNone { background: #f1f5f9; color: #64748b; }
+
 .pulseHeadList {
   padding: 2px 12px 10px;
   border-bottom: 1px solid var(--border-subtle);

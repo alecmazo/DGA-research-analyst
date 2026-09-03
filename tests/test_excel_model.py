@@ -270,9 +270,14 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
     assert abs(val.cell(labels["Risk-free rate"], 2).value - 0.04) < 1e-9
     assert "Terminal growth (g)" in labels
     assert "DCF value / share" in labels
-    assert val.cell(3, 1).value == "DCF vs last"
-    v3 = str(val.cell(3, 2).value or "")
+    assert val.cell(3, 1).value == "vs last →"
+    assert val.cell(3, 2).value == "DCF"
+    v3 = str(val.cell(3, 3).value or "")
     assert "UNDERVALUED" in v3 and "OVERVALUED" in v3 and "FAIR VALUED" in v3
+    # Row-3 verdict cells use dark ink on a light fill (never white-on-white).
+    c3_font = (val.cell(3, 3).font.color.rgb or "") if val.cell(3, 3).font and val.cell(3, 3).font.color else ""
+    c3_fill = (val.cell(3, 3).fill.fgColor.rgb or "") if val.cell(3, 3).fill and val.cell(3, 3).fill.fgColor else ""
+    assert "FFFFFF" not in str(c3_font).upper() or "E2E8F0" in str(c3_fill).upper()
     assert "DCF verdict (vs last)" in labels
     assert "Mispricing vs last" in labels
     assert "$ / sh vs last" in labels
@@ -367,6 +372,72 @@ def test_rank_dcf_undervalued():
         limit=2,
     )
     assert [r["ticker"] for r in top2] == ["B", "A"]
+
+
+def test_extract_valuation_approaches_not_blended():
+    apps = em.extract_valuation_approaches(
+        SAMPLE_MD, last=40.0, pt=48.0,
+    )
+    ids = [a["id"] for a in apps]
+    assert "dcf" in ids
+    assert "comps" in ids
+    assert "street" in ids
+    assert "bull" in ids and "base" in ids and "bear" in ids
+    # No weighted blend row
+    assert not any("blend" in (a["name"] or "").lower() for a in apps)
+    dcf = next(a for a in apps if a["id"] == "dcf")
+    assert dcf["verdict"] == "UNDERVALUED"
+    assert dcf["tone"] == "under"
+    assert dcf["gap"] is not None and dcf["gap"] > 0.05
+    bear = next(a for a in apps if a["id"] == "bear")
+    assert bear["verdict"] == "OVERVALUED"
+    comps = next(a for a in apps if a["id"] == "comps")
+    assert abs(comps["value"] - 50.0) < 1e-9
+    # recut vs a much higher last → DCF flips to overvalued
+    recut = em.recut_approaches_vs_last([dcf], 80.0)
+    assert recut[0]["verdict"] == "OVERVALUED"
+    fair = em.valuation_verdict(41.0, 40.0)
+    assert fair["verdict"] == "FAIR VALUED" and fair["tone"] == "fair"
+    fill, ink = em.verdict_palette("under", 0.2)
+    assert ink.upper() != "FFFFFF"
+    fill_x, ink_x = em.verdict_palette("under", 1.0)
+    assert fill_x.upper() != "FFFFFF" or ink_x.upper() != "FFFFFF"
+
+
+def test_workbook_approaches_table():
+    import openpyxl
+    from io import BytesIO
+    raw = em.build_ib_model_bytes(
+        "ACME",
+        financials=_financials(),
+        report_md=SAMPLE_MD,
+        summary={"rating": "Buy", "price_target": 48.0, "current_price": 40.0},
+        quote={"price": 40.0},
+    )
+    wb = openpyxl.load_workbook(BytesIO(raw), data_only=False)
+    val = wb["Valuation"]
+    blob = " ".join(
+        str(val.cell(r, c).value or "")
+        for r in range(1, 90) for c in range(1, 7)
+    )
+    assert "APPROACHES vs LAST" in blob
+    assert "Comps" in blob
+    assert "Street consensus" in blob
+    assert "not a weighted blend" in blob.lower() or "not a weighted" in blob.lower()
+    # Comps verdict cell is painted, not white-on-white
+    comps_r = None
+    for r in range(1, 90):
+        if val.cell(r, 1).value == "Comps":
+            comps_r = r
+            break
+    assert comps_r
+    verd = val.cell(comps_r, 5)
+    assert verd.value == "UNDERVALUED"
+    fill = str(getattr(verd.fill.fgColor, "rgb", "") or "")
+    ink = str(getattr(verd.font.color, "rgb", "") or "")
+    assert fill
+    assert not (ink.endswith("FFFFFF") and fill.endswith("FFFFFF"))
+    assert not (ink.endswith("FFFFFF") and fill.endswith("FBF6E8"))
 
 
 def test_dcf_verdict_formulas():

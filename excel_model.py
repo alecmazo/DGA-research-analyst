@@ -323,6 +323,7 @@ def forward_growth(tables: list[dict]) -> dict[str, Optional[float]]:
 
 
 VALUE_CUT = 0.05    # |DCF/last − 1| ≥ 5% → cheap / rich
+_FAIR_BAND = 0.05   # |value/last − 1| inside this band → FAIR VALUED
 GROWTH_CUT = 0.15   # 15%+ forward rev or EPS → growth
 
 STYLE_LABELS = {
@@ -882,6 +883,232 @@ def extract_derivation_table(tables: list[dict]) -> Optional[dict]:
         if "method" in headers and "weight" in headers:
             return tbl
     return None
+
+
+def valuation_verdict(
+    value: Optional[float],
+    last: Optional[float],
+    *,
+    band: float = _FAIR_BAND,
+) -> dict[str, Any]:
+    """UNDERVALUED / FAIR VALUED / OVERVALUED vs last. No blending.
+
+    intensity 0..1 scales how far the name is from fair (for color gradients).
+    Positive gap = cheap (value > last) = undervalued.
+    """
+    v = _f(value)
+    px = _f(last)
+    if v is None or px is None or v <= 0 or px <= 0:
+        return {
+            "verdict": None, "label": "—", "tone": "none",
+            "gap": None, "intensity": 0.0, "value": v, "last": px,
+        }
+    gap = v / px - 1.0
+    ag = abs(gap)
+    if ag < band:
+        tone, label = "fair", "FAIR VALUED"
+        intensity = 0.0
+    elif gap > 0:
+        tone, label = "under", "UNDERVALUED"
+        intensity = min(1.0, max(0.2, (ag - band) / 0.35))
+    else:
+        tone, label = "over", "OVERVALUED"
+        intensity = min(1.0, max(0.2, (ag - band) / 0.35))
+    return {
+        "verdict": label,
+        "label": label,
+        "tone": tone,
+        "gap": gap,
+        "intensity": round(float(intensity), 3),
+        "value": v,
+        "last": px,
+    }
+
+
+def verdict_palette(tone: Optional[str], intensity: Optional[float] = 0.0) -> tuple[str, str]:
+    """(fill_hex, font_hex). Dark text on light fills — never white-on-white."""
+    i = 0.0 if intensity is None else max(0.0, min(1.0, float(intensity)))
+    t = (tone or "").lower()
+    if t in ("under", "undervalued"):
+        if i < 0.35:
+            return "D1FAE5", "14532D"
+        if i < 0.60:
+            return "6EE7B7", "064E3B"
+        if i < 0.80:
+            return "059669", "ECFDF5"
+        return "047857", "ECFDF5"
+    if t in ("over", "overvalued"):
+        if i < 0.35:
+            return "FEE2E2", "7F1D1D"
+        if i < 0.60:
+            return "FCA5A5", "7F1D1D"
+        if i < 0.80:
+            return "DC2626", "FEF2F2"
+        return "B91C1C", "FEF2F2"
+    if t in ("fair", "fair valued"):
+        return "E2E8F0", "0F172A"
+    return "F1F5F9", "0F172A"
+
+
+def _approach_id(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+    aliases = {
+        "dcfvalueshare": "dcf", "dcfvalue": "dcf", "impliedshareprice": "dcf",
+        "discountedcashflow": "dcf", "dcfintrinsic": "dcf",
+        "comparable": "comps", "comparables": "comps", "tradingcomps": "comps",
+        "peermultiples": "comps", "multiples": "comps",
+        "streetconsensus": "street", "consensus": "street", "analystpt": "street",
+        "bullcase": "bull", "basecase": "base", "bearcase": "bear",
+        "report12mpt": "report_pt", "12monthpricetarget": "report_pt",
+        "dgatarget": "report_pt",
+    }
+    return aliases.get(s, s or "other")
+
+
+def _street_avg_pt(tbl: Optional[dict]) -> tuple[Optional[float], int]:
+    if not tbl:
+        return None, 0
+    headers = [h.lower() for h in (tbl.get("headers") or [])]
+    idx = None
+    for i, h in enumerate(headers):
+        if "target" in h or re.search(r"\bpt\b", h) or "price target" in h:
+            idx = i
+            break
+    if idx is None:
+        return None, 0
+    vals: list[float] = []
+    for row in tbl.get("rows") or []:
+        if not row or idx >= len(row):
+            continue
+        v = parse_embedded_number(row[idx])
+        # Skip % cells and tiny numbers that are ratings, not prices.
+        if v is None or v <= 1.5:
+            continue
+        vals.append(v)
+    if not vals:
+        return None, 0
+    return sum(vals) / len(vals), len(vals)
+
+
+def extract_valuation_approaches(
+    md: str,
+    *,
+    last: Optional[float] = None,
+    pt: Optional[float] = None,
+    tables: Optional[list] = None,
+    dcf: Optional[dict] = None,
+) -> list[dict[str, Any]]:
+    """Each PT method on its own, with a verdict vs last. Not a weighted blend.
+
+    Sources: DCF $/sh, derivation-table methods (skip blend/total rows),
+    Street average, bull/base/bear, and the report 12m PT as written.
+    """
+    tables = tables if tables is not None else parse_md_tables(md or "")
+    dcf = dcf if dcf is not None else extract_dcf(md or "")
+    last = _f(last)
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(name: str, value: Optional[float], note: str = "", *, key: str = "") -> None:
+        v = _f(value)
+        if v is None or v <= 0:
+            return
+        aid = key or _approach_id(name)
+        if aid in seen:
+            return
+        if re.search(r"blend|weighted\s+avg|weighted average|total pt|dga target", name or "", re.I):
+            return
+        seen.add(aid)
+        vd = valuation_verdict(v, last)
+        out.append({
+            "id": aid,
+            "name": name,
+            "value": v,
+            "note": note or "",
+            "verdict": vd["verdict"],
+            "tone": vd["tone"],
+            "gap": vd["gap"],
+            "intensity": vd["intensity"],
+            "last": vd["last"],
+        })
+
+    implied = _f((dcf or {}).get("implied_price"))
+    add("DCF", implied, "DCF value / share", key="dcf")
+
+    deriv = extract_derivation_table(tables)
+    if deriv:
+        headers = [h.lower() for h in (deriv.get("headers") or [])]
+        val_i = 1
+        note_i = 2 if len(headers) > 2 else None
+        for i, h in enumerate(headers):
+            if i == 0:
+                continue
+            if "value" in h or "price" in h or "$" in h:
+                val_i = i
+            if "weight" in h or "note" in h:
+                note_i = i
+        for row in deriv.get("rows") or []:
+            if not row:
+                continue
+            method = _strip_md(row[0])
+            if not method or re.search(r"^method$", method, re.I):
+                continue
+            val = parse_embedded_number(row[val_i]) if val_i < len(row) else None
+            note = ""
+            if note_i is not None and note_i < len(row):
+                w = _strip_md(row[note_i])
+                if w:
+                    note = f"report weight {w} (not applied)"
+            add(method, val, note)
+
+    street_avg, n_firms = _street_avg_pt(extract_street_table(tables))
+    if n_firms:
+        add("Street consensus", street_avg, f"average of {n_firms} firms", key="street")
+
+    for sc in extract_scenarios(md or ""):
+        prob = sc.get("probability")
+        note = f"scenario · {prob:.0%} prob" if isinstance(prob, (int, float)) else "scenario"
+        add(f"{sc['case']} case", sc.get("price_target"), note, key=sc["case"].lower())
+
+    rpt = _f(pt)
+    add("Report 12m PT", rpt, "as written in the report — not re-blended here", key="report_pt")
+    return out
+
+
+def recut_approaches_vs_last(
+    approaches: list[dict[str, Any]],
+    last: Optional[float],
+) -> list[dict[str, Any]]:
+    """Recompute gap / verdict / intensity vs a live last price."""
+    out: list[dict[str, Any]] = []
+    for raw in approaches or []:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        vd = valuation_verdict(item.get("value"), last)
+        item["verdict"] = vd["verdict"]
+        item["tone"] = vd["tone"]
+        item["gap"] = vd["gap"]
+        item["intensity"] = vd["intensity"]
+        item["last"] = vd["last"]
+        out.append(item)
+    return out
+
+
+def approaches_from_scalars(
+    *,
+    dcf: Optional[float] = None,
+    pt: Optional[float] = None,
+    last: Optional[float] = None,
+) -> list[dict[str, Any]]:
+    """Minimal approaches when we only stored DCF + 12m PT (older reports)."""
+    return extract_valuation_approaches(
+        "",
+        last=last,
+        pt=pt,
+        tables=[],
+        dcf={"implied_price": dcf} if dcf else {},
+    )
 
 
 # ── Financials helpers ──────────────────────────────────────────────────────
@@ -1507,6 +1734,156 @@ def _put_formula(ws, row, col, formula, fmt, S, *, gold=False, bold=False):
     return c
 
 
+def _paint_verdict_cell(cell, tone: Optional[str], intensity: Optional[float], S) -> None:
+    """Solid fill + readable font from the palette. Never white-on-white."""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    fill_hex, font_hex = verdict_palette(tone, intensity)
+    cell.fill = PatternFill("solid", fgColor=fill_hex)
+    cell.font = Font(name="Calibri", size=11, bold=True, color=font_hex)
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell.border = S["thin"]
+
+
+def _apply_verdict_cf(ws, ref: str) -> None:
+    """Live UNDER/FAIR/OVER on a formula cell. Dark text on light fills."""
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.styles import Font, PatternFill, Alignment
+    # Default (pre-calc / unmatched): slate, dark ink — readable on a white sheet.
+    cell = ws[ref]
+    cell.fill = PatternFill("solid", fgColor="E2E8F0")
+    cell.font = Font(name="Calibri", size=12, bold=True, color="0F172A")
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    rules = [
+        ('"UNDERVALUED"', "D1FAE5", "14532D"),
+        ('"FAIR VALUED"', "E2E8F0", "0F172A"),
+        ('"OVERVALUED"', "FEE2E2", "7F1D1D"),
+    ]
+    for lit, fill, ink in rules:
+        ws.conditional_formatting.add(ref, FormulaRule(
+            formula=[f"{ref}={lit}"],
+            fill=PatternFill("solid", fgColor=fill),
+            font=Font(name="Calibri", size=12, bold=True, color=ink),
+        ))
+
+
+def _write_row3_summary(ws, approaches: list[dict], dcf_ref: str, last_ref: str, S) -> None:
+    """Row 3: one pair (name, verdict) per approach. High-contrast fills."""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    ws.row_dimensions[3].height = 28
+    lab = ws.cell(3, 1, "vs last →")
+    lab.font = Font(name="Calibri", size=9, bold=True, color=WHITE)
+    lab.fill = S["navy_fill"]
+    lab.alignment = Alignment(horizontal="center", vertical="center")
+    lab.border = S["thin"]
+    shown = [a for a in (approaches or []) if a.get("id") != "report_pt"][:6]
+    if not shown:
+        shown = [{"id": "dcf", "name": "DCF", "tone": None, "intensity": 0, "verdict": None}]
+    vf = _dcf_verdict_formulas(dcf_ref, last_ref)
+    for i, ap in enumerate(shown):
+        name_col = 2 + i * 2
+        verd_col = name_col + 1
+        nc = ws.cell(3, name_col, ap.get("name") or ap.get("id") or "")
+        nc.font = Font(name="Calibri", size=8, bold=True, color=WHITE)
+        nc.fill = S["section_fill"]
+        nc.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        nc.border = S["thin"]
+        vc = ws.cell(3, verd_col)
+        vc.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        vc.border = S["thin"]
+        if ap.get("id") == "dcf":
+            vc.value = vf["label"]
+            _apply_verdict_cf(ws, f"{get_column_letter(verd_col)}3")
+        else:
+            vc.value = ap.get("verdict") or "—"
+            _paint_verdict_cell(vc, ap.get("tone"), ap.get("intensity"), S)
+        ws.column_dimensions[get_column_letter(name_col)].width = max(
+            12, ws.column_dimensions[get_column_letter(name_col)].width or 12
+        )
+        ws.column_dimensions[get_column_letter(verd_col)].width = max(
+            16, ws.column_dimensions[get_column_letter(verd_col)].width or 16
+        )
+
+
+def _write_approaches_table(
+    ws, start_row: int, approaches: list[dict],
+    dcf_ref: str, last_ref: str, S,
+) -> int:
+    """Stacked table: each method separately. Weights are notes only."""
+    from openpyxl.formatting.rule import ColorScaleRule
+    _section_title(
+        ws, start_row, 1, 6,
+        "APPROACHES vs LAST  ·  each method on its own (not a weighted blend)",
+        S,
+    )
+    headers = ["Approach", "$ / share", "vs last $", "Gap %", "Verdict", "Notes"]
+    hr = start_row + 1
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(hr, i, h)
+        c.font = S["font_h"]
+        c.fill = S["navy_fill"]
+        c.alignment = S["center"]
+        c.border = S["thin"]
+    r = hr + 1
+    first = r
+    if not approaches:
+        ws.cell(r, 1, "No DCF / comps / street / scenario targets parsed.").font = S["font_muted"]
+        return r + 2
+    for ap in approaches:
+        ws.cell(r, 1, ap.get("name") or ap.get("id") or "").font = S["font_bold"]
+        ws.cell(r, 1).border = S["thin"]
+        is_dcf = ap.get("id") == "dcf"
+        if is_dcf:
+            _put_formula(ws, r, 2, f"=IF(OR({dcf_ref}=\"nm\",{dcf_ref}=\"\"),\"nm\",{dcf_ref})", _FMT_SH, S, gold=True, bold=True)
+        else:
+            c = ws.cell(r, 2, ap.get("value"))
+            c.number_format = _FMT_SH
+            c.font = S["font_bold"]
+            c.border = S["thin"]
+            c.alignment = S["right"]
+        val_ref = f"B{r}"
+        _put_formula(
+            ws, r, 3,
+            f'=IF(OR({val_ref}="nm",{val_ref}="",{last_ref}="",{last_ref}=0),"—",{val_ref}-{last_ref})',
+            _FMT_SH, S,
+        )
+        _put_formula(
+            ws, r, 4,
+            f'=IF(OR({val_ref}="nm",{val_ref}="",{last_ref}="",{last_ref}=0),"—",{val_ref}/{last_ref}-1)',
+            _FMT_PCT, S,
+        )
+        if is_dcf:
+            live = _dcf_verdict_formulas(val_ref, last_ref)
+            _put_formula(ws, r, 5, live["label"], None, S, bold=True)
+            from openpyxl.utils import get_column_letter
+            _apply_verdict_cf(ws, f"E{r}")
+        else:
+            vc = ws.cell(r, 5, ap.get("verdict") or "—")
+            _paint_verdict_cell(vc, ap.get("tone"), ap.get("intensity"), S)
+        note = ws.cell(r, 6, ap.get("note") or "")
+        note.font = S["font_muted"]
+        note.border = S["thin"]
+        r += 1
+    last = r - 1
+    if last >= first:
+        ws.conditional_formatting.add(
+            f"D{first}:D{last}",
+            ColorScaleRule(
+                start_type="num", start_value=-0.40, start_color="B91C1C",
+                mid_type="num", mid_value=0.0, mid_color="E2E8F0",
+                end_type="num", end_value=0.40, end_color="047857",
+            ),
+        )
+    foot = ws.cell(
+        r, 1,
+        "Not blended. Green = cheap vs last (undervalued). Red = rich vs last (overvalued). "
+        "Fair = within ±5%. Report weights are shown as notes only.",
+    )
+    foot.font = S["font_muted"]
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    return r + 2
+
+
 def _build_dcf_horizon(
     financials: dict,
     forecasts: dict[int, dict[str, float]],
@@ -1580,9 +1957,6 @@ def _build_dcf_horizon(
     return years
 
 
-_FAIR_BAND = 0.05  # |DCF/last − 1| inside this band → FAIR VALUED
-
-
 def _dcf_verdict_formulas(dcf_ref: str, last_ref: str, band: float = _FAIR_BAND) -> dict[str, str]:
     """Live Excel formulas: UNDERVALUED / FAIR VALUED / OVERVALUED vs last price."""
     label = (
@@ -1641,6 +2015,7 @@ def _valuation_sheet(
     pt,
     price,
     S,
+    approaches: Optional[list] = None,
 ):
     from openpyxl.utils import get_column_letter
 
@@ -1927,47 +2302,10 @@ def _valuation_sheet(
         _put_formula(ws, row, 2, formula, fmt, S, gold=gold, bold=gold)
         ws.cell(row, 3, "").border = S["thin"]
 
-    # Quick label under the banner — recasts with the live DCF.
-    from openpyxl.formatting.rule import CellIsRule
-    from openpyxl.styles import Font, PatternFill
-    ws.row_dimensions[3].height = 22
-    lab = ws.cell(3, 1, "DCF vs last")
-    lab.font = Font(name="Calibri", size=10, bold=True, color=WHITE)
-    lab.fill = S["section_fill"]
-    lab.alignment = S["center"]
-    lab.border = S["thin"]
-    vcell = ws.cell(3, 2, vf["label"])
-    vcell.font = Font(name="Calibri", size=14, bold=True, color=NAVY)
-    vcell.alignment = S["center"]
-    vcell.border = S["thin"]
-    vcell.fill = S["pale_gold"]
-    ws.merge_cells("C3:F3")
-    by = ws.cell(3, 3, vf["byline"])
-    by.font = S["font"]
-    by.alignment = S["left"]
-    by.border = S["thin"]
-    for col in range(3, 7):
-        ws.cell(3, col).border = S["thin"]
-        ws.cell(3, col).fill = S["pale_navy"]
-    ws.merge_cells("G3:I3")
-    hint = ws.cell(3, 7, "This DCF only  ·  fair = ±5% of last  ·  yellow inputs recast")
-    hint.font = S["font_muted"]
-    hint.alignment = S["left"]
-    ws.conditional_formatting.add("B3", CellIsRule(
-        operator="equal", formula=['"UNDERVALUED"'],
-        fill=PatternFill("solid", fgColor=GREEN_POS),
-        font=Font(name="Calibri", size=14, bold=True, color=WHITE),
-    ))
-    ws.conditional_formatting.add("B3", CellIsRule(
-        operator="equal", formula=['"OVERVALUED"'],
-        fill=PatternFill("solid", fgColor=RED_NEG),
-        font=Font(name="Calibri", size=14, bold=True, color=WHITE),
-    ))
-    ws.conditional_formatting.add("B3", CellIsRule(
-        operator="equal", formula=['"FAIR VALUED"'],
-        fill=PatternFill("solid", fgColor=GOLD),
-        font=Font(name="Calibri", size=14, bold=True, color=NAVY),
-    ))
+    # Row-3 summary of every approach (DCF live; others from the report).
+    _write_row3_summary(ws, approaches or [], dcf_ref, last_ref, S)
+    # Live DCF verdict in the bridge — same high-contrast CF as row 3.
+    _apply_verdict_cf(ws, f"B{br + 15}")
 
     # Gordon note
     note_r = br + 18
@@ -2038,8 +2376,14 @@ def _valuation_sheet(
         end_row=sens_row + 3 + len(wacc_axis), end_column=sens_col + min(5, len(g_axis)),
     )
 
+    # ── Each valuation approach vs last (not blended) ────────────────────
+    ap_row = note_r + 3
+    ap_end = _write_approaches_table(
+        ws, ap_row, approaches or [], dcf_ref, last_ref, S,
+    )
+
     # ── Trading multiples + comps / derivation below ────────────────────
-    tm_row = max(note_r + 3, br + 17, sens_row + 6 + len(wacc_axis))
+    tm_row = max(ap_end + 1, br + 17, sens_row + 6 + len(wacc_axis))
     _section_title(ws, tm_row, 1, 3, "TRADING MULTIPLES (LAST REPORTED FY / TTM)", S)
     tm_rows = [
         ("Market cap ($m)", capital.get("market_cap"), _FMT_MM),
@@ -2396,6 +2740,9 @@ def build_ib_model_bytes(
         pt=pt,
         price=price,
         S=S,
+        approaches=extract_valuation_approaches(
+            md, last=price, pt=pt, tables=tables, dcf=dcf,
+        ),
     )
     _scenarios_sheet(wb, scenarios, price, pt, S)
     _street_sheet(wb, street, S)

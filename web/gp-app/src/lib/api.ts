@@ -320,6 +320,19 @@ export type SavedReport = {
   dcf_value?: number | null
   fwd_rev_growth?: number | null
   fwd_eps_growth?: number | null
+  valuation_approaches?: ValuationApproach[]
+}
+
+export type ValuationApproach = {
+  id?: string
+  name?: string
+  value?: number | null
+  verdict?: string | null
+  tone?: string | null
+  gap?: number | null
+  intensity?: number | null
+  last?: number | null
+  note?: string
 }
 
 export type JobStatus = {

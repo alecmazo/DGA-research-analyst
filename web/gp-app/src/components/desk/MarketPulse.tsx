@@ -5,6 +5,8 @@ import {
   type MarketPulseResponse,
   type PulseHeadline,
   type PulseNewsItem,
+  type SavedReport,
+  type ValuationApproach,
 } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { fmtPct, pctClass } from '@/lib/format'
@@ -24,6 +26,33 @@ function ageFromTs(ts?: number | null): string {
   if (sec < 3600) return `${Math.max(1, Math.floor(sec / 60))}m`
   if (sec < 86400) return `${Math.floor(sec / 3600)}h`
   return `${Math.floor(sec / 86400)}d`
+}
+
+function valChipClass(
+  tone?: string | null,
+  intensity?: number | null,
+): string {
+  const i = Number(intensity) || 0
+  const t = String(tone || '').toLowerCase()
+  if (t === 'under' || t === 'undervalued') {
+    if (i < 0.35) return styles.valUnder0
+    if (i < 0.6) return styles.valUnder1
+    if (i < 0.8) return styles.valUnder2
+    return styles.valUnder3
+  }
+  if (t === 'over' || t === 'overvalued') {
+    if (i < 0.35) return styles.valOver0
+    if (i < 0.6) return styles.valOver1
+    if (i < 0.8) return styles.valOver2
+    return styles.valOver3
+  }
+  if (t === 'fair') return styles.valFair
+  return styles.valNone
+}
+
+function approachChips(rep?: SavedReport | null): ValuationApproach[] {
+  const apps = rep?.valuation_approaches || []
+  return apps.filter((a) => a && a.id !== 'report_pt' && a.verdict && a.verdict !== '—').slice(0, 6)
 }
 
 function newsItems(row?: PulseHeadline | null): PulseNewsItem[] {
@@ -60,6 +89,7 @@ export function MarketPulse({
   const [openTk, setOpenTk] = useState<string | null>(null)
   const [extra, setExtra] = useState<Record<string, PulseHeadline>>({})
   const [extraBusy, setExtraBusy] = useState<Record<string, boolean>>({})
+  const [reports, setReports] = useState<Record<string, SavedReport>>({})
 
   const tickers = useMemo(
     () =>
@@ -105,6 +135,21 @@ export function MarketPulse({
     } finally {
       setExtraBusy((s) => ({ ...s, [tk]: false }))
     }
+  }, [])
+
+  useEffect(() => {
+    void api<SavedReport[]>('/api/reports')
+      .then((list) => {
+        const m: Record<string, SavedReport> = {}
+        for (const r of Array.isArray(list) ? list : []) {
+          const tk = String(r?.ticker || '').toUpperCase()
+          if (tk) m[tk] = r
+        }
+        setReports(m)
+      })
+      .catch(() => {
+        /* valuation chips are optional */
+      })
   }, [])
 
   useEffect(() => {
@@ -185,9 +230,10 @@ export function MarketPulse({
       {infoOpen && (
         <div className={styles.pulseInfo}>
           Newest public headline for each watchlist name, from Yahoo Finance
-          and Google News RSS. No LLM. Ranked by |day %|. Click the ticker
-          for a snapshot, the headline to open the article, or empty space
-          on the row for the latest headlines.
+          and Google News RSS. No LLM. Ranked by |day %|. Colored chips are
+          each valuation approach vs last (DCF, comps, street, scenarios) —
+          not a blended score. Click the ticker for a snapshot, the headline
+          to open the article, or empty space on the row for more headlines.
         </div>
       )}
       <div className={styles.pulseList}>
@@ -208,6 +254,7 @@ export function MarketPulse({
           const href = (row.url || '').trim()
           const open = openTk === tk
           const list = newsItems(row)
+          const chips = approachChips(reports[tk])
           return (
             <div key={tk}>
               <div
@@ -246,6 +293,28 @@ export function MarketPulse({
                 <span className={styles.pulseMore} aria-hidden>
                   {open ? '▾' : '▸'}
                 </span>
+                {chips.length > 0 && (
+                  <span className={styles.pulseValRow}>
+                    {chips.map((a) => {
+                      const gap =
+                        a.gap == null || !Number.isFinite(Number(a.gap))
+                          ? null
+                          : Number(a.gap) * 100
+                      const nm = (a.name || a.id || '—').replace(/\s+case$/i, '')
+                      return (
+                        <span
+                          key={`${tk}-${a.id || nm}`}
+                          className={`${styles.valChip} ${valChipClass(a.tone, a.intensity)}`}
+                          title={`${a.name || nm} · ${a.verdict || '—'} · ${
+                            a.value != null ? `$${Number(a.value).toFixed(2)}` : '—'
+                          } vs last`}
+                        >
+                          {nm} {fmtPct(gap, 0)}
+                        </span>
+                      )
+                    })}
+                  </span>
+                )}
                 {href && title ? (
                   <a
                     className={styles.pulseHeadline}

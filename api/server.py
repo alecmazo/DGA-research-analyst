@@ -7667,7 +7667,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui569-20260903-pulse-head-list"
+WEB_BUILD_VERSION = "ui570-20260903-val-approaches"
 
 
 @app.get("/api/build")
@@ -13740,7 +13740,11 @@ def _stamp_stock_style(ticker: str, md_text: str, summary: dict | None = None) -
         return
     try:
         import excel_model as _em
+        import json as _json
         st = _em.classify_stock_style(md_text, summary=summary or {})
+        last = _em._f((summary or {}).get("current_price"))
+        pt = _em._f((summary or {}).get("price_target"))
+        approaches = _em.extract_valuation_approaches(md_text, last=last, pt=pt)
     except Exception as e:
         print(f"[stock-style] classify {tk}: {e!s:.160}", flush=True)
         return
@@ -13753,7 +13757,8 @@ def _stamp_stock_style(ticker: str, md_text: str, summary: dict | None = None) -
                        stock_style_note = %s,
                        dcf_value = %s,
                        fwd_rev_growth = %s,
-                       fwd_eps_growth = %s
+                       fwd_eps_growth = %s,
+                       valuation_approaches = %s::jsonb
                  WHERE ticker = %s
                 """,
                 (
@@ -13762,6 +13767,7 @@ def _stamp_stock_style(ticker: str, md_text: str, summary: dict | None = None) -
                     st.get("dcf_value"),
                     st.get("fwd_rev_growth"),
                     st.get("fwd_eps_growth"),
+                    _json.dumps(approaches or []),
                     tk,
                 ),
             )
@@ -13788,7 +13794,7 @@ def _backfill_stock_styles(limit: int = 48) -> None:
                        rating, price_target, upside_pct
                   FROM analyst_reports
                  WHERE archived IS NOT TRUE
-                   AND stock_style IS NULL
+                   AND (stock_style IS NULL OR valuation_approaches IS NULL)
                  ORDER BY GREATEST(
                     COALESCE(generated_at, TIMESTAMP '1970-01-01'),
                     COALESCE(claude_generated_at, TIMESTAMP '1970-01-01'),
@@ -14778,7 +14784,8 @@ def list_reports(request: Request = None):
                            COALESCE(version_count, 1) AS version_count,
                            delta_from_prior,
                            stock_style, stock_style_note, dcf_value,
-                           fwd_rev_growth, fwd_eps_growth
+                           fwd_rev_growth, fwd_eps_growth,
+                           valuation_approaches
                     FROM analyst_reports
                     WHERE archived IS NOT TRUE
                     ORDER BY GREATEST(
@@ -14895,6 +14902,7 @@ def list_reports(request: Request = None):
                         "dcf_value":           float(r["dcf_value"]) if r.get("dcf_value") is not None else None,
                         "fwd_rev_growth":      float(r["fwd_rev_growth"]) if r.get("fwd_rev_growth") is not None else None,
                         "fwd_eps_growth":      float(r["fwd_eps_growth"]) if r.get("fwd_eps_growth") is not None else None,
+                        "valuation_approaches": r.get("valuation_approaches") or [],
                     })
                 # Prices from process cache + market_quotes store ONLY.
                 # Full-book Yahoo here blocked the Saved Reports panel for
@@ -14939,9 +14947,9 @@ def list_reports(request: Request = None):
                                 except Exception:
                                     pass
                             # Re-cut VALUE/GROWTH vs live last (DCF $ stored at persist).
-                            if row.get("dcf_value") is not None:
-                                try:
-                                    import excel_model as _em
+                            try:
+                                import excel_model as _em
+                                if row.get("dcf_value") is not None:
                                     live = _em.style_from_metrics(
                                         row.get("dcf_value"),
                                         px,
@@ -14951,8 +14959,20 @@ def list_reports(request: Request = None):
                                     if live.get("style"):
                                         row["stock_style"] = live["style"]
                                         row["stock_style_note"] = live.get("note")
-                                except Exception:
-                                    pass
+                                apps = row.get("valuation_approaches")
+                                if isinstance(apps, str):
+                                    import json as _json
+                                    apps = _json.loads(apps)
+                                if apps:
+                                    row["valuation_approaches"] = _em.recut_approaches_vs_last(apps, px)
+                                elif row.get("dcf_value") or row.get("price_target"):
+                                    row["valuation_approaches"] = _em.approaches_from_scalars(
+                                        dcf=row.get("dcf_value"),
+                                        pt=row.get("price_target"),
+                                        last=px,
+                                    )
+                            except Exception:
+                                pass
                 except Exception as e:
                     print(f"[list_reports] quote enrich failed: {e!s:.140}", flush=True)
                 out.sort(key=_report_freshness_key, reverse=True)
@@ -17692,6 +17712,7 @@ def _ensure_analyst_reports_table(conn) -> None:
         ("dcf_value",         "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS dcf_value NUMERIC"),
         ("fwd_rev_growth",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS fwd_rev_growth NUMERIC"),
         ("fwd_eps_growth",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS fwd_eps_growth NUMERIC"),
+        ("valuation_approaches", "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS valuation_approaches JSONB"),
     ]:
         _safe(sql, f"add_{col_name}")
 
