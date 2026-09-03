@@ -155,6 +155,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Approaches use implied** | **`ui572-20260903-implied-approaches`** | Approaches vs last: implied $/sh (not weighted); only 12m PT is the blend; DCF = model share + DCF (base) |
 | **Pulse drop Base case** | **`ui573-20260903-pulse-no-base`** | Drop scenario Base/Bull/Bear from Approaches + Pulse chips; ticket create salvages description if screenshot truncates JSON |
 | **IB table number format** | **`ui574-20260903-ib-table-fmt`** | Report tables: $ and thousands commas (and % / x) at render; existing reports included |
+| **POST JSON body** | **`ui575-20260903-post-json-body`** | Analyst + support tickets read JSON via FastAPI Body (event loop); empty-body false rejects |
 
 ### One-click handoff (preferred)
 
@@ -327,4 +328,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui574-20260903-ib-table-fmt` · Next: `ui575-YYYYMMDD-slug`*
+*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui575-20260903-post-json-body` · Next: `ui576-YYYYMMDD-slug`*

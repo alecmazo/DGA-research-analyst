@@ -290,31 +290,57 @@ _user_resp_cache: dict = {}   # { key_tuple: (payload, fetched_at) }
 _USER_RESP_TTL   = 25         # seconds
 
 
-def _request_json_sync(request):
-    """Parse the JSON body from a SYNC (threadpool) endpoint.
-
-    Part of the async→def sweep (ui336): endpoints doing blocking work
-    (psycopg2, yfinance, SnapTrade, Anthropic) were `async def`, which froze
-    the whole event loop — every concurrent request — for the duration. As
-    sync `def` they run in the threadpool, but can't `await request.json()`;
-    anyio.from_thread runs the coroutine on the event loop from the worker.
-    Returns {} on an empty/invalid body, matching the try/except-{} pattern
-    the call sites used.
-    """
-    import anyio
-    try:
-        return anyio.from_thread.run(request.json)
-    except Exception:
-        return {}
-
-
 def _request_body_sync(request):
-    """Raw body bytes from a SYNC (threadpool) endpoint — see _request_json_sync."""
+    """Raw body bytes from a SYNC (threadpool) endpoint.
+
+    FastAPI runs ``def`` handlers in a worker thread, so we cannot await
+    ``request.body()`` directly. Prefer Starlette's cached ``_body`` (set
+    after the first read, including FastAPI Body() parsing), then AnyIO
+    portal, then ``run_coroutine_threadsafe``.
+    """
+    cached = getattr(request, "_body", None)
+    if isinstance(cached, (bytes, bytearray)) and cached:
+        return bytes(cached)
     import anyio
+
+    async def _read():
+        return await request.body()
+
     try:
-        return anyio.from_thread.run(request.body)
-    except Exception:
+        return anyio.from_thread.run(_read)
+    except Exception as e1:
+        print(f"[request-body] from_thread: {type(e1).__name__}: {e1!s:.160}", flush=True)
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                fut = asyncio.run_coroutine_threadsafe(_read(), loop)
+                return fut.result(timeout=60) or b""
+        except Exception as e2:
+            print(f"[request-body] loop: {type(e2).__name__}: {e2!s:.160}", flush=True)
         return b""
+
+
+def _request_json_sync(request):
+    """Parse JSON from a SYNC (threadpool) endpoint. Never raises; {} on miss."""
+    cached = getattr(request, "_json", None)
+    if isinstance(cached, dict):
+        return cached
+    raw = _request_body_sync(request)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception as e:
+        print(f"[request-json] {type(e).__name__}: {e!s:.160}", flush=True)
+        return {}
+    if isinstance(data, dict):
+        try:
+            request._json = data
+        except Exception:
+            pass
+        return data
+    return {}
 
 
 def _user_cache_get(key: tuple):
@@ -1275,7 +1301,7 @@ def _parse_captable(content: bytes, filename: str) -> tuple:
 
     return out, economics, fund_established_year
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -4510,6 +4536,21 @@ class WatchlistAddRequest(BaseModel):
     ticker: str
 
 
+class AgenticStartRequest(BaseModel):
+    """JSON body for POST /api/research/agentic — parsed on the event loop."""
+    question: str = ""
+    q: str = ""
+    prompt: str = ""
+    text: str = ""
+    topic: str = ""
+    source: str = "analyst"
+    llm_provider: str = ""
+    provider: str = ""
+
+    class Config:
+        extra = "allow"
+
+
 @app.post("/api/watchlist")
 def watchlist_add(request: Request, body: WatchlistAddRequest):
     claims = _claims_or_401(request)
@@ -7667,7 +7708,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui574-20260903-ib-table-fmt"
+WEB_BUILD_VERSION = "ui575-20260903-post-json-body"
 
 
 @app.get("/api/build")
@@ -27680,7 +27721,8 @@ def _run_agentic_analysis(job_id: str, question: str,
 
 
 @app.post("/api/research/agentic")
-def research_agentic_start(req: Request, background_tasks: BackgroundTasks):
+def research_agentic_start(req: Request, background_tasks: BackgroundTasks,
+                           payload: AgenticStartRequest | None = Body(None)):
     if _request_is_demo(req):
         s = _kv_get("demo.samples.agentic") or {}
         _agentic_jobs["demo-agentic"] = {
@@ -27697,13 +27739,20 @@ def research_agentic_start(req: Request, background_tasks: BackgroundTasks):
     claims = _claims_or_401(req)
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
-    try:
-        body = _request_json_sync(req)
-    except Exception:
-        body = {}
-    question = ((body or {}).get("question") or "").strip()
+    body = payload.model_dump() if payload is not None and hasattr(payload, "model_dump") else (
+        payload.dict() if payload is not None and hasattr(payload, "dict") else {}
+    )
+    if not body:
+        body = _request_json_sync(req) or {}
+    question = (
+        (body.get("question") or body.get("q") or body.get("prompt")
+         or body.get("text") or body.get("topic") or "")
+    ).strip()
     if len(question) < 4:
-        return JSONResponse({"ok": False, "error": "Ask a real question."}, status_code=400)
+        return JSONResponse(
+            {"ok": False,
+             "error": "Ask a real question — the request body had no question text."},
+            status_code=400)
     if len(question) > 2000:
         question = question[:2000]
     # source tags where the run came from ('analyst' = main Research card,

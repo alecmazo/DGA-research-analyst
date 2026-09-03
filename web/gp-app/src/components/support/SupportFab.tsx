@@ -218,7 +218,12 @@ export function SupportFab() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'failed'
       // Huge screenshot can truncate JSON so the API never sees the description.
-      if (shotData && /screenshot|not received|too large|describe the problem/i.test(msg)) {
+      if (
+        shotData &&
+        /could not read|screenshot|not received|too large|describe the problem|body/i.test(
+          msg,
+        )
+      ) {
         try {
           const j2 = await post(null)
           if (j2.ok) {

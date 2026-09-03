@@ -9,7 +9,9 @@ import uuid as _uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
+from typing import Any, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["support"])
@@ -509,22 +511,34 @@ def _ticket_description(body: dict) -> str:
 
 
 @router.post("/api/support/tickets")
-def support_ticket_create(request: Request, background_tasks: BackgroundTasks):
+def support_ticket_create(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    payload: Optional[dict[str, Any]] = Body(None),
+):
     """GP or LP: file a trouble ticket with optional page screenshot (base64).
 
     LPs can submit (screenshot + description). They cannot list, view, or
     update tickets — that stays on the GP Settings trail for 'fix ticket'.
+
+    ``payload`` is parsed by FastAPI on the event loop (same as watchlist
+    add). Threadpool ``request.body()`` often returns empty, which used to
+    look like a missing description / oversized screenshot.
     """
     claims = _support_authed(request)
-    body, parse_err = _support_ticket_body(request)
+    body = payload if isinstance(payload, dict) else {}
+    parse_err = None
+    if not _ticket_description(body):
+        extra, parse_err = _support_ticket_body(request)
+        if extra:
+            body = {**extra, **body} if body else extra
     desc = _ticket_description(body)
     if len(desc) < 8:
-        if parse_err:
+        if parse_err or not body:
             return JSONResponse(
                 {"ok": False,
-                 "error": "Could not read the ticket (screenshot may be too large). "
-                          "Your description was not received — try Submit again "
-                          "or recapture a smaller screenshot."},
+                 "error": "Could not read the ticket body. Try Submit again "
+                          "(the description never reached the server)."},
                 status_code=400)
         return JSONResponse({"ok": False, "error": "Please describe the problem (at least a sentence)."},
                             status_code=400)
