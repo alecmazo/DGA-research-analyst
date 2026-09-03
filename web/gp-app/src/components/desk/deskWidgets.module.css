@@ -1662,3 +1662,84 @@
   font-size: 11px;
   font-weight: 700;
 }
+
+/* ── Top Movers (broad-market $1B+ day movers, no LLM) ── */
+.moversEmbed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.moversList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.moversRow {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  column-gap: 10px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.moversRow:hover {
+  background: var(--bg-hover);
+}
+
+.moversRank {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.moversMain {
+  min-width: 0;
+}
+
+.moversTk {
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-family: var(--font-display);
+  color: var(--text-primary);
+}
+
+.moversName {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moversRight {
+  text-align: right;
+}
+
+.moversPx {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.moversChg {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 700;
+}

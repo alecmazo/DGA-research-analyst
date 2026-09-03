@@ -10,6 +10,7 @@ import { EarningsCard } from '@/components/desk/EarningsCard'
 import { StockPeek } from '@/components/layout/StockPeek'
 import { MarketWire } from '@/components/desk/MarketWire'
 import { MarketPulse } from '@/components/desk/MarketPulse'
+import { TopMovers } from '@/components/desk/TopMovers'
 import {
   api,
   ApiError,
@@ -552,6 +553,14 @@ export function DeskPage() {
       flush: true,
       action: <span className={styles.meta}>Official + wires</span>,
       children: <MarketWire bare />,
+    },
+    {
+      id: 'movers' as const,
+      title: 'Top Movers',
+      badge: '$1B+',
+      flush: true,
+      action: <span className={styles.meta}>Abs day % · either way</span>,
+      children: <TopMovers onPeek={openPeek} bare />,
     },
     {
       id: 'analyze' as const,

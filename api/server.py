@@ -7550,7 +7550,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui566-20260902-cover-dcf-pt"
+WEB_BUILD_VERSION = "ui567-20260903-top-movers"
 
 
 @app.get("/api/build")
@@ -10256,18 +10256,19 @@ def research_prioritize(request: Request, top_n: int = 5):
 
 _MARKET_MOVERS_CACHE: dict = {
     "ts": 0.0, "data": None, "session_date": None, "fetched_for": None,
+    "key": None,
 }
 _MARKET_MOVERS_TTL = 90   # 90s — short enough that a new session is obvious
 
 
 @app.get("/api/market/movers")
-def market_movers(request: Request, limit: int = 12, min_price: float = 3.0,
-                  force: bool = False):
-    """The biggest BROAD-MARKET movers today (Yahoo gainers/losers/most-active
-    screeners) — ranked by absolute % move, penny stocks filtered. Powers the
-    'Today's Movers' card. Cached ~90s, keyed by US session date so overnight
-    process uptime never serves a prior calendar day. ?force=true bypasses
-    cache. No LLM, no key."""
+def market_movers(request: Request, limit: int = 10, min_price: float = 3.0,
+                  min_market_cap: float = 1e9, force: bool = False):
+    """The biggest BROAD-MARKET stocks today (Yahoo gainers/losers/most-active
+    screeners) — ranked by absolute % move, $1B+ market cap, equities only.
+    Powers the Desk 'Top Movers' card. Cached ~90s, keyed by US session date
+    + filters so overnight process uptime never serves a prior calendar day.
+    ?force=true bypasses cache. No LLM, no key."""
     _claims_or_401(request)
     now = time.time()
     c = _MARKET_MOVERS_CACHE
@@ -10278,31 +10279,53 @@ def market_movers(request: Request, limit: int = 12, min_price: float = 3.0,
         session_date = _now_pacific().strftime("%Y-%m-%d")
         _md = None
 
-    # Invalidate when our expected US session date rolls (process left up overnight)
-    day_stale = (c.get("fetched_for") or "") != session_date
+    try:
+        cap = float(min_market_cap)
+        if cap <= 0:
+            cap = 1e9
+    except (TypeError, ValueError):
+        cap = 1e9
+    try:
+        px_floor = float(min_price)
+        if px_floor < 0:
+            px_floor = 3.0
+    except (TypeError, ValueError):
+        px_floor = 3.0
+    try:
+        n_lim = max(1, min(int(limit), 40))
+    except (TypeError, ValueError):
+        n_lim = 10
+    cache_key = f"{session_date}|{px_floor:.2f}|{int(cap)}"
+
+    # Invalidate when session date rolls, filters change, or TTL expires
+    day_stale = (c.get("fetched_for") or "") != session_date or c.get("key") != cache_key
     ttl_stale = c["data"] is None or (now - c["ts"]) >= _MARKET_MOVERS_TTL
     if force or day_stale or ttl_stale:
         try:
             if _md is None:
                 import market_data as _md
-            rows = _md.yahoo_market_movers(min_price=min_price) or []
+            rows = _md.yahoo_market_movers(
+                min_price=px_floor, min_market_cap=cap) or []
+            rows = _md.rank_session_movers(
+                rows, limit=None, min_market_cap=cap, equities_only=True)
         except Exception as e:
             # Never hand back a prior-calendar-day cache after a failed refresh —
             # better empty + error than "yesterday's movers" looking live.
             if day_stale or c["data"] is None:
                 return {"ok": False, "movers": [], "session_date": session_date,
-                        "as_of": _pacific_time_str(), "error": f"{e!s:.160}"}
+                        "as_of": _pacific_time_str(), "min_market_cap": cap,
+                        "error": f"{e!s:.160}"}
             # Same-session soft failure: serve last good snapshot briefly
             return {"ok": True, "as_of": _pacific_time_str(),
                     "session_date": c.get("session_date") or session_date,
                     "stale": True, "error": f"{e!s:.160}",
-                    "movers": (c["data"] or [])[: int(limit)]}
-        rows.sort(key=lambda m: abs(m.get("pct_change") or 0.0), reverse=True)
+                    "min_market_cap": cap,
+                    "movers": (c["data"] or [])[: n_lim]}
         # Re-price top movers with the same bar-based quote path as stock-info
         # click-through so card price/day% === peek modal (screener alone can
         # lag a few seconds; never diverge on prev-close math).
         try:
-            top_n = max(int(limit) * 2, 24)
+            top_n = max(n_lim * 2, 24)
             tops = [r.get("ticker") for r in rows[:top_n] if r.get("ticker")]
             if tops:
                 qmap = _md.get_quotes(tops) or {}
@@ -10315,7 +10338,8 @@ def market_movers(request: Request, limit: int = 12, min_price: float = 3.0,
                     if q.get("prev_close") is not None:
                         r["prev_close"] = float(q["prev_close"])
                     r["quote_source"] = q.get("source") or r.get("screener") or "yahoo"
-                rows.sort(key=lambda m: abs(m.get("pct_change") or 0.0), reverse=True)
+                rows = _md.rank_session_movers(
+                    rows, limit=None, min_market_cap=cap, equities_only=True)
         except Exception as e:
             print(f"[market/movers] re-price failed: {e!s:.120}", flush=True)
         # Report the session Yahoo actually printed (pre-open = last close)
@@ -10327,6 +10351,7 @@ def market_movers(request: Request, limit: int = 12, min_price: float = 3.0,
             c["ts"] = now
             c["session_date"] = data_sess
             c["fetched_for"] = session_date
+            c["key"] = cache_key
             if not rows:
                 print(f"[market/movers] empty Yahoo screeners for {session_date}",
                       flush=True)
@@ -10339,7 +10364,8 @@ def market_movers(request: Request, limit: int = 12, min_price: float = 3.0,
         "as_of": _pacific_time_str(),
         "session_date": c.get("session_date") or session_date,
         "stale": False,
-        "movers": (c["data"] or [])[: int(limit)],
+        "min_market_cap": cap,
+        "movers": (c["data"] or [])[: n_lim],
     }
 
 

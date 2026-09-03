@@ -18,6 +18,7 @@ export type CardId =
   | 'markets'
   | 'wire'
   | 'mpulse'
+  | 'movers'
   | 'analyze'
   | 'health'
 
@@ -53,6 +54,7 @@ const DEFAULT_LAYOUT: DeskLayoutMap = {
   markets: { x: 772, y: 0, w: 400, h: 280 },
   wire: { x: 772, y: 296, w: 400, h: 380 },
   analyze: { x: 772, y: 692, w: 400, h: 220 },
+  movers: { x: 772, y: 928, w: 400, h: 460 },
   health: { x: 0, y: 1108, w: 340, h: 180 },
 }
 

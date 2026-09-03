@@ -200,6 +200,27 @@ export type DailyBrief = {
   exists?: boolean
 }
 
+/** GET /api/market/movers — Yahoo gainers/losers, no LLM. */
+export type MarketMover = {
+  ticker: string
+  name?: string
+  price?: number | null
+  pct_change?: number | null
+  market_cap?: number | null
+  session_date?: string | null
+  quote_type?: string | null
+}
+
+export type MarketMoversResponse = {
+  ok?: boolean
+  as_of?: string
+  session_date?: string
+  stale?: boolean
+  error?: string
+  min_market_cap?: number
+  movers?: MarketMover[]
+}
+
 export type BuildInfo = { build?: string }
 
 export type MeResponse = {

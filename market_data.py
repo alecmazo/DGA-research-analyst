@@ -879,17 +879,23 @@ def _us_equity_session_date():
     return now.date().isoformat()
 
 
-def yahoo_market_movers(min_price: float = 3.0, min_market_cap: float = 2e9,
+_NON_STOCK_QUOTE_TYPES = frozenset({
+    "ETF", "MUTUALFUND", "MONEYMARKET", "INDEX", "CRYPTOCURRENCY", "CRYPTO",
+    "FUTURE", "CURRENCY", "OPTION", "WARRANT", "ECNQUOTE",
+})
+
+
+def yahoo_market_movers(min_price: float = 3.0, min_market_cap: float = 1e9,
                         per_list: int = 30) -> list:
     """Biggest BROAD-MARKET movers from Yahoo's free predefined screeners
     (day_gainers + day_losers + most_actives) — the day's real movers market-wide,
     not just a given universe. No API key; same cloud-tolerant Yahoo host family
     as the price-chart endpoint. Returns [{ticker, price, pct_change, name,
-    market_cap, market_time, session_date}], deduped to the largest move.
-    Filters out penny stocks (< min_price), micro/small caps (known marketCap
-    < min_market_cap, default $2B), and quotes whose regularMarketTime is older
-    than the active US session (drops weekend / multi-day-stale names that
-    sometimes leak into most_actives)."""
+    market_cap, market_time, session_date, quote_type}], deduped to the largest
+    move. Filters out penny stocks (< min_price), names with a known marketCap
+    below min_market_cap (default $1B), and quotes whose regularMarketTime is
+    older than the active US session (drops weekend / multi-day-stale names
+    that sometimes leak into most_actives)."""
     import requests
     from datetime import datetime, timezone
     try:
@@ -945,6 +951,7 @@ def yahoo_market_movers(min_price: float = 3.0, min_market_cap: float = 2e9,
                                 continue
                         except Exception:
                             pass
+                    qt = (q.get("quoteType") or q.get("typeDisp") or "").strip()
                     row = {
                         "ticker": sym,
                         "price": px,
@@ -955,6 +962,7 @@ def yahoo_market_movers(min_price: float = 3.0, min_market_cap: float = 2e9,
                         "market_time": mkt_iso,
                         "session_date": quote_session or session_date,
                         "screener": scr,
+                        "quote_type": qt.upper() if qt else "",
                     }
                     if sym not in out or abs(pct) > abs(out[sym]["pct_change"]):
                         out[sym] = row
@@ -972,6 +980,45 @@ def yahoo_market_movers(min_price: float = 3.0, min_market_cap: float = 2e9,
         newest = max(dated)
         rows = [r for r in rows if (r.get("session_date") or newest) >= newest]
     return rows
+
+
+def rank_session_movers(rows: list, *, limit: int | None = 10,
+                        min_market_cap: float = 1e9,
+                        equities_only: bool = True) -> list:
+    """Top session movers by |day %|. Drops unknown / sub-threshold market caps
+    and (when equities_only) ETFs, funds, crypto, warrants. No network, no LLM.
+    Pass limit=None to return the full ranked list."""
+    ranked: list = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        tk = str(r.get("ticker") or "").upper().strip()
+        if not tk or tk.startswith("^") or tk.endswith("-USD") or tk.endswith("-USDT"):
+            continue
+        pct = _f(r.get("pct_change"))
+        mc = _f(r.get("market_cap"))
+        if pct is None or mc is None or mc < float(min_market_cap):
+            continue
+        qt = str(r.get("quote_type") or "").upper().strip()
+        if equities_only and qt in _NON_STOCK_QUOTE_TYPES:
+            continue
+        ranked.append(r)
+    ranked.sort(key=lambda m: abs(_f(m.get("pct_change")) or 0.0), reverse=True)
+    seen: set = set()
+    out: list = []
+    for r in ranked:
+        tk = str(r.get("ticker") or "").upper()
+        if tk in seen:
+            continue
+        seen.add(tk)
+        out.append(r)
+    if limit is None:
+        return out
+    try:
+        n = int(limit)
+    except (TypeError, ValueError):
+        n = 10
+    return out[: max(0, n)]
 
 
 # ── Nasdaq earnings calendar (free, no key) ──────────────────────────────────
