@@ -953,16 +953,87 @@ def verdict_palette(tone: Optional[str], intensity: Optional[float] = 0.0) -> tu
 def _approach_id(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "", (name or "").lower())
     aliases = {
-        "dcfvalueshare": "dcf", "dcfvalue": "dcf", "impliedshareprice": "dcf",
-        "discountedcashflow": "dcf", "dcfintrinsic": "dcf",
+        "dcfvalueshare": "dcf", "dcfvalue": "dcf",
+        "dcfbase": "dcf_base", "basedcfd": "dcf_base", "basedcf": "dcf_base",
         "comparable": "comps", "comparables": "comps", "tradingcomps": "comps",
         "peermultiples": "comps", "multiples": "comps",
+        "pecomps": "pe", "pe": "pe",
+        "evrevenue": "ev_rev", "evrevenucomps": "ev_rev", "evsales": "ev_rev",
+        "streetanchored": "street_anchored", "streetanchor": "street_anchored",
         "streetconsensus": "street", "consensus": "street", "analystpt": "street",
         "bullcase": "bull", "basecase": "base", "bearcase": "bear",
         "report12mpt": "report_pt", "12monthpricetarget": "report_pt",
         "dgatarget": "report_pt",
     }
     return aliases.get(s, s or "other")
+
+
+def _norm_method_name(name: str) -> str:
+    return re.sub(r"\s+", " ", (name or "").strip().lower())
+
+
+def _is_dcf_base_method(name: str) -> bool:
+    n = _norm_method_name(name)
+    return bool(re.fullmatch(r"dcf(\s*\(\s*base\s*\))?|dcf base|base[- ]case dcf", n))
+
+
+def _is_extra_dcf_method(name: str) -> bool:
+    """Skip duration / bull-case DCF variants — keep model share + DCF (base) only."""
+    n = _norm_method_name(name)
+    if "dcf" not in n and "discounted cash" not in n:
+        return False
+    if _is_dcf_base_method(name):
+        return False
+    if "value / share" in n or "value/share" in n:
+        return False
+    return True
+
+
+def _is_blend_pt_row(name: str) -> bool:
+    n = _norm_method_name(name)
+    return bool(re.search(
+        r"12-?m(?:onth)?\s+price\s+target|blend|weighted\s+avg|weighted average|"
+        r"total pt|dga target|expected value",
+        n,
+    ))
+
+
+def _derivation_columns(headers: list[str]) -> dict[str, int]:
+    """Prefer Implied Value over Weighted Value. Old 3-col tables use Value."""
+    out: dict[str, int] = {}
+    for i, h in enumerate(headers or []):
+        hl = (h or "").lower()
+        if "implied" in hl:
+            out["implied"] = i
+        elif "weighted" in hl and ("value" in hl or "price" in hl or "$" in hl):
+            out["weighted"] = i
+        elif re.search(r"\bweight", hl) and "value" not in hl and "price" not in hl:
+            out["weight"] = i
+        elif "value" in hl or hl in ("price", "$/sh", "$ / share", "pt"):
+            out.setdefault("value", i)
+    return out
+
+
+def extract_dcf_model_share(
+    tables: list[dict],
+    dcf: Optional[dict] = None,
+) -> Optional[float]:
+    """Model DCF value / share from the equity bridge — not PT-derivation DCF (base)."""
+    br = extract_bridge_table(tables)
+    if br:
+        for row in br.get("rows") or []:
+            if not row:
+                continue
+            lab = _strip_md(row[0]).lower()
+            if "dcf value" in lab and "share" in lab:
+                v = parse_embedded_number(row[1]) if len(row) > 1 else None
+                if v is not None and v > 1:
+                    return v
+    wacc = extract_wacc_build(tables)
+    v = _f((wacc or {}).get("implied_price"))
+    if v is not None and v > 1:
+        return v
+    return _f((dcf or {}).get("implied_price"))
 
 
 def _street_avg_pt(tbl: Optional[dict]) -> tuple[Optional[float], int]:
@@ -998,10 +1069,11 @@ def extract_valuation_approaches(
     tables: Optional[list] = None,
     dcf: Optional[dict] = None,
 ) -> list[dict[str, Any]]:
-    """Each PT method on its own, with a verdict vs last. Not a weighted blend.
+    """Each method vs last on its own implied $/share. Not a weighted blend.
 
-    Sources: DCF $/sh, derivation-table methods (skip blend/total rows),
-    Street average, bull/base/bear, and the report 12m PT as written.
+    DCF rows: model DCF value/share + derivation DCF (base) implied only.
+    Extra DCF variants (duration / bull WACC) are dropped. EV/Revenue, P/E,
+    street-anchored use Implied Value. The 12m PT is the only weighted blend.
     """
     tables = tables if tables is not None else parse_md_tables(md or "")
     dcf = dcf if dcf is not None else extract_dcf(md or "")
@@ -1016,7 +1088,7 @@ def extract_valuation_approaches(
         aid = key or _approach_id(name)
         if aid in seen:
             return
-        if re.search(r"blend|weighted\s+avg|weighted average|total pt|dga target", name or "", re.I):
+        if _is_blend_pt_row(name) and aid != "report_pt":
             return
         seen.add(aid)
         vd = valuation_verdict(v, last)
@@ -1032,38 +1104,47 @@ def extract_valuation_approaches(
             "last": vd["last"],
         })
 
-    implied = _f((dcf or {}).get("implied_price"))
-    add("DCF", implied, "DCF value / share", key="dcf")
+    model_share = extract_dcf_model_share(tables, dcf)
+    add(
+        "DCF value / share",
+        model_share,
+        "model DCF (ladder / Gordon) — not the PT-derivation DCF (base)",
+        key="dcf",
+    )
 
     deriv = extract_derivation_table(tables)
     if deriv:
-        headers = [h.lower() for h in (deriv.get("headers") or [])]
-        val_i = 1
-        note_i = 2 if len(headers) > 2 else None
-        for i, h in enumerate(headers):
-            if i == 0:
-                continue
-            if "value" in h or "price" in h or "$" in h:
-                val_i = i
-            if "weight" in h or "note" in h:
-                note_i = i
+        cols = _derivation_columns(deriv.get("headers") or [])
+        implied_i = cols.get("implied")
+        value_i = cols.get("value")
+        weight_i = cols.get("weight")
+        method_i = 0
         for row in deriv.get("rows") or []:
             if not row:
                 continue
-            method = _strip_md(row[0])
+            method = _strip_md(row[method_i])
             if not method or re.search(r"^method$", method, re.I):
                 continue
-            val = parse_embedded_number(row[val_i]) if val_i < len(row) else None
-            note = ""
-            if note_i is not None and note_i < len(row):
-                w = _strip_md(row[note_i])
-                if w:
-                    note = f"report weight {w} (not applied)"
-            add(method, val, note)
+            if _is_blend_pt_row(method) or _is_extra_dcf_method(method):
+                continue
+            idx = implied_i if implied_i is not None else value_i
+            val = parse_embedded_number(row[idx]) if idx is not None and idx < len(row) else None
+            wnote = ""
+            if weight_i is not None and weight_i < len(row):
+                w = _strip_md(row[weight_i])
+                if w and w not in ("—", "-", "–"):
+                    wnote = f"report weight {w} (not applied to this verdict)"
+            if _is_dcf_base_method(method):
+                note = "PT derivation implied DCF (base) — not weighted; not the model DCF value / share"
+                if wnote:
+                    note = note + " · " + wnote
+                add("DCF (base)", val, note, key="dcf_base")
+                continue
+            add(method, val, wnote or "implied value (not weighted)")
 
     street_avg, n_firms = _street_avg_pt(extract_street_table(tables))
     if n_firms:
-        add("Street consensus", street_avg, f"average of {n_firms} firms", key="street")
+        add("Street consensus", street_avg, f"average of {n_firms} firm PTs (implied)", key="street")
 
     for sc in extract_scenarios(md or ""):
         prob = sc.get("probability")
@@ -1071,7 +1152,12 @@ def extract_valuation_approaches(
         add(f"{sc['case']} case", sc.get("price_target"), note, key=sc["case"].lower())
 
     rpt = _f(pt)
-    add("Report 12m PT", rpt, "as written in the report — not re-blended here", key="report_pt")
+    add(
+        "12m price target",
+        rpt,
+        "blend of weighted values — the only combined figure",
+        key="report_pt",
+    )
     return out
 
 

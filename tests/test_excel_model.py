@@ -90,10 +90,14 @@ Enterprise value $9,400m.
 | WACC: 9.0% | $36.00 | $39.00 | $41.00 | $44.00 | $47.00 |
 | WACC: 10.0% | $31.00 | $33.00 | $35.00 | $37.00 | $40.00 |
 
-| Method | Value | Weight |
-|---|---|---|
-| DCF | $47.00 | 60% |
-| Comps | $50.00 | 40% |
+| Method | Implied Value | Weight | Weighted Value |
+|---|---|---|---|
+| DCF (base) | $47.00 | 60% | $28.20 |
+| DCF (7%/3.5% bull duration) | $80.00 | 0% | $0.00 |
+| EV/Revenue | $55.00 | 15% | $8.25 |
+| P/E | $52.00 | 15% | $7.80 |
+| Street-anchored | $50.00 | 10% | $5.00 |
+| **12M Price Target** | — | — | **$48.00** |
 
 | Ticker | P/E | EV/EBITDA | FCF yield |
 |---|---|---|---|
@@ -271,7 +275,7 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
     assert "Terminal growth (g)" in labels
     assert "DCF value / share" in labels
     assert val.cell(3, 1).value == "vs last →"
-    assert val.cell(3, 2).value == "DCF"
+    assert "DCF" in str(val.cell(3, 2).value or "")
     v3 = str(val.cell(3, 3).value or "")
     assert "UNDERVALUED" in v3 and "OVERVALUED" in v3 and "FAIR VALUED" in v3
     # Row-3 verdict cells use dark ink on a light fill (never white-on-white).
@@ -378,23 +382,37 @@ def test_extract_valuation_approaches_not_blended():
     apps = em.extract_valuation_approaches(
         SAMPLE_MD, last=40.0, pt=48.0,
     )
-    ids = [a["id"] for a in apps]
-    assert "dcf" in ids
-    assert "comps" in ids
-    assert "street" in ids
-    assert "bull" in ids and "base" in ids and "bear" in ids
-    # No weighted blend row
-    assert not any("blend" in (a["name"] or "").lower() for a in apps)
-    dcf = next(a for a in apps if a["id"] == "dcf")
-    assert dcf["verdict"] == "UNDERVALUED"
-    assert dcf["tone"] == "under"
-    assert dcf["gap"] is not None and dcf["gap"] > 0.05
-    bear = next(a for a in apps if a["id"] == "bear")
+    by_id = {a["id"]: a for a in apps}
+    names = [a["name"] for a in apps]
+    assert "dcf" in by_id
+    assert "dcf_base" in by_id
+    assert "ev_rev" in by_id
+    assert "pe" in by_id
+    assert "street_anchored" in by_id
+    assert "street" in by_id
+    assert "bull" in by_id and "base" in by_id and "bear" in by_id
+    assert "report_pt" in by_id
+    # Extra DCF duration case is dropped
+    assert not any("bull duration" in (n or "").lower() for n in names)
+    assert not any("7%" in (n or "") for n in names)
+    # Model DCF value/share from the bridge, not the $47 implied-share prose
+    assert abs(by_id["dcf"]["value"] - 39.67) < 0.02
+    assert "model" in (by_id["dcf"]["note"] or "").lower()
+    # DCF (base) uses implied $47, NOT weighted $28.20
+    assert abs(by_id["dcf_base"]["value"] - 47.0) < 1e-9
+    assert "implied" in (by_id["dcf_base"]["note"] or "").lower()
+    # Multiples / street-anchored: implied, not weighted contribution
+    assert abs(by_id["ev_rev"]["value"] - 55.0) < 1e-9
+    assert abs(by_id["pe"]["value"] - 52.0) < 1e-9
+    assert abs(by_id["street_anchored"]["value"] - 50.0) < 1e-9
+    # 12m PT is the only weighted blend
+    assert abs(by_id["report_pt"]["value"] - 48.0) < 1e-9
+    assert "blend" in (by_id["report_pt"]["note"] or "").lower()
+    dcf = by_id["dcf"]
+    assert dcf["verdict"] == "FAIR VALUED" or dcf["tone"] in ("fair", "under")
+    bear = by_id["bear"]
     assert bear["verdict"] == "OVERVALUED"
-    comps = next(a for a in apps if a["id"] == "comps")
-    assert abs(comps["value"] - 50.0) < 1e-9
-    # recut vs a much higher last → DCF flips to overvalued
-    recut = em.recut_approaches_vs_last([dcf], 80.0)
+    recut = em.recut_approaches_vs_last([by_id["dcf_base"]], 80.0)
     assert recut[0]["verdict"] == "OVERVALUED"
     fair = em.valuation_verdict(41.0, 40.0)
     assert fair["verdict"] == "FAIR VALUED" and fair["tone"] == "fair"
@@ -421,17 +439,37 @@ def test_workbook_approaches_table():
         for r in range(1, 90) for c in range(1, 7)
     )
     assert "APPROACHES vs LAST" in blob
-    assert "Comps" in blob
+    assert "DCF (base)" in blob
+    assert "DCF value / share" in blob
+    assert "EV/Revenue" in blob
     assert "Street consensus" in blob
-    assert "not a weighted blend" in blob.lower() or "not a weighted" in blob.lower()
-    # Comps verdict cell is painted, not white-on-white
-    comps_r = None
+    # Extra DCF duration case must not appear in the Approaches table
+    # (it can still sit in the raw derivation dump further down).
+    ap_names = []
+    in_ap = False
     for r in range(1, 90):
-        if val.cell(r, 1).value == "Comps":
-            comps_r = r
+        a1 = str(val.cell(r, 1).value or "")
+        if "APPROACHES vs LAST" in a1:
+            in_ap = True
+            continue
+        if in_ap and (
+            a1.startswith("TRADING") or "PRICE TARGET DERIVATION" in a1.upper()
+            or a1.startswith("COMPARABLE")
+        ):
             break
-    assert comps_r
-    verd = val.cell(comps_r, 5)
+        if in_ap:
+            ap_names.append(a1)
+    assert not any("bull duration" in n.lower() or "7%" in n for n in ap_names)
+    assert "not a weighted blend" in blob.lower() or "not a weighted" in blob.lower()
+    # EV/Revenue uses implied $55, not weighted $8.25
+    ev_r = None
+    for r in range(1, 90):
+        if val.cell(r, 1).value == "EV/Revenue":
+            ev_r = r
+            break
+    assert ev_r
+    assert abs(float(val.cell(ev_r, 2).value) - 55.0) < 1e-9
+    verd = val.cell(ev_r, 5)
     assert verd.value == "UNDERVALUED"
     fill = str(getattr(verd.fill.fgColor, "rgb", "") or "")
     ink = str(getattr(verd.font.color, "rgb", "") or "")

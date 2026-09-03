@@ -7667,7 +7667,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui571-20260903-xlsx-overwrite"
+WEB_BUILD_VERSION = "ui572-20260903-implied-approaches"
 
 
 @app.get("/api/build")
