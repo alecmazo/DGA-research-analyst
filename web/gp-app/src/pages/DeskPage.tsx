@@ -498,13 +498,14 @@ export function DeskPage() {
     {
       id: 'mpulse' as const,
       title: 'Market Pulse',
-      badge: 'Scan',
+      badge: 'Free',
       flush: true,
-      action: <span className={styles.meta}>Biggest movers first</span>,
+      action: <span className={styles.meta}>Newest headline</span>,
       children: (
         <MarketPulse
           watchlist={wl?.tickers || []}
           quotes={wl?.quotes || {}}
+          onPeek={openPeek}
           bare
         />
       ),

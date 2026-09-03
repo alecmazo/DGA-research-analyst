@@ -295,8 +295,9 @@ export function ModelsSection() {
       }
     >
       <p className={styles.hint}>
-        Assign a model to each task. For Daily Pulse and Market Pulse, tick <strong>Auto</strong> and
-        set a Pacific time — that is the schedule (no separate Automation card). Idea Generator is
+        Assign a model to each task. For Daily Pulse, tick <strong>Auto</strong> and
+        set a Pacific time — that is the schedule (no separate Automation card). Market Pulse
+        on the Desk is free public headlines (no model). Idea Generator is
         retired. Full reports + Agents: Grok · Claude · DeepSeek.
       </p>
 
@@ -368,7 +369,7 @@ export function ModelsSection() {
           onClick={() => {
             if (
               !confirm(
-                'Turn volume master OFF?\n\nDaily Pulse and Market Pulse stay on DeepSeek (no Grok fallback).\nOther volume jobs may fall back to Grok.\nFull reports / agentic / podcasts are unchanged.',
+                'Turn volume master OFF?\n\nDaily Pulse stays on DeepSeek (no Grok fallback). Market Pulse on the Desk is free headlines (no model).\nOther volume jobs may fall back to Grok.\nFull reports / agentic / podcasts are unchanged.',
               )
             )
               return

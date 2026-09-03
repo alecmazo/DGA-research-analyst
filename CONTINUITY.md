@@ -148,6 +148,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Report card cleanup** | **`ui565-20260902-report-switch`** | Saved reports: style + ⚡ only; open defaults to Grok; Grok/Claude switch on the report |
 | **Cover DCF target** | **`ui566-20260902-cover-dcf-pt`** | Cover table Rating row right cell = DCF-only $/sh (not blended PT) |
 | **Desk Top Movers** | **`ui567-20260903-top-movers`** | Desk card: top 10 $1B+ stocks by |day %| (Yahoo screeners, no LLM) |
+| **Market Pulse headlines** | **`ui568-20260903-pulse-headlines`** | Desk Market Pulse: newest public headline per watchlist name (Yahoo/Google RSS, no LLM) |
 
 ### One-click handoff (preferred)
 
@@ -320,4 +321,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui567-20260903-top-movers` · Next: `ui568-YYYYMMDD-slug`*
+*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui568-20260903-pulse-headlines` · Next: `ui569-YYYYMMDD-slug`*

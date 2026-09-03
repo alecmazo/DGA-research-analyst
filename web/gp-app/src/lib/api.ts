@@ -221,6 +221,23 @@ export type MarketMoversResponse = {
   movers?: MarketMover[]
 }
 
+/** GET /api/market/pulse — newest public headline per ticker, no LLM. */
+export type PulseHeadline = {
+  headline?: string
+  url?: string
+  publisher?: string
+  pub_ts?: number | null
+  source?: string
+}
+
+export type MarketPulseResponse = {
+  ok?: boolean
+  as_of?: string
+  ttl_seconds?: number
+  count?: number
+  results?: Record<string, PulseHeadline>
+}
+
 export type BuildInfo = { build?: string }
 
 export type MeResponse = {

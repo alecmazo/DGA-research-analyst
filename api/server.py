@@ -2303,10 +2303,13 @@ _NEWS_CACHE: dict[str, dict] = {}
 _NEWS_TTL = 900  # 15 minutes
 
 
-def _fetch_news_for_ticker(ticker: str, limit: int = 3) -> list[dict]:
+def _fetch_news_for_ticker(ticker: str, limit: int = 3, *, fast: bool = False) -> list[dict]:
     """Pull up to `limit` recent news items. Tries yfinance.Ticker.news first;
     falls back to Yahoo Finance RSS if that comes up empty (the .news API
-    has been intermittent for months). Cached in _NEWS_CACHE."""
+    has been intermittent for months). Cached in _NEWS_CACHE.
+
+    fast=True skips yfinance (can hang 8s from a cloud IP) and goes straight
+    to public RSS — used by the Desk Market Pulse card."""
     tk = (ticker or "").upper().strip()
     if not tk: return []
     now = time.time()
@@ -2316,7 +2319,7 @@ def _fetch_news_for_ticker(ticker: str, limit: int = 3) -> list[dict]:
     items: list[dict] = []
 
     # ── 1. yfinance.Ticker.news (preferred when it works) ──────────────
-    if _YFINANCE_OK:
+    if _YFINANCE_OK and not fast:
         try:
             import yfinance as _yf
             raw = _builder_call_timeout(lambda: _yf.Ticker(tk).news or [], 8.0, []) or []
@@ -2357,9 +2360,7 @@ def _fetch_news_for_ticker(ticker: str, limit: int = 3) -> list[dict]:
         try:
             rss_url = (f"https://feeds.finance.yahoo.com/rss/2.0/headline"
                        f"?s={tk}&region=US&lang=en-US")
-            req = _req.Request(rss_url, headers={"User-Agent": "Mozilla/5.0 DGA-Research/1.0"})
-            with _req.urlopen(req, timeout=6) as resp:
-                xml_text = resp.read().decode("utf-8", "replace")
+            xml_text = analyst._http_get_text_ssl_tolerant(rss_url, timeout=6)
             root = _ET.fromstring(xml_text)
             channel = root.find("channel")
             if channel is not None:
@@ -2394,9 +2395,7 @@ def _fetch_news_for_ticker(ticker: str, limit: int = 3) -> list[dict]:
             query = _q(f"{tk} stock")
             g_url = (f"https://news.google.com/rss/search"
                      f"?q={query}&hl=en-US&gl=US&ceid=US:en")
-            req = _req.Request(g_url, headers={"User-Agent": "Mozilla/5.0 DGA-Research/1.0"})
-            with _req.urlopen(req, timeout=6) as resp:
-                xml_text = resp.read().decode("utf-8", "replace")
+            xml_text = analyst._http_get_text_ssl_tolerant(g_url, timeout=6)
             root = _ET.fromstring(xml_text)
             channel = root.find("channel")
             if channel is not None:
@@ -2431,8 +2430,75 @@ def _fetch_news_for_ticker(ticker: str, limit: int = 3) -> list[dict]:
         except Exception as e:
             print(f"⚠️  [news {tk}] Google News failed: {e!s:.150}", flush=True)
 
+    try:
+        import market_data as _md_news
+        items = _md_news.sort_news_newest(items)
+    except Exception:
+        try:
+            items.sort(key=lambda x: int(x.get("pub_ts") or 0), reverse=True)
+        except Exception:
+            pass
     _NEWS_CACHE[tk] = {"ts": now, "items": items}
     return items[:limit]
+
+
+def _batch_ticker_headlines(tickers: list, limit: int = 1, *,
+                            fast: bool = True, force: bool = False) -> dict:
+    """Newest public headlines for many tickers. Parallel RSS, no LLM.
+
+    Returns {TICKER: [items...]}. Caps at 80 names. Cached via _NEWS_CACHE.
+    shutdown(wait=False) so a hung RSS fetch never blocks the request."""
+    import concurrent.futures as _cf
+    out: dict[str, list] = {}
+    tks: list[str] = []
+    seen: set[str] = set()
+    for raw in tickers or []:
+        tk = str(raw or "").upper().strip()
+        if not tk or tk in seen:
+            continue
+        seen.add(tk)
+        tks.append(tk)
+        if len(tks) >= 80:
+            break
+    if not tks:
+        return out
+    if force:
+        for tk in tks:
+            _NEWS_CACHE.pop(tk, None)
+    try:
+        lim = max(1, min(int(limit or 1), 5))
+    except (TypeError, ValueError):
+        lim = 1
+    now = time.time()
+    need: list[str] = []
+    for tk in tks:
+        hit = _NEWS_CACHE.get(tk)
+        if hit and (now - (hit.get("ts") or 0)) < _NEWS_TTL:
+            out[tk] = (hit.get("items") or [])[:lim]
+        else:
+            need.append(tk)
+    if need:
+        n_workers = min(8, len(need))
+        ex = _cf.ThreadPoolExecutor(max_workers=n_workers)
+        try:
+            futs = {
+                ex.submit(_fetch_news_for_ticker, tk, lim, fast=fast): tk
+                for tk in need
+            }
+            done, not_done = _cf.wait(futs, timeout=18)
+            for fut in done:
+                tk = futs[fut]
+                try:
+                    out[tk] = fut.result() or []
+                except Exception:
+                    out[tk] = []
+            for fut in not_done:
+                out[futs[fut]] = []
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
+    for tk in tks:
+        out.setdefault(tk, [])
+    return out
 
 
 @app.get("/api/news")
@@ -2447,6 +2513,40 @@ def get_ticker_news(tickers: str = "", limit: int = 1):
         out[tk] = _fetch_news_for_ticker(tk, limit=max(1, min(int(limit or 1), 8)))
     return {"ok": True, "tickers": list(out.keys()),
              "news": out, "ttl_seconds": _NEWS_TTL}
+
+
+@app.get("/api/market/pulse")
+def market_pulse_headlines(request: Request, tickers: str = "",
+                           limit: int = 1, force: bool = False):
+    """Newest public headline per ticker (Yahoo RSS → Google News). Powers the
+    Desk Market Pulse card. No LLM, no key. Cached ~15 min. Pass tickers as a
+    comma list; empty uses the GP watchlist. ?force=true bypasses cache."""
+    _claims_or_401(request)
+    tks = [t.strip().upper() for t in (tickers or "").split(",") if t.strip()]
+    if not tks:
+        try:
+            tks = _all_watchlist_tickers() or []
+        except Exception:
+            tks = []
+    news = _batch_ticker_headlines(tks, limit=limit, fast=True, force=force)
+    results: dict = {}
+    for tk, items in news.items():
+        top = items[0] if items else None
+        results[tk] = {
+            "headline": (top or {}).get("title") or "",
+            "url": (top or {}).get("url") or "",
+            "publisher": (top or {}).get("publisher") or "",
+            "pub_ts": (top or {}).get("pub_ts"),
+            "source": (top or {}).get("source") or "",
+            "items": items,
+        }
+    return {
+        "ok": True,
+        "as_of": _pacific_time_str(),
+        "ttl_seconds": _NEWS_TTL,
+        "count": sum(1 for v in results.values() if v.get("headline")),
+        "results": results,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7550,7 +7650,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui567-20260903-top-movers"
+WEB_BUILD_VERSION = "ui568-20260903-pulse-headlines"
 
 
 @app.get("/api/build")
@@ -16947,7 +17047,8 @@ def _auto_daily_brief_worker() -> None:
 
 # ── Auto-scan all saved reports into Market Pulse (time from automation.settings)
 def _auto_market_pulse_worker() -> None:
-    """Daemon: scans all saved-report tickers at the configured Pacific time."""
+    """Daemon: warms the free headline cache (Yahoo/Google RSS) at the
+    configured Pacific time. No LLM — Desk Market Pulse reads that cache."""
     import time as _time
     while True:
         try:
@@ -16957,39 +17058,34 @@ def _auto_market_pulse_worker() -> None:
                 _time.sleep(3600)
                 continue
             h, m = cfg["hour"], cfg["minute"]
-            # NO deploy-restart catch-up: the pulse scan is an AI job that
-            # COSTS MONEY — scheduled time only, never auto-relaunched.
             wait_secs = _secs_until(h, m)
-            print(f"[pulse-scheduler] next run at {h:02d}:{m:02d} Pacific — sleeping {wait_secs/3600:.1f}h")
+            print(f"[pulse-scheduler] next headline prefetch at {h:02d}:{m:02d} Pacific — sleeping {wait_secs/3600:.1f}h")
             _time.sleep(wait_secs)
             cfg2 = _get_automation_settings().get("market_pulse", {})
             if not cfg2.get("enabled", True):
                 print("[pulse-scheduler] disabled after wake — skipping")
                 continue
-            print(f"[pulse-scheduler] {h:02d}:{m:02d} Pacific — DeepSeek-only market pulse on saved reports…")
-            # Collect tickers from DB
             tickers = []
+            try:
+                tickers.extend(_all_watchlist_tickers() or [])
+            except Exception:
+                pass
             if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
                     with _fund_conn() as conn, conn.cursor() as cur:
                         cur.execute("SELECT ticker FROM analyst_reports WHERE archived IS NOT TRUE ORDER BY generated_at DESC")
-                        tickers = [r[0] for r in cur.fetchall()]
+                        tickers.extend(r[0] for r in cur.fetchall())
                 except Exception as _e:
                     print(f"[pulse-scheduler] DB query failed: {_e}")
             tickers = _filter_scan_tickers(tickers)
             if not tickers:
-                print("[pulse-scheduler] no tickers to scan — skipping")
+                print("[pulse-scheduler] no tickers to prefetch — skipping")
                 continue
-            print(f"[pulse-scheduler] scanning {len(tickers)} tickers…")
-            job_id = str(uuid.uuid4())
-            with _sjobs_lock:
-                _sjobs[job_id] = {
-                    "job_id": job_id, "status": "queued", "created_at": datetime.utcnow().isoformat(),
-                    "tickers": tickers, "tickers_done": [], "results": {}, "scanned_at": None, "error": None,
-                }
-            _run_scan(job_id, tickers)   # blocking — intentional (runs in its own thread)
-            print(f"[pulse-scheduler] scan complete — {len(tickers)} tickers merged into Market Pulse")
-            _automation_record_run("market_pulse", True, f"{len(tickers)} tickers")
+            print(f"[pulse-scheduler] prefetching free headlines for {len(tickers)} tickers (no LLM)…")
+            news = _batch_ticker_headlines(tickers, limit=1, fast=True, force=True)
+            n_ok = sum(1 for items in news.values() if items)
+            print(f"[pulse-scheduler] headlines ready — {n_ok}/{len(tickers)} names")
+            _automation_record_run("market_pulse", True, f"{n_ok}/{len(tickers)} headlines")
         except Exception as _e:
             import time as _t2
             print(f"[pulse-scheduler] error (retrying in 1h): {_e}")

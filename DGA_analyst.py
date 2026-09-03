@@ -341,12 +341,12 @@ MODEL_TASKS: dict[str, dict] = {
         "volume": True,
     },
     "market_pulse": {
-        "label": "Market Pulse (ticker scan)",
+        "label": "Market Pulse (headlines)",
         "group": "Desk",
         "allowed": ("deepseek",),
         "default": "deepseek",
-        "note": "DeepSeek only — same engine as Daily Pulse. Per-ticker. Failures stay failed; no Grok fallback.",
-        "volume": True,
+        "note": "Desk card: newest public headline per watchlist name (Yahoo / Google News RSS). No LLM. Schedule only warms the cache.",
+        "volume": False,
     },
     "agentic": {
         "label": "DGA Capital Analyst (agentic Q&A)",

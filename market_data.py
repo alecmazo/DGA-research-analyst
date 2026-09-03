@@ -2348,6 +2348,32 @@ def yfinance_earnings_calendar_context(symbol: str) -> dict:
     return out
 
 
+def sort_news_newest(items: list, limit: int | None = None) -> list:
+    """Order news dicts by pub_ts descending (newest first). Missing timestamps
+    sort last. No network. Pass limit=None for the full ranked list."""
+    rows = [
+        i for i in (items or [])
+        if isinstance(i, dict) and str(i.get("title") or "").strip()
+    ]
+
+    def _ts(it: dict) -> int:
+        v = it.get("pub_ts")
+        try:
+            n = int(v)
+            return n if n > 0 else 0
+        except (TypeError, ValueError):
+            return 0
+
+    rows.sort(key=_ts, reverse=True)
+    if limit is None:
+        return rows
+    try:
+        n = int(limit)
+    except (TypeError, ValueError):
+        n = 1
+    return rows[: max(0, n)]
+
+
 def yahoo_earnings_headlines(symbol: str, limit: int = 4) -> list[dict]:
     """Recent free Yahoo headlines mentioning earnings / print (no LLM)."""
     import time as _time
