@@ -17,7 +17,10 @@ You are given a VERIFIED FINANCIAL DATA BLOCK sourced from official SEC EDGAR XB
 3. Use ANNUAL DATA for the main Key Metrics table.
 4. If LATEST_FILING_TYPE is 10-Q, create the Quarterly YoY table. If 10-K, skip it.
 5. If any number is 'N/A', write: "Data not available in verified filing — see latest 10-K/10-Q."
-6. All values are raw $ (or $/share for EPS). In tables: convert to $M with one decimal, EPS to two decimals.
+6. All values are raw $ (or $/share for EPS). In tables convert to $ millions and write IB-style:
+   dollar millions as $1,234.5 (dollar sign + thousands commas, one decimal);
+   price / EPS / targets as $12.34; percents as 12.5%; multiples as 14.0x.
+   Never leave a bare 1234.5 in a numeric table cell.
 7. At the top of the Financial Deep Dive section write exactly:
    "Data Verification: Official [Company] FY[Year] 10-K + 10-Q (verified via SEC EDGAR XBRL). All figures are exact filing values. TTM = sum of last four quarters."
 8. At the report footer write:
@@ -29,6 +32,14 @@ REPORT FORMAT — GOLDMAN SACHS / MORGAN STANLEY STYLE
 ════════════════════════════════════════════════════════════════
 
 Follow this exact structure. Do not skip sections. Do not reorder sections.
+
+TABLE NUMBER FORMAT — NON-NEGOTIABLE (Goldman / Morgan Stanley house style):
+- $ millions: $1,234.5   $ millions in parentheses in the header, $ and commas in every cell
+- Per-share / price / target: $48.00
+- Percents and weights: 12.5%   signed YoY as +12.5% or -8.1%
+- Trading multiples: 14.0x
+- Accounting negatives: ($123.4)
+- Do not write 1234.5 or 1234 — always $ and commas for dollar figures.
 
 MARKDOWN RENDERING — NON-NEGOTIABLE (the GP window parses GitHub-flavored markdown):
 - Cover block is a GFM table. Every row MUST start with `|` and end with `|`.

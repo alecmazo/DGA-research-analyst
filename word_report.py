@@ -217,6 +217,13 @@ def _add_bordered_table(doc: Document, headers: list[str], rows: list[list[str]]
             cell.text = ""
             p = cell.paragraphs[0]
             plain, flags = _strip_md_inline(raw)
+            try:
+                from ib_tables import format_ib_cell as _ib_fmt
+                hdr = headers[i] if i < len(headers) else ""
+                label = padded[0] if padded else ""
+                plain = _ib_fmt(hdr, plain, i, row_label=label)
+            except Exception:
+                pass
             numeric = i > 0 and _looks_numeric(plain)
             p.alignment = (
                 WD_ALIGN_PARAGRAPH.RIGHT if numeric else WD_ALIGN_PARAGRAPH.LEFT

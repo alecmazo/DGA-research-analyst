@@ -36,6 +36,141 @@ export function normalizeDgaReportMd(src: string): string {
   return s.trim() ? `${s.trim()}\n` : s
 }
 
+type IbKind = 'text' | 'money' | 'money_m' | 'money_bn' | 'pct' | 'multiple' | 'eps' | 'shares'
+
+function stripMdMarks(s: string): string {
+  return String(s || '')
+    .replace(/\*\*/g, '')
+    .replace(/<[^>]+>/g, '')
+    .trim()
+}
+
+function ibColKind(header: string, colIndex: number): IbKind {
+  const h = stripMdMarks(header)
+  const low = h.toLowerCase()
+  if (
+    colIndex === 0 &&
+    /^(metric|line item|item|step|method|scenario|firm|company|ticker|symbol|year|fiscal|segment|date|rating|action|notes?|formula|assumption|comment|rationale)$/i.test(
+      h,
+    )
+  ) {
+    return 'text'
+  }
+  if (/discount factor|^t$|^year$|fiscal|date|rating|action|notes?|formula|assumption|ticker|firm|company/i.test(low)) {
+    if (!/\$(|m|b)|price|value|revenue|upside|%|p\/e|ev\//i.test(low)) return 'text'
+  }
+  if (/diluted eps|basic eps|\beps\b/i.test(low)) return 'eps'
+  if (
+    /%|margin|growth|upside|downside|weight|probability|cagr|yield|\byoy\b|return\b|ppt|implied return/i.test(
+      low,
+    ) &&
+    !/price target|implied value/i.test(low)
+  ) {
+    return 'pct'
+  }
+  if (/\bp\/?e\b|ev\/ebitda|ev\/sales|ev\/revenue|ev\/rev|\bp\/?b\b|\bp\/?s\b|multiple|\bx\b/i.test(low)) {
+    return 'multiple'
+  }
+  if (/shares|share count/i.test(low) && !/price|value|\$/i.test(low)) return 'shares'
+  if (
+    /\$|price|value|revenue|income|profit|ebitda|fcf|cash|debt|assets|equity|capex|target|market cap|enterprise|amount|sales|pv of|proceeds|book/i.test(
+      low,
+    )
+  ) {
+    if (/\$\s*m\b|\$m\b|\(\s*\$?m\s*\)|millions/i.test(low)) return 'money_m'
+    if (/\$\s*b|\(\s*\$?b|billions/i.test(low)) return 'money_bn'
+    return 'money'
+  }
+  return 'text'
+}
+
+function parseIbNum(plain: string): {
+  n: number
+  paren: boolean
+  plus: boolean
+} | null {
+  let t = stripMdMarks(plain)
+  const paren = t.startsWith('(') && t.endsWith(')')
+  if (paren) t = t.slice(1, -1).trim()
+  const plus = t.startsWith('+')
+  if (plus) t = t.slice(1).trim()
+  const neg = t.startsWith('-') || t.startsWith('−')
+  t = t.replace(/^[-−]/, '').replace(/\$/g, '').replace(/,/g, '')
+  t = t.replace(/(bn|mm|ppt|%|x)\s*$/i, '').trim()
+  const n = Number(t)
+  if (!Number.isFinite(n)) return null
+  return { n: neg || paren ? -Math.abs(n) : n, paren, plus }
+}
+
+function looksIbNumeric(plain: string): boolean {
+  const t = stripMdMarks(plain)
+  if (!t || /^(—|–|-|n\/a|na|nm|n\.a\.|\.)$/i.test(t)) return false
+  if (/^\d+\/\d+$/.test(t) || /^\d{4}-\d{2}-\d{2}/.test(t)) return false
+  if (/[a-zA-Z]{3,}/.test(t.replace(/Bn|bn|ppt/g, ''))) return false
+  const inner = t.replace(/,/g, '').replace(/\s/g, '')
+  return /^\(?\+?\$?-?\d[\d.]*\)?(%|x|bn|mm|m|ppt)?$/i.test(inner)
+}
+
+function commas(n: number, decimals: number): string {
+  return Math.abs(n).toLocaleString('en-US', {
+    minimumFractionDigits: Math.max(0, decimals),
+    maximumFractionDigits: Math.max(0, decimals),
+  })
+}
+
+function moneyStr(n: number, decimals: number, paren: boolean): string {
+  const body = `$${commas(n, decimals)}`
+  if (n < 0 || paren) return `(${body})`
+  return body
+}
+
+/** IB-style $ / commas / % / x for one table cell. Idempotent. */
+export function formatIbTableCell(
+  header: string,
+  cell: string,
+  colIndex = 0,
+  rowLabel = '',
+): string {
+  const raw = cell ?? ''
+  let kind = ibColKind(header, colIndex)
+  if (kind === 'text' && colIndex > 0 && rowLabel.trim()) {
+    const inherited = ibColKind(rowLabel, 1)
+    if (inherited !== 'text') kind = inherited
+  }
+  if (kind === 'text') return raw
+  const core = stripMdMarks(raw)
+  if (!looksIbNumeric(core)) return raw
+  const parsed = parseIbNum(core)
+  if (!parsed) return raw
+  const { n, paren, plus } = parsed
+  let out = raw
+  if (kind === 'pct') {
+    const body =
+      Math.abs(n - Math.round(n)) < 1e-9 ? String(Math.abs(Math.round(n))) : Math.abs(n).toFixed(1)
+    if (n < 0) out = paren ? `(${body}%)` : `-${body}%`
+    else if (plus) out = `+${body}%`
+    else out = `${body}%`
+  } else if (kind === 'multiple') {
+    out = `${Math.abs(n).toFixed(1)}x`
+    if (n < 0) out = `-${out}`
+  } else if (kind === 'eps') {
+    out = moneyStr(n, 2, paren)
+  } else if (kind === 'shares') {
+    out = commas(n, Math.abs(n - Math.round(n)) > 1e-9 ? 1 : 0)
+    if (n < 0) out = `-${out}`
+  } else if (kind === 'money_m' || kind === 'money_bn' || kind === 'money') {
+    let dec = 2
+    if (kind === 'money_m') dec = 1
+    else if (kind === 'money_bn') dec = 2
+    else if (Math.abs(n) < 100) dec = 2
+    else if (Math.abs(n - Math.round(n)) < 1e-9) dec = 0
+    out = moneyStr(n, dec, paren)
+  }
+  const trimmed = raw.trim()
+  if (trimmed.startsWith('**') && trimmed.endsWith('**')) return `**${out}**`
+  return out
+}
+
 /** Content-aware col widths so print/PDF don't equalize ticker vs rationale. */
 function mdTableColgroup(head: string[], body: string[][]): string {
   const n = head.length
@@ -129,8 +264,14 @@ export function renderMd(src: string): string {
     html += '</tr></thead><tbody>'
     padded.forEach((r) => {
       html += '<tr>'
-      r.forEach((c) => {
-        html += `<td>${c}</td>`
+      const label = r[0] || ''
+      r.forEach((c, i) => {
+        const formatted = formatIbTableCell(head[i] || '', c, i, label)
+        const numeric =
+          i > 0 && formatted !== c
+            ? true
+            : i > 0 && looksIbNumeric(stripMdMarks(formatted))
+        html += numeric ? `<td class="md-num">${formatted}</td>` : `<td>${formatted}</td>`
       })
       html += '</tr>'
     })

@@ -413,6 +413,12 @@
   color: #0a1628;
 }
 
+.md :global(.md-table td.md-num) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .md :global(.md-table tr:nth-child(even) td) {
   background: #f8fafc;
 }
