@@ -2303,18 +2303,21 @@ _NEWS_CACHE: dict[str, dict] = {}
 _NEWS_TTL = 900  # 15 minutes
 
 
-def _fetch_news_for_ticker(ticker: str, limit: int = 3, *, fast: bool = False) -> list[dict]:
+def _fetch_news_for_ticker(ticker: str, limit: int = 3, *,
+                           fast: bool = False, merge: bool = False) -> list[dict]:
     """Pull up to `limit` recent news items. Tries yfinance.Ticker.news first;
     falls back to Yahoo Finance RSS if that comes up empty (the .news API
     has been intermittent for months). Cached in _NEWS_CACHE.
 
     fast=True skips yfinance (can hang 8s from a cloud IP) and goes straight
-    to public RSS — used by the Desk Market Pulse card."""
+    to public RSS — used by the Desk Market Pulse card.
+    merge=True also pulls Google News and unions the two (expanded headline list)."""
     tk = (ticker or "").upper().strip()
     if not tk: return []
     now = time.time()
     hit = _NEWS_CACHE.get(tk)
-    if hit and (now - hit["ts"]) < _NEWS_TTL:
+    # Merged lists need both RSS feeds; a Yahoo-only cache hit is not enough.
+    if (not merge) and hit and (now - hit["ts"]) < _NEWS_TTL:
         return hit["items"][:limit]
     items: list[dict] = []
 
@@ -2364,7 +2367,7 @@ def _fetch_news_for_ticker(ticker: str, limit: int = 3, *, fast: bool = False) -
             root = _ET.fromstring(xml_text)
             channel = root.find("channel")
             if channel is not None:
-                for it in channel.findall("item")[:5]:
+                for it in channel.findall("item")[:8]:
                     title = (it.findtext("title") or "").strip()
                     link  = (it.findtext("link") or "").strip()
                     pub   = (it.findtext("pubDate") or "").strip()
@@ -2386,10 +2389,10 @@ def _fetch_news_for_ticker(ticker: str, limit: int = 3, *, fast: bool = False) -
         except Exception as e:
             print(f"⚠️  [news {tk}] Yahoo RSS failed: {e!s:.150}", flush=True)
 
-    # ── 3. Google News RSS fallback (most reliable, rate-limit-free) ───
-    # When both yfinance and Yahoo RSS come up empty, Google News almost
-    # always has fresh items keyed off "<ticker> stock".
-    if not items:
+    # ── 3. Google News RSS (fallback, or merged into the expanded list) ─
+    # When Yahoo is empty, or the caller asked to merge sources (row click
+    # on Market Pulse), pull Google News RSS for "<ticker> stock".
+    if (not items) or merge:
         try:
             from urllib.parse import quote as _q
             query = _q(f"{tk} stock")
@@ -2399,7 +2402,7 @@ def _fetch_news_for_ticker(ticker: str, limit: int = 3, *, fast: bool = False) -
             root = _ET.fromstring(xml_text)
             channel = root.find("channel")
             if channel is not None:
-                for it in channel.findall("item")[:5]:
+                for it in channel.findall("item")[:8]:
                     # Google News titles are formatted "Article title - Source"
                     raw_title = (it.findtext("title") or "").strip()
                     src = ""
@@ -2438,16 +2441,27 @@ def _fetch_news_for_ticker(ticker: str, limit: int = 3, *, fast: bool = False) -
             items.sort(key=lambda x: int(x.get("pub_ts") or 0), reverse=True)
         except Exception:
             pass
+    seen_titles: set[str] = set()
+    uniq: list[dict] = []
+    for it in items:
+        key = str(it.get("title") or "").strip().lower()
+        if not key or key in seen_titles:
+            continue
+        seen_titles.add(key)
+        uniq.append(it)
+    items = uniq
     _NEWS_CACHE[tk] = {"ts": now, "items": items}
     return items[:limit]
 
 
 def _batch_ticker_headlines(tickers: list, limit: int = 1, *,
-                            fast: bool = True, force: bool = False) -> dict:
+                            fast: bool = True, force: bool = False,
+                            merge: bool = False) -> dict:
     """Newest public headlines for many tickers. Parallel RSS, no LLM.
 
     Returns {TICKER: [items...]}. Caps at 80 names. Cached via _NEWS_CACHE.
-    shutdown(wait=False) so a hung RSS fetch never blocks the request."""
+    shutdown(wait=False) so a hung RSS fetch never blocks the request.
+    merge=True unions Yahoo + Google (used when a pulse row is expanded)."""
     import concurrent.futures as _cf
     out: dict[str, list] = {}
     tks: list[str] = []
@@ -2462,18 +2476,18 @@ def _batch_ticker_headlines(tickers: list, limit: int = 1, *,
             break
     if not tks:
         return out
-    if force:
+    if force or merge:
         for tk in tks:
             _NEWS_CACHE.pop(tk, None)
     try:
-        lim = max(1, min(int(limit or 1), 5))
+        lim = max(1, min(int(limit or 1), 12))
     except (TypeError, ValueError):
         lim = 1
     now = time.time()
     need: list[str] = []
     for tk in tks:
         hit = _NEWS_CACHE.get(tk)
-        if hit and (now - (hit.get("ts") or 0)) < _NEWS_TTL:
+        if (not merge) and hit and (now - (hit.get("ts") or 0)) < _NEWS_TTL:
             out[tk] = (hit.get("items") or [])[:lim]
         else:
             need.append(tk)
@@ -2482,7 +2496,7 @@ def _batch_ticker_headlines(tickers: list, limit: int = 1, *,
         ex = _cf.ThreadPoolExecutor(max_workers=n_workers)
         try:
             futs = {
-                ex.submit(_fetch_news_for_ticker, tk, lim, fast=fast): tk
+                ex.submit(_fetch_news_for_ticker, tk, lim, fast=fast, merge=merge): tk
                 for tk in need
             }
             done, not_done = _cf.wait(futs, timeout=18)
@@ -2517,10 +2531,12 @@ def get_ticker_news(tickers: str = "", limit: int = 1):
 
 @app.get("/api/market/pulse")
 def market_pulse_headlines(request: Request, tickers: str = "",
-                           limit: int = 1, force: bool = False):
+                           limit: int = 1, force: bool = False,
+                           merge: bool = False):
     """Newest public headline per ticker (Yahoo RSS → Google News). Powers the
     Desk Market Pulse card. No LLM, no key. Cached ~15 min. Pass tickers as a
-    comma list; empty uses the GP watchlist. ?force=true bypasses cache."""
+    comma list; empty uses the GP watchlist. ?force=true bypasses cache.
+    ?merge=true unions Yahoo + Google for the expanded per-ticker list."""
     _claims_or_401(request)
     tks = [t.strip().upper() for t in (tickers or "").split(",") if t.strip()]
     if not tks:
@@ -2528,7 +2544,8 @@ def market_pulse_headlines(request: Request, tickers: str = "",
             tks = _all_watchlist_tickers() or []
         except Exception:
             tks = []
-    news = _batch_ticker_headlines(tks, limit=limit, fast=True, force=force)
+    news = _batch_ticker_headlines(
+        tks, limit=limit, fast=True, force=force, merge=merge)
     results: dict = {}
     for tk, items in news.items():
         top = items[0] if items else None
@@ -7650,7 +7667,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui568-20260903-pulse-headlines"
+WEB_BUILD_VERSION = "ui569-20260903-pulse-head-list"
 
 
 @app.get("/api/build")

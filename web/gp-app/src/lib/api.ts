@@ -222,12 +222,21 @@ export type MarketMoversResponse = {
 }
 
 /** GET /api/market/pulse — newest public headline per ticker, no LLM. */
+export type PulseNewsItem = {
+  title?: string
+  url?: string
+  publisher?: string
+  pub_ts?: number | null
+  source?: string
+}
+
 export type PulseHeadline = {
   headline?: string
   url?: string
   publisher?: string
   pub_ts?: number | null
   source?: string
+  items?: PulseNewsItem[]
 }
 
 export type MarketPulseResponse = {
