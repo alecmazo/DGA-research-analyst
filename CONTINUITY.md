@@ -151,6 +151,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Market Pulse headlines** | **`ui568-20260903-pulse-headlines`** | Desk Market Pulse: newest public headline per watchlist name (Yahoo/Google RSS, no LLM) |
 | **Pulse headline list** | **`ui569-20260903-pulse-head-list`** | Click empty space on a Market Pulse row to open latest Yahoo+Google headlines |
 | **Valuation approaches** | **`ui570-20260903-val-approaches`** | Excel + Market Pulse: each PT method (DCF/comps/street/scenarios) with its own color-coded verdict; no blend |
+| **Excel Dropbox overwrite** | **`ui571-20260903-xlsx-overwrite`** | Excel export replaces `{TICKER}_DGA_Model.xlsx` in Reports; purges `(1)` copies |
 
 ### One-click handoff (preferred)
 
@@ -323,4 +324,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui570-20260903-val-approaches` · Next: `ui571-YYYYMMDD-slug`*
+*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui571-20260903-xlsx-overwrite` · Next: `ui572-YYYYMMDD-slug`*

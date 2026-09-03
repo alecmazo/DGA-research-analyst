@@ -12309,6 +12309,55 @@ def _dropbox_dest_for(file_name: str, subfolder: str | None = None) -> str:
     return f"{base}/{sub}/{file_name}" if base else f"/{sub}/{file_name}"
 
 
+def is_dropbox_duplicate_name(name: str, canonical: str) -> bool:
+    """True if *name* is a Dropbox copy of *canonical* (``(1)``, conflicted, …).
+
+    Canonical ``AAPL_DGA_Model.xlsx`` matches ``AAPL_DGA_Model (1).xlsx`` and
+    conflicted-copy names, not ``MSFT_DGA_Model.xlsx`` or ``AAPL_DGA_Model_v2.xlsx``.
+    """
+    n = (name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+    c = (canonical or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+    if not n or not c or n.lower() == c.lower():
+        return False
+    if not n.lower().endswith(".xlsx") or not c.lower().endswith(".xlsx"):
+        return False
+    ns, cs = n[:-5], c[:-5]
+    if not ns.lower().startswith(cs.lower()):
+        return False
+    rest = ns[len(cs):]
+    return bool(re.fullmatch(
+        r"(\s*\(\d+\)|\s+\d+|\s+copy|\s*\(conflicted copy[^)]*\))",
+        rest,
+        re.I,
+    ))
+
+
+def _dropbox_purge_xlsx_copies(dbx, dest: str, canonical_name: str) -> list[str]:
+    """Delete Dropbox copies of a model xlsx, keeping the canonical path."""
+    folder = dest.rsplit("/", 1)[0] or "/"
+    removed: list[str] = []
+    try:
+        res = dbx.files_list_folder(folder)
+        entries = list(res.entries or [])
+        while getattr(res, "has_more", False):
+            res = dbx.files_list_folder_continue(res.cursor)
+            entries.extend(res.entries or [])
+    except Exception as e:
+        print(f"[dropbox] list {folder}: {e!s:.160}", flush=True)
+        return removed
+    for ent in entries:
+        n = getattr(ent, "name", "") or ""
+        if not is_dropbox_duplicate_name(n, canonical_name):
+            continue
+        path = getattr(ent, "path_display", None) or f"{folder}/{n}"
+        try:
+            dbx.files_delete_v2(path)
+            removed.append(n)
+        except Exception as e:
+            print(f"[dropbox] delete copy {n}: {e!s:.160}", flush=True)
+    return removed
+
+
 def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None = None) -> dict:
     """Upload files to the Dropbox 'DGA Research Reports' folder.
 
@@ -12334,12 +12383,54 @@ def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None 
             continue
         dest = _dropbox_dest_for(p.name, dest_subfolder)
         try:
-            dbx.files_upload(
-                p.read_bytes(),
-                dest,
-                mode=dropbox.files.WriteMode.overwrite,
-                mute=True,
-            )
+            data = p.read_bytes()
+            try:
+                meta = dbx.files_upload(
+                    data,
+                    dest,
+                    mode=dropbox.files.WriteMode.overwrite,
+                    autorename=False,
+                    mute=True,
+                )
+            except Exception as up_exc:
+                # Conflict / lock: drop the dest file and write a fresh one
+                # at the same path so we never leave a "(1)" copy.
+                print(f"[dropbox] overwrite {p.name} failed ({up_exc!s:.120}); replace",
+                      flush=True)
+                try:
+                    dbx.files_delete_v2(dest)
+                except Exception:
+                    pass
+                meta = dbx.files_upload(
+                    data,
+                    dest,
+                    mode=dropbox.files.WriteMode.overwrite,
+                    autorename=False,
+                    mute=True,
+                )
+            got_name = getattr(meta, "name", None) or p.name
+            if got_name.lower() != p.name.lower():
+                # Autorename slipped through — move back onto the canonical path.
+                print(f"[dropbox] renamed {got_name} → {p.name}; correcting", flush=True)
+                try:
+                    dbx.files_delete_v2(dest)
+                except Exception:
+                    pass
+                try:
+                    from_path = getattr(meta, "path_display", None) or dest
+                    dbx.files_move_v2(from_path, dest, autorename=False)
+                except Exception:
+                    dbx.files_upload(
+                        data,
+                        dest,
+                        mode=dropbox.files.WriteMode.overwrite,
+                        autorename=False,
+                        mute=True,
+                    )
+            if "_dga_model" in p.name.lower():
+                purged = _dropbox_purge_xlsx_copies(dbx, dest, p.name)
+                if purged:
+                    print(f"[dropbox] removed copies of {p.name}: {purged}", flush=True)
             uploaded.append(p.name)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{p.name}: {exc}")
