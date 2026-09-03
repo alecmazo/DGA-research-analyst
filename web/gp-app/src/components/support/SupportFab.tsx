@@ -171,8 +171,33 @@ export function SupportFab() {
       }
     }
     const user = getCachedUser()
-    try {
-      const j = await api<{
+    const payload = (screenshot: string | null) =>
+      JSON.stringify({
+        description: text,
+        page_url: location.href,
+        page_path: location.pathname + location.search + location.hash,
+        active_tab: loc.pathname.replace(/^\//, '') || 'desk',
+        user_agent: navigator.userAgent,
+        viewport: {
+          w: window.innerWidth,
+          h: window.innerHeight,
+          dpr: window.devicePixelRatio || 1,
+          scrollY: window.scrollY || 0,
+        },
+        console_errors: errorBuf.slice(-20),
+        context: {
+          theme: document.documentElement.getAttribute('data-theme') || '',
+          title: document.title,
+          role: user?.role || 'gp',
+          user: user?.email || user?.lp_id || null,
+          name: user?.name || '',
+        },
+        screenshot_b64: screenshot || null,
+        screenshot_mime: 'image/jpeg',
+        priority: 'normal',
+      })
+    const post = (screenshot: string | null) =>
+      api<{
         ok?: boolean
         id?: string
         has_screenshot?: boolean
@@ -180,31 +205,10 @@ export function SupportFab() {
         detail?: string
       }>('/api/support/tickets', {
         method: 'POST',
-        body: JSON.stringify({
-          description: text,
-          page_url: location.href,
-          page_path: location.pathname + location.search + location.hash,
-          active_tab: loc.pathname.replace(/^\//, '') || 'desk',
-          user_agent: navigator.userAgent,
-          viewport: {
-            w: window.innerWidth,
-            h: window.innerHeight,
-            dpr: window.devicePixelRatio || 1,
-            scrollY: window.scrollY || 0,
-          },
-          console_errors: errorBuf.slice(-20),
-          context: {
-            theme: document.documentElement.getAttribute('data-theme') || '',
-            title: document.title,
-            role: user?.role || 'gp',
-            user: user?.email || user?.lp_id || null,
-            name: user?.name || '',
-          },
-          screenshot_b64: shotData || null,
-          screenshot_mime: 'image/jpeg',
-          priority: 'normal',
-        }),
+        body: payload(screenshot),
       })
+    try {
+      let j = await post(shotData)
       if (!j.ok) throw new Error(j.error || j.detail || 'Submit failed')
       setStatus(
         `✓ Ticket ${j.id || ''} filed${j.has_screenshot ? ' with screenshot' : ''}. See Settings → Support.`,
@@ -212,7 +216,24 @@ export function SupportFab() {
       setDesc('')
       window.setTimeout(() => setOpen(false), 1600)
     } catch (e) {
-      setStatus(`❌ ${e instanceof Error ? e.message : 'failed'}`)
+      const msg = e instanceof Error ? e.message : 'failed'
+      // Huge screenshot can truncate JSON so the API never sees the description.
+      if (shotData && /screenshot|not received|too large|describe the problem/i.test(msg)) {
+        try {
+          const j2 = await post(null)
+          if (j2.ok) {
+            setStatus(
+              `✓ Ticket ${j2.id || ''} filed without screenshot (image was too large). See Settings → Support.`,
+            )
+            setDesc('')
+            window.setTimeout(() => setOpen(false), 1800)
+            return
+          }
+        } catch {
+          /* fall through */
+        }
+      }
+      setStatus(`❌ ${msg}`)
     } finally {
       setBusy(false)
     }

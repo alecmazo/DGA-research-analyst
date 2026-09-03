@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import uuid as _uuid
 from datetime import datetime, timezone
@@ -447,6 +448,66 @@ def _support_auto_diagnose(ticket_id: str) -> None:
             pass
 
 
+def _salvage_ticket_json(raw: bytes) -> dict:
+    """Pull description out of truncated JSON (huge screenshot often cuts the body)."""
+    out: dict = {}
+    try:
+        text = (raw or b"").decode("utf-8", "replace")
+    except Exception:
+        return out
+    m = re.search(r'"description"\s*:\s*"((?:\\.|[^"\\])*)"', text)
+    if m:
+        try:
+            out["description"] = json.loads('"' + m.group(1) + '"')
+        except Exception:
+            out["description"] = (
+                m.group(1).replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+            )
+    return out
+
+
+def _support_ticket_body(request: Request) -> tuple[dict, str | None]:
+    """Parse ticket JSON from a sync endpoint. Salvage description if the
+    screenshot bloated the payload past a clean json.loads."""
+    raw = b""
+    try:
+        raw = B._request_body_sync(request) or b""
+    except Exception as e:
+        return {}, f"body read failed: {e!s:.80}"
+    if not raw.strip():
+        try:
+            j = B._request_json_sync(request) or {}
+            return (j if isinstance(j, dict) else {}), None
+        except Exception:
+            return {}, "empty body"
+    try:
+        j = json.loads(raw)
+        if isinstance(j, dict):
+            return j, None
+        return {}, "ticket body was not an object"
+    except Exception as e:
+        salvaged = _salvage_ticket_json(raw)
+        if salvaged.get("description"):
+            print(f"[support] salvaged description from truncated JSON ({e!s:.80})",
+                  flush=True)
+            return salvaged, None
+        return {}, f"invalid json: {e!s:.80}"
+
+
+def _ticket_description(body: dict) -> str:
+    if not isinstance(body, dict):
+        return ""
+    for k in ("description", "desc", "text", "note", "message", "problem"):
+        v = body.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        if v is not None and not isinstance(v, (dict, list)):
+            s = str(v).strip()
+            if s:
+                return s
+    return ""
+
+
 @router.post("/api/support/tickets")
 def support_ticket_create(request: Request, background_tasks: BackgroundTasks):
     """GP or LP: file a trouble ticket with optional page screenshot (base64).
@@ -455,12 +516,16 @@ def support_ticket_create(request: Request, background_tasks: BackgroundTasks):
     update tickets — that stays on the GP Settings trail for 'fix ticket'.
     """
     claims = _support_authed(request)
-    try:
-        body = B._request_json_sync(request) or {}
-    except Exception:
-        body = {}
-    desc = (body.get("description") or "").strip()
+    body, parse_err = _support_ticket_body(request)
+    desc = _ticket_description(body)
     if len(desc) < 8:
+        if parse_err:
+            return JSONResponse(
+                {"ok": False,
+                 "error": "Could not read the ticket (screenshot may be too large). "
+                          "Your description was not received — try Submit again "
+                          "or recapture a smaller screenshot."},
+                status_code=400)
         return JSONResponse({"ok": False, "error": "Please describe the problem (at least a sentence)."},
                             status_code=400)
     if len(desc) > 8000:

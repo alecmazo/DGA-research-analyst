@@ -153,6 +153,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Valuation approaches** | **`ui570-20260903-val-approaches`** | Excel + Market Pulse: each PT method (DCF/comps/street/scenarios) with its own color-coded verdict; no blend |
 | **Excel Dropbox overwrite** | **`ui571-20260903-xlsx-overwrite`** | Excel export replaces `{TICKER}_DGA_Model.xlsx` in Reports; purges `(1)` copies |
 | **Approaches use implied** | **`ui572-20260903-implied-approaches`** | Approaches vs last: implied $/sh (not weighted); only 12m PT is the blend; DCF = model share + DCF (base) |
+| **Pulse drop Base case** | **`ui573-20260903-pulse-no-base`** | Drop scenario Base/Bull/Bear from Approaches + Pulse chips; ticket create salvages description if screenshot truncates JSON |
 
 ### One-click handoff (preferred)
 
@@ -325,4 +326,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui572-20260903-implied-approaches` · Next: `ui573-YYYYMMDD-slug`*
+*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui573-20260903-pulse-no-base` · Next: `ui574-YYYYMMDD-slug`*

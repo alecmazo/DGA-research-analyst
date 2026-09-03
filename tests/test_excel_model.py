@@ -390,8 +390,10 @@ def test_extract_valuation_approaches_not_blended():
     assert "pe" in by_id
     assert "street_anchored" in by_id
     assert "street" in by_id
-    assert "bull" in by_id and "base" in by_id and "bear" in by_id
     assert "report_pt" in by_id
+    # Scenario bull/base/bear are not chips — "Base case" collided with DCF (base)
+    assert "base" not in by_id and "bull" not in by_id and "bear" not in by_id
+    assert not any("base case" in (a.get("name") or "").lower() for a in apps)
     # Extra DCF duration case is dropped
     assert not any("bull duration" in (n or "").lower() for n in names)
     assert not any("7%" in (n or "") for n in names)
@@ -410,8 +412,6 @@ def test_extract_valuation_approaches_not_blended():
     assert "blend" in (by_id["report_pt"]["note"] or "").lower()
     dcf = by_id["dcf"]
     assert dcf["verdict"] == "FAIR VALUED" or dcf["tone"] in ("fair", "under")
-    bear = by_id["bear"]
-    assert bear["verdict"] == "OVERVALUED"
     recut = em.recut_approaches_vs_last([by_id["dcf_base"]], 80.0)
     assert recut[0]["verdict"] == "OVERVALUED"
     fair = em.valuation_verdict(41.0, 40.0)

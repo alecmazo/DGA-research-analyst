@@ -1146,10 +1146,8 @@ def extract_valuation_approaches(
     if n_firms:
         add("Street consensus", street_avg, f"average of {n_firms} firm PTs (implied)", key="street")
 
-    for sc in extract_scenarios(md or ""):
-        prob = sc.get("probability")
-        note = f"scenario · {prob:.0%} prob" if isinstance(prob, (int, float)) else "scenario"
-        add(f"{sc['case']} case", sc.get("price_target"), note, key=sc["case"].lower())
+    # Bull / Base / Bear stay on the Scenarios sheet — not here. "Base case"
+    # next to "DCF (base)" on Market Pulse / this table is confusing.
 
     rpt = _f(pt)
     add(

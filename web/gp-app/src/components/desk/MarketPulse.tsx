@@ -50,9 +50,19 @@ function valChipClass(
   return styles.valNone
 }
 
+const HIDE_CHIP_IDS = new Set(['report_pt', 'base', 'bull', 'bear'])
+
 function approachChips(rep?: SavedReport | null): ValuationApproach[] {
   const apps = rep?.valuation_approaches || []
-  return apps.filter((a) => a && a.id !== 'report_pt' && a.verdict && a.verdict !== '—').slice(0, 6)
+  return apps
+    .filter(
+      (a) =>
+        a &&
+        !HIDE_CHIP_IDS.has(String(a.id || '')) &&
+        a.verdict &&
+        a.verdict !== '—',
+    )
+    .slice(0, 6)
 }
 
 function newsItems(row?: PulseHeadline | null): PulseNewsItem[] {
