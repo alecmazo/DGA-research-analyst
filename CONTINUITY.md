@@ -159,6 +159,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Excel replace + keep shot** | **`ui576-20260904-xlsx-replace`** | Excel button overwrites `{TICKER}_DGA_Model.xlsx` in Dropbox and the local open/save file; support tickets always keep the screenshot |
 | **Excel units + Excel folder** | **`ui577-20260904-excel-units`** | NFLX-style unit bugs: growth not revenue, shares from SEC not 3.0bn leftovers, $B→$m; models save to Dropbox `/Apps/DGA Research/Excel/` and replace |
 | **Cover DCF on Rating row** | **`ui578-20260904-cover-dcf`** | SUP_20260904_b6613db9 — DCF Target on the cover Rating row for every saved report; 12m PT stays the DGA blend |
+| **DCF (base) reverse bridge** | **`ui579-20260904-dcf-base-bridge`** | Valuation tab: reverse-engineered DCF (base) bridge beside the live Gordon equity bridge, with $/% gap |
 
 ### One-click handoff (preferred)
 

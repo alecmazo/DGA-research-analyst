@@ -2243,6 +2243,144 @@ def _dcf_verdict_formulas(dcf_ref: str, last_ref: str, band: float = _FAIR_BAND)
     }
 
 
+def _dcf_base_from_approaches(approaches: Optional[list]) -> Optional[float]:
+    """PT-derivation DCF (base) implied $/share — not the live model DCF."""
+    for a in approaches or []:
+        if a.get("id") == "dcf_base":
+            v = _f(a.get("value"))
+            if v is not None and v > 1:
+                return v
+    return None
+
+
+def _write_dcf_base_bridge(
+    ws,
+    start_row: int,
+    *,
+    dcf_base: Optional[float],
+    sum_row: int,
+    last_fcf_row: int,
+    model_dcf_ref: str,
+    S,
+) -> None:
+    """Reverse-engineer report DCF (base) in columns E–G, beside the Gordon bridge.
+
+    Holds the model’s FCF ladder, shares, and net debt fixed so the gap versus
+    live DCF value/share shows up in implied TV / implied g.
+    """
+    c0, c1, c2 = 5, 6, 7
+    _section_title(
+        ws, start_row, c0, 3,
+        "DCF (BASE) BRIDGE  ·  reverse from the report implied — not the live Gordon walk",
+        S,
+    )
+    hdr = start_row + 1
+    for col, h in ((c0, "Step"), (c1, "Value"), (c2, "Note")):
+        cell = ws.cell(hdr, col, h)
+        cell.font = S["font_h"]
+        cell.fill = S["navy_fill"]
+        cell.alignment = S["center"]
+        cell.border = S["thin"]
+
+    r = hdr + 1
+
+    def put(lab, val, fmt, note, *, input_cell=False, gold=False) -> int:
+        nonlocal r
+        ws.cell(r, c0, lab).font = S["font_bold"] if gold else S["font"]
+        ws.cell(r, c0).border = S["thin"]
+        if isinstance(val, str) and str(val).startswith("="):
+            _put_formula(ws, r, c1, val, fmt, S, gold=gold, bold=gold)
+        else:
+            _put_input(ws, r, c1, val, fmt, S, input_cell=input_cell)
+            if gold and not input_cell:
+                ws.cell(r, c1).fill = S["pale_gold"]
+                ws.cell(r, c1).font = S["font_kpi"]
+        n = ws.cell(r, c2, note)
+        n.font = S["font_muted"]
+        n.border = S["thin"]
+        n.alignment = Alignment_wrap(S)
+        this = r
+        r += 1
+        return this
+
+    r_px = put(
+        "DCF (base) $/share", dcf_base, _FMT_SH,
+        "PT-derivation implied — yellow input", input_cell=True,
+    )
+    r_sh = put("× Diluted shares (m)", "=$B$20", _FMT_SHARES,
+               "same share count as the model bridge")
+    r_eq = put(
+        "= Implied equity ($m)",
+        f'=IF(OR(F{r_px}="",F{r_sh}=""),"nm",F{r_px}*F{r_sh})',
+        _FMT_MM, "DCF (base) × shares",
+    )
+    r_nd = put("(+) Net debt / (−) cash", "=$B$19", _FMT_MM,
+               "same BS plug as the model bridge")
+    r_ev = put(
+        "= Implied EV ($m)",
+        f'=IF(F{r_eq}="nm","nm",F{r_eq}+F{r_nd})',
+        _FMT_MM, "equity + net debt", gold=True,
+    )
+    r_pv = put("(−) PV of explicit FCF", f"=H{sum_row}", _FMT_MM,
+               "model ladder held constant — the gap sits in TV")
+    r_pvtv = put(
+        "= Implied PV of TV ($m)",
+        f'=IF(F{r_ev}="nm","nm",F{r_ev}-F{r_pv})',
+        _FMT_MM, "implied EV − Σ PV FCF",
+    )
+    r_df = put("÷ Year-n discount factor", f"=G{last_fcf_row}", "0.000",
+               "1/(1+WACC)^n from the ladder")
+    r_tv = put(
+        "= Implied TV ($m)",
+        f'=IF(OR(F{r_pvtv}="nm",F{r_df}="",F{r_df}=0),"nm",F{r_pvtv}/F{r_df})',
+        _FMT_MM, "undiscounted TV that hits DCF (base)", gold=True,
+    )
+    r_fcf = put("Year-n FCF ($m)", f"=E{last_fcf_row}", _FMT_MM,
+                "same FCFn as the model bridge")
+    put(
+        "Implied TV / FCFn",
+        f'=IF(OR(F{r_tv}="nm",F{r_fcf}="",F{r_fcf}=0),"nm",F{r_tv}/F{r_fcf})',
+        _FMT_X, "exit multiple implied by DCF (base)",
+    )
+    r_g = put(
+        "Implied g (Gordon)",
+        f'=IF(OR(F{r_tv}="nm",F{r_tv}="",F{r_fcf}="",F{r_fcf}=0,$B$15=""),"nm",'
+        f'(F{r_tv}*$B$15-F{r_fcf})/(F{r_tv}+F{r_fcf}))',
+        _FMT_PCT,
+        "g that would make this sheet's ladder equal DCF (base)",
+    )
+    r_gm = put("Model g", "=$B$16", _FMT_PCT, "from the WACC build")
+    put(
+        "Δ g (implied − model)",
+        f'=IF(OR(F{r_g}="nm",F{r_gm}=""),"nm",F{r_g}-F{r_gm})',
+        _FMT_PCT,
+        "negative = report haircut the terminal (conservatism vs live model)",
+    )
+
+    _section_title(ws, r, c0, 3, "GAP  ·  live model DCF vs report DCF (base)", S)
+    r += 1
+    r_mod = put(
+        "Model DCF value / share", f"={model_dcf_ref}", _FMT_SH,
+        "live Gordon / ladder / this sheet", gold=True,
+    )
+    r_base = put("DCF (base) $/share", f"=F{r_px}", _FMT_SH,
+                 "report PT-derivation implied")
+    put(
+        "$ gap (model − base)",
+        f'=IF(OR(F{r_mod}="nm",F{r_base}="",F{r_base}=0),"nm",F{r_mod}-F{r_base})',
+        _FMT_SH,
+        "positive = model above the report DCF (base)", gold=True,
+    )
+    put(
+        "% gap",
+        f'=IF(OR(F{r_mod}="nm",F{r_base}="",F{r_base}=0),"nm",F{r_mod}/F{r_base}-1)',
+        _FMT_PCT,
+        "model is unadjusted Gordon; DCF (base) is the report implied, often a haircut",
+        gold=True,
+    )
+    ws.row_dimensions[r - 1].height = 28
+
+
 def _dcf_price_formula(wacc_ref: str, g_ref: str, fcf_refs: list[str],
                        nd_ref: str, sh_ref: str) -> str:
     """Equity value / share at a given WACC and g, using explicit FCF years 1..n."""
@@ -2563,6 +2701,15 @@ def _valuation_sheet(
         _put_formula(ws, row, 2, formula, fmt, S, gold=gold, bold=gold)
         ws.cell(row, 3, "").border = S["thin"]
 
+    _write_dcf_base_bridge(
+        ws, br,
+        dcf_base=_dcf_base_from_approaches(approaches),
+        sum_row=sum_row,
+        last_fcf_row=last_fcf_row,
+        model_dcf_ref=dcf_ref,
+        S=S,
+    )
+
     # Row-3 summary of every approach (DCF live; others from the report).
     _write_row3_summary(ws, approaches or [], dcf_ref, last_ref, S)
     # Live DCF verdict in the bridge — same high-contrast CF as row 3.
@@ -2683,6 +2830,9 @@ def _valuation_sheet(
     ws.column_dimensions["D"].width = 12
     for i in range(5, 20):
         ws.column_dimensions[get_column_letter(i)].width = 13
+    ws.column_dimensions["E"].width = 34
+    ws.column_dimensions["F"].width = 16
+    ws.column_dimensions["G"].width = 28
     ws.freeze_panes = "A4"
     _print_setup(ws, landscape=True)
     ws.sheet_properties.tabColor = GOLD

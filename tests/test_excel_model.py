@@ -287,6 +287,30 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
     assert "DCF verdict (vs last)" in labels
     assert "Mispricing vs last" in labels
     assert "$ / sh vs last" in labels
+    # DCF (base) reverse bridge sits in columns E–G next to the Gordon walk
+    base_title_r = None
+    for r in range(20, 90):
+        if "DCF (BASE) BRIDGE" in str(val.cell(r, 5).value or ""):
+            base_title_r = r
+            break
+    assert base_title_r, "missing DCF (base) reverse bridge"
+    assert val.cell(base_title_r + 1, 5).value == "Step"
+    assert val.cell(base_title_r + 2, 5).value == "DCF (base) $/share"
+    assert abs(float(val.cell(base_title_r + 2, 6).value) - 47.0) < 1e-9
+    gap_labs = [str(val.cell(r, 5).value or "") for r in range(base_title_r, 95)]
+    assert any("GAP" in x and "DCF (base)" in x for x in gap_labs)
+    assert "Model DCF value / share" in gap_labs
+    assert "$ gap (model − base)" in gap_labs
+    assert "% gap" in gap_labs
+    # reverse walk uses the same shares / net debt / ladder as the model
+    assert any(
+        str(val.cell(r, 6).value or "") == "=$B$20"
+        for r in range(base_title_r, base_title_r + 20)
+    )
+    assert any(
+        str(val.cell(r, 6).value or "").startswith("=H")
+        for r in range(base_title_r, base_title_r + 20)
+    )
     # Pro forma years header includes FY2026E
     pf_headers = [val.cell(5, c).value for c in range(5, 14)]
     assert "FY2026E" in pf_headers
