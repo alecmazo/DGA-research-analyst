@@ -208,7 +208,7 @@ export function ReportPage() {
       await downloadAuth(
         `/api/download/${encodeURIComponent(ticker)}/xlsx?provider=${encodeURIComponent(shownProvider)}`,
         `${ticker}_DGA_Model.xlsx`,
-        { overwrite: true },
+        { overwrite: true, openAfter: true },
       )
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') return
@@ -366,7 +366,7 @@ export function ReportPage() {
             className={styles.excel}
             onClick={() => void downloadExcel()}
             disabled={loading || excelBusy || !ticker}
-            title={`Replace ${ticker}_DGA_Model.xlsx in Dropbox /Apps/DGA Research/Excel`}
+            title={`Save ${ticker}_DGA_Model.xlsx to Dropbox /Apps/DGA Research/Excel and open it`}
           >
             {excelBusy ? 'Excel…' : 'Excel'}
           </button>

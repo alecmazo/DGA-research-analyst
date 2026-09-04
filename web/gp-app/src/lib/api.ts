@@ -66,6 +66,8 @@ export async function apiBlob(path: string): Promise<Blob> {
 type DownloadAuthOpts = {
   /** Replace the same filename on disk (File System Access) instead of ` (1)`. */
   overwrite?: boolean
+  /** After Dropbox has the file, launch it in Excel (or the Dropbox page). */
+  openAfter?: boolean
 }
 
 type DgaWritable = {
@@ -168,6 +170,16 @@ function fileBaseName(name: string): string {
   return name.replace(/\\/g, '/').split('/').pop() || name
 }
 
+function launchExcelDesktop(fileUrl: string) {
+  const uri = `ms-excel:ofe|u|${fileUrl}`
+  const a = document.createElement('a')
+  a.href = uri
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
 export async function downloadAuth(
   path: string,
   fallbackName = 'download',
@@ -180,13 +192,18 @@ export async function downloadAuth(
   const fileName = fileBaseName(fallbackName)
   const win = window as SavePickerWindow
   let destHandle: DgaFileHandle | null = null
+  // Open the helper tab in the click gesture so popup blockers allow it
+  // after the (slow) Dropbox upload.
+  const helper =
+    opts.openAfter && typeof window.open === 'function'
+      ? window.open('about:blank', 'dga-excel-open')
+      : null
 
-  if (opts.overwrite) {
+  if (opts.overwrite && !opts.openAfter) {
     const stored = await loadSaveHandle(fileName)
     if (stored && (await handleCanWrite(stored))) {
       destHandle = stored
     } else if (typeof win.showSaveFilePicker === 'function') {
-      // Picker must run in the click gesture, before the (slow) fetch.
       try {
         destHandle = await win.showSaveFilePicker({
           suggestedName: fileName,
@@ -196,6 +213,11 @@ export async function downloadAuth(
       } catch (e) {
         const name = e instanceof Error ? e.name : ''
         if (name === 'AbortError') {
+          try {
+            helper?.close()
+          } catch {
+            /* */
+          }
           const err = new Error('cancelled')
           err.name = 'AbortError'
           throw err
@@ -203,33 +225,83 @@ export async function downloadAuth(
         destHandle = null
       }
     }
+  } else if (opts.overwrite && opts.openAfter) {
+    const stored = await loadSaveHandle(fileName)
+    if (stored && (await handleCanWrite(stored))) destHandle = stored
   }
 
   const res = await fetch(path, { headers })
   if (res.status === 401) {
+    try {
+      helper?.close()
+    } catch {
+      /* */
+    }
     clearSession()
     window.location.replace('/')
     throw new ApiError(401, 'Unauthorized')
   }
-  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`)
+  if (!res.ok) {
+    try {
+      helper?.close()
+    } catch {
+      /* */
+    }
+    throw new ApiError(res.status, `Download failed (${res.status})`)
+  }
   const blob = await res.blob()
   const cd = res.headers.get('content-disposition') || ''
   const m = /filename\*?=(?:UTF-8''|")?([^\";]+)/i.exec(cd)
   const name = fileBaseName(
     m ? decodeURIComponent(m[1].replace(/"/g, '')) : fallbackName,
   )
+  const openUrl =
+    res.headers.get('X-Dropbox-Open-Url') || res.headers.get('x-dropbox-open-url') || ''
+  const webUrl =
+    res.headers.get('X-Dropbox-Web-Url') || res.headers.get('x-dropbox-web-url') || ''
 
   if (destHandle) {
     try {
       await writeBlobToHandle(destHandle, blob)
       await storeSaveHandle(name, destHandle)
-      return
-    } catch (e) {
-      throw new Error(
-        `Could not replace ${name}. Close it in Excel if it is open, then click Excel again.`,
-      )
+    } catch {
+      if (!opts.openAfter) {
+        throw new Error(
+          `Could not replace ${name}. Close it in Excel if it is open, then click Excel again.`,
+        )
+      }
     }
   }
+
+  if (opts.openAfter && (openUrl || webUrl)) {
+    if (openUrl) launchExcelDesktop(openUrl)
+    const dest = openUrl ? `ms-excel:ofe|u|${openUrl}` : webUrl
+    if (helper && !helper.closed) {
+      try {
+        helper.location.href = dest
+      } catch {
+        helper.location.href = webUrl || openUrl
+      }
+      if (openUrl) {
+        window.setTimeout(() => {
+          try {
+            helper.close()
+          } catch {
+            /* */
+          }
+        }, 1500)
+      }
+    }
+    return
+  }
+
+  try {
+    helper?.close()
+  } catch {
+    /* */
+  }
+
+  if (destHandle) return
 
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

@@ -12310,6 +12310,31 @@ def _dropbox_dest_for(file_name: str, subfolder: str | None = None) -> str:
     return f"{base}/{sub}/{file_name}" if base else f"/{sub}/{file_name}"
 
 
+def dropbox_web_url_for(dest: str) -> str:
+    """Browser URL for the file in Dropbox → Apps → DGA Research → …"""
+    from urllib.parse import quote
+
+    path = (dest or "").replace("\\", "/")
+    if not path.startswith("/"):
+        path = "/" + path
+    if not path.lower().startswith("/apps/"):
+        path = "/Apps/DGA Research" + path
+    return "https://www.dropbox.com/home" + quote(path, safe="/")
+
+
+def dropbox_file_open_urls(dbx, dest: str) -> dict:
+    """Temporary download link (Excel desktop) + Dropbox web folder URL."""
+    out = {"dest": dest, "open_url": None, "web_url": dropbox_web_url_for(dest)}
+    if dbx is None or not dest:
+        return out
+    try:
+        link = dbx.files_get_temporary_link(dest)
+        out["open_url"] = getattr(link, "link", None) or None
+    except Exception as e:
+        print(f"[dropbox] temporary link {dest}: {e!s:.160}", flush=True)
+    return out
+
+
 def is_dropbox_duplicate_name(name: str, canonical: str) -> bool:
     """True if *name* is a Dropbox copy of *canonical* (``(1)``, conflicted, …).
 
@@ -12419,6 +12444,8 @@ def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None 
     folder = _dropbox_folder()
     uploaded: list[str] = []
     errors: list[str] = []
+    last_dest = ""
+    last_open: dict = {}
     for fp in file_paths:
         p = Path(fp)
         if not p.exists():
@@ -12480,6 +12507,9 @@ def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None 
                 if purged:
                     print(f"[dropbox] removed copies of {p.name}: {purged}", flush=True)
             uploaded.append(p.name)
+            last_dest = dest
+            if "_dga_model" in p.name.lower():
+                last_open = dropbox_file_open_urls(dbx, dest)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{p.name}: {exc}")
 
@@ -12495,6 +12525,9 @@ def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None 
         "excel_folder":         _sub(DROPBOX_EXCEL_SUBFOLDER),
         "md_folder":            _sub(DROPBOX_MD_SUBFOLDER),
         "rebalanced_folder":    _sub(DROPBOX_REBALANCED_SUBFOLDER),
+        "dest": last_dest or None,
+        "open_url": last_open.get("open_url"),
+        "web_url": last_open.get("web_url") or (dropbox_web_url_for(last_dest) if last_dest else None),
         "errors": errors or None,
     }
 

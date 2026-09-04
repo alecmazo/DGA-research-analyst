@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from DGA_analyst import (
     _dropbox_dest_for,
+    dropbox_web_url_for,
     is_dropbox_duplicate_name,
     should_purge_dropbox_xlsx,
 )
@@ -63,3 +64,12 @@ def test_models_land_in_excel_folder():
     assert should_purge_dropbox_xlsx(
         "NFLX_DGA_Model (1).xlsx", "/Excel/NFLX_DGA_Model (1).xlsx", c, dest
     )
+
+
+def test_dropbox_web_url_for_excel_folder():
+    url = dropbox_web_url_for("/Excel/NFLX_DGA_Model.xlsx")
+    assert url.startswith("https://www.dropbox.com/home/")
+    assert "Apps/DGA" in url.replace("%20", " ")
+    assert url.endswith("Excel/NFLX_DGA_Model.xlsx")
+    already = dropbox_web_url_for("/Apps/DGA Research/Excel/AAPL_DGA_Model.xlsx")
+    assert already.count("/Apps/") == 1

@@ -7708,7 +7708,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui579-20260904-dcf-base-bridge"
+WEB_BUILD_VERSION = "ui580-20260904-excel-open"
 
 
 @app.get("/api/build")
@@ -9234,30 +9234,51 @@ def download_xlsx(
             out_path = cand
         except Exception as e2:
             print(f"[xlsx-export] temp write {tk}: {e2!s:.200}", flush=True)
+    dbx_open = ""
+    dbx_web = ""
+    dbx_dest = f"/Excel/{fname}"
     if out_path is not None and not _request_is_demo(request):
         # Replace the Dropbox file now so the cloud copy is the latest
-        # before the analyst opens/saves it. Fall back to background if
-        # the inline push fails (lock, network).
+        # before we hand the browser a link to open it.
         try:
             res = analyst.push_to_dropbox([out_path], dest_subfolder="Excel")
             print(f"[xlsx-export] dropbox {out_path.name}: {res}", flush=True)
             if not res.get("ok"):
                 background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
+            else:
+                dbx_open = (res.get("open_url") or "")[:2000]
+                dbx_web = (res.get("web_url") or "")[:2000]
+                dbx_dest = res.get("dest") or dbx_dest
         except Exception as e:
             print(f"[xlsx-export] dropbox inline failed: {e!s:.200}", flush=True)
             background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
+    if not dbx_web:
+        try:
+            dbx_web = analyst.dropbox_web_url_for(dbx_dest)
+        except Exception:
+            dbx_web = ""
 
     from fastapi.responses import Response as _Resp
+    hdrs = {
+        "Content-Disposition": f'attachment; filename="{fname}"',
+        "X-Dropbox-Folder": "/Excel",
+        "X-Dropbox-File": fname,
+        "X-Dropbox-Path": dbx_dest,
+        "X-Dropbox-Replace": "1",
+        "Cache-Control": "no-store",
+        "Access-Control-Expose-Headers": (
+            "Content-Disposition, X-Dropbox-Open-Url, X-Dropbox-Web-Url, "
+            "X-Dropbox-Path, X-Dropbox-File, X-Dropbox-Folder"
+        ),
+    }
+    if dbx_open:
+        hdrs["X-Dropbox-Open-Url"] = dbx_open
+    if dbx_web:
+        hdrs["X-Dropbox-Web-Url"] = dbx_web
     return _Resp(
         content=raw,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f'attachment; filename="{fname}"',
-            "X-Dropbox-Folder": "/Excel",
-            "X-Dropbox-File": fname,
-            "X-Dropbox-Replace": "1",
-            "Cache-Control": "no-store",
-        },
+        headers=hdrs,
     )
 
 
