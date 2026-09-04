@@ -68,7 +68,7 @@ def mount(ns: dict) -> None:
 # fix trail under Settings. Actual code fixes still need a coding agent
 # session (Grok terminal / local workspace) — production cannot safely push
 # git from Railway. Open tickets are readable via GET /api/support/agent-inbox.
-_SUPPORT_SCREENSHOT_MAX = 900_000  # ~900KB base64 budget
+# Screenshots are never dropped for size — the desk needs to see the page.
 
 
 def _ensure_support_tickets_table(conn=None) -> None:
@@ -556,11 +556,8 @@ def support_ticket_create(
             shot = ""
     else:
         mime = (body.get("screenshot_mime") or "image/jpeg").strip() or "image/jpeg"
-    if shot and len(shot) > _SUPPORT_SCREENSHOT_MAX:
-        # Keep ticket even if shot too large — drop image rather than fail
-        print(f"[support] screenshot too large ({len(shot)} chars) — dropping", flush=True)
-        shot = ""
-        mime = None
+    if shot:
+        print(f"[support] keeping screenshot ({len(shot)} chars)", flush=True)
     tid = "SUP_" + datetime.utcnow().strftime("%Y%m%d_") + _uuid.uuid4().hex[:8]
     role = str(claims.get("role") or "gp").lower()
     ctx_in = body.get("context") if isinstance(body.get("context"), dict) else {}

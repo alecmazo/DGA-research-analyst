@@ -63,10 +63,148 @@ export async function apiBlob(path: string): Promise<Blob> {
 }
 
 /** Authenticated blob download (Excel/PDF exports). */
-export async function downloadAuth(path: string, fallbackName = 'download') {
+type DownloadAuthOpts = {
+  /** Replace the same filename on disk (File System Access) instead of ` (1)`. */
+  overwrite?: boolean
+}
+
+type DgaWritable = {
+  write: (data: Blob) => Promise<void>
+  close: () => Promise<void>
+}
+
+type DgaFileHandle = {
+  name: string
+  createWritable: (opts?: { keepExistingData?: boolean }) => Promise<DgaWritable>
+  queryPermission?: (opts: { mode: 'readwrite' }) => Promise<PermissionState>
+  requestPermission?: (opts: { mode: 'readwrite' }) => Promise<PermissionState>
+}
+
+type SavePickerWindow = Window & {
+  showSaveFilePicker?: (opts: {
+    suggestedName?: string
+    id?: string
+    types?: Array<{ description: string; accept: Record<string, string[]> }>
+  }) => Promise<DgaFileHandle>
+}
+
+const HANDLE_DB = 'dga-save-handles'
+const HANDLE_STORE = 'handles'
+
+function openHandleDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(HANDLE_DB, 1)
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(HANDLE_STORE)) {
+        req.result.createObjectStore(HANDLE_STORE)
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function loadSaveHandle(key: string): Promise<DgaFileHandle | null> {
+  try {
+    const db = await openHandleDb()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(HANDLE_STORE, 'readonly')
+      const r = tx.objectStore(HANDLE_STORE).get(key)
+      r.onsuccess = () => resolve((r.result as DgaFileHandle) || null)
+      r.onerror = () => reject(r.error)
+    })
+  } catch {
+    return null
+  }
+}
+
+async function storeSaveHandle(key: string, handle: DgaFileHandle): Promise<void> {
+  try {
+    const db = await openHandleDb()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(HANDLE_STORE, 'readwrite')
+      tx.objectStore(HANDLE_STORE).put(handle, key)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch {
+    /* private mode */
+  }
+}
+
+async function handleCanWrite(handle: DgaFileHandle): Promise<boolean> {
+  try {
+    if (typeof handle.queryPermission === 'function') {
+      let perm = await handle.queryPermission({ mode: 'readwrite' })
+      if (perm === 'prompt' && typeof handle.requestPermission === 'function') {
+        perm = await handle.requestPermission({ mode: 'readwrite' })
+      }
+      return perm === 'granted'
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function writeBlobToHandle(handle: DgaFileHandle, blob: Blob): Promise<void> {
+  const w = await handle.createWritable({ keepExistingData: false })
+  await w.write(blob)
+  await w.close()
+}
+
+function xlsxPickerTypes() {
+  return [
+    {
+      description: 'Excel workbook',
+      accept: {
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      },
+    },
+  ]
+}
+
+function fileBaseName(name: string): string {
+  return name.replace(/\\/g, '/').split('/').pop() || name
+}
+
+export async function downloadAuth(
+  path: string,
+  fallbackName = 'download',
+  opts: DownloadAuthOpts = {},
+) {
   const headers = new Headers()
   const token = getToken()
   if (token) headers.set('x-auth-v2-token', token)
+
+  const fileName = fileBaseName(fallbackName)
+  const win = window as SavePickerWindow
+  let destHandle: DgaFileHandle | null = null
+
+  if (opts.overwrite) {
+    const stored = await loadSaveHandle(fileName)
+    if (stored && (await handleCanWrite(stored))) {
+      destHandle = stored
+    } else if (typeof win.showSaveFilePicker === 'function') {
+      // Picker must run in the click gesture, before the (slow) fetch.
+      try {
+        destHandle = await win.showSaveFilePicker({
+          suggestedName: fileName,
+          id: 'dga-xlsx-models',
+          types: fileName.toLowerCase().endsWith('.xlsx') ? xlsxPickerTypes() : undefined,
+        })
+      } catch (e) {
+        const name = e instanceof Error ? e.name : ''
+        if (name === 'AbortError') {
+          const err = new Error('cancelled')
+          err.name = 'AbortError'
+          throw err
+        }
+        destHandle = null
+      }
+    }
+  }
+
   const res = await fetch(path, { headers })
   if (res.status === 401) {
     clearSession()
@@ -77,7 +215,22 @@ export async function downloadAuth(path: string, fallbackName = 'download') {
   const blob = await res.blob()
   const cd = res.headers.get('content-disposition') || ''
   const m = /filename\*?=(?:UTF-8''|")?([^\";]+)/i.exec(cd)
-  const name = m ? decodeURIComponent(m[1].replace(/"/g, '')) : fallbackName
+  const name = fileBaseName(
+    m ? decodeURIComponent(m[1].replace(/"/g, '')) : fallbackName,
+  )
+
+  if (destHandle) {
+    try {
+      await writeBlobToHandle(destHandle, blob)
+      await storeSaveHandle(name, destHandle)
+      return
+    } catch (e) {
+      throw new Error(
+        `Could not replace ${name}. Close it in Excel if it is open, then click Excel again.`,
+      )
+    }
+  }
+
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

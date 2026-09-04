@@ -28,3 +28,8 @@ def test_ticket_description_aliases():
     assert st._ticket_description({"desc": "  hello world there  "}) == "hello world there"
     assert st._ticket_description({"description": "full sentence here"}) == "full sentence here"
     assert st._ticket_description({}) == ""
+
+
+def test_screenshot_never_dropped_for_size():
+    """Desk needs the page shot — there is no size cap that clears it."""
+    assert not hasattr(st, "_SUPPORT_SCREENSHOT_MAX")

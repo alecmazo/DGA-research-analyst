@@ -116,9 +116,10 @@ export function SupportFab() {
         ctx?.drawImage(canvas, 0, 0, c2.width, c2.height)
         out = c2
       }
-      let quality = 0.58
+      let quality = 0.72
       let dataUrl = out.toDataURL('image/jpeg', quality)
-      while (dataUrl.length > 700000 && quality > 0.28) {
+      // Shrink only if the payload is huge — never drop the screenshot.
+      while (dataUrl.length > 2_400_000 && quality > 0.4) {
         quality -= 0.08
         dataUrl = out.toDataURL('image/jpeg', quality)
       }
@@ -217,27 +218,6 @@ export function SupportFab() {
       window.setTimeout(() => setOpen(false), 1600)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'failed'
-      // Huge screenshot can truncate JSON so the API never sees the description.
-      if (
-        shotData &&
-        /could not read|screenshot|not received|too large|describe the problem|body/i.test(
-          msg,
-        )
-      ) {
-        try {
-          const j2 = await post(null)
-          if (j2.ok) {
-            setStatus(
-              `✓ Ticket ${j2.id || ''} filed without screenshot (image was too large). See Settings → Support.`,
-            )
-            setDesc('')
-            window.setTimeout(() => setOpen(false), 1800)
-            return
-          }
-        } catch {
-          /* fall through */
-        }
-      }
       setStatus(`❌ ${msg}`)
     } finally {
       setBusy(false)

@@ -7708,7 +7708,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui575-20260903-post-json-body"
+WEB_BUILD_VERSION = "ui576-20260904-xlsx-replace"
 
 
 @app.get("/api/build")
@@ -9134,8 +9134,9 @@ def download_xlsx(
     """Build an IB-style Excel model for a saved report and return .xlsx.
 
     Sheets: Cover, Financial Model (historicals + pro forma), Valuation,
-    Scenarios, Street, Quarterly. Also copies the file to Dropbox
-    ``/Apps/DGA Research/Reports/`` in the background.
+    Scenarios, Street, Quarterly. Replaces ``{TICKER}_DGA_Model.xlsx`` in
+    Dropbox ``/Apps/DGA Research/Reports/`` (same name, no copies) before
+    the file is returned so Dropbox holds the latest instance.
     """
     _claims_or_401(request)
     if not _OPENPYXL_OK:
@@ -9228,7 +9229,17 @@ def download_xlsx(
         except Exception as e2:
             print(f"[xlsx-export] temp write {tk}: {e2!s:.200}", flush=True)
     if out_path is not None and not _request_is_demo(request):
-        background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
+        # Replace the Dropbox file now so the cloud copy is the latest
+        # before the analyst opens/saves it. Fall back to background if
+        # the inline push fails (lock, network).
+        try:
+            res = analyst.push_to_dropbox([out_path], dest_subfolder="Reports")
+            print(f"[xlsx-export] dropbox {out_path.name}: {res}", flush=True)
+            if not res.get("ok"):
+                background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
+        except Exception as e:
+            print(f"[xlsx-export] dropbox inline failed: {e!s:.200}", flush=True)
+            background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
 
     from fastapi.responses import Response as _Resp
     return _Resp(
@@ -9237,6 +9248,8 @@ def download_xlsx(
         headers={
             "Content-Disposition": f'attachment; filename="{fname}"',
             "X-Dropbox-Folder": "/Reports",
+            "X-Dropbox-File": fname,
+            "X-Dropbox-Replace": "1",
             "Cache-Control": "no-store",
         },
     )

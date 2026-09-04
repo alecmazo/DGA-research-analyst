@@ -208,8 +208,10 @@ export function ReportPage() {
       await downloadAuth(
         `/api/download/${encodeURIComponent(ticker)}/xlsx?provider=${encodeURIComponent(shownProvider)}`,
         `${ticker}_DGA_Model.xlsx`,
+        { overwrite: true },
       )
     } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') return
       alert('Excel export failed: ' + (e instanceof Error ? e.message : e))
     } finally {
       setExcelBusy(false)
@@ -364,7 +366,7 @@ export function ReportPage() {
             className={styles.excel}
             onClick={() => void downloadExcel()}
             disabled={loading || excelBusy || !ticker}
-            title="Download IB Excel model — financials, pro forma, valuation. Also saved to Dropbox /Reports"
+            title={`Replace ${ticker}_DGA_Model.xlsx — latest in Dropbox /Reports and the file you open/save`}
           >
             {excelBusy ? 'Excel…' : 'Excel'}
           </button>

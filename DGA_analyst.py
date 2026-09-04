@@ -12326,30 +12326,71 @@ def is_dropbox_duplicate_name(name: str, canonical: str) -> bool:
         return False
     rest = ns[len(cs):]
     return bool(re.fullmatch(
-        r"(\s*\(\d+\)|\s+\d+|\s+copy|\s*\(conflicted copy[^)]*\))",
+        r"(\s*\(\d+\)|\s+\d+|\s+copy|\s*\([^)]*conflicted copy[^)]*\))+",
         rest,
         re.I,
     ))
 
 
+def should_purge_dropbox_xlsx(name: str, path: str, canonical_name: str, dest: str) -> bool:
+    """True if this Dropbox entry is the same model under another path or a copy.
+
+    Keeps the canonical dest (``/Reports/AAPL_DGA_Model.xlsx``). Same-name files
+    in Rebalanced/ or the app-folder root, plus ``(1)`` / conflicted copies,
+    are removed so Excel always replaces one latest instance.
+    """
+    n = (name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+    c = (canonical_name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+    if not n or not c:
+        return False
+    dest_n = (dest or "").replace("\\", "/").rstrip("/").lower()
+    path_n = (path or "").replace("\\", "/").rstrip("/").lower()
+    if not path_n:
+        path_n = f"/{n}".lower()
+    if path_n == dest_n:
+        return False
+    if n.lower() == c.lower():
+        return True
+    return is_dropbox_duplicate_name(n, c)
+
+
 def _dropbox_purge_xlsx_copies(dbx, dest: str, canonical_name: str) -> list[str]:
-    """Delete Dropbox copies of a model xlsx, keeping the canonical path."""
-    folder = dest.rsplit("/", 1)[0] or "/"
+    """Delete same-name and copy xlsx files, keeping the canonical dest path."""
     removed: list[str] = []
-    try:
-        res = dbx.files_list_folder(folder)
-        entries = list(res.entries or [])
-        while getattr(res, "has_more", False):
-            res = dbx.files_list_folder_continue(res.cursor)
-            entries.extend(res.entries or [])
-    except Exception as e:
-        print(f"[dropbox] list {folder}: {e!s:.160}", flush=True)
-        return removed
+    dest_folder = dest.rsplit("/", 1)[0] or ""
+    list_root = _dropbox_folder()
+    entries: list = []
+    listed = False
+    for path_arg, recursive in (
+        ("" if list_root in ("", "/") else list_root, True),
+        (dest_folder if dest_folder != "/" else "", False),
+    ):
+        if listed and not recursive:
+            break
+        try:
+            res = dbx.files_list_folder(path_arg, recursive=recursive)
+            batch = list(res.entries or [])
+            while getattr(res, "has_more", False):
+                res = dbx.files_list_folder_continue(res.cursor)
+                batch.extend(res.entries or [])
+            entries.extend(batch)
+            listed = True
+            if recursive:
+                break
+        except Exception as e:
+            print(f"[dropbox] list {path_arg or '/'}: {e!s:.160}", flush=True)
+    seen: set[str] = set()
     for ent in entries:
-        n = getattr(ent, "name", "") or ""
-        if not is_dropbox_duplicate_name(n, canonical_name):
+        if "Folder" in type(ent).__name__:
             continue
-        path = getattr(ent, "path_display", None) or f"{folder}/{n}"
+        n = getattr(ent, "name", "") or ""
+        path = getattr(ent, "path_display", None) or getattr(ent, "path_lower", None) or n
+        path_key = str(path).replace("\\", "/").rstrip("/").lower()
+        if path_key in seen:
+            continue
+        seen.add(path_key)
+        if not should_purge_dropbox_xlsx(n, str(path), canonical_name, dest):
+            continue
         try:
             dbx.files_delete_v2(path)
             removed.append(n)

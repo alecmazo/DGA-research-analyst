@@ -156,6 +156,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Pulse drop Base case** | **`ui573-20260903-pulse-no-base`** | Drop scenario Base/Bull/Bear from Approaches + Pulse chips; ticket create salvages description if screenshot truncates JSON |
 | **IB table number format** | **`ui574-20260903-ib-table-fmt`** | Report tables: $ and thousands commas (and % / x) at render; existing reports included |
 | **POST JSON body** | **`ui575-20260903-post-json-body`** | Analyst + support tickets read JSON via FastAPI Body (event loop); empty-body false rejects |
+| **Excel replace + keep shot** | **`ui576-20260904-xlsx-replace`** | Excel button overwrites `{TICKER}_DGA_Model.xlsx` in Dropbox and the local open/save file; support tickets always keep the screenshot |
 
 ### One-click handoff (preferred)
 
