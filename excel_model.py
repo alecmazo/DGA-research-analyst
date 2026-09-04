@@ -696,6 +696,31 @@ def _fmt_dcf_pt(v: float) -> str:
     return f"${v:,.2f}"
 
 
+def resolve_cover_dcf(md: str, dcf_value: Optional[float] = None) -> Optional[float]:
+    """DCF $/share for the cover Rating row — never the blended 12m PT.
+
+    Prefers the model equity-bridge value/share, then the PT-derivation
+    DCF (base) implied, then prose ``implied_price``.
+    """
+    v = _f(dcf_value)
+    if v is not None and v > 1:
+        return v
+    tables = parse_md_tables(md or "")
+    dcf = extract_dcf(md or "")
+    v = extract_dcf_model_share(tables, dcf)
+    if v is not None and v > 1:
+        return v
+    for ap in extract_valuation_approaches(md or "", tables=tables, dcf=dcf):
+        if ap.get("id") in ("dcf", "dcf_base"):
+            x = _f(ap.get("value"))
+            if x is not None and x > 1:
+                return x
+    v = _f((dcf or {}).get("implied_price"))
+    if v is not None and v > 1:
+        return v
+    return None
+
+
 def inject_cover_dcf_target(md: str, dcf_value: Optional[float] = None) -> str:
     """Put the DCF-only $/share in the cover table Rating row, right cell.
 
@@ -704,9 +729,7 @@ def inject_cover_dcf_target(md: str, dcf_value: Optional[float] = None) -> str:
     """
     if not md:
         return md
-    val = _f(dcf_value)
-    if val is None:
-        val = _f((extract_dcf(md) or {}).get("implied_price"))
+    val = resolve_cover_dcf(md, dcf_value)
     if val is None or val <= 0:
         return md
     label = f"**DCF Target:** {_fmt_dcf_pt(val)}"

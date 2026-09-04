@@ -158,6 +158,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **POST JSON body** | **`ui575-20260903-post-json-body`** | Analyst + support tickets read JSON via FastAPI Body (event loop); empty-body false rejects |
 | **Excel replace + keep shot** | **`ui576-20260904-xlsx-replace`** | Excel button overwrites `{TICKER}_DGA_Model.xlsx` in Dropbox and the local open/save file; support tickets always keep the screenshot |
 | **Excel units + Excel folder** | **`ui577-20260904-excel-units`** | NFLX-style unit bugs: growth not revenue, shares from SEC not 3.0bn leftovers, $B→$m; models save to Dropbox `/Apps/DGA Research/Excel/` and replace |
+| **Cover DCF on Rating row** | **`ui578-20260904-cover-dcf`** | SUP_20260904_b6613db9 — DCF Target on the cover Rating row for every saved report; 12m PT stays the DGA blend |
 
 ### One-click handoff (preferred)
 

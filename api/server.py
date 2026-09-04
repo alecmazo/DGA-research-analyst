@@ -7708,7 +7708,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui577-20260904-excel-units"
+WEB_BUILD_VERSION = "ui578-20260904-cover-dcf"
 
 
 @app.get("/api/build")
@@ -8940,6 +8940,12 @@ def report_version_get(ticker: str, version_id: str, request: Request = None):
         r = cur.fetchone()
     if not r:
         raise HTTPException(404, "Version not found")
+    body_md = r[3] or ""
+    try:
+        import excel_model as _em
+        body_md = _em.inject_cover_dcf_target(body_md)
+    except Exception:
+        pass
     dtn = r[8]
     if isinstance(dtn, str):
         try:
@@ -8953,7 +8959,7 @@ def report_version_get(ticker: str, version_id: str, request: Request = None):
         "ticker": ticker,
         "provider": r[1],
         "generated_at": r[2].isoformat() if r[2] and hasattr(r[2], "isoformat") else str(r[2] or ""),
-        "report_md": r[3],
+        "report_md": body_md,
         "report_date": r[4],
         "rating": r[5],
         "price_target": float(r[6]) if r[6] is not None else None,

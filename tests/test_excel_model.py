@@ -360,6 +360,29 @@ def test_inject_cover_dcf_target():
     assert again.count("DCF Target") == 1
 
 
+def test_inject_cover_dcf_from_derivation_table_not_pt():
+    """NFLX-style: no 'DCF value / share' line; DCF lives in the method table."""
+    md = """| DGA CAPITAL RESEARCH | 2026-07-17 |
+|-----------------------------------------------|-----------------------------|
+| **NETFLIX INC** (NFLX: NASDAQ) | Equity Research |
+| **Rating:** BUY                               |                             |
+| **12-Month Price Target:** $100               | Implied Return: +45.1%      |
+| **Current Price:** $68.95 | 52-Week Range: $70–$127 |
+
+| Method         | Implied Value | Weight | Weighted Value |
+|----------------|-------------|--------|---------------|
+| DCF            | $110        | 50%    | $55           |
+| EV/EBITDA Comps | $95–105 | 30% | $30          |
+| **12M Price Target** | —    | —      | **$100**      |
+"""
+    out = em.inject_cover_dcf_target(md)
+    rating = next(ln for ln in out.splitlines() if "Rating:" in ln)
+    assert "DCF Target" in rating
+    assert "$110" in rating
+    assert "**12-Month Price Target:** $100" in out
+    assert out.count("DCF Target") == 1
+
+
 def test_rank_dcf_undervalued():
     rows = em.rank_dcf_undervalued([
         {"ticker": "CHEAP", "dcf_value": 50, "price": 40},   # +25%
