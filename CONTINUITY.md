@@ -161,6 +161,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Cover DCF on Rating row** | **`ui578-20260904-cover-dcf`** | SUP_20260904_b6613db9 — DCF Target on the cover Rating row for every saved report; 12m PT stays the DGA blend |
 | **DCF (base) reverse bridge** | **`ui579-20260904-dcf-base-bridge`** | Valuation tab: reverse-engineered DCF (base) bridge beside the live Gordon equity bridge, with $/% gap |
 | **Excel button opens file** | **`ui580-20260904-excel-open`** | Excel click saves to Dropbox `/Apps/DGA Research/Excel/` then opens the workbook in Excel |
+| **xlsx repair formulas** | **`ui581-20260904-xlsx-repair`** | Valuation DCF (base) step labels no longer start with `=` (Excel was repairing the file and stripping sheet3 formulas) |
 
 ### One-click handoff (preferred)
 

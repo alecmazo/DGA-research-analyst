@@ -2286,8 +2286,13 @@ def _write_dcf_base_bridge(
 
     def put(lab, val, fmt, note, *, input_cell=False, gold=False) -> int:
         nonlocal r
-        ws.cell(r, c0, lab).font = S["font_bold"] if gold else S["font"]
-        ws.cell(r, c0).border = S["thin"]
+        # Never start a label with "=" — Excel treats that cell as a formula
+        # and Mac repair then strips formulas from the whole Valuation sheet.
+        safe_lab = lab[1:].lstrip() if isinstance(lab, str) and lab.startswith("=") else lab
+        lab_cell = ws.cell(r, c0, safe_lab)
+        lab_cell.font = S["font_bold"] if gold else S["font"]
+        lab_cell.border = S["thin"]
+        lab_cell.number_format = "@"
         if isinstance(val, str) and str(val).startswith("="):
             _put_formula(ws, r, c1, val, fmt, S, gold=gold, bold=gold)
         else:
@@ -2310,28 +2315,28 @@ def _write_dcf_base_bridge(
     r_sh = put("× Diluted shares (m)", "=$B$20", _FMT_SHARES,
                "same share count as the model bridge")
     r_eq = put(
-        "= Implied equity ($m)",
+        "Implied equity ($m)",
         f'=IF(OR(F{r_px}="",F{r_sh}=""),"nm",F{r_px}*F{r_sh})',
         _FMT_MM, "DCF (base) × shares",
     )
     r_nd = put("(+) Net debt / (−) cash", "=$B$19", _FMT_MM,
                "same BS plug as the model bridge")
     r_ev = put(
-        "= Implied EV ($m)",
+        "Implied EV ($m)",
         f'=IF(F{r_eq}="nm","nm",F{r_eq}+F{r_nd})',
         _FMT_MM, "equity + net debt", gold=True,
     )
     r_pv = put("(−) PV of explicit FCF", f"=H{sum_row}", _FMT_MM,
                "model ladder held constant — the gap sits in TV")
     r_pvtv = put(
-        "= Implied PV of TV ($m)",
+        "Implied PV of TV ($m)",
         f'=IF(F{r_ev}="nm","nm",F{r_ev}-F{r_pv})',
         _FMT_MM, "implied EV − Σ PV FCF",
     )
     r_df = put("÷ Year-n discount factor", f"=G{last_fcf_row}", "0.000",
                "1/(1+WACC)^n from the ladder")
     r_tv = put(
-        "= Implied TV ($m)",
+        "Implied TV ($m)",
         f'=IF(OR(F{r_pvtv}="nm",F{r_df}="",F{r_df}=0),"nm",F{r_pvtv}/F{r_df})',
         _FMT_MM, "undiscounted TV that hits DCF (base)", gold=True,
     )

@@ -311,6 +311,17 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
         str(val.cell(r, 6).value or "").startswith("=H")
         for r in range(base_title_r, base_title_r + 20)
     )
+    # Labels must be text. "= Implied equity ($m)" is parsed as a formula
+    # and Mac Excel then repairs the file, stripping Valuation formulas.
+    import re as _re
+    for r in range(1, 120):
+        for c in range(1, 16):
+            v = val.cell(r, c).value
+            assert not (
+                isinstance(v, str) and _re.match(r"=\s+[A-Za-z]", v)
+            ), (r, c, v)
+    assert "Implied equity ($m)" in gap_labs
+    assert "Implied EV ($m)" in gap_labs
     # Pro forma years header includes FY2026E
     pf_headers = [val.cell(5, c).value for c in range(5, 14)]
     assert "FY2026E" in pf_headers
