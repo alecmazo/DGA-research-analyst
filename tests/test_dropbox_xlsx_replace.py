@@ -9,7 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from DGA_analyst import is_dropbox_duplicate_name, should_purge_dropbox_xlsx
+from DGA_analyst import (
+    _dropbox_dest_for,
+    is_dropbox_duplicate_name,
+    should_purge_dropbox_xlsx,
+)
 
 
 def test_duplicate_patterns():
@@ -45,4 +49,17 @@ def test_purge_same_name_elsewhere_keeps_canonical():
     )
     assert not should_purge_dropbox_xlsx(
         "MSFT_DGA_Model.xlsx", "/Reports/MSFT_DGA_Model.xlsx", c, dest
+    )
+
+
+def test_models_land_in_excel_folder():
+    assert _dropbox_dest_for("NFLX_DGA_Model.xlsx") == "/Excel/NFLX_DGA_Model.xlsx"
+    assert _dropbox_dest_for("NFLX_DGA_Model.xlsx", "Excel") == "/Excel/NFLX_DGA_Model.xlsx"
+    assert _dropbox_dest_for("NFLX_DGA_Report.docx") == "/Reports/NFLX_DGA_Report.docx"
+    dest = "/Excel/NFLX_DGA_Model.xlsx"
+    c = "NFLX_DGA_Model.xlsx"
+    assert not should_purge_dropbox_xlsx(c, dest, c, dest)
+    assert should_purge_dropbox_xlsx(c, "/Reports/NFLX_DGA_Model.xlsx", c, dest)
+    assert should_purge_dropbox_xlsx(
+        "NFLX_DGA_Model (1).xlsx", "/Excel/NFLX_DGA_Model (1).xlsx", c, dest
     )

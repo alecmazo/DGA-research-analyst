@@ -49,7 +49,7 @@ PALE_NAVY = "E8EEF5"
 # ── Markdown / number parsing ───────────────────────────────────────────────
 _NUM_RE = re.compile(
     r"^\s*\(?\s*\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.[0-9]+|[0-9]+)"
-    r"\s*(%|x|×|bn|b|mm|m|k)?\s*\)?\s*$",
+    r"\s*(%|x|×|bn|billions?|mm|millions?|b|m|k|thousands?)?\s*\)?\s*$",
     re.I,
 )
 _YEAR_RE = re.compile(r"(20\d{2})")
@@ -87,13 +87,42 @@ def parse_cell_number(raw: str) -> Optional[float]:
     unit = (m.group(2) or "").lower()
     if unit == "%":
         val = val / 100.0
-    elif unit in ("bn", "b"):
-        val = val * 1000.0          # model is $ millions
-    elif unit == "k":
-        val = val / 1000.0
+    else:
+        val = _apply_money_unit(val, unit)
     if neg:
         val = -abs(val)
     return val
+
+
+def _apply_money_unit(val: float, unit: str) -> float:
+    """Convert a trailing unit into the model’s $ millions (shares also millions)."""
+    u = re.sub(r"s$", "", (unit or "").lower().strip())
+    if u in ("bn", "b", "billion"):
+        return val * 1000.0
+    if u in ("k", "thousand"):
+        return val / 1000.0
+    return val
+
+
+def _money_scale_from_text(text: str) -> Optional[float]:
+    """Header/label unit → multiplier into $ millions. None if unspecified."""
+    s = _strip_md(text or "")
+    if re.search(r"billion|\(\s*\$?\s*bn\s*\)|\$bn\b|\(\s*\$b\s*\)", s, re.I):
+        return 1000.0
+    if re.search(r"million|\(\s*\$?\s*mm?\s*\)|\$mm\b|\$m\b|\(\s*\$m\s*\)", s, re.I):
+        return 1.0
+    if re.search(r"thousand|\(\s*\$k\s*\)|\$k\b", s, re.I):
+        return 0.001
+    return None
+
+
+def _cell_has_explicit_unit(raw: str) -> bool:
+    s = _strip_md(raw or "")
+    return bool(re.search(
+        r"(bn|billions?|mm|millions?|(?<![a-z])b(?![a-z])|(?<![a-z])m(?![a-z])|k|thousands?)\s*$",
+        s,
+        re.I,
+    ))
 
 
 def parse_md_tables(md: str) -> list[dict[str, Any]]:
@@ -184,6 +213,9 @@ def _year_from_header(header: str) -> Optional[int]:
 
 
 _METRIC_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"revenue.{0,24}(growth|yoy)|^(total\s+)?sales.{0,16}(growth|yoy)", re.I), "RevenueGrowth"),
+    (re.compile(r"(?:free cash flow|fcf).{0,16}(growth|yoy)", re.I), "FCFGrowth"),
+    (re.compile(r"(?:diluted\s+)?eps.{0,16}(growth|yoy)", re.I), "EPSGrowth"),
     (re.compile(r"^(total\s+)?revenue|^net sales|^sales\b|^revenues", re.I), "Revenue"),
     (re.compile(r"cost of (revenue|goods|sales)|^cogs", re.I), "CostOfRevenue"),
     (re.compile(r"^gross profit", re.I), "GrossProfit"),
@@ -211,12 +243,87 @@ _METRIC_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 def _metric_from_label(label: str) -> Optional[str]:
     s = _strip_md(label)
+    s = re.sub(r"\s*\(\$?b(?:n|illions?)?\)\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*\(\$?m(?:illions)?\)\s*$", "", s, flags=re.I)
     s = re.sub(r"\s*\(\$\)\s*$", "", s)
     for pat, key in _METRIC_PATTERNS:
         if pat.search(s):
             return key
     return None
+
+
+def _as_rate(v: Optional[float]) -> Optional[float]:
+    """13.3 or 13.3% → 0.133. Already-fractional rates pass through."""
+    if v is None:
+        return None
+    if abs(v) > 1.5:
+        return v / 100.0
+    return v
+
+
+def reconcile_money_level(est: Optional[float], actual: Optional[float]) -> Optional[float]:
+    """Put a report estimate into $ millions next to a known actual.
+
+    Drops growth-looking leftovers (13.3 vs 45,183) and lifts billions
+    written as 47.5 next to an actual of 45,183.
+    """
+    if est is None:
+        return None
+    if actual is None or actual == 0:
+        return est
+    ratio = abs(est / actual)
+    if 0.40 <= ratio <= 2.5:
+        return est
+    if 0.40 <= abs(est * 1000.0 / actual) <= 2.5:
+        return est * 1000.0
+    if abs(est) >= 10_000_000 and 0.40 <= abs(est / 1_000_000.0 / actual) <= 2.5:
+        return est / 1_000_000.0
+    if abs(est) < 80 and ratio < 0.05:
+        return None
+    return est
+
+
+def normalize_shares_millions(
+    report: Optional[float],
+    fallback: Optional[float] = None,
+) -> Optional[float]:
+    """Diluted shares in millions. Prefer SEC; reject 3.0-as-billions leftovers."""
+    v = _f(report)
+    fb = _f(fallback)
+    if v is not None and abs(v) >= 100_000:
+        v = v / 1_000_000.0
+    if fb is not None and abs(fb) >= 100_000:
+        fb = fb / 1_000_000.0
+    if v is not None and fb is not None and abs(fb) >= 50:
+        if abs(v) < 30:
+            if abs(v * 1000.0 - fb) / fb <= 0.35:
+                v = v * 1000.0
+            else:
+                v = fb
+        elif abs(v / fb) > 8 or abs(v / fb) < 0.15:
+            v = fb
+    if v is None:
+        v = fb
+    return v
+
+
+def _scaled_table_number(raw: str, label: str, header: str, metric: str) -> Optional[float]:
+    val = parse_cell_number(raw)
+    if val is None:
+        val = parse_embedded_number(raw)
+    if val is None:
+        return None
+    if metric in ("RevenueGrowth", "FCFGrowth", "EPSGrowth") or metric in _MARGINS:
+        return _as_rate(val) if metric.endswith("Growth") else val
+    if metric in _PERSHARE:
+        return val
+    if metric in _SHARES:
+        return val
+    if metric in _MONEY and not _cell_has_explicit_unit(raw):
+        scale = _money_scale_from_text(label) or _money_scale_from_text(header)
+        if scale and scale != 1.0:
+            val = val * scale
+    return val
 
 
 def extract_forecasts(tables: list[dict]) -> dict[int, dict[str, float]]:
@@ -236,10 +343,11 @@ def extract_forecasts(tables: list[dict]) -> dict[int, dict[str, float]]:
             for row in tbl.get("rows") or []:
                 if not row:
                     continue
-                key = _metric_from_label(row[0] if row else "")
+                label = row[0] if row else ""
+                key = _metric_from_label(label)
                 if not key or col_i >= len(row):
                     continue
-                val = parse_cell_number(row[col_i])
+                val = _scaled_table_number(row[col_i], label, h, key)
                 if val is None:
                     continue
                 bucket[key] = val
@@ -263,10 +371,11 @@ def extract_actuals(tables: list[dict]) -> dict[int, dict[str, float]]:
             for row in tbl.get("rows") or []:
                 if not row:
                     continue
-                key = _metric_from_label(row[0] if row else "")
+                label = row[0] if row else ""
+                key = _metric_from_label(label)
                 if not key or col_i >= len(row):
                     continue
-                val = parse_cell_number(row[col_i])
+                val = _scaled_table_number(row[col_i], label, h, key)
                 if val is None:
                     continue
                 bucket[key] = val
@@ -456,7 +565,8 @@ def parse_embedded_number(raw: str) -> Optional[float]:
         except ValueError:
             return None
     m = re.search(
-        r"\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.[0-9]+|[0-9]+)\s*(bn|b|mm|m|k|x|×)?",
+        r"\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.[0-9]+|[0-9]+)"
+        r"\s*(bn|billions?|mm|millions?|b|m|k|thousands?|x|×)?",
         s,
         re.I,
     )
@@ -467,10 +577,10 @@ def parse_embedded_number(raw: str) -> Optional[float]:
     except ValueError:
         return None
     unit = (m.group(2) or "").lower()
-    if unit in ("bn", "b"):
-        val *= 1000.0
-    elif unit == "k":
-        val /= 1000.0
+    if unit in ("x", "×"):
+        pass
+    else:
+        val = _apply_money_unit(val, unit)
     if s.strip().startswith("(") or re.search(r"(^|\s)[-−]", s):
         val = -abs(val)
     return val
@@ -528,9 +638,19 @@ def extract_dcf(md: str) -> dict[str, Any]:
         r"terminal\s+growth(?:\s+rate)?[^%]{0,48}?(\d+(?:\.\d+)?)\s*%"
     )
     out["tax_rate"] = _pct(r"(?:tax\s+rate|effective\s+tax)[^%]{0,40}?(\d+(?:\.\d+)?)\s*%")
-    out["shares"] = _num(
-        r"(?:diluted\s+)?shares(?:\s+outstanding)?[^0-9]{0,28}?(\d{1,6}(?:\.\d+)?)\s*(?:m|mm|million)?"
+    sh_m = re.search(
+        r"(?:diluted\s+)?shares(?:\s+outstanding)?[^0-9]{0,36}?"
+        r"(\d{1,6}(?:\.\d+)?)\s*(bn|billions?|mm|millions?|b|m)?",
+        text,
+        re.I,
     )
+    if sh_m:
+        try:
+            sh_val = float(sh_m.group(1).replace(",", ""))
+            sh_val = _apply_money_unit(sh_val, sh_m.group(2) or "m")
+            out["shares"] = sh_val
+        except ValueError:
+            pass
     out["net_debt"] = _money(
         r"net\s+debt[^\$]{0,40}\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)"
         r"\s*(bn|b|mm|m)?"
@@ -754,9 +874,16 @@ def extract_dcf_ladder(tables: list[dict]) -> list[dict[str, Any]]:
             for key in ("revenue", "fcf", "rev_g", "fcf_g", "df", "pv"):
                 if key not in idx or idx[key] >= len(row):
                     continue
-                val = parse_embedded_number(row[idx[key]])
+                raw = row[idx[key]]
+                val = parse_embedded_number(raw)
                 if val is None:
                     continue
+                if key in ("revenue", "fcf", "pv") and not _cell_has_explicit_unit(raw):
+                    scale = _money_scale_from_text(headers[idx[key]] if idx[key] < len(headers) else "")
+                    if scale and scale != 1.0:
+                        val *= scale
+                if key in ("rev_g", "fcf_g"):
+                    val = _as_rate(val) if abs(val) > 1.5 else val
                 item[key] = val
             if item.get("t") is None and not item.get("fcf") and not item.get("revenue"):
                 continue
@@ -825,9 +952,9 @@ def extract_scenarios(md: str) -> list[dict[str, Any]]:
     text = md or ""
     rows = []
     for label, pat in (
-        ("Bull", r"bull(?:\s+case)?[^\$\n]{0,90}\$\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)"),
-        ("Base", r"base(?:\s+case)?[^\$\n]{0,90}\$\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)"),
-        ("Bear", r"bear(?:\s+case)?[^\$\n]{0,90}\$\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)"),
+        ("Bull", r"bull\s+case[^\$\n]{0,90}\$\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)"),
+        ("Base", r"base\s+case[^\$\n]{0,90}\$\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)"),
+        ("Bear", r"bear\s+case[^\$\n]{0,90}\$\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)"),
     ):
         m = re.search(pat, text, re.I)
         if not m:
@@ -1371,16 +1498,27 @@ def _build_columns(financials: dict, forecasts: dict[int, dict[str, float]]) -> 
             "already_mm": False,
         })
     # Pro forma years after the last actual FY
+    last_actual = annuals[-1] if annuals else {}
     min_est_year = (last_fy + 1) if last_fy else 0
+    last_rev = to_model_units("Revenue", last_actual.get("Revenue"), already_millions=False)
     for year in sorted(forecasts.keys()):
         if year < min_est_year:
             continue
+        period = dict(forecasts[year] or {})
+        for metric in _MONEY:
+            if metric in period:
+                actual = to_model_units(metric, last_actual.get(metric), already_millions=False)
+                period[metric] = reconcile_money_level(period[metric], actual)
+        g = _as_rate(period.get("RevenueGrowth"))
+        if period.get("Revenue") is None and last_rev and last_fy and g is not None:
+            span = max(1, year - last_fy)
+            period["Revenue"] = last_rev * ((1.0 + g) ** span)
         cols.append({
             "label": f"FY{year}E",
             "kind": "E",
             "fy": year,
             "end": None,
-            "period": forecasts[year],
+            "period": period,
             "already_mm": True,
         })
     return cols
@@ -2018,22 +2156,34 @@ def _build_dcf_horizon(
         "hard_rev": True,
     }
     years.append(y0)
+    y0_rev = y0.get("revenue")
+    y0_fcf = y0.get("fcf")
     for t in range(1, n + 1):
         fy = (last_fy + t) if last_fy else None
         src_l = by_t.get(t) or (by_fy.get(fy) if fy else None) or {}
         src_f = forecasts.get(fy) or {}
+        rev = reconcile_money_level(
+            _rev(src_l, None, already=True) or _rev(src_f, None, already=True),
+            y0_rev,
+        )
+        fcf = reconcile_money_level(
+            _fcf(src_l, None, already=True) or _fcf(src_f, None, already=True),
+            y0_fcf,
+        )
         item = {
             "t": t,
             "fy": fy,
             "kind": "E",
-            "revenue": _rev(src_l, None, already=True) or _rev(src_f, None, already=True),
-            "fcf": _fcf(src_l, None, already=True) or _fcf(src_f, None, already=True),
+            "revenue": rev,
+            "fcf": fcf,
             "ebit": to_model_units("OperatingIncome", src_f.get("OperatingIncome"), already_millions=True)
                     if src_f else None,
             "ebitda": to_model_units("EBITDA", src_f.get("EBITDA"), already_millions=True) if src_f else None,
             "ni": to_model_units("NetIncome", src_f.get("NetIncome"), already_millions=True) if src_f else None,
             "eps": _f(src_f.get("DilutedEPS")) if src_f else None,
             "gp": to_model_units("GrossProfit", src_f.get("GrossProfit"), already_millions=True) if src_f else None,
+            "rev_g_in": _as_rate(src_l.get("rev_g")) or _as_rate(src_f.get("RevenueGrowth")),
+            "fcf_g_in": _as_rate(src_l.get("fcf_g")) or _as_rate(src_f.get("FCFGrowth")),
         }
         item["hard_fcf"] = item["fcf"] is not None
         item["hard_rev"] = item["revenue"] is not None
@@ -2119,11 +2269,7 @@ def _valuation_sheet(
     nd = merged.get("net_debt")
     if nd is None:
         nd = capital.get("net_debt")
-    shares = merged.get("shares")
-    if shares is None:
-        shares = capital.get("shares")
-    elif shares and shares > 50_000:
-        shares = shares / 1_000_000.0
+    shares = normalize_shares_millions(merged.get("shares"), capital.get("shares"))
     mkt = capital.get("market_cap")
     we = merged.get("we")
     wd = merged.get("wd")
@@ -2154,10 +2300,18 @@ def _valuation_sheet(
     elif horizon[0].get("fcf") and len(horizon) > 1 and horizon[1].get("fcf"):
         if horizon[0]["fcf"]:
             fcf_g = horizon[1]["fcf"] / horizon[0]["fcf"] - 1.0
+    else:
+        g_in = next((y.get("fcf_g_in") for y in horizon if y.get("fcf_g_in") is not None), None)
+        if g_in is not None and -0.5 <= g_in <= 1.5:
+            fcf_g = g_in
     rev_g = 0.08
     known_rev = [y for y in horizon if y.get("revenue") is not None]
     if len(known_rev) >= 2 and known_rev[0]["revenue"]:
         rev_g = known_rev[1]["revenue"] / known_rev[0]["revenue"] - 1.0
+    else:
+        g_in = next((y.get("rev_g_in") for y in horizon if y.get("rev_g_in") is not None), None)
+        if g_in is not None and -0.5 <= g_in <= 0.8:
+            rev_g = g_in
 
     # ── WACC BUILD (A–C) ────────────────────────────────────────────────
     _section_title(ws, 4, 1, 3, "WACC BUILD", S)

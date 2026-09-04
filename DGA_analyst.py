@@ -12267,7 +12267,8 @@ def _dropbox_folder() -> str:
 
 # Each file type gets its own Dropbox subfolder for tidy browsing.
 DROPBOX_PRESENTATIONS_SUBFOLDER = "Presentations"   # .pptx
-DROPBOX_REPORTS_SUBFOLDER       = "Reports"         # .docx + IB Excel models
+DROPBOX_REPORTS_SUBFOLDER       = "Reports"         # .docx Word reports
+DROPBOX_EXCEL_SUBFOLDER         = "Excel"           # IB Excel models (*_DGA_Model.xlsx)
 DROPBOX_MD_SUBFOLDER            = "MD cached"       # .md  (markdown reports)
 DROPBOX_REBALANCED_SUBFOLDER    = "Rebalanced"      # .xlsx (portfolio rebalance files)
 
@@ -12279,7 +12280,7 @@ def _dropbox_dest_for(file_name: str, subfolder: str | None = None) -> str:
       .pptx  → <base>/Presentations/
       .docx  → <base>/Reports/
       .md    → <base>/MD cached/
-      *_DGA_Model.xlsx → <base>/Reports/   (saved-report IB models)
+      *_DGA_Model.xlsx → <base>/Excel/     (saved-report IB models)
       .xlsx  → <base>/Rebalanced/          (portfolio rebalance files)
       other  → <base>/   (e.g. .json metadata files)
 
@@ -12300,7 +12301,7 @@ def _dropbox_dest_for(file_name: str, subfolder: str | None = None) -> str:
             # Research models sit next to Word reports; rebalance books stay
             # in Rebalanced so the two xlsx families don't mix.
             if "_dga_model" in name_lower:
-                sub = DROPBOX_REPORTS_SUBFOLDER
+                sub = DROPBOX_EXCEL_SUBFOLDER
             else:
                 sub = DROPBOX_REBALANCED_SUBFOLDER
         else:
@@ -12423,6 +12424,12 @@ def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None 
         if not p.exists():
             continue
         dest = _dropbox_dest_for(p.name, dest_subfolder)
+        parent = dest.rsplit("/", 1)[0] if "/" in dest else ""
+        if parent and parent not in ("", "/"):
+            try:
+                dbx.files_create_folder_v2(parent)
+            except Exception:
+                pass
         try:
             data = p.read_bytes()
             try:
@@ -12485,6 +12492,7 @@ def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None 
         "folder": folder,
         "presentations_folder": _sub(DROPBOX_PRESENTATIONS_SUBFOLDER),
         "reports_folder":       _sub(DROPBOX_REPORTS_SUBFOLDER),
+        "excel_folder":         _sub(DROPBOX_EXCEL_SUBFOLDER),
         "md_folder":            _sub(DROPBOX_MD_SUBFOLDER),
         "rebalanced_folder":    _sub(DROPBOX_REBALANCED_SUBFOLDER),
         "errors": errors or None,

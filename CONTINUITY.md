@@ -157,6 +157,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **IB table number format** | **`ui574-20260903-ib-table-fmt`** | Report tables: $ and thousands commas (and % / x) at render; existing reports included |
 | **POST JSON body** | **`ui575-20260903-post-json-body`** | Analyst + support tickets read JSON via FastAPI Body (event loop); empty-body false rejects |
 | **Excel replace + keep shot** | **`ui576-20260904-xlsx-replace`** | Excel button overwrites `{TICKER}_DGA_Model.xlsx` in Dropbox and the local open/save file; support tickets always keep the screenshot |
+| **Excel units + Excel folder** | **`ui577-20260904-excel-units`** | NFLX-style unit bugs: growth not revenue, shares from SEC not 3.0bn leftovers, $B→$m; models save to Dropbox `/Apps/DGA Research/Excel/` and replace |
 
 ### One-click handoff (preferred)
 

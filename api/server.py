@@ -7708,7 +7708,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui576-20260904-xlsx-replace"
+WEB_BUILD_VERSION = "ui577-20260904-excel-units"
 
 
 @app.get("/api/build")
@@ -9113,12 +9113,12 @@ def _load_financials_for_model(ticker: str) -> dict:
 
 
 def _bg_push_model_xlsx(path_str: str) -> None:
-    """Best-effort Dropbox upload into Apps/DGA Research/Reports/."""
+    """Best-effort Dropbox upload into Apps/DGA Research/Excel/."""
     try:
         p = Path(path_str)
         if not p.exists():
             return
-        res = analyst.push_to_dropbox([p], dest_subfolder="Reports")
+        res = analyst.push_to_dropbox([p], dest_subfolder="Excel")
         print(f"[xlsx-export] dropbox {p.name}: {res}", flush=True)
     except Exception as e:
         print(f"[xlsx-export] dropbox failed: {e!s:.200}", flush=True)
@@ -9135,7 +9135,7 @@ def download_xlsx(
 
     Sheets: Cover, Financial Model (historicals + pro forma), Valuation,
     Scenarios, Street, Quarterly. Replaces ``{TICKER}_DGA_Model.xlsx`` in
-    Dropbox ``/Apps/DGA Research/Reports/`` (same name, no copies) before
+    Dropbox ``/Apps/DGA Research/Excel/`` (same name, no copies) before
     the file is returned so Dropbox holds the latest instance.
     """
     _claims_or_401(request)
@@ -9201,7 +9201,7 @@ def download_xlsx(
             entity_name=financials.get("entity_name") or tk,
             sector=summary.get("sector") or "",
             source=financials.get("source") or "company_financials",
-            dropbox_note="Copy saved to Dropbox /Apps/DGA Research/Reports/",
+            dropbox_note=f"Replaces Dropbox /Apps/DGA Research/Excel/{tk}_DGA_Model.xlsx",
             generated_at=str(as_of),
         )
     except Exception as e:
@@ -9233,7 +9233,7 @@ def download_xlsx(
         # before the analyst opens/saves it. Fall back to background if
         # the inline push fails (lock, network).
         try:
-            res = analyst.push_to_dropbox([out_path], dest_subfolder="Reports")
+            res = analyst.push_to_dropbox([out_path], dest_subfolder="Excel")
             print(f"[xlsx-export] dropbox {out_path.name}: {res}", flush=True)
             if not res.get("ok"):
                 background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
@@ -9247,7 +9247,7 @@ def download_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f'attachment; filename="{fname}"',
-            "X-Dropbox-Folder": "/Reports",
+            "X-Dropbox-Folder": "/Excel",
             "X-Dropbox-File": fname,
             "X-Dropbox-Replace": "1",
             "Cache-Control": "no-store",

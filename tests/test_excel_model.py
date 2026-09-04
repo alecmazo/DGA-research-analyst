@@ -172,6 +172,8 @@ def test_parse_cell_number():
     assert em.parse_cell_number("N/A") is None
     assert em.parse_cell_number("—") is None
     assert em.parse_cell_number("$9.4bn") == 9400.0
+    assert em.parse_cell_number("$47.5 billion") == 47500.0
+    assert em.parse_cell_number("13.3%") == 0.133
 
 
 def test_parse_tables_and_forecasts():
@@ -494,3 +496,117 @@ def test_to_model_units():
     assert em.to_model_units("DilutedShares", 100_000_000) == 100.0
     assert em.to_model_units("GrossMargin", 0.4) == 0.4
     assert em.to_model_units("Revenue", 1200.0, already_millions=True) == 1200.0
+
+
+def test_growth_label_is_not_revenue():
+    md = """
+| Metric | FY2026E |
+|---|---|
+| Revenue growth | 13.3 |
+| Diluted EPS | 26.00 |
+"""
+    fc = em.extract_forecasts(em.parse_md_tables(md))
+    assert 2026 in fc
+    assert "Revenue" not in fc[2026]
+    assert abs(fc[2026]["RevenueGrowth"] - 0.133) < 1e-9
+
+
+def test_revenue_billions_header_scales_to_millions():
+    md = """
+| Metric | FY2026E |
+|---|---|
+| Revenue ($B) | 47.5 |
+"""
+    fc = em.extract_forecasts(em.parse_md_tables(md))
+    assert abs(fc[2026]["Revenue"] - 47500.0) < 1e-6
+
+
+def test_normalize_shares_prefers_sec_over_three_billion():
+    assert em.normalize_shares_millions(3.0, 427.0) == 427.0
+    assert abs(em.normalize_shares_millions(0.427, 427.0) - 427.0) < 1.0
+    assert abs(em.normalize_shares_millions(427.0, 427.0) - 427.0) < 1e-9
+    assert abs(em.normalize_shares_millions(427_000_000, 427.0) - 427.0) < 1e-6
+
+
+def test_nflx_like_units_do_not_break_valuation():
+    """13.3 growth vs $45,183m actual; 3.0 'billion' shares vs 427m SEC."""
+    import openpyxl
+    from io import BytesIO
+
+    md = """
+# SECTION 4 — Growth
+
+| Metric | FY2026E |
+|---|---|
+| Revenue growth | 13.3 |
+| Diluted EPS | 26.00 |
+
+# SECTION 5 — Valuation
+
+WACC 8.5%. Terminal growth 2.5%. diluted shares outstanding 3.0 billion.
+
+| Step | Amount ($M) | Formula / note |
+|------|-------------|----------------|
+| Diluted shares (M) | 3.0 | |
+| **DCF value / share** | **$90.00** | |
+"""
+    financials = {
+        "ticker": "NFLX",
+        "entity_name": "Netflix Inc",
+        "annuals": [{
+            "fy": 2025, "end": "2025-12-31",
+            "Revenue": 45_183_000_000,
+            "OperatingIncome": 10_000_000_000,
+            "NetIncome": 8_000_000_000,
+            "DilutedEPS": 18.0,
+            "DilutedShares": 427_000_000,
+            "FreeCashFlow": 7_000_000_000,
+            "Cash": 7_000_000_000,
+            "TotalDebt": 14_000_000_000,
+            "EBITDA": 12_000_000_000,
+            "GrossProfit": 20_000_000_000,
+        }],
+        "ttm": {
+            "end": "2025-12-31",
+            "Revenue": 45_183_000_000,
+            "DilutedShares": 427_000_000,
+            "Cash": 7_000_000_000,
+            "TotalDebt": 14_000_000_000,
+            "FreeCashFlow": 7_000_000_000,
+        },
+    }
+    raw = em.build_ib_model_bytes(
+        "NFLX",
+        financials=financials,
+        report_md=md,
+        summary={"rating": "Buy", "price_target": 90.0, "current_price": 80.0},
+        quote={"price": 80.0},
+    )
+    wb = openpyxl.load_workbook(BytesIO(raw), data_only=False)
+    model = wb["Financial Model"]
+    headers = [model.cell(5, c).value for c in range(1, 12) if model.cell(5, c).value]
+    rev_row = next(r for r in range(1, 40) if model.cell(r, 1).value == "Revenue")
+    fy25 = headers.index("FY2025A") + 1
+    fy26 = headers.index("FY2026E") + 1
+    assert abs(model.cell(rev_row, fy25).value - 45183.0) < 1.0
+    fy26_rev = model.cell(rev_row, fy26).value
+    assert fy26_rev is not None
+    assert abs(fy26_rev - 13.3) > 100
+    assert 48_000 < fy26_rev < 55_000
+    val = wb["Valuation"]
+    share_rows = [r for r in range(1, 80) if val.cell(r, 1).value == "Diluted shares (m)"]
+    assert share_rows
+    shares = val.cell(share_rows[0], 2).value
+    assert shares is not None
+    assert abs(float(shares) - 427.0) < 2.0
+    # Pro forma year-0 revenue is the actual, not 13.3
+    pf = [val.cell(5, c).value for c in range(5, 14)]
+    a_col = pf.index("FY2025A") + 5
+    e_col = pf.index("FY2026E") + 5
+    assert abs(val.cell(6, a_col).value - 45183.0) < 1.0
+    e_rev = val.cell(6, e_col).value
+    if isinstance(e_rev, (int, float)):
+        assert abs(e_rev - 13.3) > 100
+        assert e_rev > 40_000
+    else:
+        assert isinstance(e_rev, str) and e_rev.startswith("=")

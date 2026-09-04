@@ -366,7 +366,7 @@ export function ReportPage() {
             className={styles.excel}
             onClick={() => void downloadExcel()}
             disabled={loading || excelBusy || !ticker}
-            title={`Replace ${ticker}_DGA_Model.xlsx — latest in Dropbox /Reports and the file you open/save`}
+            title={`Replace ${ticker}_DGA_Model.xlsx in Dropbox /Apps/DGA Research/Excel`}
           >
             {excelBusy ? 'Excel…' : 'Excel'}
           </button>
