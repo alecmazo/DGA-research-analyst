@@ -1908,6 +1908,58 @@ def _write_kv_table(ws, start_row: int, title: str, rows: list[tuple], S, ncols=
     return r + 1
 
 
+def _write_store_comps(ws, start_row: int, data: dict, S) -> int:
+    """Comps from company_financials (last FY + live last). Not NTM / not (E)."""
+    peers = list((data or {}).get("peers") or [])
+    headers = [
+        "Ticker", "Price", "Mkt cap ($m)", "EV ($m)", "P/E",
+        "EV/EBITDA", "EV/Sales", "FCF yield", "Rev YoY", "FY",
+    ]
+    width = len(headers)
+    title = "COMPARABLE COMPANIES  ·  last reported FY + live last (company_financials, not NTM/E)"
+    _section_title(ws, start_row, 1, width, title, S)
+    r = start_row + 1
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(r, i, h)
+        cell.font = S["font_h"]
+        cell.fill = S["navy_fill"]
+        cell.alignment = S["center"]
+        cell.border = S["thin"]
+    r += 1
+    fmts = [
+        None, _FMT_SH, _FMT_MM, _FMT_MM, _FMT_X,
+        _FMT_X, _FMT_X, _FMT_PCT, _FMT_PCT, _FMT_INT,
+    ]
+    keys = [
+        "ticker", "price", "market_cap_m", "ev_m", "pe",
+        "ev_ebitda", "ev_sales", "fcf_yield", "rev_yoy_pct", "fy",
+    ]
+    for p in peers:
+        for i, (key, fmt) in enumerate(zip(keys, fmts), start=1):
+            val = p.get(key)
+            if key == "pe" and val is None and p.get("pe_nm"):
+                cell = ws.cell(r, i, "n/m")
+                cell.font = S["font_muted"]
+            else:
+                cell = ws.cell(r, i, val)
+                cell.font = S["font_bold"] if p.get("is_subject") else S["font"]
+                if isinstance(val, (int, float)) and fmt:
+                    cell.number_format = fmt
+            cell.border = S["thin"]
+            cell.alignment = S["left"] if i == 1 else S["right"]
+            if p.get("is_subject"):
+                cell.fill = S["pale_gold"]
+        r += 1
+    note = ws.cell(
+        r, 1,
+        (data or {}).get("note")
+        or "Last reported fiscal year from the Financials store; live last price. Blanks are missing filings, not estimates.",
+    )
+    note.font = S["font_muted"]
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=width)
+    return r + 2
+
+
 def _dump_md_table(ws, start_row: int, title: str, tbl: dict, S) -> int:
     headers = tbl.get("headers") or []
     rows = tbl.get("rows") or []
@@ -2822,7 +2874,9 @@ def _valuation_sheet(
     extra = rr + 1
     if derivation:
         extra = _dump_md_table(ws, extra, "PRICE TARGET DERIVATION (FROM REPORT)", derivation, S)
-    if comps:
+    if comps and isinstance(comps, dict) and comps.get("peers"):
+        extra = _write_store_comps(ws, extra, comps, S)
+    elif comps:
         extra = _dump_md_table(ws, extra, "COMPARABLE COMPANIES (FROM REPORT)", comps, S)
     if bridge_tbl:
         extra = _dump_md_table(ws, extra, "REPORT EQUITY BRIDGE (AS WRITTEN)", bridge_tbl, S)
@@ -3104,6 +3158,13 @@ def build_ib_model_bytes(
     street = extract_street_table(tables)
     comps = extract_comps_table(tables)
     derivation = extract_derivation_table(tables)
+    try:
+        import research_comps as _rc
+        store_comps = _rc.load(tk)
+        if len(store_comps.get("peers") or []) >= 2:
+            comps = store_comps
+    except Exception as e:
+        print(f"[excel_model] store comps {tk}: {e!s:.160}", flush=True)
 
     price = _f(quote.get("price")) or _f(summary.get("current_price"))
     pt = _f(summary.get("price_target"))

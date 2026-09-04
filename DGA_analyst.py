@@ -2203,6 +2203,14 @@ def build_verified_peers_block(ticker: str, sector: str | None,
     if not sec and not ind:
         return ""
 
+    try:
+        import research_comps as _rc
+        block = _rc.prompt_block(target_u)
+        if block:
+            return block
+    except Exception as e:
+        print(f"   ⚠️  research_comps prompt failed: {e!s:.120}", flush=True)
+
     # Subject market cap for size banding
     if subject_mcap is None:
         try:

@@ -7708,7 +7708,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui581-20260904-xlsx-repair"
+WEB_BUILD_VERSION = "ui582-20260904-store-comps"
 
 
 @app.get("/api/build")
@@ -8561,6 +8561,11 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                 raw = _em.inject_cover_dcf_target(raw)
             except Exception:
                 pass
+            try:
+                import research_comps as _rc
+                raw = _rc.replace_in_report(raw, payload.get("ticker") or ticker)
+            except Exception:
+                pass
             payload["report_md"] = raw
             return _finish_report_payload(payload, row)
         if row:
@@ -8592,6 +8597,11 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                 try:
                     import excel_model as _em
                     alt_md = _em.inject_cover_dcf_target(alt_md)
+                except Exception:
+                    pass
+                try:
+                    import research_comps as _rc
+                    alt_md = _rc.replace_in_report(alt_md, payload.get("ticker") or ticker)
                 except Exception:
                     pass
                 payload["report_md"] = alt_md
@@ -8944,6 +8954,11 @@ def report_version_get(ticker: str, version_id: str, request: Request = None):
     try:
         import excel_model as _em
         body_md = _em.inject_cover_dcf_target(body_md)
+    except Exception:
+        pass
+    try:
+        import research_comps as _rc
+        body_md = _rc.replace_in_report(body_md, ticker)
     except Exception:
         pass
     dtn = r[8]
