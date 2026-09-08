@@ -168,6 +168,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Watchlist YTD column** | **`ui585-20260908-watchlist-ytd`** | SUP_20260908_ad9c15d1 — calendar YTD from price_history runs before Yahoo so the column is not starved to dashes |
 | **Watchlist YTD keep** | **`ui586-20260908-ytd-keep`** | Yahoo/store price updates merge into the row so they do not wipe YTD already stamped |
 | **Positions Ind one row** | **`ui587-20260908-pos-ind-row`** | SUP_20260908_ffea3da3 — drop subtitle under Ind; 1m/YTD/1y/3y sit on the same row as the account name |
+| **Page title row** | **`ui588-20260908-title-row`** | SUP_20260908_6aa2c0a8 — hide descriptions under page titles site-wide; right-side actions sit on the title row |
 
 ### One-click handoff (preferred)
 

@@ -6,19 +6,30 @@
 
 .hero {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
 }
 
+/* Kicker + title on one line so right-side actions sit on the title row. */
+.hero > div:first-child {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 .kicker {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--brand-600);
+  flex-shrink: 0;
 }
 
 .h1 {
@@ -87,11 +98,16 @@
 }
 
 .sub {
-  margin: 6px 0 0;
-  max-width: 52ch;
-  font-size: var(--text-md);
-  color: var(--text-secondary);
-  line-height: 1.45;
+  /* SUP_20260908_6aa2c0a8 — no description under page titles. Keep in DOM for a11y. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .heroActions {
