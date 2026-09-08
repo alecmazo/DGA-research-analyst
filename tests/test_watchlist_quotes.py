@@ -150,3 +150,20 @@ def test_watchlist_apply_ytd_stamps_keys():
     assert quotes["AAPL"]["ytd_status"] == "ok"
     assert quotes["CBRS"]["ytd"] == 40.0
     assert quotes["CBRS"]["ytd_label"] == "IPO"
+
+
+def test_watchlist_set_price_keeps_ytd():
+    ns: dict = {}
+    exec(_fn_src("_watchlist_set_price"), ns)
+    quotes = {"AAPL": {"ytd": 12.5, "ytd_status": "ok", "ytd_pct": 12.5}}
+    ns["_watchlist_set_price"](quotes, "AAPL", 188.4, pct=0.5, as_of="2026-09-08")
+    assert quotes["AAPL"]["price"] == 188.4
+    assert quotes["AAPL"]["pct"] == 0.5
+    assert quotes["AAPL"]["ytd"] == 12.5
+    assert quotes["AAPL"]["ytd_status"] == "ok"
+
+
+def test_watchlist_yahoo_does_not_replace_quote_row():
+    body = _fn_src("watchlist_get")
+    assert "_watchlist_set_price" in body
+    assert 'quotes[tk] = {\n                            "price": q.get("price")' not in body

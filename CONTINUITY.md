@@ -166,6 +166,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Watchlist last-close feed** | **`ui583-20260908-watchlist-quotes`** | Skip yfinance on quote hot path (Railway 401); last-close store fallback; never stamp null prices over the watchlist |
 | **Excel open as .xlsx** | **`ui584-20260908-xlsx-open`** | Excel button opens a URL that ends in `{TICKER}_DGA_Model.xlsx` so Mac Excel no longer warns that ``file`` format/extension don't match |
 | **Watchlist YTD column** | **`ui585-20260908-watchlist-ytd`** | SUP_20260908_ad9c15d1 — calendar YTD from price_history runs before Yahoo so the column is not starved to dashes |
+| **Watchlist YTD keep** | **`ui586-20260908-ytd-keep`** | Yahoo/store price updates merge into the row so they do not wipe YTD already stamped |
 
 ### One-click handoff (preferred)
 

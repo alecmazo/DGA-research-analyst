@@ -4353,6 +4353,19 @@ def _watchlist_apply_ytd(tickers: list[str], quotes: dict, ytd_map: dict) -> int
     return n
 
 
+def _watchlist_set_price(quotes: dict, tk: str, price, pct=None, as_of=None) -> None:
+    """Set last/day % without wiping calendar YTD already stamped on the row."""
+    if not tk or price is None:
+        return
+    row = quotes.get(tk) or {}
+    row["price"] = price
+    row["prev"] = None
+    row["pct"] = pct
+    if as_of:
+        row["as_of"] = as_of
+    quotes[tk] = row
+
+
 def _watchlist_fill_ytd(tickers: list[str], quotes: dict, budget_s: float = 2.0) -> int:
     """Calendar YTD from price_history. Own budget — never leftover after Yahoo."""
     if not tickers:
@@ -4437,12 +4450,9 @@ def watchlist_get(request: Request, fresh: bool = False):
                             (not live) or _quote_from_current_session(as_of)
                         )
                         if ok:
-                            quotes[tk] = {
-                                "price": q.get("price"),
-                                "prev": None,
-                                "pct": q.get("pct_change"),
-                                "as_of": as_of,
-                            }
+                            _watchlist_set_price(
+                                quotes, tk, q.get("price"),
+                                pct=q.get("pct_change"), as_of=as_of)
                             _QUOTE_CACHE[tk] = {
                                 "price": q.get("price"),
                                 "pct_change": q.get("pct_change"),
@@ -4483,12 +4493,9 @@ def watchlist_get(request: Request, fresh: bool = False):
                     # Never stamp a null price over a name — that paints "—" on
                     # the desk even when market_quotes still has last close.
                     if q.get("price") is not None:
-                        quotes[tk] = {
-                            "price": q.get("price"),
-                            "prev": None,
-                            "pct": q.get("pct_change"),
-                            "as_of": q.get("as_of"),
-                        }
+                        _watchlist_set_price(
+                            quotes, tk, q.get("price"),
+                            pct=q.get("pct_change"), as_of=q.get("as_of"))
 
             # Yahoo miss / 6s wall: last-close store (≤4d). Live session already
             # rejected these as not-current-session so we wouldn't paint Friday
@@ -4504,12 +4511,9 @@ def watchlist_get(request: Request, fresh: bool = False):
                         q = older.get(tk) or {}
                         if q.get("price") is None:
                             continue
-                        quotes[tk] = {
-                            "price": q.get("price"),
-                            "prev": None,
-                            "pct": q.get("pct_change"),
-                            "as_of": q.get("as_of"),
-                        }
+                        _watchlist_set_price(
+                            quotes, tk, q.get("price"),
+                            pct=q.get("pct_change"), as_of=q.get("as_of"))
                 except Exception as e:
                     print(f"[watchlist] last-close store failed: {e!s:.120}", flush=True)
 
@@ -7750,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui585-20260908-watchlist-ytd"
+WEB_BUILD_VERSION = "ui586-20260908-ytd-keep"
 
 
 @app.get("/api/build")
