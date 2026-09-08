@@ -4201,30 +4201,30 @@ def _watchlist_ytd_pcts(tickers: list[str],
                     SELECT unnest(%s::text[]) AS symbol
                 ),
                 first_ever AS (
-                    SELECT DISTINCT ON (upper(p.symbol))
-                           upper(p.symbol) AS symbol, p.d AS first_d,
+                    SELECT DISTINCT ON (p.symbol)
+                           p.symbol, p.d AS first_d,
                            p.close AS ipo_close
                       FROM price_history p
-                      JOIN t ON upper(p.symbol) = t.symbol
+                      JOIN t ON p.symbol = t.symbol
                      WHERE p.close IS NOT NULL AND p.close > 0
-                     ORDER BY upper(p.symbol), p.d ASC
+                     ORDER BY p.symbol, p.d ASC
                 ),
                 firsts AS (
-                    SELECT DISTINCT ON (upper(p.symbol))
-                           upper(p.symbol) AS symbol, p.close AS jan_close
+                    SELECT DISTINCT ON (p.symbol)
+                           p.symbol, p.close AS jan_close
                       FROM price_history p
-                      JOIN t ON upper(p.symbol) = t.symbol
+                      JOIN t ON p.symbol = t.symbol
                      WHERE p.d >= date_trunc('year', CURRENT_DATE)::date
                        AND p.close IS NOT NULL AND p.close > 0
-                     ORDER BY upper(p.symbol), p.d ASC
+                     ORDER BY p.symbol, p.d ASC
                 ),
                 lasts AS (
-                    SELECT DISTINCT ON (upper(p.symbol))
-                           upper(p.symbol) AS symbol, p.close AS last_close
+                    SELECT DISTINCT ON (p.symbol)
+                           p.symbol, p.close AS last_close
                       FROM price_history p
-                      JOIN t ON upper(p.symbol) = t.symbol
+                      JOIN t ON p.symbol = t.symbol
                      WHERE p.close IS NOT NULL AND p.close > 0
-                     ORDER BY upper(p.symbol), p.d DESC
+                     ORDER BY p.symbol, p.d DESC
                 )
                 SELECT e.symbol, e.first_d, e.ipo_close, f.jan_close, l.last_close
                   FROM first_ever e
@@ -4324,6 +4324,56 @@ def _ytd_entry(raw) -> dict:
     return {}
 
 
+def _watchlist_apply_ytd(tickers: list[str], quotes: dict, ytd_map: dict) -> int:
+    """Stamp calendar YTD onto the quote rows the desk looks up. Returns count."""
+    n = 0
+    for orig in tickers or []:
+        sym = (orig or "").strip().upper()
+        entry = _ytd_entry((ytd_map or {}).get(sym) or (ytd_map or {}).get(orig))
+        ytd = entry.get("ytd")
+        if ytd is None:
+            continue
+        status = entry.get("status")
+        for key in {orig, sym}:
+            if not key:
+                continue
+            if key not in quotes:
+                quotes[key] = {}
+            quotes[key]["ytd"] = ytd
+            quotes[key]["ytd_pct"] = ytd
+            quotes[key]["ytd_status"] = status or "ok"
+            if status == "ipo":
+                quotes[key]["ytd_label"] = "IPO"
+                if entry.get("since"):
+                    quotes[key]["ytd_since"] = entry.get("since")
+            else:
+                quotes[key].pop("ytd_label", None)
+                quotes[key].pop("ytd_since", None)
+        n += 1
+    return n
+
+
+def _watchlist_fill_ytd(tickers: list[str], quotes: dict, budget_s: float = 2.0) -> int:
+    """Calendar YTD from price_history. Own budget — never leftover after Yahoo."""
+    if not tickers:
+        return 0
+    live_px = {
+        tk: (quotes.get(tk) or {}).get("price")
+        for tk in tickers
+        if (quotes.get(tk) or {}).get("price") is not None
+    }
+    try:
+        ytd_map = _run_with_timeout(
+            lambda: _watchlist_ytd_pcts(tickers, live_prices=live_px) or {},
+            max(0.8, float(budget_s)),
+            default={},
+        ) or {}
+    except Exception as e:
+        print(f"[watchlist] ytd attach failed: {e!s:.160}", flush=True)
+        ytd_map = {}
+    return _watchlist_apply_ytd(tickers, quotes, ytd_map)
+
+
 @app.get("/api/watchlist")
 def watchlist_get(request: Request, fresh: bool = False):
     """Fast watchlist for login / desk paint.
@@ -4335,7 +4385,8 @@ def watchlist_get(request: Request, fresh: bool = False):
     ``fresh=1`` skips the process cache.
     Earnings chips: process-cached Nasdaq calendar, ≤8s budget, never hangs
     the list (stale-while-revalidate + background refresh).
-    YTD %: bulk from price_history (calendar year first close vs live last).
+    YTD %: bulk from price_history (calendar year first close vs last), run
+    *before* Yahoo so a slow quote wall cannot leave the column blank.
     """
     t0 = time.time()
     tickers: list[str] = []
@@ -4403,6 +4454,13 @@ def watchlist_get(request: Request, fresh: bool = False):
                     need = still
                 except Exception as e:
                     print(f"[watchlist] store quotes failed: {e!s:.120}", flush=True)
+
+            # YTD is a cheap DB read (jan close vs last). Do it BEFORE Yahoo so a
+            # 4.5s quote wall cannot leave the YTD column as dashes (ytd=0).
+            try:
+                _watchlist_fill_ytd(tickers, quotes, budget_s=2.0)
+            except Exception as e:
+                print(f"[watchlist] ytd fill failed: {e!s:.160}", flush=True)
 
             # Live Yahoo — MUST use shutdown(wait=False). A `with ThreadPoolExecutor`
             # after result(timeout=…) still waits for the hung worker on exit and
@@ -4481,47 +4539,6 @@ def watchlist_get(request: Request, fresh: bool = False):
             except Exception as e:
                 print(f"[watchlist] earnings failed: {e!s:.160}", flush=True)
                 earnings_map = {}
-
-        # Calendar YTD % (small column next to Day %) — free price_history
-        if tickers:
-            try:
-                live_px = {
-                    tk: (quotes.get(tk) or {}).get("price")
-                    for tk in tickers
-                    if (quotes.get(tk) or {}).get("price") is not None
-                }
-                ytd_budget = min(1.2, max(0.2, 4.5 - (time.time() - t0)))
-                ytd_map = _run_with_timeout(
-                    lambda: _watchlist_ytd_pcts(tickers, live_prices=live_px) or {},
-                    ytd_budget,
-                    default={},
-                ) or {}
-                # Stamp onto the original ticker key the UI looks up (and
-                # uppercase) so a spelling/case mismatch can't hide YTD.
-                for orig in tickers:
-                    sym = (orig or "").strip().upper()
-                    entry = _ytd_entry(ytd_map.get(sym))
-                    status = entry.get("status")
-                    ytd = entry.get("ytd")
-                    if ytd is None:
-                        continue
-                    for key in {orig, sym}:
-                        if not key:
-                            continue
-                        if key not in quotes:
-                            quotes[key] = {}
-                        quotes[key]["ytd"] = ytd
-                        quotes[key]["ytd_pct"] = ytd
-                        quotes[key]["ytd_status"] = status or "ok"
-                        if status == "ipo":
-                            quotes[key]["ytd_label"] = "IPO"
-                            if entry.get("since"):
-                                quotes[key]["ytd_since"] = entry.get("since")
-                        else:
-                            quotes[key].pop("ytd_label", None)
-                            quotes[key].pop("ytd_since", None)
-            except Exception as e:
-                print(f"[watchlist] ytd attach failed: {e!s:.160}", flush=True)
 
         def _wl_move_key(tk: str):
             pct = (quotes.get(tk) or {}).get("pct")
@@ -7733,7 +7750,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui584-20260908-xlsx-open"
+WEB_BUILD_VERSION = "ui585-20260908-watchlist-ytd"
 
 
 @app.get("/api/build")

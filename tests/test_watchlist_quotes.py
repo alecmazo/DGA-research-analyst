@@ -120,3 +120,33 @@ def test_watchlist_get_never_stamps_null_over_last_close():
     assert 'q.get("price") is not None or tk not in quotes' not in body
     assert "4 * 86400" in body
     assert "last-close" in body.lower() or "still_blank" in body
+
+
+def test_watchlist_ytd_runs_before_yahoo():
+    """YTD must not wait on leftover quote budget (SUP_20260908_ad9c15d1)."""
+    body = _fn_src("watchlist_get")
+    ytd = body.find("_watchlist_fill_ytd")
+    yahoo = body.find("_batch_quotes_fast")
+    assert ytd != -1 and yahoo != -1
+    assert ytd < yahoo
+    sql = _fn_src("_watchlist_ytd_pcts")
+    assert "upper(p.symbol)" not in sql
+
+
+def test_watchlist_apply_ytd_stamps_keys():
+    ns: dict = {}
+    exec(_fn_src("_ytd_entry") + "\n" + _fn_src("_watchlist_apply_ytd"), ns)
+    quotes: dict = {"AAPL": {"price": 188.0}}
+    n = ns["_watchlist_apply_ytd"](
+        ["AAPL", "CBRS"],
+        quotes,
+        {
+            "AAPL": {"ytd": 12.5, "status": "ok"},
+            "CBRS": {"ytd": 40.0, "status": "ipo", "since": "2026-03-01"},
+        },
+    )
+    assert n == 2
+    assert quotes["AAPL"]["ytd"] == 12.5
+    assert quotes["AAPL"]["ytd_status"] == "ok"
+    assert quotes["CBRS"]["ytd"] == 40.0
+    assert quotes["CBRS"]["ytd_label"] == "IPO"

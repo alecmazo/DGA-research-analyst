@@ -165,6 +165,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Comps from financials store** | **`ui582-20260904-store-comps`** | Excel + saved reports comps use last reported FY from company_financials (live last), not NTM/(E) estimates |
 | **Watchlist last-close feed** | **`ui583-20260908-watchlist-quotes`** | Skip yfinance on quote hot path (Railway 401); last-close store fallback; never stamp null prices over the watchlist |
 | **Excel open as .xlsx** | **`ui584-20260908-xlsx-open`** | Excel button opens a URL that ends in `{TICKER}_DGA_Model.xlsx` so Mac Excel no longer warns that ``file`` format/extension don't match |
+| **Watchlist YTD column** | **`ui585-20260908-watchlist-ytd`** | SUP_20260908_ad9c15d1 — calendar YTD from price_history runs before Yahoo so the column is not starved to dashes |
 
 ### One-click handoff (preferred)
 

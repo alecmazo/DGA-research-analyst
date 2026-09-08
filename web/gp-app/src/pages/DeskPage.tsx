@@ -112,15 +112,31 @@ function writeWlCache(w: WatchlistResponse) {
   }
 }
 
-/** Keep last-known last when the feed returns a blank price (Yahoo miss). */
+/** Keep last-known last / YTD when the feed omits a field (Yahoo miss). */
 function mergeWlQuotes(
   prev: WatchlistResponse | null,
   next: WatchlistResponse,
 ): WatchlistResponse {
   const quotes: Record<string, Quote> = { ...(prev?.quotes || {}) }
   for (const [tk, q] of Object.entries(next.quotes || {})) {
-    if (q && q.price != null) quotes[tk] = q
-    else if (!quotes[tk]) quotes[tk] = q || {}
+    const old = quotes[tk] || {}
+    const merged: Quote = { ...old }
+    if (q && q.price != null) {
+      merged.price = q.price
+      if (q.pct != null) merged.pct = q.pct
+      if (q.pct_change != null) merged.pct_change = q.pct_change
+      if (q.as_of) merged.as_of = q.as_of
+    } else if (!quotes[tk] && q) {
+      Object.assign(merged, q)
+    }
+    if (q && (q.ytd != null || q.ytd_pct != null)) {
+      merged.ytd = q.ytd ?? q.ytd_pct
+      merged.ytd_pct = q.ytd_pct ?? q.ytd
+      if (q.ytd_status) merged.ytd_status = q.ytd_status
+      if (q.ytd_label != null) merged.ytd_label = q.ytd_label
+      if (q.ytd_since != null) merged.ytd_since = q.ytd_since
+    }
+    quotes[tk] = merged
   }
   return { ...next, quotes }
 }
