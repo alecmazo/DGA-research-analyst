@@ -353,20 +353,25 @@ export function PositionsPage() {
           </aside>
 
           <div className={styles.pane}>
-            <header className={page.hero}>
-              <div>
-                <p className={page.kicker}>Book · live</p>
-                <h1 className={page.h1}>{title}</h1>
-                <p className={page.sub}>
-                  Holdings across funds and managed accounts — day move, unrealized
-                  P&amp;L, and weight.
-                </p>
-              </div>
-              <div className={styles.periods}>
+            <header className={styles.head}>
+              <h1
+                className={styles.headH1}
+                title="Holdings across funds and managed accounts — day move, unrealized P&L, and weight."
+              >
+                <span className={styles.headKicker}>Book · live</span>
+                {title}
+              </h1>
+              <div
+                className={styles.periods}
+                role="tablist"
+                aria-label="Chart period"
+              >
                 {(['1m', 'ytd', '1y', '3y'] as ChartPeriod[]).map((p) => (
                   <button
                     key={p}
                     type="button"
+                    role="tab"
+                    aria-selected={period === p}
                     className={`${styles.periodBtn} ${period === p ? styles.periodOn : ''}`}
                     onClick={() => setPeriod(p)}
                   >

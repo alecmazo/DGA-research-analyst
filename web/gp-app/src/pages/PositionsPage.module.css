@@ -192,7 +192,47 @@
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
-  padding-top: var(--space-5);
+  padding-top: var(--space-3);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.headH1 {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+.headKicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand-600);
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .headH1 {
+    font-size: 20px;
+  }
+  .periods {
+    margin-left: auto;
+  }
 }
 
 .periods {
