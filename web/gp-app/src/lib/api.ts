@@ -180,6 +180,38 @@ function launchExcelDesktop(fileUrl: string) {
   a.remove()
 }
 
+/** Excel names the download from the last path segment. No .xlsx → "file". */
+export function urlHasXlsxFilename(url: string): boolean {
+  try {
+    const last =
+      decodeURIComponent(new URL(url).pathname)
+        .split('/')
+        .filter(Boolean)
+        .pop() || ''
+    return last.toLowerCase().endsWith('.xlsx')
+  } catch {
+    return false
+  }
+}
+
+function triggerNamedDownload(blob: Blob, name: string) {
+  const fname = name.toLowerCase().endsWith('.xlsx') ? name : `${name}.xlsx`
+  const typed =
+    blob.type && /spreadsheet|excel|zip/i.test(blob.type)
+      ? blob
+      : new Blob([blob], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+  const url = URL.createObjectURL(typed)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fname
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function downloadAuth(
   path: string,
   fallbackName = 'download',
@@ -273,16 +305,17 @@ export async function downloadAuth(
     }
   }
 
-  if (opts.openAfter && (openUrl || webUrl)) {
-    if (openUrl) launchExcelDesktop(openUrl)
-    const dest = openUrl ? `ms-excel:ofe|u|${openUrl}` : webUrl
+  const ofeOk = Boolean(openUrl && urlHasXlsxFilename(openUrl))
+  if (opts.openAfter && (ofeOk || webUrl)) {
+    if (ofeOk) launchExcelDesktop(openUrl)
+    const dest = ofeOk ? `ms-excel:ofe|u|${openUrl}` : webUrl
     if (helper && !helper.closed) {
       try {
         helper.location.href = dest
       } catch {
         helper.location.href = webUrl || openUrl
       }
-      if (openUrl) {
+      if (ofeOk) {
         window.setTimeout(() => {
           try {
             helper.close()
@@ -292,6 +325,10 @@ export async function downloadAuth(
         }, 1500)
       }
     }
+    // Dropbox temp links have no .xlsx name — never hand those to Excel
+    // (Mac warns "format and extension of 'file' don't match"). Save the
+    // workbook under its real name instead.
+    if (!ofeOk) triggerNamedDownload(blob, name)
     return
   }
 

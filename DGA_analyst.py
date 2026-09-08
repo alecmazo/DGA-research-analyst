@@ -12330,16 +12330,84 @@ def dropbox_web_url_for(dest: str) -> str:
     return "https://www.dropbox.com/home" + quote(path, safe="/")
 
 
+def url_has_xlsx_filename(url: str) -> bool:
+    """True when the URL path's last segment ends in ``.xlsx``.
+
+    Excel for Mac names the download from that segment. A Dropbox temp link
+    (``/apitl/1/TOKEN``) becomes a file called ``file`` and Excel warns that
+    the format and extension don't match.
+    """
+    from urllib.parse import unquote, urlparse
+
+    if not (url or "").strip():
+        return False
+    try:
+        path = unquote(urlparse(url.strip()).path or "")
+    except Exception:
+        return False
+    last = path.rstrip("/").rsplit("/", 1)[-1]
+    return last.lower().endswith(".xlsx")
+
+
+def dropbox_direct_download_url(url: str) -> str:
+    """Force ``dl=1`` so Excel fetches the workbook, not the preview HTML."""
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    try:
+        p = urlparse(raw)
+    except Exception:
+        return raw
+    if not p.scheme:
+        return raw
+    q = dict(parse_qsl(p.query, keep_blank_values=True))
+    q["dl"] = "1"
+    q.pop("raw", None)
+    return urlunparse(p._replace(query=urlencode(q)))
+
+
 def dropbox_file_open_urls(dbx, dest: str) -> dict:
-    """Temporary download link (Excel desktop) + Dropbox web folder URL."""
+    """Excel-openable link (path must end in .xlsx) + Dropbox web URL.
+
+    Never return ``files_get_temporary_link`` — those URLs have no filename,
+    so Excel for Mac saves them as ``file`` and shows a format/extension
+    warning. Prefer a shared link whose last path segment is the workbook.
+    """
     out = {"dest": dest, "open_url": None, "web_url": dropbox_web_url_for(dest)}
     if dbx is None or not dest:
         return out
+    shared = None
     try:
-        link = dbx.files_get_temporary_link(dest)
-        out["open_url"] = getattr(link, "link", None) or None
+        listed = dbx.sharing_list_shared_links(path=dest, direct_only=True)
+        for link in getattr(listed, "links", None) or []:
+            u = getattr(link, "url", None)
+            if u:
+                shared = u
+                break
     except Exception as e:
-        print(f"[dropbox] temporary link {dest}: {e!s:.160}", flush=True)
+        print(f"[dropbox] list shared {dest}: {e!s:.120}", flush=True)
+    if not shared:
+        try:
+            created = dbx.sharing_create_shared_link_with_settings(path=dest)
+            shared = getattr(created, "url", None)
+        except Exception as e:
+            err = str(e).lower()
+            if "shared_link_already_exists" in err:
+                try:
+                    listed = dbx.sharing_list_shared_links(path=dest, direct_only=True)
+                    links = getattr(listed, "links", None) or []
+                    if links:
+                        shared = getattr(links[0], "url", None)
+                except Exception:
+                    pass
+            else:
+                print(f"[dropbox] create shared {dest}: {e!s:.160}", flush=True)
+    if shared:
+        url = dropbox_direct_download_url(shared)
+        if url_has_xlsx_filename(url):
+            out["open_url"] = url
     return out
 
 

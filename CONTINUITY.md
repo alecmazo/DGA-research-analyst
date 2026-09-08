@@ -164,6 +164,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **xlsx repair formulas** | **`ui581-20260904-xlsx-repair`** | Valuation DCF (base) step labels no longer start with `=` (Excel was repairing the file and stripping sheet3 formulas) |
 | **Comps from financials store** | **`ui582-20260904-store-comps`** | Excel + saved reports comps use last reported FY from company_financials (live last), not NTM/(E) estimates |
 | **Watchlist last-close feed** | **`ui583-20260908-watchlist-quotes`** | Skip yfinance on quote hot path (Railway 401); last-close store fallback; never stamp null prices over the watchlist |
+| **Excel open as .xlsx** | **`ui584-20260908-xlsx-open`** | Excel button opens a URL that ends in `{TICKER}_DGA_Model.xlsx` so Mac Excel no longer warns that ``file`` format/extension don't match |
 
 ### One-click handoff (preferred)
 

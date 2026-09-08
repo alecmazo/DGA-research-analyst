@@ -7733,7 +7733,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui583-20260908-watchlist-quotes"
+WEB_BUILD_VERSION = "ui584-20260908-xlsx-open"
 
 
 @app.get("/api/build")
@@ -9158,6 +9158,83 @@ def _load_financials_for_model(ticker: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+_XLSX_OPEN: dict[str, tuple[float, bytes, str]] = {}
+_XLSX_OPEN_TTL = 180.0
+_XLSX_OPEN_LOCK = threading.Lock()
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _public_base(request: Request) -> str:
+    proto = (
+        (request.headers.get("x-forwarded-proto") or request.url.scheme or "https")
+        .split(",")[0]
+        .strip()
+    )
+    host = (
+        (request.headers.get("x-forwarded-host") or request.headers.get("host") or "")
+        .split(",")[0]
+        .strip()
+    )
+    if not host:
+        host = "portfolio.dgacapital.com"
+    if "dgacapital.com" in host and proto != "https":
+        proto = "https"
+    return f"{proto}://{host}"
+
+
+def _xlsx_open_put(raw: bytes, fname: str) -> str:
+    import secrets
+    name = Path(fname).name
+    token = secrets.token_urlsafe(18)
+    now = time.time()
+    with _XLSX_OPEN_LOCK:
+        dead = [k for k, (ts, _, _) in _XLSX_OPEN.items() if now - ts > _XLSX_OPEN_TTL]
+        for k in dead:
+            _XLSX_OPEN.pop(k, None)
+        if len(_XLSX_OPEN) > 24:
+            for k, _ in sorted(_XLSX_OPEN.items(), key=lambda kv: kv[1][0])[:8]:
+                _XLSX_OPEN.pop(k, None)
+        _XLSX_OPEN[token] = (now, raw, name)
+    return token
+
+
+def _xlsx_open_get(token: str, fname: str) -> bytes | None:
+    rec = _XLSX_OPEN.get(token)
+    if not rec:
+        return None
+    ts, raw, stored = rec
+    if time.time() - ts > _XLSX_OPEN_TTL:
+        _XLSX_OPEN.pop(token, None)
+        return None
+    if Path(fname).name != stored:
+        return None
+    return raw
+
+
+@app.get("/api/xlsx-open/{token}/{fname}")
+def xlsx_open_file(token: str, fname: str):
+    """Short-lived workbook for Excel desktop (``ms-excel:ofe``).
+
+    Path ends in ``{TICKER}_DGA_Model.xlsx`` so Excel does not save it as
+    ``file`` (Dropbox temp links triggered a format/extension warning).
+    """
+    from fastapi.responses import Response as _Resp
+    name = Path(fname or "").name
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,32}_DGA_Model\.xlsx", name, re.I):
+        raise HTTPException(status_code=404, detail="Not found")
+    raw = _xlsx_open_get(token, name)
+    if not raw:
+        raise HTTPException(status_code=410, detail="Excel link expired — click Excel again")
+    return _Resp(
+        content=raw,
+        media_type=_XLSX_MIME,
+        headers={
+            "Content-Disposition": f'inline; filename="{name}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 def _bg_push_model_xlsx(path_str: str) -> None:
     """Best-effort Dropbox upload into Apps/DGA Research/Excel/."""
     try:
@@ -9286,9 +9363,11 @@ def download_xlsx(
             if not res.get("ok"):
                 background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
             else:
-                dbx_open = (res.get("open_url") or "")[:2000]
                 dbx_web = (res.get("web_url") or "")[:2000]
                 dbx_dest = res.get("dest") or dbx_dest
+                shared = (res.get("open_url") or "")[:2000]
+                if shared and analyst.url_has_xlsx_filename(shared):
+                    dbx_open = shared
         except Exception as e:
             print(f"[xlsx-export] dropbox inline failed: {e!s:.200}", flush=True)
             background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
@@ -9297,6 +9376,14 @@ def download_xlsx(
             dbx_web = analyst.dropbox_web_url_for(dbx_dest)
         except Exception:
             dbx_web = ""
+    # Always mint a same-origin URL that *ends in .xlsx*. Dropbox temp links
+    # have no filename, so Excel for Mac opens them as ``file`` and warns.
+    try:
+        from urllib.parse import quote
+        token = _xlsx_open_put(raw, fname)
+        dbx_open = f"{_public_base(request)}/api/xlsx-open/{token}/{quote(fname)}"
+    except Exception as e:
+        print(f"[xlsx-export] open token {tk}: {e!s:.160}", flush=True)
 
     from fastapi.responses import Response as _Resp
     hdrs = {
