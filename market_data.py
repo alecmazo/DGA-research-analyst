@@ -123,7 +123,18 @@ _SPARK_BARS_TTL = 120.0
 
 
 def _yf_prior_close(symbol: str) -> float | None:
-    """Last completed session close via yfinance history (fills Yahoo chart gaps)."""
+    """Last completed session close via yfinance history (fills Yahoo chart gaps).
+
+    Off by default on the quote hot path. Railway cloud IPs get yfinance crumb
+    401s (``User is unable to access this feature``), and a per-ticker
+    ``history()`` call inside the 12-worker ``get_quotes`` fan-out ate the 6s
+    wall so the watchlist painted dashes. Chart / spark / Nasdaq HTTP stay on.
+    Set ``QUOTE_USE_YFINANCE=1`` to re-enable.
+    """
+    if os.environ.get("QUOTE_USE_YFINANCE", "").strip().lower() not in (
+        "1", "true", "yes",
+    ):
+        return None
     try:
         import yfinance as yf  # type: ignore
         hist = yf.Ticker(symbol).history(period="10d", auto_adjust=True)
@@ -309,8 +320,9 @@ def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool,
 
     Cloud Yahoo chart/spark often skip a session (prod: 2026-07-23 then
     2026-07-27 — Friday missing). If the latest pre-today bar is older than
-    the expected prior weekday, fill from yfinance then Nasdaq historical so
-    day-% matches the real last session close (e.g. Fri 313.03 not Thu 319.69).
+    the expected prior weekday, fill from Nasdaq historical (HTTP) so day-%
+    matches the real last session close (e.g. Fri 313.03 not Thu 319.69).
+    yfinance is not used here — crumb 401s from Railway stall the watchlist.
     """
     from datetime import date
     today_iso = _us_now_et().date().isoformat()
@@ -327,16 +339,12 @@ def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool,
         last_prior_date, last_prior_close = prior_bars[-1]
         if last_prior_date >= expected or not symbol:
             return float(last_prior_close)
-        # Missing expected session — Nasdaq first (fast/reliable on cloud),
-        # then yfinance. Caller usually already merged; this is a safety net.
+        # Missing expected session — Nasdaq HTTP only (no yfinance).
         ndq = _nasdaq_daily_bars(symbol)
         if ndq:
             ndq_prior = [(d, c) for d, c in ndq if d and d < today_iso]
             if ndq_prior and ndq_prior[-1][0] > last_prior_date:
                 return float(ndq_prior[-1][1])
-        yf_prev = _yf_prior_close(symbol)
-        if yf_prev is not None:
-            return float(yf_prev)
         return float(last_prior_close)
 
     if len(dated) >= 2 and dated[-1][0] >= today_iso:
@@ -349,7 +357,6 @@ def _session_prior_close(bars: list[tuple[str, float]], live_px, rth_open: bool,
         p = _from_prior([(d, c) for d, c in ndq if d and d < today_iso])
         if p is not None:
             return p
-        return _yf_prior_close(symbol)
     return None
 
 
@@ -433,7 +440,7 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                     "interval": "1d",
                     "includePrePost": "false",
                 },
-                timeout=6,
+                timeout=3,
                 headers={"User-Agent": "Mozilla/5.0 DGACapital/1.0"},
             )
             if r.status_code != 200:
@@ -546,20 +553,11 @@ def _yahoo_chart_quote(symbol: str) -> dict | None:
                             ]
                             if filled and filled[-1][0] > prior_to_sess[-1][0]:
                                 prev = float(filled[-1][1])
-                        if prev is not None and prior_to_sess and abs(
-                                float(prev) - float(prior_to_sess[-1][1])) < 1e-9:
-                            yf_p = _yf_prior_close(sym)
-                            # Only if yfinance disagrees with the pinned close
-                            if (yf_p is not None and px is not None
-                                    and abs(float(yf_p) - float(px)) > 1e-4):
-                                prev = float(yf_p)
             if prev is None:
                 # RTH open path (and any closed-market fallback): last bar
                 # strictly before *calendar today* ET.
                 prev = _session_prior_close(
                     bars, live_px if rth_open else px, rth_open, symbol=sym)
-            if prev is None:
-                prev = _yf_prior_close(sym)
             # Hard guard: closed market must never emit last==prior (fake 0%).
             if (not rth_open and prev is not None and px is not None
                     and abs(float(prev) - float(px)) < 1e-9):

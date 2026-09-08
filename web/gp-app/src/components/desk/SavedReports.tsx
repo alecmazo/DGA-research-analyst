@@ -120,9 +120,17 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
             const got = await api<Record<string, Quote>>(
               `/api/quotes?tickers=${encodeURIComponent(part.join(','))}`,
             )
-            Object.assign(q, got || {})
+            for (const [tk, row] of Object.entries(got || {})) {
+              if (row && row.price != null) q[tk] = row
+            }
           }
-          setQuotes(q)
+          setQuotes((prev) => {
+            const merged: Record<string, Quote> = { ...prev }
+            for (const [tk, row] of Object.entries(q)) {
+              if (row && row.price != null) merged[tk] = row
+            }
+            return merged
+          })
         } catch {
           /* keep seed prices on reports */
         }

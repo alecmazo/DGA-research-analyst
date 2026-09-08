@@ -4329,10 +4329,10 @@ def watchlist_get(request: Request, fresh: bool = False):
     """Fast watchlist for login / desk paint.
 
     Always returns the ticker list even if quotes fail. Quote path:
-    process cache → market_quotes store → Yahoo chart (hard 6s wall).
-    During a live US session, previous-session store rows are misses so the
-    first morning open hits Yahoo (idea-feed already does). Weekend/closed
-    still paints last close. ``fresh=1`` skips the process cache.
+    process cache → market_quotes store (current session while live) →
+    Yahoo chart (hard 6s wall) → last-close store (≤4d) so a Yahoo miss
+    still paints a price. Weekend/closed still paints last close.
+    ``fresh=1`` skips the process cache.
     Earnings chips: process-cached Nasdaq calendar, ≤8s budget, never hangs
     the list (stale-while-revalidate + background refresh).
     YTD %: bulk from price_history (calendar year first close vs live last).
@@ -4422,13 +4422,38 @@ def watchlist_get(request: Request, fresh: bool = False):
                     raw = {}
                 for tk in need:
                     q = raw.get(tk) or {}
-                    if q.get("price") is not None or tk not in quotes:
+                    # Never stamp a null price over a name — that paints "—" on
+                    # the desk even when market_quotes still has last close.
+                    if q.get("price") is not None:
                         quotes[tk] = {
                             "price": q.get("price"),
                             "prev": None,
                             "pct": q.get("pct_change"),
                             "as_of": q.get("as_of"),
                         }
+
+            # Yahoo miss / 6s wall: last-close store (≤4d). Live session already
+            # rejected these as not-current-session so we wouldn't paint Friday
+            # as the open; after a live miss a last close beats a dash.
+            still_blank = [
+                tk for tk in tickers
+                if (quotes.get(tk) or {}).get("price") is None
+            ]
+            if still_blank and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+                try:
+                    older = _db_quotes(still_blank, max_age_s=4 * 86400) or {}
+                    for tk in still_blank:
+                        q = older.get(tk) or {}
+                        if q.get("price") is None:
+                            continue
+                        quotes[tk] = {
+                            "price": q.get("price"),
+                            "prev": None,
+                            "pct": q.get("pct_change"),
+                            "as_of": q.get("as_of"),
+                        }
+                except Exception as e:
+                    print(f"[watchlist] last-close store failed: {e!s:.120}", flush=True)
 
             # Report flags (cheap) — never fail the list
             if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
@@ -7708,7 +7733,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui582-20260904-store-comps"
+WEB_BUILD_VERSION = "ui583-20260908-watchlist-quotes"
 
 
 @app.get("/api/build")
@@ -15846,16 +15871,18 @@ def get_quotes(tickers: str = ""):
 
 
 def _batch_quotes_fast(symbols: list[str]) -> dict:
-    """Watchlist / login path — cache + Yahoo chart only, no yfinance cascade.
+    """Watchlist / login path — cache + Yahoo chart + last-close store.
 
     Full ``batch_quotes`` can spend 10–14s on yfinance ThreadPool + download
     when chart gaps exist; that blocked every login. This path returns what we
     can get in a few seconds so the desk paints immediately.
+
+    Never fills remaining names with ``{price: None}`` — that overwrote the
+    watchlist paint and Saved Reports last-close when Yahoo 401'd / timed out.
     """
     originals = [str(s).strip().upper().rstrip("*") for s in (symbols or []) if s][:100]
     if not originals:
         return {}
-    null_row: dict = {"price": None, "pct_change": None}
     result: dict = {}
     now = time.time()
     misses: list = []
@@ -15907,6 +15934,10 @@ def _batch_quotes_fast(symbols: list[str]) -> dict:
         result[sym] = row
         _QUOTE_CACHE[sym] = {**row, "_ts": now}
 
+    def _still_need(sym: str) -> bool:
+        r = result.get(sym) or {}
+        return r.get("price") is None
+
     # Yahoo chart only (parallel in market_data.get_quotes)
     try:
         import market_data as _md
@@ -15931,9 +15962,32 @@ def _batch_quotes_fast(symbols: list[str]) -> dict:
     except Exception as e:
         print(f"[batch_quotes_fast] market_data failed: {e!s:.140}", flush=True)
 
-    for sym in originals:
-        if sym not in result:
-            result[sym] = dict(null_row)
+    still = [s for s in originals if _still_need(s)]
+    if still:
+        try:
+            db_fn = globals().get("_db_quotes")
+            db_fresh = db_fn(still, max_age_s=90) if callable(db_fn) else {}
+        except Exception as e:
+            print(f"[batch_quotes_fast] db_quotes fresh failed: {e!s:.120}", flush=True)
+            db_fresh = {}
+        for sym, dq in (db_fresh or {}).items():
+            if dq and dq.get("price") is not None:
+                _accept(sym, dq["price"], dq.get("pct_change"),
+                        source="store-fresh", as_of=dq.get("as_of"))
+        still = [s for s in originals if _still_need(s)]
+
+    if still:
+        try:
+            db_fn = globals().get("_db_quotes")
+            db_sess = db_fn(still, max_age_s=4 * 86400) if callable(db_fn) else {}
+        except Exception as e:
+            print(f"[batch_quotes_fast] db_quotes session-age failed: {e!s:.120}", flush=True)
+            db_sess = {}
+        for sym, dq in (db_sess or {}).items():
+            if dq and dq.get("price") is not None:
+                _accept(sym, dq["price"], dq.get("pct_change"),
+                        source="store", as_of=dq.get("as_of"))
+
     return result
 
 

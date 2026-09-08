@@ -112,6 +112,19 @@ function writeWlCache(w: WatchlistResponse) {
   }
 }
 
+/** Keep last-known last when the feed returns a blank price (Yahoo miss). */
+function mergeWlQuotes(
+  prev: WatchlistResponse | null,
+  next: WatchlistResponse,
+): WatchlistResponse {
+  const quotes: Record<string, Quote> = { ...(prev?.quotes || {}) }
+  for (const [tk, q] of Object.entries(next.quotes || {})) {
+    if (q && q.price != null) quotes[tk] = q
+    else if (!quotes[tk]) quotes[tk] = q || {}
+  }
+  return { ...next, quotes }
+}
+
 export function DeskPage() {
   const cached = readWlCache()
   const [wl, setWl] = useState<WatchlistResponse | null>(cached)
@@ -134,8 +147,11 @@ export function DeskPage() {
     const timer = window.setTimeout(() => ac.abort(), 10_000)
     try {
       const w = await api<WatchlistResponse>('/api/watchlist', { signal: ac.signal })
-      setWl(w)
-      writeWlCache(w)
+      setWl((prev) => {
+        const merged = mergeWlQuotes(prev, w)
+        writeWlCache(merged)
+        return merged
+      })
       setErr(null)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return
