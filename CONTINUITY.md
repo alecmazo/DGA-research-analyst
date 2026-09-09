@@ -177,6 +177,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **GF watchlist add ticker** | **`ui594-20260909-gf-add-ticker`** | SUP_20260909_8152b360 — add-ticker field sits on the same row as the watchlist name (e.g. Space) |
 | **GF watchlist edit desk** | **`ui595-20260909-gf-edit-lists`** | SUP_20260909_a68add7e — create/delete lists, hover-remove stocks, editable note + fair value, drop dividend column |
 | **Builder board switch** | **`ui596-20260909-board-switch`** | SUP_20260909_88b93702 — Track boards paint from cache/store + client prefetch; no Yahoo wait or DCF rebuild on every click |
+| **Builder board quotes** | **`ui597-20260909-board-quotes`** | Same ticket — fill leftover last prices via `_batch_quotes_fast`; prefetch 3 boards at a time |
 
 ### One-click handoff (preferred)
 

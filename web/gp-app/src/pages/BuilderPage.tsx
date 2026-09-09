@@ -316,15 +316,22 @@ export function BuilderPage() {
   useEffect(() => {
     if (tab !== 'boards' || !lists.length) return
     let stop = false
+    const queue = lists.map((l) => l.id)
     ;(async () => {
-      for (const l of lists) {
-        if (stop) return
-        try {
-          await fetchBoard(l.id, false)
-        } catch {
-          /* prefetch is best-effort */
-        }
-      }
+      const workers = 3
+      await Promise.all(
+        Array.from({ length: workers }, async () => {
+          while (!stop) {
+            const id = queue.shift()
+            if (!id) return
+            try {
+              await fetchBoard(id, false)
+            } catch {
+              /* prefetch is best-effort */
+            }
+          }
+        }),
+      )
     })()
     return () => {
       stop = true

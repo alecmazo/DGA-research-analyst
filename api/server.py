@@ -7754,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui596-20260909-board-switch"
+WEB_BUILD_VERSION = "ui597-20260909-board-quotes"
 
 
 @app.get("/api/build")
@@ -12241,6 +12241,17 @@ def _builder_board_quotes(tickers: list[str]) -> dict:
             if dq.get("as_of"):
                 row["as_of"] = dq["as_of"]
             result[sym] = row
+    still = [s for s in originals if (result.get(s) or {}).get("price") is None]
+    if still:
+        try:
+            extra = _batch_quotes_fast(still) or {}
+        except Exception as e:
+            print(f"[builder-lists] fast quotes: {e!s:.120}", flush=True)
+            extra = {}
+        for sym, q in extra.items():
+            if (q or {}).get("price") is None:
+                continue
+            result[sym] = q
     return result
 
 

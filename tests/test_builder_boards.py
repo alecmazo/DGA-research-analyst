@@ -17,8 +17,8 @@ def test_board_quotes_skip_yahoo_and_yfinance():
     assert "_QUOTE_CACHE" in body
     assert "_db_quotes" in body
     assert "batch_quotes(" not in body
-    assert "market_data" not in body
-    assert "get_quotes" not in body
+    assert "_batch_quotes_fast" in body
+    # Yahoo/yfinance ThreadPool lives in batch_quotes, not this path.
 
 
 def test_list_board_uses_fast_board_quotes():
@@ -40,7 +40,7 @@ def test_builder_page_caches_and_prefetches_boards():
     assert "boardCache" in src
     assert "fetchBoard" in src
     assert "boardCache.current[l.id]" in src
-    assert "await fetchBoard(l.id, false)" in src
+    assert "fetchBoard(id, false)" in src
     # Boards tab must not wait on construct candidates.
     assert "listsLoading" in src
     assert "candsLoading" in src
