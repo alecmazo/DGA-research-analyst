@@ -165,6 +165,9 @@ type Props = {
   alreadyOnWatchlist?: boolean
   /** Let the page under the dim receive hover/click (Builder boards). */
   passThrough?: boolean
+  /** Builder hover: keep the snapshot while the pointer is on the card. */
+  onHoverEnter?: () => void
+  onHoverLeave?: () => void
 }
 
 export function StockPeek({
@@ -172,6 +175,8 @@ export function StockPeek({
   onClose,
   alreadyOnWatchlist = false,
   passThrough = false,
+  onHoverEnter,
+  onHoverLeave,
 }: Props) {
   const navigate = useNavigate()
   const tk = ticker.trim().toUpperCase()
@@ -255,7 +260,11 @@ export function StockPeek({
         if (!passThrough && e.target === e.currentTarget) onClose()
       }}
     >
-      <div className={styles.dialog}>
+      <div
+        className={styles.dialog}
+        onMouseEnter={onHoverEnter}
+        onMouseLeave={onHoverLeave}
+      >
         <header className={styles.hero}>
           <div className={styles.heroLeft}>
             <div className={styles.tk}>{tk}</div>

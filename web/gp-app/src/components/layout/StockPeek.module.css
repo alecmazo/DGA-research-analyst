@@ -12,7 +12,7 @@
 
 .overlayPass {
   pointer-events: none;
-  background: rgba(10, 22, 40, 0.12);
+  background: transparent;
   justify-content: flex-end;
   padding: 72px 20px 20px;
 }

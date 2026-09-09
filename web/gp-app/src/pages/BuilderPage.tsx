@@ -113,8 +113,37 @@ export function BuilderPage() {
   const [addTk, setAddTk] = useState('')
   const [peekTk, setPeekTk] = useState<string | null>(null)
   const hoverTimer = useRef<number | null>(null)
+  const closeTimer = useRef<number | null>(null)
   const skipPeek = useRef(false)
   const peekOpen = useRef(false)
+
+  const clearHoverTimer = () => {
+    if (hoverTimer.current) {
+      window.clearTimeout(hoverTimer.current)
+      hoverTimer.current = null
+    }
+  }
+
+  const clearCloseTimer = () => {
+    if (closeTimer.current) {
+      window.clearTimeout(closeTimer.current)
+      closeTimer.current = null
+    }
+  }
+
+  const closePeek = () => {
+    clearHoverTimer()
+    clearCloseTimer()
+    peekOpen.current = false
+    setPeekTk(null)
+  }
+
+  const scheduleClose = () => {
+    clearCloseTimer()
+    // Short delay so row→row swaps don't flicker; long enough to reach the
+    // snapshot card. Leaving the list (or the card) then clears the screen.
+    closeTimer.current = window.setTimeout(() => closePeek(), 180)
+  }
 
   const openPeek = (tk: string) => {
     const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
@@ -125,30 +154,24 @@ export function BuilderPage() {
 
   const onBoardEnter = (tk: string) => {
     skipPeek.current = false
-    if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
-    const delay = peekOpen.current ? 50 : 220
+    clearCloseTimer()
+    clearHoverTimer()
+    const delay = peekOpen.current ? 40 : 180
     hoverTimer.current = window.setTimeout(() => {
       if (!skipPeek.current) openPeek(tk)
     }, delay)
   }
 
   const onBoardLeave = () => {
-    if (hoverTimer.current) {
-      window.clearTimeout(hoverTimer.current)
-      hoverTimer.current = null
-    }
+    clearHoverTimer()
+    scheduleClose()
   }
 
   const openFinancials = (tk: string) => {
     const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
     if (!sym) return
     skipPeek.current = true
-    if (hoverTimer.current) {
-      window.clearTimeout(hoverTimer.current)
-      hoverTimer.current = null
-    }
-    peekOpen.current = false
-    setPeekTk(null)
+    closePeek()
     navigate(`/financials?ticker=${encodeURIComponent(sym)}`)
   }
 
@@ -197,7 +220,8 @@ export function BuilderPage() {
 
   useEffect(() => {
     return () => {
-      if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
+      clearHoverTimer()
+      clearCloseTimer()
     }
   }, [])
 
@@ -1164,10 +1188,9 @@ export function BuilderPage() {
         <StockPeek
           ticker={peekTk}
           passThrough
-          onClose={() => {
-            peekOpen.current = false
-            setPeekTk(null)
-          }}
+          onHoverEnter={clearCloseTimer}
+          onHoverLeave={scheduleClose}
+          onClose={closePeek}
         />
       )}
     </div>

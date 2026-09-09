@@ -172,6 +172,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Wheel held = Positions** | **`ui589-20260909-wheel-held`** | SUP_20260909_37ea161d — covered-call HELD/share counts from live Positions book only (no DEMOF1 / watchlist) |
 | **Demo creds in Settings** | **`ui590-20260909-demo-creds`** | GP Settings → Admin User Management shows `demo@dgacapital.com` / `demo123` in plaintext |
 | **Wheel CC overwrite rank** | **`ui591-20260909-cc-setup-rank`** | Covered calls: held uncovered → held covered → not held, then GS/MS risk/reward (rich vol, 15–30Δ, cushion vs assignment) — not share count |
+| **Builder hover dismiss** | **`ui592-20260909-builder-hover`** | Board snapshot closes when the pointer leaves the list (or the card); no leftover dim over the page |
 
 ### One-click handoff (preferred)
 
