@@ -7754,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui589-20260909-wheel-held"
+WEB_BUILD_VERSION = "ui590-20260909-demo-creds"
 
 
 @app.get("/api/build")
@@ -40277,7 +40277,7 @@ _DEMO_FALLBACK_TICKERS = [
 # One advertised login. Fake LP rows exist so the Users tab looks like a
 # real GP desk, but they get random unguessable passwords and are never
 # printed, emailed, or returned on the public login page.
-_DEMO_GP_EMAIL, _DEMO_GP_PASSWORD = "demo@dgacapital.com", "demo"
+_DEMO_GP_EMAIL, _DEMO_GP_PASSWORD = "demo@dgacapital.com", "demo123"
 _DEMO_GP_NAME = "DGA Preview"
 _DEMO_FUND_NAME = "Ridgecrest Partners, LP"
 _DEMO_LEGACY_EMAILS = (
@@ -40729,6 +40729,11 @@ def _demo_ensure_seeded() -> dict:
         reg = _demo_registry(force=True) or {}
         funds = list(reg.get("fund_ids") or [])
         if gp and gp.get("demo_mode") and len(funds) >= 3:
+            try:
+                _av2.gp_set_password(
+                    gp["lp_id"], _DEMO_GP_PASSWORD, must_change=False)
+            except Exception as e:
+                print(f"[demo] password sync: {e!s:.120}", flush=True)
             return {"ok": True, "already": True, "fund_ids": funds}
         print("[demo] seeding 3-book anonymous sandbox", flush=True)
         return _demo_reseed()

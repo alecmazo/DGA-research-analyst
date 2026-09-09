@@ -134,7 +134,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **PDF tables + question** | **`ui519-20260827-pdf-table-question`** | Report/IC PDF columns sized from cell text; Strategist Question strip no longer dumps the LLM prompt |
 | **Next deploy after this** | **`ui520-YYYYMMDD-slug`** | Always `max(live, this file, BUILD_VERSION) + 1` |
 | **Book snapshot required** | **`ui553-20260829-book-snapshot`** | Strategist / quarterly / memos lock IC snapshot table |
-| **Anonymous demo login** | **`ui554-20260829-demo-preview`** | `demo@dgacapital.com` / `demo` — 3 synthetic books, zero live PII |
+| **Anonymous demo login** | **`ui554-20260829-demo-preview`** | `demo@dgacapital.com` / `demo123` — 3 synthetic books, zero live PII |
 | **LP planning edit** | **`ui555-20260829-lp-plan-edit`** | LP can edit/save the shared planning worksheet; latest save is what GP sees |
 | **Desk column sort** | **`ui556-20260831-desk-sort`** | Watchlist headers sort (default |day %|); Saved Reports TGT/Upside sorts by Grok upside |
 | **Print engine aliases** | **`ui557-20260831-print-aliases`** | Printed/PDF reports: Grok → Rock, Claude → Laudia |
@@ -170,6 +170,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Positions Ind one row** | **`ui587-20260908-pos-ind-row`** | SUP_20260908_ffea3da3 — drop subtitle under Ind; 1m/YTD/1y/3y sit on the same row as the account name |
 | **Page title row** | **`ui588-20260908-title-row`** | SUP_20260908_6aa2c0a8 — hide descriptions under page titles site-wide; right-side actions sit on the title row |
 | **Wheel held = Positions** | **`ui589-20260909-wheel-held`** | SUP_20260909_37ea161d — covered-call HELD/share counts from live Positions book only (no DEMOF1 / watchlist) |
+| **Demo creds in Settings** | **`ui590-20260909-demo-creds`** | GP Settings → Admin User Management shows `demo@dgacapital.com` / `demo123` in plaintext |
 
 ### One-click handoff (preferred)
 
@@ -294,7 +295,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - SnapTrade: `SnapTradeAuth.commercial_api_key` when available
 - Options wheel: held names first; term tables + KPI strip
 - **Portfolio SNAPSHOT (required):** every book analysis (Portfolio Strategist), quarterly partner letter, and memo assigned to a portfolio MUST include the live attribution table — **Ticker | Position Δ YTD | Contribution | $ P&L** — with Modified Dietz YTD as a real book return (not a price-path). Same look as the IC Strategist snapshot. Do not substitute a different snapshot layout.
-- **Demo sandbox (privacy):** public login `demo@dgacapital.com` / `demo`. Three synthetic books only (Northridge SMA, Harbor Tax-Exempt, Ridgecrest Partners). Never clone or mask live LPs. Fail-closed on `DEMO%` short names. Kill switch `_DEMO_DISABLED` if isolation ever bleeds.
+- **Demo sandbox (privacy):** public login `demo@dgacapital.com` / `demo123`. Three synthetic books only (Northridge SMA, Harbor Tax-Exempt, Ridgecrest Partners). Never clone or mask live LPs. Fail-closed on `DEMO%` short names. Kill switch `_DEMO_DISABLED` if isolation ever bleeds.
 - **Planning worksheet is shared:** LP and GP edit the same snapshot (`lp.planning:{lp_id}`). Latest save is what both see. LP cannot see GP-hidden scratch lines.
 
 ---

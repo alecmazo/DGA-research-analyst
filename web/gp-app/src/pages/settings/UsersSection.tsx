@@ -495,6 +495,36 @@ function LpRoster() {
 
 /* ── Admin roster ─────────────────────────────────────────────── */
 
+function DemoLoginPanel() {
+  const [login, setLogin] = useState<{ email?: string; password?: string } | null>(
+    null,
+  )
+  useEffect(() => {
+    void api<{
+      credentials?: { login?: { email?: string; password?: string } }
+    }>('/api/v2/admin/demo/status')
+      .then((d) => setLogin(d.credentials?.login || null))
+      .catch(() => setLogin(null))
+  }, [])
+  if (!login?.email) return null
+  return (
+    <div className={styles.help} style={{ marginBottom: 12 }}>
+      <div className={styles.fieldLabel} style={{ marginBottom: 4 }}>
+        Prospect demo login
+      </div>
+      <div>
+        Email <code>{login.email}</code>
+        {' · '}
+        Password <code>{login.password}</code>
+      </div>
+      <div className={styles.meta} style={{ marginTop: 4 }}>
+        Public sandbox (3 synthetic books). Visible to GP here so you can share
+        it — live LPs never see this panel.
+      </div>
+    </div>
+  )
+}
+
 function AdminRoster() {
   const [admins, setAdmins] = useState<User[]>([])
   const [showAdd, setShowAdd] = useState(false)
@@ -590,13 +620,14 @@ function AdminRoster() {
       title="Admin User Management"
       badge="GOD MODE"
       className={styles.span2}
-      defaultOpen={false}
+      defaultOpen
       action={
         <Button size="sm" variant="secondary" onClick={() => setShowAdd((v) => !v)}>
           {showAdd ? '✕ Cancel' : '+ Add Admin'}
         </Button>
       }
     >
+      <DemoLoginPanel />
       {showAdd && (
         <div className={styles.addForm}>
           <div className={styles.addFormTitle} style={{ color: '#c9a84c' }}>

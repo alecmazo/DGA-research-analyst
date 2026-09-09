@@ -369,9 +369,9 @@ function DemoCard() {
   return (
     <CollapsibleCard title="🎭 Demo sandbox" badge="PROSPECTS" defaultOpen={false}>
       <div className={styles.hint} style={{ marginBottom: 6 }}>
-        Public login <code>demo@dgacapital.com</code> / <code>demo</code> opens a
+        Public login <code>demo@dgacapital.com</code> / <code>demo123</code> opens a
         3-book sample workspace. Fully synthetic names — live LPs never appear,
-        even anonymized.
+        even anonymized. Same credentials are listed under Admin User Management.
       </div>
       <pre className={styles.mono} style={{ marginBottom: 6, whiteSpace: 'pre-wrap' }}>
         {statusHtml}
