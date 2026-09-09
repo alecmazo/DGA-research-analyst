@@ -169,6 +169,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Watchlist YTD keep** | **`ui586-20260908-ytd-keep`** | Yahoo/store price updates merge into the row so they do not wipe YTD already stamped |
 | **Positions Ind one row** | **`ui587-20260908-pos-ind-row`** | SUP_20260908_ffea3da3 — drop subtitle under Ind; 1m/YTD/1y/3y sit on the same row as the account name |
 | **Page title row** | **`ui588-20260908-title-row`** | SUP_20260908_6aa2c0a8 — hide descriptions under page titles site-wide; right-side actions sit on the title row |
+| **Wheel held = Positions** | **`ui589-20260909-wheel-held`** | SUP_20260909_37ea161d — covered-call HELD/share counts from live Positions book only (no DEMOF1 / watchlist) |
 
 ### One-click handoff (preferred)
 

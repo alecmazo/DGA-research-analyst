@@ -7754,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui588-20260908-title-row"
+WEB_BUILD_VERSION = "ui589-20260909-wheel-held"
 
 
 @app.get("/api/build")
@@ -33337,18 +33337,34 @@ def transcripts_calls_probe(request: Request, ticker: str = "AAPL",
 _options_scan_jobs: dict[str, dict] = {}
 
 
-def _held_tickers() -> list:
-    """Distinct symbols currently held (open tax-lots) across all funds — the
-    covered-call universe (you must own shares to sell calls against them)."""
+def _options_live_book_sql(demo: bool = False) -> str:
+    """Same book as Positions / Accounts: open managed + LP funds, demo lane.
+
+    Wheel 'held' used to sum every open tax lot (including DEMOF1 Ridgecrest),
+    so watchlist names inherited invented share counts (SUP_20260909_37ea161d).
+    """
+    pred = _sql_demo_short(bool(demo))
+    return (
+        "tl.closed_at IS NULL AND tl.quantity > 0 "
+        "AND COALESCE(s.asset_class, '') <> 'cash' "
+        "AND f.status != 'closed' "
+        "AND f.fund_type IN ('managed_account', 'lp_fund') "
+        f"AND {pred}"
+    )
+
+
+def _held_tickers(demo: bool = False) -> list:
+    """Distinct symbols on the live Positions book (not watchlist / reports)."""
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return []
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT DISTINCT s.symbol AS symbol
                   FROM tax_lots tl
                   JOIN securities s ON s.id = tl.security_id
-                 WHERE tl.closed_at IS NULL AND tl.quantity > 0
+                  JOIN funds f ON f.id = tl.fund_id
+                 WHERE {_options_live_book_sql(demo)}
             """)
             return sorted({(r.get("symbol") or "").strip().upper()
                            for r in (cur.fetchall() or []) if r.get("symbol")})
@@ -33357,21 +33373,19 @@ def _held_tickers() -> list:
         return []
 
 
-def _held_share_counts() -> dict:
-    """Total shares held PER symbol across ALL open tax-lots (managed accounts +
-    LP funds) — the actual position size used to size covered calls. Contracts =
-    shares // 100, so premium $ = contracts * premium * 100."""
+def _held_share_counts(demo: bool = False) -> dict:
+    """Shares on the live Positions book only — sizes covered-call contracts."""
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return {}
     out: dict = {}
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT s.symbol AS symbol, SUM(tl.quantity) AS qty
                   FROM tax_lots tl
                   JOIN securities s ON s.id = tl.security_id
-                 WHERE tl.closed_at IS NULL AND tl.quantity > 0
-                   AND s.asset_class != 'cash'
+                  JOIN funds f ON f.id = tl.fund_id
+                 WHERE {_options_live_book_sql(demo)}
                  GROUP BY s.symbol
             """)
             for r in (cur.fetchall() or []):
@@ -33379,9 +33393,11 @@ def _held_share_counts() -> dict:
                 if not sym:
                     continue
                 try:
-                    out[sym] = float(r.get("qty") or 0)
+                    qty = float(r.get("qty") or 0)
                 except Exception:
-                    pass
+                    continue
+                if qty > 0:
+                    out[sym] = qty
     except Exception as e:
         print(f"[options scan] held-share-counts query failed: {e!s:.150}", flush=True)
     return out
@@ -33468,14 +33484,14 @@ def _snaptrade_short_options_map() -> dict:
 
 
 def _run_options_scan(job_id: str, universe: list, held_set: list,
-                      delta_max: float) -> None:
+                      delta_max: float, demo: bool = False) -> None:
     """Background worker. Scans each name for BOTH covered calls and cash-secured
     puts. Covered-call rows are limited to names you HOLD (you must own the
     shares); cash-secured-put rows span the whole universe (watchlist + saved
     reports + holdings). Both tables are ranked by weekly annualized yield."""
     import options_engine as _opt
-    held = set(held_set)
-    share_counts = _held_share_counts()   # {symbol: total shares} for premium $ sizing
+    share_counts = _held_share_counts(demo=bool(demo))
+    held = {t for t, q in share_counts.items() if q and q > 0}
     short_map = _snaptrade_short_options_map()   # calls/puts already written
 
     def _set(**kw):
@@ -33496,8 +33512,11 @@ def _run_options_scan(job_id: str, universe: list, held_set: list,
                 25.0, {"ticker": tk, "ok": False, "error": "timed out"})
             if not isinstance(r, dict):
                 r = {"ticker": tk, "ok": False, "error": "no result"}
-            r["held"] = tk in held
-            r["shares_held"] = share_counts.get(tk) or 0
+            qty = float(share_counts.get(tk) or 0)
+            r["shares_held"] = qty
+            # Held only if the Positions/Accounts book has shares — never
+            # watchlist, saved reports, or demo-fund lots.
+            r["held"] = qty > 0
             so = short_map.get(tk) or {}
             r["short_calls"] = so.get("short_calls") or 0
             r["short_puts"]  = so.get("short_puts") or 0
@@ -33564,7 +33583,8 @@ def options_scan(req: Request, background_tasks: BackgroundTasks):
     except Exception:
         delta_max = 0.30
     delta_max = max(0.05, min(delta_max, 0.95))
-    held = _filter_scan_tickers(_held_tickers())
+    demo = bool(claims.get("demo_mode"))
+    held = _filter_scan_tickers(_held_tickers(demo=demo))
     explicit = [str(t).upper().strip() for t in (body.get("tickers") or [])
                 if t and str(t).strip()]
     if explicit:
@@ -33593,7 +33613,8 @@ def options_scan(req: Request, background_tasks: BackgroundTasks):
     _options_scan_jobs[job_id] = {"stage": "queued", "status": "running", "label": "Queued…",
                                   "started_at": time.time(), "updated_at": time.time(),
                                   "total": len(universe), "done": 0}
-    background_tasks.add_task(_run_options_scan, job_id, universe, held_set, delta_max)
+    background_tasks.add_task(
+        _run_options_scan, job_id, universe, held_set, delta_max, demo)
     print(f"⚙ [options scan] queued {job_id}  universe={len(universe)} "
           f"held={len(held_set)} trunc={truncated} dmax={delta_max}", flush=True)
     return {"ok": True, "job_id": job_id, "universe": universe, "held": held_set,
