@@ -1,0 +1,184 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+}
+
+.sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
+}
+
+.card {
+  text-align: left;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-height: 78px;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+}
+
+.card:hover {
+  border-color: var(--brand-400);
+}
+
+.cardOn {
+  background: var(--brand-50, #eef4fb);
+  border-color: var(--brand-400);
+  box-shadow: inset 0 0 0 1px var(--brand-400);
+}
+
+.cardName {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.cardMeta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.cardDate {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.tableCard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tableHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tableTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.search {
+  height: 32px;
+  min-width: 180px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.tableWrap {
+  overflow: auto;
+  max-height: min(70vh, 820px);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-subtle, #f7f8fa);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-secondary);
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: normal;
+  max-width: 110px;
+  line-height: 1.25;
+  vertical-align: bottom;
+}
+
+.table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+.table tbody tr {
+  cursor: pointer;
+}
+
+.table tbody tr:hover td {
+  background: var(--bg-hover);
+}
+
+.tk {
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.co {
+  color: var(--text-secondary);
+  max-width: 220px;
+}
+
+.date {
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.listName {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  max-width: 140px;
+}
+
+.note {
+  max-width: 240px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+[data-theme='dark'] .cardOn {
+  background: rgba(91, 184, 212, 0.1);
+}

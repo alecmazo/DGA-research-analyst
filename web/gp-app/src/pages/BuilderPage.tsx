@@ -4,6 +4,7 @@ import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { StockPeek } from '@/components/layout/StockPeek'
+import { GuruFocusTab } from '@/pages/builder/GuruFocusTab'
 import { api } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
 import page from './page.module.css'
@@ -91,7 +92,7 @@ type Scenario = {
 }
 
 type Method = 'equal' | 'ev_weighted' | 'rating_weighted'
-type Tab = 'boards' | 'construct'
+type Tab = 'boards' | 'gurufocus' | 'construct'
 
 const METHOD_HELP: Record<Method, string> = {
   equal: '1/N across selected names.',
@@ -609,6 +610,13 @@ export function BuilderPage() {
             </button>
             <button
               type="button"
+              className={`${styles.tab} ${tab === 'gurufocus' ? styles.tabOn : ''}`}
+              onClick={() => setTab('gurufocus')}
+            >
+              Gurufocus
+            </button>
+            <button
+              type="button"
               className={`${styles.tab} ${tab === 'construct' ? styles.tabOn : ''}`}
               onClick={() => setTab('construct')}
             >
@@ -621,7 +629,9 @@ export function BuilderPage() {
       {err && <div className={page.bannerErr}>{err}</div>}
       {status && !err && <div className={styles.okBanner}>{status}</div>}
 
-      {loading ? (
+      {tab === 'gurufocus' ? (
+        <GuruFocusTab onPeek={onBoardEnter} onLeave={onBoardLeave} onOpen={openFinancials} />
+      ) : loading ? (
         <Spinner label="Loading builder…" />
       ) : tab === 'construct' ? (
         <>

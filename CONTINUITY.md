@@ -173,6 +173,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Demo creds in Settings** | **`ui590-20260909-demo-creds`** | GP Settings → Admin User Management shows `demo@dgacapital.com` / `demo123` in plaintext |
 | **Wheel CC overwrite rank** | **`ui591-20260909-cc-setup-rank`** | Covered calls: held uncovered → held covered → not held, then GS/MS risk/reward (rich vol, 15–30Δ, cushion vs assignment) — not share count |
 | **Builder hover dismiss** | **`ui592-20260909-builder-hover`** | Board snapshot closes when the pointer leaves the list (or the card); no leftover dim over the page |
+| **Builder GuruFocus tab** | **`ui593-20260909-gf-watchlists`** | Builder → Gurufocus tab mirrors My Portfolios: 37 watchlists, Date First Added, GF table columns |
 
 ### One-click handoff (preferred)
 

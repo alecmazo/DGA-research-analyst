@@ -7754,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui592-20260909-builder-hover"
+WEB_BUILD_VERSION = "ui593-20260909-gf-watchlists"
 
 
 @app.get("/api/build")
@@ -12410,6 +12410,39 @@ def builder_lists_get(request: Request):
         print(f"[builder-lists] dcf value ensure: {e!s:.160}", flush=True)
     lists = _builder_lists_for_user(lp_id)
     return {"ok": True, "lists": lists, "seeded": len(lists) > 0}
+
+
+@app.get("/api/v2/builder/gurufocus")
+def builder_gurufocus_lists(request: Request):
+    """GuruFocus My Portfolios snapshot — every watchlist + first-added dates."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    if claims.get("demo_mode"):
+        return {"ok": True, "lists": [], "list_count": 0, "stock_count": 0,
+                "synced_at": None, "demo": True}
+    try:
+        from api.domains.gurufocus_watchlists import list_summaries
+    except ImportError:
+        from domains.gurufocus_watchlists import list_summaries  # type: ignore
+    return list_summaries()
+
+
+@app.get("/api/v2/builder/gurufocus/{list_id}")
+def builder_gurufocus_list(list_id: str, request: Request):
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    if claims.get("demo_mode"):
+        raise HTTPException(404, "list not found")
+    try:
+        from api.domains.gurufocus_watchlists import get_list as _gf_get
+    except ImportError:
+        from domains.gurufocus_watchlists import get_list as _gf_get  # type: ignore
+    out = _gf_get(list_id)
+    if not out.get("ok"):
+        raise HTTPException(404, out.get("error") or "list not found")
+    return out
 
 
 @app.post("/api/v2/builder/lists/seed")
