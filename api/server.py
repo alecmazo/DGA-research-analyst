@@ -7754,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui595-20260909-gf-edit-lists"
+WEB_BUILD_VERSION = "ui596-20260909-board-switch"
 
 
 @app.get("/api/build")
@@ -12202,6 +12202,48 @@ def _builder_repair_wrong_anchors(list_id: str, quotes: dict) -> int:
     return n
 
 
+def _builder_board_quotes(tickers: list[str]) -> dict:
+    """Quotes for a board switch — cache + last-close store, no Yahoo wait.
+
+    ``batch_quotes`` can spend 10–14s on yfinance when switching Track boards
+    (SUP_20260909_88b93702). The desk already has last-close in Postgres and
+    an in-process cache from the tape/watchlist; that is enough to paint.
+    """
+    originals = [str(s).strip().upper() for s in (tickers or []) if s]
+    if not originals:
+        return {}
+    result: dict = {}
+    now = time.time()
+    live = _us_session_live()
+    misses: list[str] = []
+    for sym in originals:
+        entry = _QUOTE_CACHE.get(sym)
+        if _cache_quote_usable(entry, now, live=live):
+            result[sym] = {
+                "price": entry["price"],
+                "pct_change": entry.get("pct_change"),
+            }
+            if entry.get("as_of"):
+                result[sym]["as_of"] = entry["as_of"]
+        else:
+            misses.append(sym)
+    if misses:
+        try:
+            db = _db_quotes(misses, max_age_s=4 * 86400) or {}
+        except Exception as e:
+            print(f"[builder-lists] store quotes: {e!s:.120}", flush=True)
+            db = {}
+        for sym in misses:
+            dq = db.get(sym) or {}
+            if dq.get("price") is None:
+                continue
+            row = {"price": dq["price"], "pct_change": dq.get("pct_change")}
+            if dq.get("as_of"):
+                row["as_of"] = dq["as_of"]
+            result[sym] = row
+    return result
+
+
 def _builder_list_board(list_id: str, lp_id: str) -> dict:
     """Live board for one list: quotes, names, entry anchors, notes, fair value."""
     _ensure_builder_lists_tables()
@@ -12210,7 +12252,7 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
     quotes: dict = {}
     if tickers:
         try:
-            raw = batch_quotes(",".join(tickers)) or {}
+            raw = _builder_board_quotes(tickers)
         except Exception as e:
             print(f"[builder-lists] quotes: {e!s:.120}", flush=True)
             raw = {}
@@ -12223,8 +12265,6 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
             }
         # Stamp missing anchors from initiation-day close (not live)
         _builder_anchor_missing(list_id, quotes)
-        # Fix boards previously stamped with live ≈ entry (0% since add)
-        _builder_repair_wrong_anchors(list_id, quotes)
         # Re-read after anchor so response has stamped values
         rows_meta = _builder_list_ticker_rows(list_id, lp_id)
         tickers = [r["ticker"] for r in rows_meta]
@@ -12940,7 +12980,8 @@ def builder_list_board_get(list_id: str, request: Request):
         src = ((meta[0] if meta else "") or "").lower()
         nm = ((meta[1] if meta else "") or "").lower()
         if src == "dcf_value" or nm == _DCF_VALUE_BOARD_NAME.lower():
-            _builder_sync_dcf_value_board(lp_id, force=True)
+            # Do not force a DCF rebuild on every click — Refresh DCF is explicit.
+            _builder_sync_dcf_value_board(lp_id, force=False)
     except Exception as e:
         print(f"[builder-lists] dcf refresh on get: {e!s:.120}", flush=True)
     return _builder_list_board(list_id, lp_id)

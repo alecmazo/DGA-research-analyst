@@ -176,6 +176,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Builder GuruFocus tab** | **`ui593-20260909-gf-watchlists`** | Builder → Gurufocus tab mirrors My Portfolios: 37 watchlists, Date First Added, GF table columns |
 | **GF watchlist add ticker** | **`ui594-20260909-gf-add-ticker`** | SUP_20260909_8152b360 — add-ticker field sits on the same row as the watchlist name (e.g. Space) |
 | **GF watchlist edit desk** | **`ui595-20260909-gf-edit-lists`** | SUP_20260909_a68add7e — create/delete lists, hover-remove stocks, editable note + fair value, drop dividend column |
+| **Builder board switch** | **`ui596-20260909-board-switch`** | SUP_20260909_88b93702 — Track boards paint from cache/store + client prefetch; no Yahoo wait or DCF rebuild on every click |
 
 ### One-click handoff (preferred)
 

@@ -191,9 +191,12 @@ export function BuilderPage() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [status, setStatus] = useState('')
 
-  const [loading, setLoading] = useState(true)
+  const [listsLoading, setListsLoading] = useState(true)
+  const [candsLoading, setCandsLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const boardCache = useRef<Record<string, Board>>({})
+  const boardInflight = useRef<Record<string, Promise<Board>>>({})
 
   const loadLists = useCallback(async () => {
     const d = await api<{ lists?: BoardList[] }>('/api/v2/builder/lists')
@@ -214,10 +217,37 @@ export function BuilderPage() {
     return arr
   }, [])
 
-  const loadBoard = useCallback(async (id: string) => {
-    const d = await api<Board>(`/api/v2/builder/lists/${encodeURIComponent(id)}`)
-    setBoard(d)
+  const fetchBoard = useCallback(async (id: string, fresh = false) => {
+    if (!fresh && boardCache.current[id]) return boardCache.current[id]
+    const pending = boardInflight.current[id]
+    if (pending) return pending
+    const p = api<Board>(`/api/v2/builder/lists/${encodeURIComponent(id)}`)
+      .then((d) => {
+        boardCache.current[id] = d
+        if (boardInflight.current[id] === p) delete boardInflight.current[id]
+        return d
+      })
+      .catch((e) => {
+        if (boardInflight.current[id] === p) delete boardInflight.current[id]
+        throw e
+      })
+    boardInflight.current[id] = p
+    return p
   }, [])
+
+  const loadBoard = useCallback(
+    async (id: string, fresh = false) => {
+      const d = await fetchBoard(id, fresh)
+      setBoard(d)
+      return d
+    },
+    [fetchBoard],
+  )
+
+  const bustBoard = (id: string) => {
+    delete boardCache.current[id]
+    delete boardInflight.current[id]
+  }
 
   useEffect(() => {
     return () => {
@@ -244,11 +274,20 @@ export function BuilderPage() {
     let alive = true
     ;(async () => {
       try {
-        await Promise.all([loadLists(), loadCandidates(false), loadScenarios()])
+        await loadLists()
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : 'Failed to load builder')
       } finally {
-        if (alive) setLoading(false)
+        if (alive) setListsLoading(false)
+      }
+    })()
+    ;(async () => {
+      try {
+        await Promise.all([loadCandidates(false), loadScenarios()])
+      } catch (e) {
+        if (alive) setErr(e instanceof Error ? e.message : 'Failed to load builder')
+      } finally {
+        if (alive) setCandsLoading(false)
       }
     })()
     return () => {
@@ -258,18 +297,39 @@ export function BuilderPage() {
 
   useEffect(() => {
     if (!active || tab !== 'boards') return
+    const cached = boardCache.current[active]
+    if (cached) setBoard(cached)
     let alive = true
     ;(async () => {
       try {
-        await loadBoard(active)
+        const d = await fetchBoard(active, true)
+        if (alive) setBoard(d)
       } catch (e) {
-        if (alive) setErr(e instanceof Error ? e.message : 'Board failed')
+        if (alive && !cached) setErr(e instanceof Error ? e.message : 'Board failed')
       }
     })()
     return () => {
       alive = false
     }
-  }, [active, tab, loadBoard])
+  }, [active, tab, fetchBoard])
+
+  useEffect(() => {
+    if (tab !== 'boards' || !lists.length) return
+    let stop = false
+    ;(async () => {
+      for (const l of lists) {
+        if (stop) return
+        try {
+          await fetchBoard(l.id, false)
+        } catch {
+          /* prefetch is best-effort */
+        }
+      }
+    })()
+    return () => {
+      stop = true
+    }
+  }, [tab, lists, fetchBoard])
 
   /* ranked by EV for presets */
   const rankedByEv = useMemo(() => {
@@ -487,6 +547,8 @@ export function BuilderPage() {
     setBusy(true)
     try {
       await api('/api/v2/builder/lists/seed', { method: 'POST', body: '{}' })
+      boardCache.current = {}
+      boardInflight.current = {}
       await loadLists()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Seed failed')
@@ -506,9 +568,14 @@ export function BuilderPage() {
         board?: Board
       }>('/api/v2/builder/lists/dcf-value', { method: 'POST' })
       if (d.lists) setLists(d.lists)
-      if (d.id) setActive(d.id)
-      if (d.board) setBoard(d.board)
-      else if (d.id) await loadBoard(d.id)
+      if (d.id) {
+        setActive(d.id)
+        bustBoard(d.id)
+      }
+      if (d.board) {
+        if (d.id) boardCache.current[d.id] = d.board
+        setBoard(d.board)
+      } else if (d.id) await loadBoard(d.id, true)
       setStatus(
         `Top 10 Value · ${d.n ?? 0} names cheapest on DCF vs last.`,
       )
@@ -530,9 +597,14 @@ export function BuilderPage() {
         board?: Board
       }>('/api/v2/builder/lists/dga-scored', { method: 'POST' })
       if (d.lists) setLists(d.lists)
-      if (d.id) setActive(d.id)
-      if (d.board) setBoard(d.board)
-      else if (d.id) await loadBoard(d.id)
+      if (d.id) {
+        setActive(d.id)
+        bustBoard(d.id)
+      }
+      if (d.board) {
+        if (d.id) boardCache.current[d.id] = d.board
+        setBoard(d.board)
+      } else if (d.id) await loadBoard(d.id, true)
       setStatus(
         `DGA Scored · ${d.n ?? 0} names with score > 90, highest first.`,
       )
@@ -552,7 +624,8 @@ export function BuilderPage() {
         body: JSON.stringify({ tickers: addTk.trim().toUpperCase() }),
       })
       setAddTk('')
-      await loadBoard(active)
+      bustBoard(active)
+      await loadBoard(active, true)
       await loadLists()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Add failed')
@@ -631,9 +704,10 @@ export function BuilderPage() {
 
       {tab === 'gurufocus' ? (
         <GuruFocusTab onPeek={onBoardEnter} onLeave={onBoardLeave} onOpen={openFinancials} />
-      ) : loading ? (
-        <Spinner label="Loading builder…" />
       ) : tab === 'construct' ? (
+        candsLoading ? (
+          <Spinner label="Loading builder…" />
+        ) : (
         <>
           <div className={styles.constructGrid}>
             {/* Pool */}
@@ -984,6 +1058,9 @@ export function BuilderPage() {
             )}
           </Panel>
         </>
+        )
+      ) : listsLoading ? (
+        <Spinner label="Loading boards…" />
       ) : (
         /* ── Boards tab ── */
         <div className={split.split}>
@@ -1005,7 +1082,11 @@ export function BuilderPage() {
                   key={l.id}
                   type="button"
                   className={`${split.sideItem} ${active === l.id ? split.sideActive : ''}`}
-                  onClick={() => setActive(l.id)}
+                  onClick={() => {
+                    setActive(l.id)
+                    const cached = boardCache.current[l.id]
+                    if (cached) setBoard(cached)
+                  }}
                 >
                   <div className={split.sideTitle}>{l.name}</div>
                   <div className={split.sideSub}>
@@ -1076,7 +1157,7 @@ export function BuilderPage() {
                   {isDcfValue ? (
                     <p className={styles.hint} style={{ padding: '10px 12px 0' }}>
                       Auto watchlist · 10 cheapest saved reports on DCF vs last
-                      price. Re-runs when you open the board.
+                      price. Use Refresh DCF to rebuild.
                     </p>
                   ) : (
                   <div className={split.addBar}>
