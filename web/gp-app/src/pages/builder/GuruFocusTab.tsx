@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
+import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import styles from './GuruFocusTab.module.css'
 
@@ -40,6 +41,9 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
   const [stocks, setStocks] = useState<GfStock[]>([])
   const [meta, setMeta] = useState<{ name?: string; synced_at?: string; n?: number }>({})
   const [q, setQ] = useState('')
+  const [addTk, setAddTk] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [addMsg, setAddMsg] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -103,7 +107,55 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
   const pick = async (id: string) => {
     setActive(id)
     setQ('')
+    setAddTk('')
+    setAddMsg(null)
     await loadList(id)
+  }
+
+  const addTickers = async () => {
+    const raw = addTk.trim()
+    if (!raw || active === 'overview' || adding) return
+    setAdding(true)
+    setAddMsg(null)
+    try {
+      const d = await api<{
+        added?: string[]
+        skipped?: string[]
+        list?: { stocks?: GfStock[]; stock_count?: number; name?: string }
+        synced_at?: string
+      }>(`/api/v2/builder/gurufocus/${encodeURIComponent(active)}/tickers`, {
+        method: 'POST',
+        body: JSON.stringify({ tickers: raw }),
+      })
+      setStocks(d.list?.stocks || [])
+      setMeta((m) => ({
+        ...m,
+        name: d.list?.name || m.name,
+        n: d.list?.stock_count,
+        synced_at: d.synced_at || m.synced_at,
+      }))
+      setLists((prev) =>
+        prev.map((l) => {
+          if (l.id === active) return { ...l, stock_count: d.list?.stock_count ?? l.stock_count }
+          if (l.id === 'overview') {
+            const delta = (d.added || []).length
+            return { ...l, stock_count: (l.stock_count || 0) + delta }
+          }
+          return l
+        }),
+      )
+      const added = d.added || []
+      const skipped = d.skipped || []
+      if (added.length) setAddTk('')
+      const bits: string[] = []
+      if (added.length) bits.push(`Added ${added.join(', ')}`)
+      if (skipped.length) bits.push(`already on list: ${skipped.join(', ')}`)
+      setAddMsg(bits.join(' · ') || 'Nothing to add')
+    } catch (e) {
+      setAddMsg(e instanceof Error ? e.message : 'Add failed')
+    } finally {
+      setAdding(false)
+    }
   }
 
   if (loading) return <Spinner label="Loading GuruFocus watchlists…" />
@@ -153,7 +205,35 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
 
       <div className={styles.tableCard}>
         <div className={styles.tableHead}>
-          <h3 className={styles.tableTitle}>{meta.name || 'Overview'}</h3>
+          <div className={styles.titleRow}>
+            <h3 className={styles.tableTitle}>{meta.name || 'Overview'}</h3>
+            {active !== 'overview' && (
+              <form
+                className={styles.addForm}
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void addTickers()
+                }}
+              >
+                <input
+                  className={styles.addInput}
+                  placeholder="Add tickers: RKLB, LUNR"
+                  value={addTk}
+                  onChange={(e) => setAddTk(e.target.value.toUpperCase())}
+                  disabled={adding}
+                />
+                <Button
+                  size="sm"
+                  variant="primary"
+                  type="submit"
+                  disabled={adding || !addTk.trim()}
+                >
+                  {adding ? 'Adding…' : 'Add'}
+                </Button>
+                {addMsg && <span className={styles.addMsg}>{addMsg}</span>}
+              </form>
+            )}
+          </div>
           <input
             className={styles.search}
             placeholder="Search stock"

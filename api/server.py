@@ -7754,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui593-20260909-gf-watchlists"
+WEB_BUILD_VERSION = "ui594-20260909-gf-add-ticker"
 
 
 @app.get("/api/build")
@@ -12412,6 +12412,100 @@ def builder_lists_get(request: Request):
     return {"ok": True, "lists": lists, "seeded": len(lists) > 0}
 
 
+def _gf_wl():
+    try:
+        from api.domains import gurufocus_watchlists as m
+    except ImportError:
+        from domains import gurufocus_watchlists as m  # type: ignore
+    return m
+
+
+def _ensure_gf_local_tickers(conn=None) -> None:
+    own = conn is None
+    if own:
+        if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+            return
+        conn = _fund_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gurufocus_local_tickers (
+                    list_id          TEXT NOT NULL,
+                    ticker           TEXT NOT NULL,
+                    company          TEXT NOT NULL DEFAULT '',
+                    price            DOUBLE PRECISION,
+                    day_pct          DOUBLE PRECISION,
+                    date_first_added DATE NOT NULL DEFAULT CURRENT_DATE,
+                    cost_per_share   DOUBLE PRECISION,
+                    added_by         TEXT,
+                    added_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (list_id, ticker)
+                )""")
+        if own:
+            conn.commit()
+    except Exception as e:
+        print(f"[gf-wl] ensure local tickers: {e!s:.160}", flush=True)
+        if own:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _gf_local_stock_dict(row: dict, list_name: str | None) -> dict:
+    day = row.get("date_first_added")
+    if hasattr(day, "isoformat"):
+        day = day.isoformat()
+    return {
+        "symbol": (row.get("ticker") or "").upper(),
+        "company": row.get("company") or "",
+        "price": row.get("price"),
+        "day_pct": row.get("day_pct"),
+        "date_first_added": str(day)[:10] if day else None,
+        "cost_per_share": row.get("cost_per_share"),
+        "pct_since_first": 0.0 if row.get("price") is not None else None,
+        "rel_spy": None,
+        "div_earned": None,
+        "ann_gain": None,
+        "fair_value": None,
+        "note": None,
+        "list_name": list_name,
+        "local": True,
+    }
+
+
+def _gf_local_by_list() -> dict:
+    """{list_id: [stock dicts]} from desk-side adds (Postgres)."""
+    out: dict = {}
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return out
+    try:
+        _ensure_gf_local_tickers()
+        gf = _gf_wl()
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT list_id, ticker, company, price, day_pct,
+                       date_first_added, cost_per_share
+                  FROM gurufocus_local_tickers
+                 ORDER BY date_first_added, ticker
+            """)
+            for r in (cur.fetchall() or []):
+                lid = str(r.get("list_id") or "")
+                if not lid:
+                    continue
+                name = gf.list_name(lid)
+                out.setdefault(lid, []).append(_gf_local_stock_dict(dict(r), name))
+    except Exception as e:
+        print(f"[gf-wl] load local tickers: {e!s:.160}", flush=True)
+    return out
+
+
 @app.get("/api/v2/builder/gurufocus")
 def builder_gurufocus_lists(request: Request):
     """GuruFocus My Portfolios snapshot — every watchlist + first-added dates."""
@@ -12421,11 +12515,8 @@ def builder_gurufocus_lists(request: Request):
     if claims.get("demo_mode"):
         return {"ok": True, "lists": [], "list_count": 0, "stock_count": 0,
                 "synced_at": None, "demo": True}
-    try:
-        from api.domains.gurufocus_watchlists import list_summaries
-    except ImportError:
-        from domains.gurufocus_watchlists import list_summaries  # type: ignore
-    return list_summaries()
+    extra = {k: len(v) for k, v in _gf_local_by_list().items()}
+    return _gf_wl().list_summaries(extra)
 
 
 @app.get("/api/v2/builder/gurufocus/{list_id}")
@@ -12435,13 +12526,75 @@ def builder_gurufocus_list(list_id: str, request: Request):
         raise HTTPException(403, "GP only")
     if claims.get("demo_mode"):
         raise HTTPException(404, "list not found")
-    try:
-        from api.domains.gurufocus_watchlists import get_list as _gf_get
-    except ImportError:
-        from domains.gurufocus_watchlists import get_list as _gf_get  # type: ignore
-    out = _gf_get(list_id)
+    local = _gf_local_by_list()
+    gf = _gf_wl()
+    lid = (list_id or "").strip()
+    if lid in ("", "overview", "all"):
+        out = gf.get_list("overview", extra_by_list=local)
+    else:
+        out = gf.get_list(lid, extra_stocks=local.get(lid) or [])
     if not out.get("ok"):
         raise HTTPException(404, out.get("error") or "list not found")
+    return out
+
+
+@app.post("/api/v2/builder/gurufocus/{list_id}/tickers")
+def builder_gurufocus_add_tickers(list_id: str, request: Request):
+    """Add tickers to a GuruFocus watchlist (desk-side; Date First Added = today)."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    if claims.get("demo_mode"):
+        raise HTTPException(403, "Demo cannot edit GuruFocus watchlists")
+    gf = _gf_wl()
+    lid = (list_id or "").strip()
+    if not lid or lid in ("overview", "all"):
+        raise HTTPException(400, "Pick a watchlist — cannot add to Overview")
+    name = gf.list_name(lid)
+    if not name:
+        raise HTTPException(404, "list not found")
+    try:
+        body = _request_json_sync(request) or {}
+    except Exception:
+        body = {}
+    tickers = gf.parse_tickers(body.get("tickers") or body.get("ticker") or "")
+    if not tickers:
+        raise HTTPException(400, "tickers required")
+    have = gf.snapshot_symbols(lid)
+    local = _gf_local_by_list().get(lid) or []
+    have |= {(r.get("symbol") or "").upper() for r in local}
+    new = [t for t in tickers if t not in have]
+    skipped = [t for t in tickers if t in have]
+    added = []
+    if new:
+        quotes = {}
+        try:
+            quotes = _batch_quotes_fast(new) or {}
+        except Exception as e:
+            print(f"[gf-wl] quotes: {e!s:.120}", flush=True)
+        today = datetime.now(timezone.utc).date().isoformat()
+        who = (claims.get("email") or claims.get("lp_id") or "gp")[:80]
+        _ensure_gf_local_tickers()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            for tk in new:
+                q = quotes.get(tk) or quotes.get(tk.replace("-", ".")) or {}
+                row = gf.stock_row(tk, name, q, today)
+                cur.execute("""
+                    INSERT INTO gurufocus_local_tickers
+                        (list_id, ticker, company, price, day_pct,
+                         date_first_added, cost_per_share, added_by)
+                    VALUES (%s,%s,%s,%s,%s,%s::date,%s,%s)
+                    ON CONFLICT (list_id, ticker) DO NOTHING
+                """, (lid, tk, row.get("company") or "",
+                      row.get("price"), row.get("day_pct"),
+                      row.get("date_first_added"), row.get("cost_per_share"),
+                      who))
+                added.append(row)
+            conn.commit()
+    extra = _gf_local_by_list()
+    out = gf.get_list(lid, extra_stocks=extra.get(lid) or [])
+    out["added"] = [r["symbol"] for r in added]
+    out["skipped"] = skipped
     return out
 
 

@@ -87,10 +87,44 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+}
+
 .tableTitle {
   margin: 0;
   font-size: 18px;
   font-weight: 750;
+  flex-shrink: 0;
+}
+
+.addForm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.addInput {
+  height: 32px;
+  min-width: 180px;
+  width: min(260px, 42vw);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.addMsg {
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .search {
