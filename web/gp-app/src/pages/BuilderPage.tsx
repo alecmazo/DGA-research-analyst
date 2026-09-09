@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { StockPeek } from '@/components/layout/StockPeek'
 import { GuruFocusTab } from '@/pages/builder/GuruFocusTab'
 import { api } from '@/lib/api'
+import { openFinancialsPage } from '@/lib/financialsNav'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
 import page from './page.module.css'
 import split from './split.module.css'
@@ -104,7 +104,6 @@ const METHOD_HELP: Record<Method, string> = {
 /* ── page ──────────────────────────────────────────────────────── */
 
 export function BuilderPage() {
-  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('boards')
 
   /* boards */
@@ -169,11 +168,9 @@ export function BuilderPage() {
   }
 
   const openFinancials = (tk: string) => {
-    const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
-    if (!sym) return
     skipPeek.current = true
     closePeek()
-    navigate(`/financials?ticker=${encodeURIComponent(sym)}`)
+    openFinancialsPage(tk)
   }
 
   /* construct */

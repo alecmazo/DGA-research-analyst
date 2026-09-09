@@ -18,7 +18,7 @@ import shutil
 import tempfile
 import threading
 import traceback
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Optional
@@ -7754,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui597-20260909-board-quotes"
+WEB_BUILD_VERSION = "ui598-20260909-gf-desk"
 
 
 @app.get("/api/build")
@@ -12027,34 +12027,52 @@ def _builder_close_on_or_before(ticker: str, day_iso: str) -> float | None:
             return hit[1]
     px = None
     try:
-        # Prefer 1y of daily bars (enough for any board age in this product)
-        hist = _md.yahoo_history(tku, "1y") or _md.yahoo_history(tku, "2y") or []
-        prev = None
-        for row in hist:
-            d = str(row.get("date") or "")[:10]
-            if not d:
-                continue
-            try:
-                rd = _date.fromisoformat(d)
-            except Exception:
-                continue
-            if rd > target:
-                break
-            c = row.get("close")
-            if c is None:
-                continue
-            try:
-                prev = float(c)
-            except (TypeError, ValueError):
-                continue
-            if rd == target:
-                px = prev
-                break
-        if px is None:
-            px = prev
+        if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT close FROM price_history
+                     WHERE upper(symbol)=%s AND d <= %s::date AND close IS NOT NULL
+                     ORDER BY d DESC LIMIT 1
+                    """,
+                    (tku, day),
+                )
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    px = float(row[0])
     except Exception as e:
-        print(f"[builder-lists] hist close {tku} {day}: {e!s:.100}", flush=True)
+        print(f"[builder-lists] hist db {tku} {day}: {e!s:.100}", flush=True)
         px = None
+    if px is None:
+        try:
+            # max range so 2018 TSLA (and other pre-split names) get adj closes
+            hist = _md.yahoo_history(tku, "max") or _md.yahoo_history(tku, "10y") or []
+            prev = None
+            for row in hist:
+                d = str(row.get("date") or "")[:10]
+                if not d:
+                    continue
+                try:
+                    rd = _date.fromisoformat(d)
+                except Exception:
+                    continue
+                if rd > target:
+                    break
+                c = row.get("close")
+                if c is None:
+                    continue
+                try:
+                    prev = float(c)
+                except (TypeError, ValueError):
+                    continue
+                if rd == target:
+                    px = prev
+                    break
+            if px is None:
+                px = prev
+        except Exception as e:
+            print(f"[builder-lists] hist close {tku} {day}: {e!s:.100}", flush=True)
+            px = None
     if isinstance(cache, dict):
         cache[ckey] = (_time.time(), px)
     return px
@@ -12627,6 +12645,186 @@ def _gf_desk() -> dict:
     return desk
 
 
+_ADJ_CLOSE_MEMO: dict[tuple[str, str], float | None] = {}
+
+
+def _adj_closes_on_dates(pairs: list[tuple[str, str]]) -> dict[tuple[str, str], float]:
+    """Split-adjusted close on or before each (ticker, YYYY-MM-DD).
+
+    Prefers price_history (Yahoo-synced adj closes). Falls back to Yahoo max
+    for a small number of misses so 2018 TSLA is not stuck on unadjusted cost.
+    """
+    out: dict[tuple[str, str], float] = {}
+    need: list[tuple[str, str]] = []
+    for tk, day in pairs:
+        tku = (tk or "").strip().upper()
+        d = str(day or "")[:10]
+        if not tku or not d:
+            continue
+        key = (tku, d)
+        if key in _ADJ_CLOSE_MEMO:
+            px = _ADJ_CLOSE_MEMO[key]
+            if px is not None:
+                out[key] = px
+            continue
+        need.append(key)
+    if not need:
+        return out
+    try:
+        if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            syms = [t for t, _ in need]
+            days = [d for _, d in need]
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (upper(p.symbol), v.dt)
+                           upper(p.symbol), v.dt::text, p.close
+                      FROM price_history p
+                      JOIN unnest(%s::text[], %s::date[]) AS v(sym, dt)
+                        ON upper(p.symbol) = v.sym AND p.d <= v.dt
+                     WHERE p.close IS NOT NULL
+                     ORDER BY upper(p.symbol), v.dt, p.d DESC
+                    """,
+                    (syms, days),
+                )
+                for s, dt, c in cur.fetchall() or []:
+                    if c is None:
+                        continue
+                    key = (str(s).upper(), str(dt)[:10])
+                    try:
+                        px = float(c)
+                    except (TypeError, ValueError):
+                        continue
+                    out[key] = px
+                    _ADJ_CLOSE_MEMO[key] = px
+    except Exception as e:
+        print(f"[gf-wl] adj hist db: {e!s:.140}", flush=True)
+    missing = [k for k in need if k not in out]
+    if missing:
+        try:
+            import market_data as _md  # type: ignore
+            from datetime import date as _date
+            seen = set()
+            for tk, day in missing[:8]:
+                if tk in seen:
+                    continue
+                seen.add(tk)
+                hist = _md.yahoo_history(tk, "max") or []
+                # fill every missing date for this ticker from one history pull
+                want = sorted({d for t, d in missing if t == tk})
+                prev = None
+                wi = 0
+                for row in hist:
+                    hd = str(row.get("date") or "")[:10]
+                    if not hd:
+                        continue
+                    try:
+                        c = float(row.get("close"))
+                    except (TypeError, ValueError):
+                        continue
+                    while wi < len(want) and want[wi] < hd:
+                        if prev is not None:
+                            key = (tk, want[wi])
+                            out[key] = prev
+                            _ADJ_CLOSE_MEMO[key] = prev
+                        wi += 1
+                    prev = c
+                    while wi < len(want) and want[wi] == hd:
+                        key = (tk, want[wi])
+                        out[key] = c
+                        _ADJ_CLOSE_MEMO[key] = c
+                        wi += 1
+                while wi < len(want) and prev is not None:
+                    key = (tk, want[wi])
+                    out[key] = prev
+                    _ADJ_CLOSE_MEMO[key] = prev
+                    wi += 1
+        except Exception as e:
+            print(f"[gf-wl] adj hist yahoo: {e!s:.140}", flush=True)
+    for k in need:
+        if k not in _ADJ_CLOSE_MEMO:
+            _ADJ_CLOSE_MEMO[k] = out.get(k)
+    return out
+
+
+def _gf_apply_split_perf(out: dict) -> dict:
+    """Recompute cost / since-add % / ann gain / rel SPY on split-adjusted closes."""
+    lst = out.get("list") if isinstance(out, dict) else None
+    stocks = list((lst or {}).get("stocks") or [])
+    if not stocks:
+        return out
+    today = datetime.now(timezone.utc).date()
+    today_s = today.isoformat()
+    pairs: list[tuple[str, str]] = []
+    add_days: list[str] = []
+    tickers: list[str] = []
+    for r in stocks:
+        tk = (r.get("symbol") or "").upper()
+        day = str(r.get("date_first_added") or "")[:10]
+        if not tk:
+            continue
+        tickers.append(tk)
+        if day:
+            pairs.append((tk, day))
+            add_days.append(day)
+            pairs.append(("SPY", day))
+    pairs.append(("SPY", today_s))
+    adj = _adj_closes_on_dates(pairs)
+    live: dict = {}
+    try:
+        live = _builder_board_quotes(list(dict.fromkeys(tickers))) or {}
+    except Exception:
+        live = {}
+    spy_now = adj.get(("SPY", today_s))
+    try:
+        spy_q = (_builder_board_quotes(["SPY"]) or {}).get("SPY") or {}
+        if spy_q.get("price") is not None:
+            spy_now = float(spy_q["price"])
+    except Exception:
+        pass
+    for r in stocks:
+        tk = (r.get("symbol") or "").upper()
+        day = str(r.get("date_first_added") or "")[:10]
+        q = live.get(tk) or {}
+        px = q.get("price")
+        if px is None:
+            px = r.get("price")
+        try:
+            px = float(px) if px is not None else None
+        except (TypeError, ValueError):
+            px = None
+        if px is not None:
+            r["price"] = px
+        if q.get("pct_change") is not None:
+            r["day_pct"] = q.get("pct_change")
+        cost = adj.get((tk, day)) if day else None
+        if cost is None or cost == 0:
+            continue
+        r["cost_per_share"] = round(cost, 4)
+        if px is None:
+            continue
+        pct = (px - cost) / abs(cost) * 100.0
+        r["pct_since_first"] = round(pct, 4)
+        try:
+            add = date.fromisoformat(day)
+            days = max(1, (today - add).days)
+        except Exception:
+            days = 1
+        try:
+            r["ann_gain"] = round(((px / cost) ** (365.25 / days) - 1.0) * 100.0, 4)
+        except Exception:
+            r["ann_gain"] = None
+        spy_then = adj.get(("SPY", day)) if day else None
+        if spy_then and spy_now and spy_then != 0:
+            spy_pct = (float(spy_now) - float(spy_then)) / abs(float(spy_then)) * 100.0
+            r["rel_spy"] = round(pct - spy_pct, 4)
+    if lst is not None:
+        lst["stocks"] = stocks
+        lst["stock_count"] = len(stocks)
+        out["list"] = lst
+    return out
+
+
 def _gf_gp_claims(request: Request, write: bool = False):
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
@@ -12680,7 +12878,7 @@ def builder_gurufocus_list(list_id: str, request: Request):
     out = _gf_wl().get_list(list_id, _gf_desk())
     if not out.get("ok"):
         raise HTTPException(404, out.get("error") or "list not found")
-    return out
+    return _gf_apply_split_perf(out)
 
 
 @app.delete("/api/v2/builder/gurufocus/{list_id}")

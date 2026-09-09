@@ -129,7 +129,11 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
     setAddMsg(null)
     setDraftNote({})
     setDraftFv({})
-    await loadList(id)
+    try {
+      await loadList(id)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not load watchlist')
+    }
   }
 
   const addTickers = async () => {
@@ -247,6 +251,22 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
             {meta.synced_at ? ` · synced ${meta.synced_at.slice(0, 10)}` : ''}
           </p>
         </div>
+        <label className={styles.pickerWrap}>
+          <span className={styles.pickerLabel}>Watchlist</span>
+          <select
+            className={styles.picker}
+            value={active}
+            onChange={(e) => void pick(e.target.value)}
+            aria-label="Select watchlist"
+          >
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+                {l.stock_count != null ? ` · ${l.stock_count}` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className={styles.cards}>
@@ -481,7 +501,7 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
                       <td onClick={(e) => e.stopPropagation()} onMouseEnter={onLeave}>
                         <textarea
                           className={styles.editNote}
-                          rows={2}
+                          rows={1}
                           placeholder="Add a note"
                           value={draftNote[nk] ?? r.note ?? ''}
                           onChange={(e) =>

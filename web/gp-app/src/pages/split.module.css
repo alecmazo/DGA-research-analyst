@@ -20,7 +20,7 @@
   display: block;
   width: 100%;
   text-align: left;
-  padding: 12px 14px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-subtle);
   transition: background var(--t-fast) var(--ease);
 }
@@ -94,7 +94,7 @@
 }
 
 .table td {
-  padding: 9px 12px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--border-subtle);
   vertical-align: middle;
 }

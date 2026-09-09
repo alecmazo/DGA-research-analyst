@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
+import { openFinancialsPage } from '@/lib/financialsNav'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
 import styles from './StockPeek.module.css'
@@ -247,7 +248,7 @@ export function StockPeek({
 
   const openFinancials = () => {
     onClose()
-    navigate(`/financials?ticker=${encodeURIComponent(tk)}`)
+    openFinancialsPage(tk)
   }
 
   return (

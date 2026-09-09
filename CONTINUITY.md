@@ -178,6 +178,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **GF watchlist edit desk** | **`ui595-20260909-gf-edit-lists`** | SUP_20260909_a68add7e — create/delete lists, hover-remove stocks, editable note + fair value, drop dividend column |
 | **Builder board switch** | **`ui596-20260909-board-switch`** | SUP_20260909_88b93702 — Track boards paint from cache/store + client prefetch; no Yahoo wait or DCF rebuild on every click |
 | **Builder board quotes** | **`ui597-20260909-board-quotes`** | Same ticket — fill leftover last prices via `_batch_quotes_fast`; prefetch 3 boards at a time |
+| **GF desk UX + splits** | **`ui598-20260909-gf-desk`** | Financials in a new tab; compact GF rows + watchlist dropdown; split-adjusted since-add (TSLA) |
 
 ### One-click handoff (preferred)
 
