@@ -171,6 +171,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Page title row** | **`ui588-20260908-title-row`** | SUP_20260908_6aa2c0a8 — hide descriptions under page titles site-wide; right-side actions sit on the title row |
 | **Wheel held = Positions** | **`ui589-20260909-wheel-held`** | SUP_20260909_37ea161d — covered-call HELD/share counts from live Positions book only (no DEMOF1 / watchlist) |
 | **Demo creds in Settings** | **`ui590-20260909-demo-creds`** | GP Settings → Admin User Management shows `demo@dgacapital.com` / `demo123` in plaintext |
+| **Wheel CC overwrite rank** | **`ui591-20260909-cc-setup-rank`** | Covered calls: held uncovered → held covered → not held, then GS/MS risk/reward (rich vol, 15–30Δ, cushion vs assignment) — not share count |
 
 ### One-click handoff (preferred)
 

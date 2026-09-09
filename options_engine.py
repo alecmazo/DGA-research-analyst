@@ -223,20 +223,167 @@ def _bucket_expiries(exps_dte: list) -> dict:
     return chosen
 
 
-def _best_in(rows, evalfn, yield_field, spot, dte, exp, delta_max, risk_free, min_oi):
-    """Best (highest annualized yield) sellable strike in a list of rows, within
-    [MIN_DELTA, delta_max] and the OTM band."""
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return lo if x < lo else hi if x > hi else x
+
+
+def overwrite_score(c: dict, hv: float | None = None,
+                    iv_hv_fallback: float | None = None) -> float:
+    """GS/MS-style covered-call overwrite quality, 0–100.
+
+    Sell calls on stock you already own when the *premium is a real setup*,
+    not because a 7-day 40¢ option annualizes to 80%. Desk heuristics:
+
+    * **Rich vol** — sell IV above realized (IV/HV). Cheap vol is a skip.
+    * **15–30Δ band**, peak ~20–25Δ — keep the name, collect rent; not junk
+      5Δ and not a stock-sale 40Δ.
+    * **Cushion vs assignment** — premium / spot per unit of delta. That is
+      the risk/reward: dollars of downside buffer per unit of call-away risk.
+    * **DTE-capped yield** — annualize with a 21-day floor so weeklies cannot
+      dominate a fat 30-day overwrite.
+    * **OTM room** — 4–12% is the overwrite sweet spot (upside kept, still paid).
+    * **Liquidity** — open interest so the bid is a real fill.
+    """
+    if not c:
+        return 0.0
+    iv = c.get("iv")
+    try:
+        iv = float(iv) if iv is not None else None
+    except (TypeError, ValueError):
+        iv = None
+    if iv and hv and hv > 0:
+        ivhv = iv / hv
+    else:
+        ivhv = float(iv_hv_fallback or 1.0)
+
+    # Vol richness 0–28. 0.70 → 0, 1.00 → 14, 1.45+ → 28.
+    if ivhv <= 0.70:
+        vol = 0.0
+    elif ivhv >= 1.45:
+        vol = 28.0
+    else:
+        vol = 28.0 * (ivhv - 0.70) / 0.75
+
+    d = c.get("assignment_prob")
+    try:
+        d = float(d) if d is not None else 0.0
+    except (TypeError, ValueError):
+        d = 0.0
+    # Delta band 0–22. Peak 0.18–0.26; dead below 0.08 or above 0.38.
+    if d < 0.08 or d > 0.38:
+        delta_s = 0.0
+    elif 0.18 <= d <= 0.26:
+        delta_s = 22.0
+    elif d < 0.18:
+        delta_s = 22.0 * (d - 0.08) / 0.10
+    else:
+        delta_s = 22.0 * (0.38 - d) / 0.12
+
+    try:
+        dte = max(int(c.get("dte") or 7), 1)
+    except (TypeError, ValueError):
+        dte = 7
+    try:
+        static = float(c.get("static_return") or 0)
+    except (TypeError, ValueError):
+        static = 0.0
+    # Premium quality 0–24: capped ann (16) + raw cushion (8).
+    cap_dte = max(dte, 21)
+    capped_ann = static * (365.0 / cap_dte)
+    ann_pts = 16.0 * _clamp(capped_ann / 0.25, 0.0, 1.0)
+    cush_pts = 8.0 * _clamp(static / 0.025, 0.0, 1.0)
+    prem_s = ann_pts + cush_pts
+
+    # Risk/reward 0–16: cushion per unit assignment. 0.18 is a fat setup.
+    rr = static / max(d, 0.08)
+    rr_s = 16.0 * _clamp(rr / 0.18, 0.0, 1.0)
+
+    try:
+        otm = float(c.get("pct_otm") or 0)
+    except (TypeError, ValueError):
+        otm = 0.0
+    # OTM room 0–6. Sweet 4–12%; pin-risk <2%; junk >20%.
+    if 0.04 <= otm <= 0.12:
+        otm_s = 6.0
+    elif otm < 0.04:
+        otm_s = 6.0 * (otm / 0.04)
+    elif otm <= 0.20:
+        otm_s = 6.0 * (0.20 - otm) / 0.08
+    else:
+        otm_s = 0.0
+
+    try:
+        oi = int(c.get("open_interest") or 0)
+    except (TypeError, ValueError):
+        oi = 0
+    if oi >= 500:
+        liq = 4.0
+    elif oi >= 100:
+        liq = 2.5
+    elif oi >= 25:
+        liq = 1.0
+    else:
+        liq = 0.0
+
+    return round(vol + delta_s + prem_s + rr_s + otm_s + liq, 2)
+
+
+def attach_row_setup_score(row: dict) -> float:
+    """Stamp `setup_score` = best tenor overwrite score on a scan row."""
+    m = row.get("covered_calls") or {}
+    hv = row.get("realized_vol")
+    iv_hv = row.get("iv_hv_ratio")
+    scores = []
+    for b in ("weekly", "monthly", "quarterly"):
+        c = m.get(b)
+        if not c:
+            continue
+        if c.get("setup_score") is None:
+            c["setup_score"] = overwrite_score(c, hv=hv, iv_hv_fallback=iv_hv)
+        scores.append(float(c["setup_score"]))
+    top = max(scores) if scores else 0.0
+    row["setup_score"] = top
+    return top
+
+
+def rank_covered_calls(rows: list) -> list:
+    """Covered-call table order: held uncovered → held covered → not held,
+    then GS/MS overwrite score (not share count, not raw weekly-ann)."""
+    out = list(rows)
+    for r in out:
+        attach_row_setup_score(r)
+    out.sort(key=lambda r: (
+        0 if r.get("held") and not r.get("fully_covered") else (1 if r.get("held") else 2),
+        -(r.get("setup_score") or 0),
+        -(r.get("iv_hv_ratio") or 0),
+    ))
+    return out
+
+
+def _best_in(rows, evalfn, yield_field, spot, dte, exp, delta_max, risk_free, min_oi,
+             scorefn=None):
+    """Best sellable strike in a list of rows, within [MIN_DELTA, delta_max]
+    and the OTM band. Covered calls pass `scorefn=overwrite_score` so a fat
+    30-Δ-band monthly beats a 7-day annualized-junk weekly. Puts still pick
+    by `yield_field` when scorefn is omitted."""
     best = None
+    best_key = None
     for row in rows:
         if _row_oi(row) < min_oi:
             continue
         c = evalfn(row, spot, dte, risk_free)
-        if (c and c["assignment_prob"] is not None
+        if not (c and c["assignment_prob"] is not None
                 and MIN_DELTA <= c["assignment_prob"] <= delta_max
-                and c["pct_otm"] <= MAX_PCT_OTM
-                and (best is None or c[yield_field] > best[yield_field])):
-            c["expiration"], c["dte"] = exp, dte
-            best = c
+                and c["pct_otm"] <= MAX_PCT_OTM):
+            continue
+        c["expiration"], c["dte"] = exp, dte
+        if scorefn:
+            c["setup_score"] = round(float(scorefn(c)), 2)
+            key = (c["setup_score"], c.get(yield_field) or 0)
+        else:
+            key = (c.get(yield_field) or 0,)
+        if best is None or key > best_key:
+            best, best_key = c, key
     return best
 
 
@@ -260,21 +407,29 @@ def _eval_bucket_chains(ticker, spot, hv, bucket_chains, delta_max=DEFAULT_DELTA
     bucket_chains = {bucket: (exp, dte, [normalized_rows])}."""
     want_calls = side in ("both", "calls")
     want_puts = side in ("both", "puts")
-    cc, csp, atm_iv = {}, {}, None
-    nearest_exp = (min(bucket_chains.values(), key=lambda v: v[1])[0]
-                   if bucket_chains else None)
+    cc, csp = {}, {}
+    nearest = min(bucket_chains.values(), key=lambda v: v[1]) if bucket_chains else None
+    atm_iv = None
+    if nearest:
+        atm_iv = _atm_iv(
+            [r for r in nearest[2]
+             if (r.get("option_type") or "").lower() == "call"],
+            spot)
+    iv_hv = round(atm_iv / hv, 3) if (atm_iv and hv) else None
+
+    def _cc_score(c):
+        return overwrite_score(c, hv=hv, iv_hv_fallback=iv_hv)
+
     for bucket, (exp, dte, rows) in bucket_chains.items():
         calls = [r for r in rows if (r.get("option_type") or "").lower() == "call"]
         puts = [r for r in rows if (r.get("option_type") or "").lower() == "put"]
         if want_calls:
             cc[bucket] = _best_in(calls, _eval_call, "static_return_annualized",
-                                  spot, dte, exp, delta_max, risk_free, min_oi)
+                                  spot, dte, exp, delta_max, risk_free, min_oi,
+                                  scorefn=_cc_score)
         if want_puts:
             csp[bucket] = _best_in(puts, _eval_put, "yield_on_cash_annualized",
                                    spot, dte, exp, delta_max, risk_free, min_oi)
-        if exp == nearest_exp and atm_iv is None:
-            atm_iv = _atm_iv(calls, spot)
-    iv_hv = round(atm_iv / hv, 3) if (atm_iv and hv) else None
     out = {"ticker": ticker.strip().upper(), "ok": True,
            "spot": round(spot, 2),
            "realized_vol": round(hv, 4) if hv else None,
@@ -284,6 +439,7 @@ def _eval_bucket_chains(ticker, spot, hv, bucket_chains, delta_max=DEFAULT_DELTA
                                    for b, (e, d, _) in bucket_chains.items()}}
     if want_calls:
         out["covered_calls"] = cc
+        attach_row_setup_score(out)
     if want_puts:
         out["cash_secured_puts"] = csp
     return out

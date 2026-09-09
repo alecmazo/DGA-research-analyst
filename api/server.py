@@ -7754,7 +7754,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui590-20260909-demo-creds"
+WEB_BUILD_VERSION = "ui591-20260909-cc-setup-rank"
 
 
 @app.get("/api/build")
@@ -33486,9 +33486,10 @@ def _snaptrade_short_options_map() -> dict:
 def _run_options_scan(job_id: str, universe: list, held_set: list,
                       delta_max: float, demo: bool = False) -> None:
     """Background worker. Scans each name for BOTH covered calls and cash-secured
-    puts. Covered-call rows are limited to names you HOLD (you must own the
-    shares); cash-secured-put rows span the whole universe (watchlist + saved
-    reports + holdings). Both tables are ranked by weekly annualized yield."""
+    puts. Covered-call rows span the universe but list HELD uncovered first,
+    then held already-covered, then ideas — ranked inside each group by GS/MS
+    overwrite risk/reward (not share count, not raw weekly-ann). CSP rows
+    list held first, then weekly annualized yield."""
     import options_engine as _opt
     share_counts = _held_share_counts(demo=bool(demo))
     held = {t for t, q in share_counts.items() if q and q > 0}
@@ -33530,25 +33531,22 @@ def _run_options_scan(job_id: str, universe: list, held_set: list,
             return any(m.get(b) for b in ("weekly", "monthly", "quarterly"))
         # Covered calls span the WHOLE universe so the table isn't sparse —
         # names you HOLD are badged + ranked first (actionable covered calls;
-        # no naked writing). CSP also lists held first so the desk sees names
-        # already in the book before pure watchlist/idea puts.
-        cc_rows = [r for r in rows if _has(r, "covered_calls")]
+        # no naked writing). Inside held, rank by overwrite setup quality
+        # (rich vol, 15–30Δ, cushion vs assignment) — not by share count.
+        # CSP also lists held first so the desk sees names already in the
+        # book before pure watchlist/idea puts.
+        cc_rows = _opt.rank_covered_calls(
+            [r for r in rows if _has(r, "covered_calls")])
         csp_rows = [r for r in rows if _has(r, "cash_secured_puts")]
 
         def _held_first_key(r, side_key, yld_field):
-            # Sort ascending: held uncovered (0), held covered (1), not held (2);
-            # within group, weekly yield ranks first via negated tier/yield.
+            # Sort ascending: held (0), not held (1); within group, weekly
+            # yield ranks first via negated tier/yield. CC uses rank_covered_calls.
             held = 1 if r.get("held") else 0
-            fully = 1 if r.get("fully_covered") else 0
-            # For CSP, "fully_covered" is irrelevant — treat as 0
-            if side_key == "cash_secured_puts":
-                fully = 0
+            group = 0 if held else 1
             tier, yld = _wheel_rank_key(r, side_key, yld_field)
-            group = (0 if held and not fully else (1 if held else 2))
             return (group, -tier, -(yld or 0))
 
-        cc_rows.sort(key=lambda r: _held_first_key(
-            r, "covered_calls", "static_return_annualized"))
         csp_rows.sort(key=lambda r: _held_first_key(
             r, "cash_secured_puts", "yield_on_cash_annualized"))
         ok_n = sum(1 for r in rows if r.get("ok"))

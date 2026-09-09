@@ -23,6 +23,7 @@ type WheelRow = {
   held?: boolean
   shares_held?: number
   fully_covered?: boolean
+  setup_score?: number
   spot?: number
   iv_hv_ratio?: number
   covered_calls?: { weekly?: Strike; monthly?: Strike; quarterly?: Strike }
@@ -30,11 +31,19 @@ type WheelRow = {
 }
 
 function sortHeldFirst(rows: WheelRow[], side: 'cc' | 'csp') {
+  // Preserve server ranking: held uncovered → held covered → not held,
+  // then overwrite setup_score (GS/MS risk/reward). NEVER re-rank by
+  // shares_held — size is shown on the row, it is not the quality sort.
   return [...rows].sort((a, b) => {
-    const ga = a.held ? (a.fully_covered && side === 'cc' ? 1 : 0) : 2
-    const gb = b.held ? (b.fully_covered && side === 'cc' ? 1 : 0) : 2
+    const group = (r: WheelRow) =>
+      r.held ? (r.fully_covered && side === 'cc' ? 1 : 0) : 2
+    const ga = group(a)
+    const gb = group(b)
     if (ga !== gb) return ga - gb
-    return (b.shares_held || 0) - (a.shares_held || 0)
+    const sa = a.setup_score ?? -1
+    const sb = b.setup_score ?? -1
+    if (sa !== sb) return sb - sa
+    return 0
   })
 }
 
@@ -139,8 +148,8 @@ export function OptionsPage() {
           <p className={page.kicker}>Income · wheel strategy</p>
           <h1 className={page.h1}>Options Wheel</h1>
           <p className={page.sub}>
-            Covered calls on holdings · CSPs across watchlist. Held names first; premium sized to
-            shares you own.
+            Covered calls on holdings · CSPs across watchlist. Held names first, ranked by
+            overwrite risk/reward — not share count.
           </p>
         </div>
         <div className={page.heroActions}>
@@ -180,7 +189,10 @@ export function OptionsPage() {
 
       <Panel title="Covered calls" badge={heldCc ? `${heldCc} held · ${cc.length}` : cc.length}>
         {!cc.length ? (
-          <Empty title="No scan yet" sub="Run Scan portfolio — held names surface first." />
+          <Empty
+            title="No scan yet"
+            sub="Run Scan portfolio — held names first, then best overwrite setup."
+          />
         ) : (
           <div className={styles.tableWrap}>
             <table className={styles.table}>
