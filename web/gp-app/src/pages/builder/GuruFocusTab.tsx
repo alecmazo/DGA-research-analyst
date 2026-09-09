@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { api } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
@@ -11,6 +11,7 @@ type GfList = {
   created_on?: string | null
   stock_count?: number
   is_overview?: boolean
+  is_local?: boolean
 }
 
 type GfStock = {
@@ -22,10 +23,10 @@ type GfStock = {
   cost_per_share?: number | null
   pct_since_first?: number | null
   rel_spy?: number | null
-  div_earned?: number | null
   ann_gain?: number | null
   fair_value?: number | null
   note?: string | null
+  list_id?: string | null
   list_name?: string | null
 }
 
@@ -47,13 +48,36 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [confirmDel, setConfirmDel] = useState<GfList | null>(null)
+  const [draftNote, setDraftNote] = useState<Record<string, string>>({})
+  const [draftFv, setDraftFv] = useState<Record<string, string>>({})
+
+  const applyLists = (d: { lists?: GfList[]; synced_at?: string; stock_count?: number }) => {
+    setLists(d.lists || [])
+    setMeta((m) => ({ ...m, synced_at: d.synced_at, n: d.stock_count }))
+  }
+
+  const applyList = (d: {
+    synced_at?: string
+    list?: { name?: string; stocks?: GfStock[]; stock_count?: number }
+  }) => {
+    setStocks(d.list?.stocks || [])
+    setMeta((m) => ({
+      ...m,
+      name: d.list?.name,
+      synced_at: d.synced_at || m.synced_at,
+      n: d.list?.stock_count,
+    }))
+  }
 
   const loadLists = useCallback(async () => {
     const d = await api<{ lists?: GfList[]; synced_at?: string; stock_count?: number }>(
       '/api/v2/builder/gurufocus',
     )
-    setLists(d.lists || [])
-    setMeta((m) => ({ ...m, synced_at: d.synced_at, n: d.stock_count }))
+    applyLists(d)
+    return d
   }, [])
 
   const loadList = useCallback(async (id: string) => {
@@ -63,13 +87,7 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
         synced_at?: string
         list?: { name?: string; stocks?: GfStock[]; stock_count?: number }
       }>(`/api/v2/builder/gurufocus/${encodeURIComponent(id)}`)
-      setStocks(d.list?.stocks || [])
-      setMeta((m) => ({
-        ...m,
-        name: d.list?.name,
-        synced_at: d.synced_at || m.synced_at,
-        n: d.list?.stock_count,
-      }))
+      applyList(d)
     } finally {
       setBusy(false)
     }
@@ -109,6 +127,8 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
     setQ('')
     setAddTk('')
     setAddMsg(null)
+    setDraftNote({})
+    setDraftFv({})
     await loadList(id)
   }
 
@@ -127,23 +147,8 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
         method: 'POST',
         body: JSON.stringify({ tickers: raw }),
       })
-      setStocks(d.list?.stocks || [])
-      setMeta((m) => ({
-        ...m,
-        name: d.list?.name || m.name,
-        n: d.list?.stock_count,
-        synced_at: d.synced_at || m.synced_at,
-      }))
-      setLists((prev) =>
-        prev.map((l) => {
-          if (l.id === active) return { ...l, stock_count: d.list?.stock_count ?? l.stock_count }
-          if (l.id === 'overview') {
-            const delta = (d.added || []).length
-            return { ...l, stock_count: (l.stock_count || 0) + delta }
-          }
-          return l
-        }),
-      )
+      applyList(d)
+      await loadLists()
       const added = d.added || []
       const skipped = d.skipped || []
       if (added.length) setAddTk('')
@@ -157,6 +162,68 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
       setAdding(false)
     }
   }
+
+  const createList = async () => {
+    const name = newName.trim()
+    if (!name) return
+    try {
+      const d = await api<{ id?: string; lists?: GfList[]; synced_at?: string; stock_count?: number }>(
+        '/api/v2/builder/gurufocus',
+        { method: 'POST', body: JSON.stringify({ name }) },
+      )
+      applyLists(d)
+      setCreating(false)
+      setNewName('')
+      if (d.id) await pick(d.id)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create watchlist')
+    }
+  }
+
+  const deleteList = async (l: GfList) => {
+    const d = await api<{ lists?: GfList[]; synced_at?: string; stock_count?: number }>(
+      `/api/v2/builder/gurufocus/${encodeURIComponent(l.id)}`,
+      { method: 'DELETE' },
+    )
+    setConfirmDel(null)
+    applyLists(d)
+    if (active === l.id) await pick('overview')
+    else await loadList(active)
+  }
+
+  const removeStock = async (r: GfStock, e: MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const lid = active === 'overview' ? r.list_id : active
+    if (!lid || lid === 'overview' || !r.symbol) return
+    const d = await api<{
+      list?: { stocks?: GfStock[]; stock_count?: number; name?: string }
+      synced_at?: string
+    }>(
+      `/api/v2/builder/gurufocus/${encodeURIComponent(lid)}/tickers/${encodeURIComponent(r.symbol)}`,
+      { method: 'DELETE' },
+    )
+    if (active === 'overview') await loadList('overview')
+    else applyList(d)
+    await loadLists()
+    onLeave()
+  }
+
+  const saveEdit = async (r: GfStock, patch: { note?: string; fair_value?: number | null }) => {
+    const lid = active === 'overview' ? r.list_id : active
+    if (!lid || lid === 'overview' || !r.symbol) return
+    const d = await api<{
+      list?: { stocks?: GfStock[]; stock_count?: number; name?: string }
+      synced_at?: string
+    }>(
+      `/api/v2/builder/gurufocus/${encodeURIComponent(lid)}/tickers/${encodeURIComponent(r.symbol)}`,
+      { method: 'PATCH', body: JSON.stringify(patch) },
+    )
+    if (active === 'overview') await loadList('overview')
+    else applyList(d)
+  }
+
+  const noteKey = (r: GfStock) => `${r.list_id || active}:${r.symbol}`
 
   if (loading) return <Spinner label="Loading GuruFocus watchlists…" />
   if (err) return <Empty title="Could not load GuruFocus" sub={err} />
@@ -184,24 +251,101 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
 
       <div className={styles.cards}>
         {lists.map((l) => (
-          <button
+          <div
             key={l.id}
-            type="button"
             className={`${styles.card} ${active === l.id ? styles.cardOn : ''}`}
-            onClick={() => void pick(l.id)}
           >
-            <div className={styles.cardName}>{l.name}</div>
-            <div className={styles.cardMeta}>
-              {l.stock_count ?? 0} stock{(l.stock_count || 0) === 1 ? '' : 's'}
-            </div>
-            {l.created_on ? (
-              <div className={styles.cardDate}>Created On: {l.created_on}</div>
-            ) : l.is_overview ? (
-              <div className={styles.cardDate}>All watchlists</div>
-            ) : null}
-          </button>
+            {!l.is_overview && (
+              <button
+                type="button"
+                className={styles.cardX}
+                title={`Delete ${l.name}`}
+                aria-label={`Delete ${l.name}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirmDel(l)
+                }}
+              >
+                ×
+              </button>
+            )}
+            <button type="button" className={styles.cardHit} onClick={() => void pick(l.id)}>
+              <div className={styles.cardName}>{l.name}</div>
+              <div className={styles.cardMeta}>
+                {l.stock_count ?? 0} stock{(l.stock_count || 0) === 1 ? '' : 's'}
+              </div>
+              {l.created_on ? (
+                <div className={styles.cardDate}>Created On: {l.created_on}</div>
+              ) : l.is_overview ? (
+                <div className={styles.cardDate}>All watchlists</div>
+              ) : null}
+            </button>
+          </div>
         ))}
+        {creating ? (
+          <form
+            className={`${styles.card} ${styles.plusCard}`}
+            onSubmit={(e) => {
+              e.preventDefault()
+              void createList()
+            }}
+          >
+            <input
+              className={styles.plusInput}
+              autoFocus
+              placeholder="Watchlist name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setCreating(false)
+                  setNewName('')
+                }
+              }}
+            />
+            <div className={styles.plusActions}>
+              <Button size="sm" variant="primary" type="submit" disabled={!newName.trim()}>
+                Create
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                onClick={() => {
+                  setCreating(false)
+                  setNewName('')
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <button
+            type="button"
+            className={`${styles.card} ${styles.plusCard}`}
+            onClick={() => setCreating(true)}
+            title="New watchlist"
+          >
+            <div className={styles.plusMark}>+</div>
+            <div className={styles.cardMeta}>New watchlist</div>
+          </button>
+        )}
       </div>
+
+      {confirmDel && (
+        <div className={styles.confirmBar} role="alertdialog" aria-label="Confirm delete">
+          <span>
+            Delete watchlist <strong>{confirmDel.name}</strong>? Names on this desk list will
+            be removed.
+          </span>
+          <Button size="sm" onClick={() => setConfirmDel(null)}>
+            Cancel
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => void deleteList(confirmDel)}>
+            Delete
+          </Button>
+        </div>
+      )}
 
       <div className={styles.tableCard}>
         <div className={styles.tableHead}>
@@ -244,7 +388,7 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
         {busy ? (
           <Spinner label="Loading list…" />
         ) : !filtered.length ? (
-          <Empty title="No names" sub="Try another watchlist or search." />
+          <Empty title="No names" sub="Add tickers next to the watchlist name, or pick another list." />
         ) : (
           <div className={styles.tableWrap}>
             <table className={styles.table}>
@@ -259,43 +403,101 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
                   <th className="tabular">Cost per Share</th>
                   <th className="tabular">Price % Change since First Transaction</th>
                   <th className="tabular">Rel. to S&amp;P 500</th>
-                  <th className="tabular">Dividend Earned Since Purchase</th>
                   <th className="tabular">Annualized Gain</th>
                   <th className="tabular">Fair Value</th>
                   <th>Note</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r, i) => (
-                  <tr
-                    key={`${r.list_name || ''}-${r.symbol}-${i}`}
-                    onMouseEnter={() => onPeek(r.symbol)}
-                    onMouseLeave={onLeave}
-                    onClick={() => onOpen(r.symbol)}
-                  >
-                    {active === 'overview' && (
-                      <td className={styles.listName}>{r.list_name || '—'}</td>
-                    )}
-                    <td className={styles.tk}>{r.symbol}</td>
-                    <td className={styles.co}>{r.company || '—'}</td>
-                    <td className="tabular">{fmtPx(r.price)}</td>
-                    <td className={`tabular ${pctClass(r.day_pct)}`}>{fmtPct(r.day_pct)}</td>
-                    <td className={styles.date}>{r.date_first_added || '—'}</td>
-                    <td className="tabular">{fmtPx(r.cost_per_share)}</td>
-                    <td className={`tabular ${pctClass(r.pct_since_first)}`}>
-                      {fmtPct(r.pct_since_first)}
-                    </td>
-                    <td className={`tabular ${pctClass(r.rel_spy)}`}>{fmtPct(r.rel_spy)}</td>
-                    <td className="tabular">
-                      {r.div_earned != null ? `${r.div_earned.toFixed(2)}%` : '—'}
-                    </td>
-                    <td className={`tabular ${pctClass(r.ann_gain)}`}>{fmtPct(r.ann_gain)}</td>
-                    <td className="tabular">{fmtPx(r.fair_value)}</td>
-                    <td className={styles.note} title={r.note || ''}>
-                      {r.note || ''}
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map((r, i) => {
+                  const nk = noteKey(r)
+                  return (
+                    <tr
+                      key={`${r.list_id || ''}-${r.symbol}-${i}`}
+                      onMouseEnter={() => onPeek(r.symbol)}
+                      onMouseLeave={onLeave}
+                      onClick={() => onOpen(r.symbol)}
+                    >
+                      {active === 'overview' && (
+                        <td className={styles.listName}>{r.list_name || '—'}</td>
+                      )}
+                      <td className={styles.tkCell}>
+                        {active !== 'overview' && (
+                          <button
+                            type="button"
+                            className={styles.rowX}
+                            title={`Remove ${r.symbol}`}
+                            aria-label={`Remove ${r.symbol}`}
+                            onClick={(e) => void removeStock(r, e)}
+                          >
+                            ×
+                          </button>
+                        )}
+                        <span className={styles.tk}>{r.symbol}</span>
+                      </td>
+                      <td className={styles.co}>{r.company || '—'}</td>
+                      <td className="tabular">{fmtPx(r.price)}</td>
+                      <td className={`tabular ${pctClass(r.day_pct)}`}>{fmtPct(r.day_pct)}</td>
+                      <td className={styles.date}>{r.date_first_added || '—'}</td>
+                      <td className="tabular">{fmtPx(r.cost_per_share)}</td>
+                      <td className={`tabular ${pctClass(r.pct_since_first)}`}>
+                        {fmtPct(r.pct_since_first)}
+                      </td>
+                      <td className={`tabular ${pctClass(r.rel_spy)}`}>{fmtPct(r.rel_spy)}</td>
+                      <td className={`tabular ${pctClass(r.ann_gain)}`}>{fmtPct(r.ann_gain)}</td>
+                      <td
+                        className="tabular"
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseEnter={onLeave}
+                      >
+                        <input
+                          className={styles.editFv}
+                          inputMode="decimal"
+                          placeholder="—"
+                          value={
+                            draftFv[nk] ??
+                            (r.fair_value != null ? String(r.fair_value) : '')
+                          }
+                          onChange={(e) =>
+                            setDraftFv((p) => ({ ...p, [nk]: e.target.value }))
+                          }
+                          onBlur={() => {
+                            const raw = (draftFv[nk] ?? '').trim()
+                            const next = raw === '' ? null : Number(raw)
+                            if (raw !== '' && Number.isNaN(next)) return
+                            const prev = r.fair_value ?? null
+                            if (next === prev || (next == null && prev == null)) {
+                              setDraftFv((p) => {
+                                const n = { ...p }
+                                delete n[nk]
+                                return n
+                              })
+                              return
+                            }
+                            void saveEdit(r, { fair_value: next })
+                          }}
+                        />
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()} onMouseEnter={onLeave}>
+                        <textarea
+                          className={styles.editNote}
+                          rows={2}
+                          placeholder="Add a note"
+                          value={draftNote[nk] ?? r.note ?? ''}
+                          onChange={(e) =>
+                            setDraftNote((p) => ({ ...p, [nk]: e.target.value }))
+                          }
+                          onBlur={() => {
+                            const next = (draftNote[nk] ?? r.note ?? '').trim()
+                            const prev = (r.note || '').trim()
+                            if (next === prev) return
+                            void saveEdit(r, { note: next })
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
