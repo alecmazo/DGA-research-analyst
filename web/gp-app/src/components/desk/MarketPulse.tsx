@@ -10,6 +10,7 @@ import {
 } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { fmtPct, pctClass } from '@/lib/format'
+import { openValuationWindow } from '@/pages/ValuationBridgePage'
 import styles from './deskWidgets.module.css'
 
 type PulseResp = MarketPulseResponse
@@ -312,15 +313,20 @@ export function MarketPulse({
                           : Number(a.gap) * 100
                       const nm = (a.name || a.id || '—').replace(/\s+case$/i, '')
                       return (
-                        <span
+                        <button
+                          type="button"
                           key={`${tk}-${a.id || nm}`}
                           className={`${styles.valChip} ${valChipClass(a.tone, a.intensity)}`}
                           title={`${a.name || nm} · ${a.verdict || '—'} · ${
                             a.value != null ? `$${Number(a.value).toFixed(2)}` : '—'
-                          } vs last`}
+                          } vs last — click for bridge`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openValuationWindow(tk, String(a.id || ''))
+                          }}
                         >
                           {nm} {fmtPct(gap, 0)}
-                        </span>
+                        </button>
                       )
                     })}
                   </span>

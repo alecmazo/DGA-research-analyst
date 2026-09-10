@@ -645,6 +645,15 @@
   cursor: default;
 }
 
+.pillClick {
+  cursor: pointer;
+}
+
+.pillClick:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 0 1px rgba(10, 22, 40, 0.15);
+}
+
 .pillVer {
   background: #e0f2fe;
   color: #0369a1;
@@ -1646,6 +1655,14 @@ a.pulseHeadline:hover {
   border-radius: 4px;
   white-space: nowrap;
   line-height: 1.4;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.valChip:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 0 0 1px rgba(10, 22, 40, 0.18);
 }
 
 .valUnder0 { background: #d1fae5; color: #14532d; }

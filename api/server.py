@@ -7340,6 +7340,137 @@ def start_report_compare(ticker: str, request: Request,
     return _jobs[job_id]
 
 
+@app.get("/api/reports/{ticker}/valuation")
+def get_report_valuation(ticker: str, request: Request):
+    """Detailed valuation bridge for a saved-report style / Market Pulse chip."""
+    _claims_or_401(request)
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+    row: dict = {}
+    md = ""
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            _ensure_analyst_reports_table_schema()
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT ticker, rating, price_target, upside_pct,
+                           report_md, report_md_claude, report_md_kimi, report_md_deepseek,
+                           stock_style, stock_style_note, dcf_value,
+                           fwd_rev_growth, fwd_eps_growth, valuation_approaches,
+                           dcf_user_multiple, dcf_user_value, dcf_user_fcf
+                      FROM analyst_reports
+                     WHERE ticker=%s AND archived IS NOT TRUE
+                     LIMIT 1
+                    """,
+                    (tk,),
+                )
+                row = dict(cur.fetchone() or {})
+        except Exception as e:
+            print(f"[valuation] load {tk}: {e!s:.160}", flush=True)
+            row = {}
+    md = (
+        (row.get("report_md") or row.get("report_md_claude")
+         or row.get("report_md_kimi") or row.get("report_md_deepseek") or "")
+        if row else ""
+    )
+    last = None
+    try:
+        q = (_batch_quotes_fast([tk]) or {}).get(tk) or {}
+        last = q.get("price")
+    except Exception:
+        last = None
+    summary = {
+        "current_price": last,
+        "price_target": row.get("price_target"),
+        "rating": row.get("rating"),
+    }
+    capital: dict = {}
+    try:
+        fin = _load_financials_for_model(tk)
+        import excel_model as _em
+        capital = _em._capital_from(fin, last) if hasattr(_em, "_capital_from") else {}
+    except Exception:
+        capital = {}
+    try:
+        import excel_model as _em
+        pack = _em.build_valuation_pack(
+            md,
+            last=last,
+            pt=row.get("price_target"),
+            summary=summary,
+            dcf_user_multiple=row.get("dcf_user_multiple"),
+            dcf_user_fcf=row.get("dcf_user_fcf"),
+            capital=capital,
+        )
+    except Exception as e:
+        print(f"[valuation] pack {tk}: {e!s:.200}", flush=True)
+        raise HTTPException(500, f"valuation pack failed: {e!s:.160}") from e
+    pack["ticker"] = tk
+    pack["rating"] = row.get("rating")
+    if pack.get("dcf_user") is None and row.get("dcf_user_multiple") is not None:
+        pack["assigned_multiple"] = row.get("dcf_user_multiple")
+    else:
+        pack["assigned_multiple"] = (pack.get("dcf_user") or {}).get("multiple") or row.get("dcf_user_multiple")
+    return {"ok": True, **pack}
+
+
+@app.post("/api/reports/{ticker}/dcf-user")
+def set_report_dcf_user(ticker: str, request: Request):
+    """Assign (or clear) the GP's FCF multiple → DCF User."""
+    _claims_or_401(request)
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+    try:
+        body = _request_json_sync(request) or {}
+    except Exception:
+        body = {}
+    raw = body.get("multiple")
+    multiple = None
+    if raw not in (None, "", "none", "clear"):
+        try:
+            multiple = float(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "multiple must be a number")
+        if multiple <= 0 or multiple > 80:
+            raise HTTPException(400, "multiple out of range")
+    pack = get_report_valuation(tk, request)
+    fcf = (pack.get("dcf_user") or {}).get("fcf") or pack.get("dcf", {}).get("year0_fcf")
+    nd = pack.get("dcf", {}).get("net_debt")
+    sh = pack.get("dcf", {}).get("shares")
+    last = pack.get("last")
+    user = None
+    try:
+        import excel_model as _em
+        user = _em.compute_dcf_user(fcf, multiple, nd, sh, last) if multiple else None
+    except Exception:
+        user = None
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        _ensure_analyst_reports_table_schema()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE analyst_reports
+                   SET dcf_user_multiple=%s,
+                       dcf_user_value=%s,
+                       dcf_user_fcf=%s
+                 WHERE ticker=%s
+                """,
+                (
+                    multiple,
+                    (user or {}).get("value"),
+                    (user or {}).get("fcf") or fcf,
+                    tk,
+                ),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(404, "report not found")
+            conn.commit()
+    return {"ok": True, "ticker": tk, "dcf_user": user, "multiple": multiple}
+
+
 @app.get("/api/reports/{ticker}/comparison")
 def get_report_comparison(ticker: str, request: Request, provider: str = "claude"):
     """Return multi-engine report comparison for `ticker`.
@@ -7754,7 +7885,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui598-20260909-gf-desk"
+WEB_BUILD_VERSION = "ui599-20260910-val-bridge"
 
 
 @app.get("/api/build")
@@ -15659,7 +15790,8 @@ def list_reports(request: Request = None):
                            delta_from_prior,
                            stock_style, stock_style_note, dcf_value,
                            fwd_rev_growth, fwd_eps_growth,
-                           valuation_approaches
+                           valuation_approaches,
+                           dcf_user_multiple, dcf_user_value, dcf_user_fcf
                     FROM analyst_reports
                     WHERE archived IS NOT TRUE
                     ORDER BY GREATEST(
@@ -15777,6 +15909,9 @@ def list_reports(request: Request = None):
                         "fwd_rev_growth":      float(r["fwd_rev_growth"]) if r.get("fwd_rev_growth") is not None else None,
                         "fwd_eps_growth":      float(r["fwd_eps_growth"]) if r.get("fwd_eps_growth") is not None else None,
                         "valuation_approaches": r.get("valuation_approaches") or [],
+                        "dcf_user_multiple":   float(r["dcf_user_multiple"]) if r.get("dcf_user_multiple") is not None else None,
+                        "dcf_user_value":      float(r["dcf_user_value"]) if r.get("dcf_user_value") is not None else None,
+                        "dcf_user_fcf":        float(r["dcf_user_fcf"]) if r.get("dcf_user_fcf") is not None else None,
                     })
                 # Prices from process cache + market_quotes store ONLY.
                 # Full-book Yahoo here blocked the Saved Reports panel for
@@ -15844,6 +15979,31 @@ def list_reports(request: Request = None):
                                         dcf=row.get("dcf_value"),
                                         pt=row.get("price_target"),
                                         last=px,
+                                    )
+                                if row.get("dcf_user_value") is not None:
+                                    user = _em.compute_dcf_user(
+                                        row.get("dcf_user_fcf"),
+                                        row.get("dcf_user_multiple"),
+                                        None,
+                                        None,
+                                        px,
+                                    )
+                                    if user is None:
+                                        vd = _em.valuation_verdict(row.get("dcf_user_value"), px)
+                                        user = {
+                                            "id": "dcf_user",
+                                            "name": "DCF User",
+                                            "value": row.get("dcf_user_value"),
+                                            "multiple": row.get("dcf_user_multiple"),
+                                            "note": (
+                                                f"FCF × {row['dcf_user_multiple']:.0f}x"
+                                                if row.get("dcf_user_multiple")
+                                                else "User FCF multiple"
+                                            ),
+                                            **vd,
+                                        }
+                                    row["valuation_approaches"] = _em.overlay_dcf_user(
+                                        row.get("valuation_approaches") or [], user,
                                     )
                             except Exception:
                                 pass
@@ -18616,6 +18776,9 @@ def _ensure_analyst_reports_table(conn) -> None:
         ("fwd_rev_growth",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS fwd_rev_growth NUMERIC"),
         ("fwd_eps_growth",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS fwd_eps_growth NUMERIC"),
         ("valuation_approaches", "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS valuation_approaches JSONB"),
+        ("dcf_user_multiple", "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS dcf_user_multiple DOUBLE PRECISION"),
+        ("dcf_user_value", "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS dcf_user_value DOUBLE PRECISION"),
+        ("dcf_user_fcf", "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS dcf_user_fcf DOUBLE PRECISION"),
     ]:
         _safe(sql, f"add_{col_name}")
 

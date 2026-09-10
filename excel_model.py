@@ -499,6 +499,172 @@ def style_from_metrics(
         "dcf_gap": dcf_gap,
         "fwd_rev_growth": rev_g,
         "fwd_eps_growth": eps_g,
+        "cuts": {
+            "value_cut": VALUE_CUT,
+            "growth_cut": GROWTH_CUT,
+            "fair_band": _FAIR_BAND,
+        },
+        "rules": style_decision_rules(dcf_gap, rev_g, eps_g, undervalued, overvalued, growing),
+    }
+
+
+def style_decision_rules(
+    dcf_gap: Optional[float],
+    rev_g: Optional[float],
+    eps_g: Optional[float],
+    undervalued: bool,
+    overvalued: bool,
+    growing: bool,
+) -> list[dict[str, Any]]:
+    """Exact tests that pick VALUE / GROWTH / GARP / RICH / CORE."""
+    def _pct(v):
+        return None if v is None else round(float(v) * 100.0, 2)
+
+    return [
+        {
+            "id": "dcf_cheap",
+            "label": f"DCF / last − 1 ≥ {VALUE_CUT:.0%} → cheap",
+            "pass": bool(undervalued),
+            "value": _pct(dcf_gap),
+            "unit": "pct",
+        },
+        {
+            "id": "dcf_rich",
+            "label": f"DCF / last − 1 ≤ −{VALUE_CUT:.0%} → rich",
+            "pass": bool(overvalued),
+            "value": _pct(dcf_gap),
+            "unit": "pct",
+        },
+        {
+            "id": "growth",
+            "label": f"fwd rev or EPS CAGR ≥ {GROWTH_CUT:.0%} → growth",
+            "pass": bool(growing),
+            "value": _pct(rev_g if (rev_g or 0) >= (eps_g or 0) else eps_g),
+            "unit": "pct",
+            "fwd_rev_growth": _pct(rev_g),
+            "fwd_eps_growth": _pct(eps_g),
+        },
+        {
+            "id": "tree",
+            "label": "Decision: cheap+growth=GARP · cheap=VALUE · growth=GROWTH · rich=RICH · else CORE",
+            "pass": True,
+            "value": None,
+        },
+    ]
+
+
+FCF_MULTIPLES = (8, 10, 12, 15, 18, 20, 22, 25, 30)
+
+
+def compute_dcf_user(
+    fcf: Optional[float],
+    multiple: Optional[float],
+    net_debt: Optional[float],
+    shares: Optional[float],
+    last: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
+    """Normalized FCF × user multiple → EV → equity → $/share."""
+    f = _f(fcf)
+    m = _f(multiple)
+    sh = _f(shares)
+    if f is None or m is None or m <= 0 or sh is None or sh <= 0:
+        return None
+    nd = _f(net_debt) or 0.0
+    ev = f * m
+    equity = ev - nd
+    px = equity / sh
+    vd = valuation_verdict(px, last)
+    return {
+        "id": "dcf_user",
+        "name": "DCF User",
+        "multiple": m,
+        "fcf": f,
+        "net_debt": nd,
+        "shares": sh,
+        "ev": ev,
+        "equity": equity,
+        "value": px,
+        "note": f"Normalized FCF ${f:,.1f}m × {m:.0f}x − net debt / {sh:,.1f}m shares",
+        "verdict": vd["verdict"],
+        "tone": vd["tone"],
+        "gap": vd["gap"],
+        "intensity": vd["intensity"],
+        "last": vd["last"],
+    }
+
+
+def overlay_dcf_user(
+    approaches: Optional[list],
+    user: Optional[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Replace the DCF chip with DCF User when the GP has assigned a multiple."""
+    apps = [dict(a) for a in (approaches or []) if isinstance(a, dict)]
+    if not user or _f(user.get("value")) is None:
+        return [a for a in apps if a.get("id") != "dcf_user"]
+    chip = dict(user)
+    chip["id"] = "dcf_user"
+    chip["name"] = "DCF User"
+    out: list[dict[str, Any]] = []
+    replaced = False
+    for a in apps:
+        if a.get("id") == "dcf":
+            out.append(chip)
+            replaced = True
+        elif a.get("id") == "dcf_user":
+            continue
+        else:
+            out.append(a)
+    if not replaced:
+        out.insert(0, chip)
+    return out
+
+
+def build_valuation_pack(
+    md: str,
+    *,
+    last: Optional[float] = None,
+    pt: Optional[float] = None,
+    summary: Optional[dict] = None,
+    dcf_user_multiple: Optional[float] = None,
+    dcf_user_fcf: Optional[float] = None,
+    capital: Optional[dict] = None,
+) -> dict[str, Any]:
+    """Desk payload for the expandable valuation-bridge window."""
+    summary = summary if isinstance(summary, dict) else {}
+    tables = parse_md_tables(md or "")
+    dcf = extract_dcf(md or "")
+    st = classify_stock_style(md or "", summary=summary, price=last)
+    last = _f(last) or _f(summary.get("current_price"))
+    pt = _f(pt) or _f(summary.get("price_target"))
+    approaches = extract_valuation_approaches(
+        md or "", last=last, pt=pt, tables=tables, dcf=dcf,
+    )
+    fcf = _f(dcf_user_fcf) or _f(dcf.get("year0_fcf"))
+    nd = _f(dcf.get("net_debt"))
+    sh = _f(dcf.get("shares"))
+    user = compute_dcf_user(fcf, dcf_user_multiple, nd, sh, last)
+    if user:
+        approaches = overlay_dcf_user(approaches, user)
+    wacc = extract_wacc_build(tables)
+    deriv = extract_derivation_table(tables)
+    comps = extract_comps_table(tables)
+    return {
+        "style": st,
+        "last": last,
+        "pt": pt,
+        "approaches": approaches,
+        "dcf": dcf,
+        "wacc": wacc,
+        "dcf_user": user,
+        "fcf_multiples": list(FCF_MULTIPLES),
+        "derivation": deriv,
+        "comps": comps,
+        "capital": capital or {},
+        "cuts": st.get("cuts") or {
+            "value_cut": VALUE_CUT,
+            "growth_cut": GROWTH_CUT,
+            "fair_band": _FAIR_BAND,
+        },
     }
 
 
@@ -2105,6 +2271,7 @@ def _write_row3_summary(ws, approaches: list[dict], dcf_ref: str, last_ref: str,
 def _write_approaches_table(
     ws, start_row: int, approaches: list[dict],
     dcf_ref: str, last_ref: str, S,
+    dcf_user_ref: Optional[str] = None,
 ) -> int:
     """Stacked table: each method separately. Weights are notes only."""
     from openpyxl.formatting.rule import ColorScaleRule
@@ -2130,8 +2297,11 @@ def _write_approaches_table(
         ws.cell(r, 1, ap.get("name") or ap.get("id") or "").font = S["font_bold"]
         ws.cell(r, 1).border = S["thin"]
         is_dcf = ap.get("id") == "dcf"
+        is_user = ap.get("id") == "dcf_user" and dcf_user_ref
         if is_dcf:
             _put_formula(ws, r, 2, f"=IF(OR({dcf_ref}=\"nm\",{dcf_ref}=\"\"),\"nm\",{dcf_ref})", _FMT_SH, S, gold=True, bold=True)
+        elif is_user:
+            _put_formula(ws, r, 2, f"=IF(OR({dcf_user_ref}=\"nm\",{dcf_user_ref}=\"\"),\"nm\",{dcf_user_ref})", _FMT_SH, S, gold=True, bold=True)
         else:
             c = ws.cell(r, 2, ap.get("value"))
             c.number_format = _FMT_SH
@@ -2149,10 +2319,9 @@ def _write_approaches_table(
             f'=IF(OR({val_ref}="nm",{val_ref}="",{last_ref}="",{last_ref}=0),"—",{val_ref}/{last_ref}-1)',
             _FMT_PCT, S,
         )
-        if is_dcf:
+        if is_dcf or is_user:
             live = _dcf_verdict_formulas(val_ref, last_ref)
             _put_formula(ws, r, 5, live["label"], None, S, bold=True)
-            from openpyxl.utils import get_column_letter
             _apply_verdict_cf(ws, f"E{r}")
         else:
             vc = ws.cell(r, 5, ap.get("verdict") or "—")
@@ -2436,6 +2605,135 @@ def _write_dcf_base_bridge(
         gold=True,
     )
     ws.row_dimensions[r - 1].height = 28
+
+
+def _write_dcf_user_table(
+    ws,
+    start_row: int,
+    *,
+    year0_fcf_row: int,
+    last_fcf_row: int,
+    S,
+    default_multiple: float = 15.0,
+) -> dict[str, str]:
+    """Normalized FCF × pulldown multiple, beside the DCF (base) reverse bridge.
+
+    Yellow FCF multiple is a list (8–30x). Changing it recasts EV, equity, and
+    DCF User $/share. Gordon DCF on the left is unchanged until the GP assigns
+    this multiple on the desk (Market Pulse then swaps the DCF chip).
+    """
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    c0, c1, c2 = 9, 10, 11  # I J K
+    _section_title(
+        ws, start_row, c0, 3,
+        "DCF USER  ·  normalized FCF × chosen multiple (pulldown)",
+        S,
+    )
+    hdr = start_row + 1
+    for col, h in ((c0, "Step"), (c1, "Value"), (c2, "Note")):
+        cell = ws.cell(hdr, col, h)
+        cell.font = S["font_h"]
+        cell.fill = S["navy_fill"]
+        cell.alignment = S["center"]
+        cell.border = S["thin"]
+
+    r = hdr + 1
+
+    def put(lab, val, fmt, note, *, input_cell=False, gold=False) -> int:
+        nonlocal r
+        lab_cell = ws.cell(r, c0, lab)
+        lab_cell.font = S["font_bold"] if gold else S["font"]
+        lab_cell.border = S["thin"]
+        lab_cell.number_format = "@"
+        if isinstance(val, str) and str(val).startswith("="):
+            _put_formula(ws, r, c1, val, fmt, S, gold=gold, bold=gold)
+        else:
+            _put_input(ws, r, c1, val, fmt, S, input_cell=input_cell)
+            if gold and not input_cell:
+                ws.cell(r, c1).fill = S["pale_gold"]
+                ws.cell(r, c1).font = S["font_kpi"]
+        n = ws.cell(r, c2, note)
+        n.font = S["font_muted"]
+        n.border = S["thin"]
+        n.alignment = Alignment_wrap(S)
+        this = r
+        r += 1
+        return this
+
+    r_fcf = put(
+        "Normalized FCF ($m)",
+        f"=E{year0_fcf_row}",
+        _FMT_MM,
+        "Last reported year (year-0) FCF — same ladder as Gordon",
+    )
+    put(
+        "Year-n FCF ($m)",
+        f"=E{last_fcf_row}",
+        _FMT_MM,
+        "Explicit-period last year (reference only)",
+    )
+    r_mult = put(
+        "FCF multiple",
+        float(default_multiple),
+        _FMT_X,
+        "Yellow pulldown — 8x / 10x / 12x / 15x / 18x / 20x / 22x / 25x / 30x",
+        input_cell=True,
+    )
+    dv = DataValidation(
+        type="list",
+        formula1='"' + ",".join(str(x) for x in FCF_MULTIPLES) + '"',
+        allow_blank=False,
+        showDropDown=False,
+        showErrorMessage=True,
+        errorTitle="FCF multiple",
+        error="Pick a multiple from the list.",
+        promptTitle="DCF User",
+        prompt="Choose the FCF multiple. DCF User $/share recasts live.",
+        showInputMessage=True,
+    )
+    dv.add(ws.cell(r_mult, c1))
+    ws.add_data_validation(dv)
+
+    r_ev = put(
+        "Implied EV ($m)",
+        f'=IF(OR(J{r_fcf}="",J{r_mult}=""),"nm",J{r_fcf}*J{r_mult})',
+        _FMT_MM,
+        "Normalized FCF × multiple",
+        gold=True,
+    )
+    r_nd = put("(−) Net debt / (+) cash", "=$B$19", _FMT_MM,
+               "same BS plug as the Gordon bridge")
+    r_eq = put(
+        "Equity value ($m)",
+        f'=IF(J{r_ev}="nm","nm",J{r_ev}-J{r_nd})',
+        _FMT_MM, "EV − net debt", gold=True,
+    )
+    r_sh = put("÷ Diluted shares (m)", "=$B$20", _FMT_SHARES,
+               "same share count as the Gordon bridge")
+    r_px = put(
+        "DCF User $/share",
+        f'=IF(OR(J{r_eq}="nm",J{r_sh}="",J{r_sh}=0),"nm",J{r_eq}/J{r_sh})',
+        _FMT_SH,
+        "Use this instead of Gordon DCF on Market Pulse once assigned on the desk",
+        gold=True,
+    )
+    put("Last price", "=$B$21", _FMT_SH, "live last")
+    vf = _dcf_verdict_formulas(f"J{r_px}", "$B$21")
+    r_ver = put("DCF User verdict (vs last)", vf["label"], None, "±5% band, same as Gordon")
+    _apply_verdict_cf(ws, f"J{r_ver}")
+    put("Mispricing vs last", vf["gap_pct"], _FMT_PCT, "DCF User / last − 1", gold=True)
+    put(
+        "Implied FCF yield",
+        f'=IF(OR(J{r_ev}="nm",J{r_ev}="",J{r_ev}=0),"nm",J{r_fcf}/J{r_ev})',
+        _FMT_PCT,
+        "Normalized FCF / implied EV = 1 / multiple",
+    )
+    return {
+        "value_ref": f"J{r_px}",
+        "mult_ref": f"J{r_mult}",
+        "fcf_ref": f"J{r_fcf}",
+    }
 
 
 def _dcf_price_formula(wacc_ref: str, g_ref: str, fcf_refs: list[str],
@@ -2766,6 +3064,13 @@ def _valuation_sheet(
         model_dcf_ref=dcf_ref,
         S=S,
     )
+    year0_fcf_row = hdr + 1
+    dcf_user_refs = _write_dcf_user_table(
+        ws, br,
+        year0_fcf_row=year0_fcf_row,
+        last_fcf_row=last_fcf_row,
+        S=S,
+    )
 
     # Row-3 summary of every approach (DCF live; others from the report).
     _write_row3_summary(ws, approaches or [], dcf_ref, last_ref, S)
@@ -2843,8 +3148,25 @@ def _valuation_sheet(
 
     # ── Each valuation approach vs last (not blended) ────────────────────
     ap_row = note_r + 3
+    apps = [dict(a) for a in (approaches or []) if isinstance(a, dict)]
+    if dcf_user_refs and not any(a.get("id") == "dcf_user" for a in apps):
+        user_row = {
+            "id": "dcf_user",
+            "name": "DCF User",
+            "value": None,
+            "note": "Normalized FCF × yellow pulldown multiple (I–K table)",
+        }
+        slotted = []
+        placed = False
+        for a in apps:
+            slotted.append(a)
+            if a.get("id") == "dcf":
+                slotted.append(user_row)
+                placed = True
+        apps = slotted if placed else [user_row] + apps
     ap_end = _write_approaches_table(
-        ws, ap_row, approaches or [], dcf_ref, last_ref, S,
+        ws, ap_row, apps, dcf_ref, last_ref, S,
+        dcf_user_ref=(dcf_user_refs or {}).get("value_ref"),
     )
 
     # ── Trading multiples + comps / derivation below ────────────────────
@@ -2892,6 +3214,9 @@ def _valuation_sheet(
     ws.column_dimensions["E"].width = 34
     ws.column_dimensions["F"].width = 16
     ws.column_dimensions["G"].width = 28
+    ws.column_dimensions["I"].width = 34
+    ws.column_dimensions["J"].width = 16
+    ws.column_dimensions["K"].width = 32
     ws.freeze_panes = "A4"
     _print_setup(ws, landscape=True)
     ws.sheet_properties.tabColor = GOLD

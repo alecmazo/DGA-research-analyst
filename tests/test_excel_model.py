@@ -296,6 +296,18 @@ def test_workbook_sheets_and_pro_forma(tmp_path):
     assert base_title_r, "missing DCF (base) reverse bridge"
     assert val.cell(base_title_r + 1, 5).value == "Step"
     assert val.cell(base_title_r + 2, 5).value == "DCF (base) $/share"
+    user_title_r = None
+    for r in range(20, 90):
+        if "DCF USER" in str(val.cell(r, 9).value or ""):
+            user_title_r = r
+            break
+    assert user_title_r, "missing DCF User FCF-multiple table"
+    assert val.cell(user_title_r + 1, 9).value == "Step"
+    labs = [str(val.cell(r, 9).value or "") for r in range(user_title_r, user_title_r + 18)]
+    assert "Normalized FCF ($m)" in labs
+    assert "FCF multiple" in labs
+    assert "DCF User $/share" in labs
+    assert any("DCF User" in str(val.cell(r, 1).value or "") for r in range(1, 120))
     assert abs(float(val.cell(base_title_r + 2, 6).value) - 47.0) < 1e-9
     gap_labs = [str(val.cell(r, 5).value or "") for r in range(base_title_r, 95)]
     assert any("GAP" in x and "DCF (base)" in x for x in gap_labs)
@@ -372,6 +384,25 @@ def test_classify_stock_style():
     assert core["style"] == "core"
     empty = em.style_from_metrics(None, 40.0, None, None)
     assert empty["style"] is None
+    assert "cuts" in cheap and cheap["cuts"]["value_cut"] == 0.05
+    assert any(r.get("id") == "dcf_cheap" for r in (cheap.get("rules") or []))
+
+
+def test_dcf_user_overlay_replaces_dcf_chip():
+    user = em.compute_dcf_user(100.0, 15.0, 200.0, 50.0, last=20.0)
+    assert user is not None
+    # EV = 1500, equity = 1300, /50 shares = $26
+    assert abs(user["value"] - 26.0) < 1e-9
+    assert user["name"] == "DCF User"
+    apps = [
+        {"id": "dcf", "name": "DCF value / share", "value": 22.0},
+        {"id": "pe", "name": "P/E", "value": 30.0},
+    ]
+    out = em.overlay_dcf_user(apps, user)
+    assert out[0]["id"] == "dcf_user"
+    assert out[0]["name"] == "DCF User"
+    assert [a["id"] for a in out] == ["dcf_user", "pe"]
+    assert em.overlay_dcf_user(apps, None)[0]["id"] == "dcf"
 
 
 def test_inject_cover_dcf_target():

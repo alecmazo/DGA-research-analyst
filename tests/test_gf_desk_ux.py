@@ -1,4 +1,4 @@
-"""GuruFocus desk: new-tab financials, compact rows, dropdown, split-adjusted perf."""
+"""GuruFocus desk + valuation-bridge UI contracts."""
 
 from pathlib import Path
 
@@ -60,3 +60,22 @@ def test_tsla_snapshot_date_is_pre_split():
     assert tsla["date_first_added"] <= "2020-08-31"
     # Snapshot cost is not split-adjusted vs 2018; live overlay must recompute.
     assert tsla["cost_per_share"] > 100
+
+
+def test_valuation_bridge_window_wired():
+    page = (ROOT / "web/gp-app/src/pages/ValuationBridgePage.tsx").read_text()
+    assert "openValuationWindow" in page
+    assert "DCF User" in page
+    assert "FCF multiple" in page
+    app = (ROOT / "web/gp-app/src/App.tsx").read_text()
+    assert "path=\"valuation\"" in app
+    saved = (ROOT / "web/gp-app/src/components/desk/SavedReports.tsx").read_text()
+    assert "openValuationWindow" in saved
+    pulse = (ROOT / "web/gp-app/src/components/desk/MarketPulse.tsx").read_text()
+    assert "openValuationWindow" in pulse
+    api = (ROOT / "api" / "server.py").read_text()
+    assert "/api/reports/{ticker}/valuation" in api
+    assert "/api/reports/{ticker}/dcf-user" in api
+    xls = (ROOT / "excel_model.py").read_text()
+    assert "DCF USER" in xls
+    assert "FCF multiple" in xls

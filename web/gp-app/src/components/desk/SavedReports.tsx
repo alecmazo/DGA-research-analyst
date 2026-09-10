@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { api, type Quote, type SavedReport } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
+import { openValuationWindow } from '@/pages/ValuationBridgePage'
 import styles from './deskWidgets.module.css'
 
 function tsMs(v?: string | null): number {
@@ -379,12 +380,17 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                           const st = stylePill(rep.stock_style)
                           if (!st) return null
                           return (
-                            <span
-                              className={`${styles.pill} ${st.cls}`}
-                              title={rep.stock_style_note || st.hint}
+                            <button
+                              type="button"
+                              className={`${styles.pill} ${st.cls} ${styles.pillClick}`}
+                              title={(rep.stock_style_note || st.hint) + ' — click for valuation bridge'}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openValuationWindow(rep.ticker)
+                              }}
                             >
                               {st.label}
-                            </span>
+                            </button>
                           )
                         })()}
                         {onAnalyze && (

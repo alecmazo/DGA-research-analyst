@@ -583,6 +583,9 @@ export type SavedReport = {
   fwd_rev_growth?: number | null
   fwd_eps_growth?: number | null
   valuation_approaches?: ValuationApproach[]
+  dcf_user_multiple?: number | null
+  dcf_user_value?: number | null
+  dcf_user_fcf?: number | null
 }
 
 export type ValuationApproach = {
