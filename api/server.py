@@ -1617,10 +1617,15 @@ def _is_demo_short_name(sn) -> bool:
 
 
 def _sql_demo_short(is_demo: bool) -> str:
-    """SQL fragment (no user input) so list queries never mix lanes."""
-    return ("UPPER(COALESCE(short_name,'')) LIKE 'DEMO%'"
-            if is_demo else
-            "UPPER(COALESCE(short_name,'')) NOT LIKE 'DEMO%'")
+    """SQL fragment (no user input) so list queries never mix lanes.
+
+    Do not use LIKE 'DEMO%' here. psycopg2 treats `%` as a pyformat
+    placeholder, so embedding that fragment in a query that also passes
+    `%s` params 500s LP `/api/v2/lp/me/positions` (SUP_20260911_a8cea52d).
+    LEFT(..., 4) matches `_is_demo_short_name` (startswith DEMO).
+    """
+    op = "=" if is_demo else "<>"
+    return f"LEFT(UPPER(COALESCE(short_name,'')), 4) {op} 'DEMO'"
 
 
 def _partition_fund_rows(rows, is_demo: bool) -> list:
@@ -5090,6 +5095,7 @@ def lp_me_positions(request: Request):
         return {"positions": [], "total_market_value": None, "account_count": 0}
 
     conn = _fund_conn()
+    rows = []
     try:
         with conn.cursor(cursor_factory=_RealDictCursor) as cur:
 
@@ -5258,6 +5264,20 @@ def lp_me_positions(request: Request):
             """, (fund_db_ids,))
             rows = cur.fetchall()
 
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[positions] query failed: {exc!s:.400}", flush=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {
+            "positions": [],
+            "total_market_value": 0,
+            "account_count": 0,
+            "error": str(exc)[:200],
+        }
     finally:
         conn.close()
 
@@ -7885,7 +7905,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui599-20260910-val-bridge"
+WEB_BUILD_VERSION = "ui600-20260911-lp-pos-500"
 
 
 @app.get("/api/build")
