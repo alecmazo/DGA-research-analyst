@@ -1724,6 +1724,14 @@ def earnings_card(symbol: str, horizon_days: int = 5,
     rev_estimate = street_range.get("revenue_avg")
     rev_surprise_pct = None
     rev_beat = None
+    if (rev_actual is not None and rev_estimate not in (None, 0)
+            and not _revenue_plausible_vs_estimate(rev_actual, rev_estimate)):
+        print(
+            f"[market_data] drop implausible rev {sym}: "
+            f"actual={rev_actual} est={rev_estimate}",
+            flush=True,
+        )
+        rev_actual = None
     if rev_actual is not None and rev_estimate not in (None, 0):
         try:
             ra, re_ = float(rev_actual), float(rev_estimate)
@@ -1972,6 +1980,66 @@ def _parse_money_phrase_to_float(num: str, unit: str) -> float | None:
     return n
 
 
+def _revenue_plausible_vs_estimate(actual, estimate) -> bool:
+    """Reject 8-K/Yahoo actuals that are a different order of magnitude than Street.
+
+    ORCL SUP_20260911_1d199fdf: parser took Services $1.4B vs Street $21B (total was $19.3B).
+    Typical beat/miss is a few percent; 5×+ is a unit/segment error.
+    """
+    if actual is None or estimate in (None, 0):
+        return True
+    try:
+        ratio = float(actual) / abs(float(estimate))
+    except (TypeError, ValueError, ZeroDivisionError):
+        return True
+    return 0.2 <= ratio <= 5.0
+
+
+def _score_earnings_revenue_hit(val: float, snip: str) -> tuple[int, float]:
+    """Rank company-level quarterly print over segment / FY lines.
+
+    Sort key is (score, value) so equal scores pick the larger print — the
+    company total, not Services/Hardware (ORCL 8-K: $19.3B vs $1.4B).
+    """
+    s = (snip or "").lower()
+    sc = 0
+    if any(x in s for x in (
+        "total revenue", "total revenues", "total quarterly",
+        "consolidated revenue", "consolidated net", "net sales",
+        "total net sales",
+    )):
+        sc += 8
+    if "net sales" in s:
+        sc += 4
+    if "revenues of" in s or "revenue of" in s or "sales of" in s:
+        sc += 3
+    if any(q in s for q in (
+        "quarter", "q1", "q2", "q3", "q4", "second-quarter",
+        "first-quarter", "third-quarter", "fourth-quarter",
+        "quarterly",
+    )):
+        sc += 4
+    if "record" in s:
+        sc += 1
+    if any(x in s for x in (
+        "segment", "engine segment", "components",
+        "services revenue", "services revenues", "service revenues",
+        "hardware revenue", "hardware revenues",
+        "software revenue", "software revenues",
+        "cloud infra", "cloud infrastructure", "iaas", "saas",
+        "cloud apps", "cloud applications", "cloud revenue", "cloud revenues",
+        "license revenue", "subscription revenue",
+        "remaining performance", " rpo ",
+        "operating income", "net income", "cash flow",
+    )):
+        sc -= 10
+    if any(x in s for x in ("full year", "full-year", "fy ", "guidance")):
+        sc -= 8
+    if val >= 1_000_000_000:
+        sc += 1
+    return (sc, float(val))
+
+
 def _extract_revenue_from_earnings_text(text: str) -> dict:
     """Pull quarterly revenue/net sales from an 8-K exhibit 99 press release.
 
@@ -1994,23 +2062,24 @@ def _extract_revenue_from_earnings_text(text: str) -> dict:
         r"(?:net\s+sales|total\s+(?:net\s+)?sales|total\s+revenues?|net\s+revenues?|"
         r"revenues?|sales)"
     )
+    _unit = r"([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b"
     patterns = [
         # Net sales of $418 million / revenues of $9.5 billion
         rev_words
         + r"\s+(?:of|were|was|reached|totaled|totalled)\s*\$?\s*"
-        + r"([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b",
+        + _unit,
         # second-quarter revenues of $9.5 billion / Record … revenues of …
         r"(?:first|second|third|fourth|1st|2nd|3rd|4th)?\s*-?\s*"
         r"(?:quarter|qtr)?\s*" + rev_words
         + r"\s+(?:of|were|was)\s*\$?\s*"
-        + r"([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b",
-        # increased X% to $418 million
+        + _unit,
+        # increased / up X% to $19.3 billion (ORCL: "Total Revenues up 30% … to")
         rev_words + r"\s+"
-        r"(?:increased|decreased|rose|fell|grew|declined)[^\.]{0,80}?\s+to\s+"
-        r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b",
+        r"(?:increased|decreased|rose|fell|grew|declined|up|down)[^\.]{0,100}?\s+to\s+"
+        r"\$?\s*" + _unit,
         # reported revenue/net sales of $…
         r"reported\s+" + rev_words + r"\s+of\s+"
-        r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|m|b)\b",
+        r"\$?\s*" + _unit,
     ]
     hits: list[tuple[float, str, str]] = []
     for pat in patterns:
@@ -2018,43 +2087,21 @@ def _extract_revenue_from_earnings_text(text: str) -> dict:
             val = _parse_money_phrase_to_float(m.group(1), m.group(2))
             if val is None or val < 50_000:  # ignore tiny / parse noise
                 continue
-            # Skip obvious full-year guidance bands when "full year" nearby
-            ctx = t[max(0, m.start() - 80): m.end() + 40].lower()
-            if any(x in ctx for x in (
+            # Wider window so scoring sees "Services revenues were $1.4 billion"
+            ctx = t[max(0, m.start() - 80): m.end() + 40]
+            ctx_l = ctx.lower()
+            if any(x in ctx_l for x in (
                 "full year", "full-year", "fy 20", "guidance ranging",
                 "guidance of", "outlook of", "for the year",
-            )) and "quarter" not in ctx and "second quarter" not in ctx \
-                    and "first quarter" not in ctx and "third quarter" not in ctx \
-                    and "fourth quarter" not in ctx:
+            )) and "quarter" not in ctx_l and "second quarter" not in ctx_l \
+                    and "first quarter" not in ctx_l and "third quarter" not in ctx_l \
+                    and "fourth quarter" not in ctx_l:
                 continue
-            hits.append((val, m.group(0)[:160], "prose"))
+            hits.append((val, ctx[:220], "prose"))
 
     if hits:
-        # Prefer company-level quarterly print over segment lines / FY guidance
-        def _score(item):
-            val, snip, _ = item
-            s = snip.lower()
-            sc = 0
-            if "net sales" in s:
-                sc += 4
-            if "revenues of" in s or "revenue of" in s or "sales of" in s:
-                sc += 3
-            if any(q in s for q in (
-                "quarter", "q1", "q2", "q3", "q4", "second-quarter",
-                "first-quarter", "third-quarter", "fourth-quarter",
-            )):
-                sc += 4
-            if "record" in s:
-                sc += 1
-            if "segment" in s or "engine segment" in s or "components" in s:
-                sc -= 6
-            if any(x in s for x in ("full year", "full-year", "fy ", "guidance")):
-                sc -= 8
-            # Prefer mid/large company totals over tiny segment noise
-            if val >= 1_000_000_000:
-                sc += 1
-            return sc
-        hits.sort(key=_score, reverse=True)
+        hits.sort(key=lambda item: _score_earnings_revenue_hit(item[0], item[1]),
+                  reverse=True)
         val, snip, method = hits[0]
         return {
             "revenue_actual": float(val),
