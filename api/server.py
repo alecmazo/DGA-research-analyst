@@ -7433,6 +7433,28 @@ def get_report_valuation(ticker: str, request: Request):
         pack["assigned_multiple"] = row.get("dcf_user_multiple")
     else:
         pack["assigned_multiple"] = (pack.get("dcf_user") or {}).get("multiple") or row.get("dcf_user_multiple")
+    # Heal stored DCF User $/share when report shares were a leftover (BSX 7.1m).
+    new_v = (pack.get("dcf_user") or {}).get("value")
+    stored_v = row.get("dcf_user_value")
+    if (
+        _PSYCOPG2_OK and os.environ.get("DATABASE_URL")
+        and row.get("dcf_user_multiple") is not None
+        and new_v is not None
+        and (stored_v is None or abs(float(stored_v) - float(new_v)) > 0.05)
+    ):
+        try:
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE analyst_reports
+                       SET dcf_user_value=%s, dcf_user_fcf=%s
+                     WHERE ticker=%s AND archived IS NOT TRUE
+                    """,
+                    (new_v, (pack.get("dcf_user") or {}).get("fcf"), tk),
+                )
+                conn.commit()
+        except Exception as e:
+            print(f"[valuation] heal dcf_user {tk}: {e!s:.160}", flush=True)
     return {"ok": True, **pack}
 
 
@@ -7905,7 +7927,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui602-20260911-ticket-dot"
+WEB_BUILD_VERSION = "ui603-20260911-dcf-shares"
 
 
 @app.get("/api/build")
@@ -16001,6 +16023,7 @@ def list_reports(request: Request = None):
                                         last=px,
                                     )
                                 if row.get("dcf_user_value") is not None:
+                                    stored_v = row.get("dcf_user_value")
                                     user = _em.compute_dcf_user(
                                         row.get("dcf_user_fcf"),
                                         row.get("dcf_user_multiple"),
@@ -16008,12 +16031,12 @@ def list_reports(request: Request = None):
                                         None,
                                         px,
                                     )
-                                    if user is None:
-                                        vd = _em.valuation_verdict(row.get("dcf_user_value"), px)
+                                    if user is None and _em.dcf_user_value_plausible(stored_v, px):
+                                        vd = _em.valuation_verdict(stored_v, px)
                                         user = {
                                             "id": "dcf_user",
                                             "name": "DCF User",
-                                            "value": row.get("dcf_user_value"),
+                                            "value": stored_v,
                                             "multiple": row.get("dcf_user_multiple"),
                                             "note": (
                                                 f"FCF × {row['dcf_user_multiple']:.0f}x"
@@ -16022,9 +16045,12 @@ def list_reports(request: Request = None):
                                             ),
                                             **vd,
                                         }
-                                    row["valuation_approaches"] = _em.overlay_dcf_user(
-                                        row.get("valuation_approaches") or [], user,
-                                    )
+                                    elif user is None:
+                                        user = None
+                                    if user:
+                                        row["valuation_approaches"] = _em.overlay_dcf_user(
+                                            row.get("valuation_approaches") or [], user,
+                                        )
                             except Exception:
                                 pass
                 except Exception as e:

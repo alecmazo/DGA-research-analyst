@@ -619,6 +619,18 @@ def overlay_dcf_user(
     return out
 
 
+def dcf_user_value_plausible(value: Optional[float], last: Optional[float]) -> bool:
+    """Reject leftover share-count scale errors (BSX $2,577 vs last $43)."""
+    v, px = _f(value), _f(last)
+    if v is None or px in (None, 0):
+        return True
+    try:
+        ratio = abs(v / px)
+    except (TypeError, ZeroDivisionError):
+        return True
+    return 0.15 <= ratio <= 8.0
+
+
 def build_valuation_pack(
     md: str,
     *,
@@ -631,21 +643,34 @@ def build_valuation_pack(
 ) -> dict[str, Any]:
     """Desk payload for the expandable valuation-bridge window."""
     summary = summary if isinstance(summary, dict) else {}
+    cap = capital if isinstance(capital, dict) else {}
     tables = parse_md_tables(md or "")
     dcf = extract_dcf(md or "")
+    wacc = extract_wacc_build(tables)
     st = classify_stock_style(md or "", summary=summary, price=last)
     last = _f(last) or _f(summary.get("current_price"))
     pt = _f(pt) or _f(summary.get("price_target"))
     approaches = extract_valuation_approaches(
         md or "", last=last, pt=pt, tables=tables, dcf=dcf,
     )
-    fcf = _f(dcf_user_fcf) or _f(dcf.get("year0_fcf"))
+    raw_sh = _f(dcf.get("shares"))
+    if raw_sh is None:
+        raw_sh = _f(wacc.get("shares"))
+    sh = normalize_shares_millions(raw_sh, cap.get("shares"))
+    if sh is not None:
+        dcf["shares"] = sh
+        wacc["shares"] = sh
     nd = _f(dcf.get("net_debt"))
-    sh = _f(dcf.get("shares"))
+    if nd is None:
+        nd = _f(wacc.get("net_debt"))
+    if nd is None:
+        nd = _f(cap.get("net_debt"))
+    if nd is not None:
+        dcf["net_debt"] = nd
+    fcf = _f(dcf_user_fcf) or _f(dcf.get("year0_fcf")) or _f(cap.get("fcf"))
     user = compute_dcf_user(fcf, dcf_user_multiple, nd, sh, last)
     if user:
         approaches = overlay_dcf_user(approaches, user)
-    wacc = extract_wacc_build(tables)
     deriv = extract_derivation_table(tables)
     comps = extract_comps_table(tables)
     return {

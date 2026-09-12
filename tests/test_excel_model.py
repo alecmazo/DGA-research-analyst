@@ -388,6 +388,27 @@ def test_classify_stock_style():
     assert any(r.get("id") == "dcf_cheap" for r in (cheap.get("rules") or []))
 
 
+def test_dcf_user_uses_sec_shares_not_report_7m():
+    """BSX-style: report diluted shares 7.1m vs SEC ~1,475m (SUP screenshot)."""
+    md = """
+WACC 7.9%. Terminal growth 2.5%. diluted shares outstanding 7.1 million.
+Year-0 FCF $3,475m. Net debt $9,500m.
+"""
+    capital = {"shares": 1475.0, "net_debt": 9500.0, "market_cap": 63387.0, "fcf": 3475.0}
+    pack = em.build_valuation_pack(
+        md, last=42.98, dcf_user_multiple=8.0, capital=capital,
+    )
+    assert pack["dcf"]["shares"] > 1000
+    user = pack["dcf_user"]
+    assert user is not None
+    assert user["shares"] > 1000
+    expect = (3475.0 * 8.0 - 9500.0) / 1475.0
+    assert abs(user["value"] - expect) < 0.05
+    assert user["value"] < 50
+    assert em.dcf_user_value_plausible(2577.46, 42.98) is False
+    assert em.dcf_user_value_plausible(expect, 42.98) is True
+
+
 def test_dcf_user_overlay_replaces_dcf_chip():
     user = em.compute_dcf_user(100.0, 15.0, 200.0, 50.0, last=20.0)
     assert user is not None
