@@ -182,6 +182,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Valuation bridge** | **`ui599-20260910-val-bridge`** | Click GARP/VALUE/etc and Market Pulse chips for a detailed bridge window; Excel DCF User FCF-multiple pulldown |
 | **LP mobile Portfolio 500** | **`ui600-20260911-lp-pos-500`** | SUP_20260911_a8cea52d — `_sql_demo_short` no longer uses LIKE `%` (psycopg2 pyformat 500 on `/api/v2/lp/me/positions`) |
 | **Earnings actual revenue** | **`ui601-20260911-earn-rev`** | SUP_20260911_1d199fdf — 8-K parser picks company total (ORCL $19.3B) not Services $1.4B; drop actuals 5× off Street |
+| **Desk ticket light** | **`ui602-20260911-ticket-dot`** | Green/red dot next to Reset layout; hover shows open-ticket count (GP, incl. LP-filed) |
 
 ### One-click handoff (preferred)
 

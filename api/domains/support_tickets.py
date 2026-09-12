@@ -16,6 +16,10 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["support"])
 
+# Unsolved tickets the GP desk light and agent inbox both treat as "needs a fix".
+_OPEN_TICKET_STATUSES = ("open", "diagnosing", "diagnosed", "in_progress")
+_OPEN_STATUS_SQL = ", ".join("'" + s + "'" for s in _OPEN_TICKET_STATUSES)
+
 
 class _Bag:
     """Late-bound symbols from api.server (set in mount())."""
@@ -692,8 +696,7 @@ def support_ticket_list(request: Request, status: str = "", limit: int = 40):
         pub = _support_row_public(d)
         # diagnosis may be long — keep full for settings trail
         out.append(pub)
-    open_n = sum(1 for t in out if t.get("status") in
-                 ("open", "diagnosing", "diagnosed", "in_progress"))
+    open_n = sum(1 for t in out if t.get("status") in _OPEN_TICKET_STATUSES)
     return {"ok": True, "tickets": out, "open_count": open_n, "count": len(out)}
 
 
@@ -825,6 +828,32 @@ def support_ticket_update(ticket_id: str, request: Request):
     return {"ok": True, "id": ticket_id, "status": status or None}
 
 
+@router.get("/api/support/open-count")
+def support_open_count(request: Request):
+    """GP desk light: count of unsolved tickets, including LP-filed ones.
+
+    Demo GP only sees the demo lane. No ticket bodies — cheap to poll.
+    """
+    claims = _support_gp_only(request)
+    _ensure_support_tickets_table()
+    want_demo = bool(claims.get("demo_mode"))
+    try:
+        with B._fund_conn() as conn, conn.cursor(cursor_factory=B._RealDictCursor) as cur:
+            cur.execute(f"""
+                SELECT created_by_email, context_json
+                  FROM support_tickets
+                 WHERE status IN ({_OPEN_STATUS_SQL})
+            """)
+            n = sum(
+                1
+                for r in (cur.fetchall() or [])
+                if _support_row_is_demo(dict(r)) == want_demo
+            )
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+    return {"ok": True, "open_count": int(n)}
+
+
 @router.get("/api/support/agent-inbox")
 def support_agent_inbox(request: Request):
     """Structured open tickets for coding agents (GP auth). No screenshots in list."""
@@ -832,13 +861,13 @@ def support_agent_inbox(request: Request):
     _ensure_support_tickets_table()
     try:
         with B._fund_conn() as conn, conn.cursor(cursor_factory=B._RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT id, created_at, status, description, page_url, page_path,
                        active_tab, diagnosis, agent_brief, fix_trail,
                        CASE WHEN screenshot_b64 IS NOT NULL AND screenshot_b64 <> ''
                             THEN true ELSE false END AS has_screenshot
                   FROM support_tickets
-                 WHERE status IN ('open','diagnosing','diagnosed','in_progress')
+                 WHERE status IN ({_OPEN_STATUS_SQL})
                  ORDER BY created_at DESC LIMIT 25
             """)
             rows = [dict(r) for r in (cur.fetchall() or [])]

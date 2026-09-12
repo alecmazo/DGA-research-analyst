@@ -8,6 +8,7 @@ import {
   type MouseEvent as RMouseEvent,
 } from 'react'
 import styles from './DeskBoard.module.css'
+import { TicketStatusDot } from './TicketStatusDot'
 
 export type CardId =
   | 'watchlist'
@@ -373,6 +374,7 @@ export function DeskBoard({ cards, title, meta, extraActions }: Props) {
           <button type="button" className={styles.resetBtn} onClick={reset}>
             Reset layout
           </button>
+          <TicketStatusDot />
         </div>
       </div>
       <div

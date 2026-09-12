@@ -33,3 +33,19 @@ def test_ticket_description_aliases():
 def test_screenshot_never_dropped_for_size():
     """Desk needs the page shot — there is no size cap that clears it."""
     assert not hasattr(st, "_SUPPORT_SCREENSHOT_MAX")
+
+
+def test_open_count_route_and_statuses():
+    """GP desk light polls unsolved tickets, including LP-filed ones."""
+    src = Path(st.__file__).read_text()
+    assert '@router.get("/api/support/open-count")' in src
+    assert "support_open_count" in src
+    assert st._OPEN_TICKET_STATUSES == (
+        "open",
+        "diagnosing",
+        "diagnosed",
+        "in_progress",
+    )
+    assert "open" in st._OPEN_STATUS_SQL
+    assert "fixed" not in st._OPEN_STATUS_SQL
+    assert "_support_row_is_demo" in src.split("def support_open_count")[1][:1200]

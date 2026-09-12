@@ -215,6 +215,7 @@ export function SupportFab() {
         `✓ Ticket ${j.id || ''} filed${j.has_screenshot ? ' with screenshot' : ''}. See Settings → Support.`,
       )
       setDesc('')
+      window.dispatchEvent(new Event('dga-ticket-filed'))
       window.setTimeout(() => setOpen(false), 1600)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'failed'
