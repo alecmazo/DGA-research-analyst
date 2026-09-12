@@ -184,6 +184,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Earnings actual revenue** | **`ui601-20260911-earn-rev`** | SUP_20260911_1d199fdf — 8-K parser picks company total (ORCL $19.3B) not Services $1.4B; drop actuals 5× off Street |
 | **Desk ticket light** | **`ui602-20260911-ticket-dot`** | Green/red dot next to Reset layout; hover shows open-ticket count (GP, incl. LP-filed) |
 | **DCF User share count** | **`ui603-20260911-dcf-shares`** | Valuation DCF User uses SEC diluted shares (BSX 7.1m leftover → ~1.5bn); drop insane stored $/share on pulse |
+| **Fund account menus** | **`ui604-20260912-fund-menus`** | SUP_20260912_9de2a14e — account switcher + Download pulldown; chart/table and monthly/quarterly/annual selects |
 
 ### One-click handoff (preferred)
 

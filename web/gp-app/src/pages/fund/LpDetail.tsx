@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Panel } from '@/components/ui/Panel'
-import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api, downloadAuth } from '@/lib/api'
 import { fmtUsd, pctClass } from '@/lib/format'
+import { AccountChrome, type BookOption } from './AccountChrome'
 import { FundPositionsTable } from './FundPositionsTable'
 import type { FundDetail, FundPosition, Waterfall } from './types'
 import styles from './fund.module.css'
@@ -12,9 +12,11 @@ type Props = {
   fundId: string
   detail: FundDetail
   onBack: () => void
+  books?: BookOption[]
+  onSelectBook?: (id: string) => void
 }
 
-export function LpDetail({ fundId, detail, onBack }: Props) {
+export function LpDetail({ fundId, detail, onBack, books, onSelectBook }: Props) {
   const [positions, setPositions] = useState<FundPosition[]>([])
   const [wf, setWf] = useState<Waterfall | null>(null)
   const [loading, setLoading] = useState(true)
@@ -75,30 +77,19 @@ export function LpDetail({ fundId, detail, onBack }: Props) {
 
   return (
     <div className={styles.detail}>
-      <div className={styles.toolbar}>
-        <Button variant="secondary" size="sm" onClick={onBack}>
-          ← Back to Funds
-        </Button>
-        <h2 className={styles.detailTitle}>{title}</h2>
-        <div className={styles.toolbarRight}>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={exportBusy}
-            onClick={() => void doExport('excel')}
-          >
-            ⬇ Excel
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={exportBusy}
-            onClick={() => void doExport('pdf')}
-          >
-            ⬇ PDF
-          </Button>
-        </div>
-      </div>
+      <AccountChrome
+        backLabel="← Back to Funds"
+        onBack={onBack}
+        title={title}
+        currentId={fundId}
+        books={books}
+        onSelectBook={onSelectBook}
+        downloadBusy={exportBusy}
+        onDownload={(kind) => {
+          if (kind === 'excel' || kind === 'pdf') void doExport(kind)
+        }}
+        formats={['excel', 'pdf']}
+      />
 
       {err && <div className={styles.bannerErr}>{err}</div>}
       {loading ? (

@@ -321,6 +321,41 @@
   margin-left: auto;
 }
 
+.pull {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg-surface)
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%2364748b' d='M0 0l5 6 5-6z'/></svg>")
+    no-repeat right 8px center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 4px 22px 4px 8px;
+  max-width: 240px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.pull:hover:not(:disabled) {
+  border-color: var(--brand-400);
+  color: var(--brand-700);
+}
+
+.pull:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.cardPulls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .bannerErr {
   padding: 10px 14px;
   border-radius: var(--r-md);

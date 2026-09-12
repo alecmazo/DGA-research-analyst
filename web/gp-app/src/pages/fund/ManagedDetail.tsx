@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api, downloadAuth } from '@/lib/api'
 import { fmtPct, fmtUsd, pctClass } from '@/lib/format'
+import { AccountChrome, type BookOption } from './AccountChrome'
 import { FundPositionsTable } from './FundPositionsTable'
 import { AllTimePerfChart, MonthlyBarChart } from './perfCharts'
 import type {
@@ -31,6 +32,56 @@ type Props = {
   fundId: string
   detail: FundDetail
   onBack: () => void
+  books?: BookOption[]
+  onSelectBook?: (id: string) => void
+}
+
+type YtdGrain = 'monthly' | 'quarterly' | 'annual'
+
+function monthNum(p: MonthlyChartPoint): number {
+  if (typeof p.month === 'number') return p.month
+  const n = Number(String(p.month || '').split('-').pop())
+  return Number.isFinite(n) ? n : 0
+}
+
+function rollupYtd(
+  pts: MonthlyChartPoint[],
+  grain: YtdGrain,
+): MonthlyChartPoint[] {
+  if (!pts.length || grain === 'monthly') return pts
+  if (grain === 'annual') {
+    const first = pts[0]
+    const last = pts[pts.length - 1]
+    const prod = pts.reduce((a, p) => a * (1 + (p.return_pct || 0) / 100), 1)
+    return [
+      {
+        ...last,
+        label: 'YTD',
+        month: 'YTD',
+        beg_balance: first.beg_balance,
+        return_pct: (prod - 1) * 100,
+      },
+    ]
+  }
+  const buckets: Record<number, MonthlyChartPoint[]> = { 1: [], 2: [], 3: [], 4: [] }
+  for (const p of pts) {
+    const q = Math.max(1, Math.min(4, Math.ceil(monthNum(p) / 3) || 1))
+    buckets[q].push(p)
+  }
+  return ([1, 2, 3, 4] as const)
+    .filter((q) => buckets[q].length)
+    .map((q) => {
+      const g = buckets[q]
+      const last = g[g.length - 1]
+      const prod = g.reduce((a, p) => a * (1 + (p.return_pct || 0) / 100), 1)
+      return {
+        ...last,
+        label: `Q${q}`,
+        month: `Q${q}`,
+        beg_balance: g[0].beg_balance,
+        return_pct: (prod - 1) * 100,
+      }
+    })
 }
 
 type AtReturnMode = 'annual' | 'cumulative' | 'cagr'
@@ -101,7 +152,7 @@ function parseYtd(cache: YtdCache): YtdResult | null {
   return cache.result_json
 }
 
-export function ManagedDetail({ fundId, detail, onBack }: Props) {
+export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: Props) {
   const [positions, setPositions] = useState<FundPosition[]>([])
   const [ytd, setYtd] = useState<YtdResult | null>(null)
   const [cachedYtd, setCachedYtd] = useState<number | null>(null)
@@ -118,8 +169,9 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
   const [runStatus, setRunStatus] = useState<string | null>(null)
   const [runBusy, setRunBusy] = useState(false)
 
-  // YTD monthly: chart | table
+  // YTD monthly: chart | table + grain
   const [ytdView, setYtdView] = useState<'chart' | 'table'>('chart')
+  const [ytdGrain, setYtdGrain] = useState<YtdGrain>('monthly')
   // All-time
   const [allTime, setAllTime] = useState<BalanceHistory | null>(null)
   const [atView, setAtView] = useState<'monthly' | 'quarterly' | 'annual'>('monthly')
@@ -268,6 +320,11 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
       spy_ytd_pct: altBenchYtd[i] ?? m.spy_ytd_pct,
     }))
   }, [monthlyRaw, altBenchYtd, bench, ytd])
+
+  const ytdDisplayPts = useMemo(
+    () => rollupYtd(monthlyChartPts, ytdGrain),
+    [monthlyChartPts, ytdGrain],
+  )
 
   const attr = [...(ytd?.attribution || [])].sort(
     (a, b) => (b.contribution_pct || 0) - (a.contribution_pct || 0),
@@ -431,30 +488,19 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
 
   return (
     <div className={styles.detail}>
-      <div className={styles.toolbar}>
-        <Button variant="secondary" size="sm" onClick={onBack}>
-          ← Back to Accounts
-        </Button>
-        <h2 className={styles.detailTitle}>{title}</h2>
-        <div className={styles.toolbarRight}>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={exportBusy}
-            onClick={() => void doExport('excel')}
-          >
-            ⬇ Excel
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={exportBusy}
-            onClick={() => void doExport('pdf')}
-          >
-            ⬇ PDF
-          </Button>
-        </div>
-      </div>
+      <AccountChrome
+        backLabel="← Back to Accounts"
+        onBack={onBack}
+        title={title}
+        currentId={fundId}
+        books={books}
+        onSelectBook={onSelectBook}
+        downloadBusy={exportBusy}
+        onDownload={(kind) => {
+          if (kind === 'excel' || kind === 'pdf') void doExport(kind)
+        }}
+        formats={['excel', 'pdf']}
+      />
 
       {err && <div className={styles.bannerErr}>{err}</div>}
       {loading ? (
@@ -544,21 +590,26 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             badge={monthlyRaw.length ? `${monthlyRaw.length} mo` : 'YTD'}
             action={
               monthlyRaw.length ? (
-                <div className={styles.viewToggle}>
-                  <button
-                    type="button"
-                    className={ytdView === 'chart' ? styles.viewOn : styles.viewBtn}
-                    onClick={() => setYtdView('chart')}
+                <div className={styles.cardPulls}>
+                  <select
+                    className={styles.pull}
+                    value={ytdView}
+                    aria-label="YTD view"
+                    onChange={(e) => setYtdView(e.target.value as 'chart' | 'table')}
                   >
-                    Chart
-                  </button>
-                  <button
-                    type="button"
-                    className={ytdView === 'table' ? styles.viewOn : styles.viewBtn}
-                    onClick={() => setYtdView('table')}
+                    <option value="chart">Chart</option>
+                    <option value="table">Table</option>
+                  </select>
+                  <select
+                    className={styles.pull}
+                    value={ytdGrain}
+                    aria-label="YTD grain"
+                    onChange={(e) => setYtdGrain(e.target.value as YtdGrain)}
                   >
-                    Table
-                  </button>
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="annual">Annual</option>
+                  </select>
                 </div>
               ) : undefined
             }
@@ -570,7 +621,7 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
               />
             ) : ytdView === 'chart' ? (
               <MonthlyBarChart
-                points={monthlyChartPts}
+                points={ytdDisplayPts}
                 benchLabel={bench}
                 height={220}
               />
@@ -579,18 +630,18 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                 <table className={styles.table}>
                   <thead>
                     <tr>
-                      <th>Month</th>
+                      <th>{ytdGrain === 'monthly' ? 'Month' : ytdGrain === 'quarterly' ? 'Quarter' : 'Period'}</th>
                       <th className="tabular">End balance</th>
                       <th className="tabular">Portfolio</th>
                       <th className="tabular">{bench}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {monthlyChartPts.map((m, i) => {
+                    {ytdDisplayPts.map((m, i) => {
                       // monthly bench return from ytd series
                       const curr = m.spy_ytd_pct
                       const prev =
-                        i > 0 ? monthlyChartPts[i - 1].spy_ytd_pct : null
+                        i > 0 ? ytdDisplayPts[i - 1].spy_ytd_pct : null
                       const bRet =
                         curr == null
                           ? null
@@ -629,35 +680,28 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
             }
             action={
               allTime ? (
-                <div className={styles.atCardActions}>
-                  <div className={styles.viewToggle}>
-                    <button
-                      type="button"
-                      className={atDisp === 'chart' ? styles.viewOn : styles.viewBtn}
-                      onClick={() => setAtDisp('chart')}
-                    >
-                      Chart
-                    </button>
-                    <button
-                      type="button"
-                      className={atDisp === 'table' ? styles.viewOn : styles.viewBtn}
-                      onClick={() => setAtDisp('table')}
-                    >
-                      Table
-                    </button>
-                  </div>
-                  <div className={styles.viewToggle}>
-                    {(['monthly', 'quarterly', 'annual'] as const).map((v) => (
-                      <button
-                        key={v}
-                        type="button"
-                        className={atView === v ? styles.viewOn : styles.viewBtn}
-                        onClick={() => setAtView(v)}
-                      >
-                        {v[0].toUpperCase() + v.slice(1)}
-                      </button>
-                    ))}
-                  </div>
+                <div className={styles.cardPulls}>
+                  <select
+                    className={styles.pull}
+                    value={atDisp}
+                    aria-label="All-time view"
+                    onChange={(e) => setAtDisp(e.target.value as 'chart' | 'table')}
+                  >
+                    <option value="chart">Chart</option>
+                    <option value="table">Table</option>
+                  </select>
+                  <select
+                    className={styles.pull}
+                    value={atView}
+                    aria-label="All-time grain"
+                    onChange={(e) =>
+                      setAtView(e.target.value as 'monthly' | 'quarterly' | 'annual')
+                    }
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="annual">Annual</option>
+                  </select>
                 </div>
               ) : undefined
             }
@@ -672,33 +716,33 @@ export function ManagedDetail({ fundId, detail, onBack }: Props) {
                 <div className={styles.atpToolbar}>
                   <div className={styles.atpGroup}>
                     <span className={styles.atpLbl}>Period</span>
-                    {(['all', '5yr', '3yr'] as const).map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        className={atPeriod === p ? styles.viewOn : styles.viewBtn}
-                        onClick={() => setAtPeriod(p)}
-                      >
-                        {p === 'all' ? 'All-Time' : p === '5yr' ? '5-Year' : '3-Year'}
-                      </button>
-                    ))}
+                    <select
+                      className={styles.pull}
+                      value={atPeriod}
+                      aria-label="History period"
+                      onChange={(e) =>
+                        setAtPeriod(e.target.value as 'all' | '5yr' | '3yr')
+                      }
+                    >
+                      <option value="all">All-Time</option>
+                      <option value="5yr">5-Year</option>
+                      <option value="3yr">3-Year</option>
+                    </select>
                   </div>
                   <div className={styles.atpGroup}>
                     <span className={styles.atpLbl}>Return</span>
-                    {(['annual', 'cumulative', 'cagr'] as const).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        className={atMode === m ? styles.viewOn : styles.viewBtn}
-                        onClick={() => setAtMode(m)}
-                      >
-                        {m === 'annual'
-                          ? 'Period'
-                          : m === 'cumulative'
-                            ? 'Cumulative'
-                            : 'CAGR'}
-                      </button>
-                    ))}
+                    <select
+                      className={styles.pull}
+                      value={atMode}
+                      aria-label="Return mode"
+                      onChange={(e) =>
+                        setAtMode(e.target.value as 'annual' | 'cumulative' | 'cagr')
+                      }
+                    >
+                      <option value="annual">Period</option>
+                      <option value="cumulative">Cumulative</option>
+                      <option value="cagr">CAGR</option>
+                    </select>
                   </div>
                   {showAtBench && (
                     <div className={styles.atpGroup}>

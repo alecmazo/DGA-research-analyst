@@ -6,6 +6,7 @@ import { fmtPct, fmtUsd, pctClass } from '@/lib/format'
 import { LpDetail } from './fund/LpDetail'
 import { LpPlanning } from './fund/LpPlanning'
 import { ManagedDetail } from './fund/ManagedDetail'
+import type { BookOption } from './fund/AccountChrome'
 import type {
   FundDetail,
   FundOverview,
@@ -126,29 +127,50 @@ export function FundPage() {
   }
 
   if (detailId && detail) {
+    const books: BookOption[] = [
+      ...accts.map((a) => ({
+        id: a.fund_id,
+        label:
+          a.short_name && a.account_name && !a.account_name.includes(a.short_name)
+            ? `${a.account_name} (${a.short_name})`
+            : a.account_name || a.short_name || a.fund_id,
+        group: 'Managed' as const,
+      })),
+      ...funds.map((f) => ({
+        id: f.fund_id,
+        label:
+          f.short_name && f.fund_name && !f.fund_name.includes(f.short_name)
+            ? `${f.fund_name} (${f.short_name})`
+            : f.fund_name || f.short_name || f.fund_id,
+        group: 'LP Funds' as const,
+      })),
+    ]
+    const onBack = () => {
+      setDetailId(null)
+      setDetail(null)
+      void loadOverview()
+    }
     const isAcct = detail.fund_type === 'managed_account'
     if (isAcct) {
       return (
         <ManagedDetail
+          key={detailId}
           fundId={detailId}
           detail={detail}
-          onBack={() => {
-            setDetailId(null)
-            setDetail(null)
-            void loadOverview()
-          }}
+          books={books}
+          onSelectBook={(id) => void openDetail(id)}
+          onBack={onBack}
         />
       )
     }
     return (
       <LpDetail
+        key={detailId}
         fundId={detailId}
         detail={detail}
-        onBack={() => {
-          setDetailId(null)
-          setDetail(null)
-          void loadOverview()
-        }}
+        books={books}
+        onSelectBook={(id) => void openDetail(id)}
+        onBack={onBack}
       />
     )
   }
