@@ -14,6 +14,7 @@ import { SettingsPage } from '@/pages/SettingsPage'
 import { ReportPage } from '@/pages/ReportPage'
 import { ResearchAnswerPage } from '@/pages/ResearchAnswerPage'
 import { ValuationBridgePage } from '@/pages/ValuationBridgePage'
+import { CompsPage } from '@/pages/CompsPage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import {
@@ -98,6 +99,7 @@ export default function App() {
             <Route path="report" element={<ReportPage />} />
             <Route path="research" element={<ResearchAnswerPage />} />
             <Route path="valuation" element={<ValuationBridgePage />} />
+            <Route path="comps" element={<CompsPage />} />
             <Route element={<Shell user={user} build={build} />}>
               <Route
                 index

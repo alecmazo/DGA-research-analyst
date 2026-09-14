@@ -79,3 +79,30 @@ def test_valuation_bridge_window_wired():
     xls = (ROOT / "excel_model.py").read_text()
     assert "DCF USER" in xls
     assert "FCF multiple" in xls
+
+
+def test_pulse_three_chips_dcf_comps_street():
+    pulse = (ROOT / "web/gp-app/src/components/desk/MarketPulse.tsx").read_text()
+    assert "function pulseChips" in pulse
+    assert "kind: 'dcf'" in pulse
+    assert "kind: 'comps'" in pulse
+    assert "kind: 'street'" in pulse
+    assert "openCompsWindow" in pulse
+    assert "openValuationWindow" in pulse
+    assert ".slice(0, 6)" not in pulse
+    assert "HIDE_CHIP_IDS" not in pulse
+    assert "dcf_user" in pulse
+    assert "approachChips" not in pulse
+    app = (ROOT / "web/gp-app/src/App.tsx").read_text()
+    assert 'path="comps"' in app
+    comps = (ROOT / "web/gp-app/src/pages/CompsPage.tsx").read_text()
+    assert "openCompsWindow" in comps
+    assert "/api/financials/" in comps and "/comps" in comps
+    assert "n/a" in comps
+    assert "EV/EBITDA" in comps
+    assert "P/S" in comps
+    assert "EBITDA margin" in comps
+    body = (ROOT / "api/domains/_financials_body.py").read_text()
+    assert '/api/financials/{ticker}/comps' in body
+    assert "research_comps" in body
+    assert "def financials_comps" in body

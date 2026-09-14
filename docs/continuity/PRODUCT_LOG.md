@@ -126,7 +126,7 @@ Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status do
 | Portfolio Strategist | Whole-book review + IC snapshot; EV; both engines’ PTs. |
 | Live Markets | TradingView. |
 | Market Wire | Official + wire RSS (**no Reuters, no AP**). |
-| Market Pulse | Per-name headline + valuation chips (click → bridge). |
+| Market Pulse | Per-name headline + **three** chips: DCF, Comps, Street. DCF/Street → valuation bridge. Comps → last-FY peer window. |
 | Top Movers | $1B+ names by \|day %\|. |
 | Analyze Ticker | Multi-engine Analyze (Grok / Claude / DeepSeek / Kimi). Overlay while running. |
 | Desk health | Quote / report / pulse counts. |
@@ -201,6 +201,15 @@ Opened from GARP/VALUE/GROWTH/RICH/CORE pills and Market Pulse chips.
 - Gordon / model DCF vs **DCF User** (FCF × yellow multiple − net debt ÷ **SEC diluted shares**)
 - Report leftover share counts (BSX 7.1m) must yield to SEC (~1.48bn). `normalize_shares_millions`
 - Insane stored DCF User $/share (60× last) must not overlay Market Pulse
+- Market Pulse chips are **only** DCF / Comps / Street (not DCF base, EV/EBITDA Comps, P/E Comps, FY26E, street-anchored, 12m PT)
+
+### 5.15 Comps window (`/comps?ticker=`)
+
+Opened from the Market Pulse **Comps** chip.
+
+- `GET /api/financials/{ticker}/comps` → `research_comps.load()` (company_financials last FY + live last)
+- Columns: EV/EBITDA, P/E, P/S, FCF yield, rev growth, EBITDA margin
+- Missing cells render **n/a** — never NTM / (E)
 
 ---
 

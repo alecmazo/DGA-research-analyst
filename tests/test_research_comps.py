@@ -84,6 +84,31 @@ def test_excel_valuation_uses_store_comps_not_report_e():
         rc_mod.load = real_load
 
 
+def test_row_ps_and_missing_is_none():
+    fin = {
+        "revenue": 200_000_000,
+        "diluted_eps": 2.0,
+        "shares_outstanding": 10_000_000,
+        "ebitda": 40_000_000,
+        "free_cash_flow": 10_000_000,
+        "ebitda_margin": 0.2,
+        "fy": 2025,
+    }
+    row = rc._row("AAA", fin, 20.0, is_subject=True, name="Aaa")
+    assert row["ps"] == 1.0
+    assert row["pe"] == 10.0
+    assert row["ev_ebitda"] == 5.0
+    assert row["fcf_yield"] == 0.05
+    assert row["ebitda_margin_pct"] == 20.0
+    empty = rc._row("BBB", {}, None, is_subject=False)
+    assert empty["ps"] is None
+    assert empty["pe"] is None
+    assert empty["ev_ebitda"] is None
+    assert empty["fcf_yield"] is None
+    assert empty["ebitda_margin_pct"] is None
+    assert empty["rev_yoy_pct"] is None
+
+
 def test_comps_header_detector():
     assert rc._is_comps_header("| Ticker | P/E | EV/EBITDA | FCF yield |")
     assert rc._is_comps_header(

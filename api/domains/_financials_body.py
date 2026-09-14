@@ -4211,6 +4211,32 @@ def _build_peer_comps(tk: str, subject_metrics: dict, limit: int = 8) -> dict:
         return out
 
 
+@app.get("/api/financials/{ticker}/comps")
+def financials_comps(ticker: str, request: Request, limit: int = 8):
+    """Last-reported-FY competitor multiples from company_financials + live last.
+
+    Market Pulse Comps chip. Not NTM, not (E). Missing cells stay null (UI: n/a).
+    """
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+    try:
+        lim = int(limit or 8)
+    except (TypeError, ValueError):
+        lim = 8
+    lim = max(1, min(lim, 16))
+    try:
+        import research_comps as _rc
+        data = _rc.load(tk, limit=lim)
+    except Exception as e:
+        print(f"[fin-comps] {tk}: {e!s:.160}", flush=True)
+        raise HTTPException(500, f"comps failed: {e!s:.160}") from e
+    return {"ok": True, **(data or {})}
+
+
 @app.get("/api/financials/{ticker}/dashboard")
 def financials_dashboard(ticker: str, request: Request, period_type: str = "annual"):
     """Chart-ready company dashboard: fundamentals series, ROIC/WACC, DGA Score,

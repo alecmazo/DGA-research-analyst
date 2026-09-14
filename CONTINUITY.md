@@ -186,6 +186,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **DCF User share count** | **`ui603-20260911-dcf-shares`** | Valuation DCF User uses SEC diluted shares (BSX 7.1m leftover → ~1.5bn); drop insane stored $/share on pulse |
 | **Fund account menus** | **`ui604-20260912-fund-menus`** | SUP_20260912_9de2a14e — account switcher + Download pulldown; chart/table and monthly/quarterly/annual selects |
 | **Continuity kit** | **`ui605-20260914-continuity-kit`** | Settings handoff is a short briefing + downloadable product log (`docs/continuity/PRODUCT_LOG.md`) and version log |
+| **Pulse three chips** | **`ui606-20260914-pulse-comps`** | SUP_20260914_1f66fa9d — Market Pulse tags are DCF / Comps / Street only; Comps opens last-FY `company_financials` peer window (n/a if missing) |
 
 ### One-click handoff (preferred)
 
@@ -363,4 +364,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui605-20260914-continuity-kit` · Next: `ui606-YYYYMMDD-slug`*
+*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui606-20260914-pulse-comps` · Next: `ui607-YYYYMMDD-slug`*

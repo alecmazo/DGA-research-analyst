@@ -125,6 +125,7 @@ def _row(tkr: str, fin: dict, price: Optional[float], *, is_subject: bool, name:
     pe_nm = bool(eps is not None and eps <= 0 and price is not None)
     ev_eb = (ev / ebitda) if (ev is not None and ebitda and ebitda > 0) else None
     ev_sales = (ev / rev) if (ev is not None and rev and rev > 0) else None
+    ps = (mkt / rev) if (mkt is not None and rev and rev > 0) else None
     fcf_y = (fcf / mkt) if (fcf is not None and mkt and mkt > 0) else None
     nm = _f(fin.get("net_margin"))
     if nm is not None and abs(nm) <= 2:
@@ -160,6 +161,7 @@ def _row(tkr: str, fin: dict, price: Optional[float], *, is_subject: bool, name:
         "pe_nm": pe_nm,
         "ev_ebitda": round(ev_eb, 1) if ev_eb is not None else None,
         "ev_sales": round(ev_sales, 1) if ev_sales is not None else None,
+        "ps": round(ps, 1) if ps is not None else None,
         "fcf_yield": round(fcf_y, 4) if fcf_y is not None else None,
         "net_margin_pct": round(nm_pct, 1) if nm_pct is not None else None,
         "ebitda_margin_pct": round(ebitda_mgn, 1) if ebitda_mgn is not None else None,
