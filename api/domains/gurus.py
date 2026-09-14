@@ -41,6 +41,54 @@ GURU_SEED = [
         "firm": "Icahn Capital",
         "cik": "0000921669",
     },
+    {
+        "id": "druckenmiller",
+        "name": "Stanley Druckenmiller",
+        "firm": "Duquesne Family Office LLC",
+        "cik": "0001536411",
+    },
+    {
+        "id": "loeb",
+        "name": "Daniel Loeb",
+        "firm": "Third Point LLC",
+        "cik": "0001040273",
+    },
+    {
+        "id": "einhorn",
+        "name": "David Einhorn",
+        "firm": "Greenlight Capital (DME Capital Management)",
+        "cik": "0001489933",
+    },
+    {
+        "id": "tepper",
+        "name": "David Tepper",
+        "firm": "Appaloosa LP",
+        "cik": "0001656456",
+    },
+    {
+        "id": "marks",
+        "name": "Howard Marks",
+        "firm": "Oaktree Capital Management LP",
+        "cik": "0000949509",
+    },
+    {
+        "id": "burry",
+        "name": "Michael Burry",
+        "firm": "Scion Asset Management, LLC",
+        "cik": "0001649339",
+    },
+    {
+        "id": "paulson",
+        "name": "John Paulson",
+        "firm": "Paulson & Co. Inc.",
+        "cik": "0001035674",
+    },
+    {
+        "id": "klarman",
+        "name": "Seth Klarman",
+        "firm": "The Baupost Group",
+        "cik": "0001061768",
+    },
 ]
 
 _ISSUER_TICKER = {
@@ -57,7 +105,6 @@ _ISSUER_TICKER = {
     "RESTAURANT BRANDS": "QSR",
     "HILTON WORLDWIDE": "HLT",
     "CHIPOTLE": "CMG",
-    "ALPHABET": "GOOGL",
     "CANADIAN PACIFIC": "CP",
     "HOWARD HUGHES": "HHH",
     "NIKE": "NKE",
@@ -74,6 +121,35 @@ _ISSUER_TICKER = {
     "DAVITA": "DVA",
     "CVR ENERGY": "CVI",
     "ICAHN ENTERPRISES": "IEP",
+    "CHUBB": "CB",
+    "DELTA AIR": "DAL",
+    "SIRIUS XM": "SIRI",
+    "SIRIUSXM": "SIRI",
+    "VERISIGN": "VRSN",
+    "KROGER": "KR",
+    "NVIDIA": "NVDA",
+    "TESLA": "TSLA",
+    "NETFLIX": "NFLX",
+    "BROADCOM": "AVGO",
+    "TAIWAN SEMICONDUCTOR": "TSM",
+    "ELI LILLY": "LLY",
+    "UNITEDHEALTH": "UNH",
+    "JPMORGAN": "JPM",
+    "VISA": "V",
+    "MASTERCARD": "MA",
+    "EXXON": "XOM",
+    "WALMART": "WMT",
+    "COSTCO": "COST",
+    "HOME DEPOT": "HD",
+    "ORACLE": "ORCL",
+    "SALESFORCE": "CRM",
+    "PALANTIR": "PLTR",
+    "CONSTELLATION ENERGY": "CEG",
+    "GE VERNOVA": "GEV",
+    "VISTRA": "VST",
+    "SPDR S P 500": "SPY",
+    "INVESCO QQQ": "QQQ",
+    "BERKSHIRE": "BRK.B",
 }
 
 
@@ -138,10 +214,19 @@ def _f(v: Any) -> Optional[float]:
         return None
 
 
-def ticker_from_issuer(name: str) -> Optional[str]:
+def ticker_from_issuer(name: str, title: str = "") -> Optional[str]:
     n = " ".join((name or "").upper().replace(".", " ").replace(",", " ").split())
+    t = " ".join((title or "").upper().replace(".", " ").replace(",", " ").split())
     if not n:
         return None
+    if "ALPHABET" in n:
+        if "CL C" in t or "CLASS C" in t:
+            return "GOOG"
+        return "GOOGL"
+    if "BERKSHIRE" in n:
+        if "CL A" in t or "CLASS A" in t:
+            return "BRK.A"
+        return "BRK.B"
     for needle, tk in _ISSUER_TICKER.items():
         if needle in n:
             return tk
@@ -176,7 +261,7 @@ def parse_13f_infotable(xml_text: str) -> list[dict]:
             "issuer": issuer,
             "title": title,
             "cusip": cusip,
-            "symbol": ticker_from_issuer(issuer),
+            "symbol": ticker_from_issuer(issuer, title),
             "value_k": value_k,
             "shares": shares,
             "put_call": put_call,

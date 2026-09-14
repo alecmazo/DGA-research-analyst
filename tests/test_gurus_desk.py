@@ -107,6 +107,36 @@ def test_parse_form4_buy():
     assert rows[0]["shares"] == 1000
 
 
+def test_guru_seed_new_names():
+    ids = {g["id"] for g in g.GURU_SEED}
+    assert {
+        "druckenmiller",
+        "loeb",
+        "einhorn",
+        "tepper",
+        "marks",
+        "burry",
+        "paulson",
+        "klarman",
+    } <= ids
+    by = {row["id"]: row["cik"] for row in g.GURU_SEED}
+    assert by["druckenmiller"] == "0001536411"
+    assert by["loeb"] == "0001040273"
+    assert by["einhorn"] == "0001489933"
+    assert by["tepper"] == "0001656456"
+    assert by["marks"] == "0000949509"
+    assert by["burry"] == "0001649339"
+    assert by["paulson"] == "0001035674"
+    assert by["klarman"] == "0001061768"
+    assert by["paulson"] != "0001037389"  # that CIK is Renaissance
+
+
+def test_alphabet_share_class_tickers():
+    assert g.ticker_from_issuer("ALPHABET INC", "CAP STK CL C") == "GOOG"
+    assert g.ticker_from_issuer("ALPHABET INC", "CAP STK CL A") == "GOOGL"
+    assert g.ticker_from_issuer("CHUBB LIMITED") == "CB"
+
+
 def test_nav_has_lab_accounts_gurus():
     top = (ROOT / "web/gp-app/src/components/layout/Topbar.tsx").read_text()
     assert 'label="Gurus"' in top or "label: 'Gurus'" in top
@@ -129,3 +159,8 @@ def test_nav_has_lab_accounts_gurus():
     assert "api.gurufocus.com" not in body
     assert "data.sec.gov" in body
     assert "0001336528" in body
+    page = (ROOT / "web/gp-app/src/pages/GurusPage.tsx").read_text()
+    assert "kpiOpen" in page
+    assert "aria-expanded" in page
+    assert "lineLbl" in page
+    assert "KpiDetail" in page

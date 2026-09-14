@@ -76,24 +76,54 @@ function BarChart({
   )
 }
 
+const FLOW_COLORS = ['#0a1628', '#5bb8d4', '#047857', '#b91c1c', '#d97706', '#7c3aed']
+
+type KpiId = 'equity' | 'names' | 'new' | 'turnover' | 'top5' | 'hhi'
+
 function HistoryChart({ data }: { data: History | null }) {
   const dates = data?.dates || []
   const series = data?.series || []
   if (dates.length < 2 || !series.length) {
     return <div className={styles.muted}>Need at least two 13F quarters for a time-flow chart.</div>
   }
-  const W = 640
-  const H = 220
-  const pad = { l: 36, r: 8, t: 12, b: 28 }
+  const W = 720
+  const H = 240
+  const pad = { l: 36, r: 72, t: 14, b: 28 }
   const innerW = W - pad.l - pad.r
   const innerH = H - pad.t - pad.b
-  const colors = ['#0a1628', '#5bb8d4', '#047857', '#b91c1c', '#d97706', '#7c3aed']
   const max = Math.max(
     8,
     ...series.flatMap((s) => (s.weights || []).map((v) => Number(v) || 0)),
   )
   const x = (i: number) => pad.l + (i / Math.max(1, dates.length - 1)) * innerW
   const y = (v: number) => pad.t + innerH - (v / max) * innerH
+  const labels = series
+    .map((s, si) => {
+      const weights = s.weights || []
+      let lastI = -1
+      let lastV = 0
+      weights.forEach((v, i) => {
+        if (v != null && Number.isFinite(Number(v))) {
+          lastI = i
+          lastV = Number(v)
+        }
+      })
+      if (lastI < 0) return null
+      return {
+        key: s.key,
+        color: FLOW_COLORS[si % FLOW_COLORS.length],
+        x: x(lastI),
+        y: y(lastV),
+        atEnd: lastI === dates.length - 1,
+      }
+    })
+    .filter((v): v is NonNullable<typeof v> => v != null)
+    .sort((a, b) => a.y - b.y)
+  for (let i = 1; i < labels.length; i++) {
+    if (labels[i].y - labels[i - 1].y < 12) {
+      labels[i] = { ...labels[i], y: labels[i - 1].y + 12 }
+    }
+  }
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className={styles.svg} role="img">
       {[0, 0.25, 0.5, 0.75, 1].map((t) => {
@@ -117,12 +147,26 @@ function HistoryChart({ data }: { data: History | null }) {
           <polyline
             key={s.key}
             fill="none"
-            stroke={colors[si % colors.length]}
+            stroke={FLOW_COLORS[si % FLOW_COLORS.length]}
             strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
             points={pts}
           />
         )
       })}
+      {labels.map((lb) => (
+        <text
+          key={lb.key}
+          x={lb.atEnd ? lb.x + 6 : lb.x + 4}
+          y={lb.y + 3}
+          className={styles.lineLbl}
+          fill={lb.color}
+          textAnchor="start"
+        >
+          {lb.key}
+        </text>
+      ))}
       {dates.map((d, i) => (
         <text key={d} x={x(i)} y={H - 8} className={styles.axis} textAnchor="middle">
           {d.slice(0, 7)}
@@ -132,11 +176,125 @@ function HistoryChart({ data }: { data: History | null }) {
   )
 }
 
+function holdingLabel(h: Holding): string {
+  return h.symbol || (h.issuer || '—').slice(0, 22)
+}
+
+function KpiDetail({
+  id,
+  holdings,
+  trades,
+  kpis,
+}: {
+  id: KpiId
+  holdings: Holding[]
+  trades: Holding[]
+  kpis?: Summary['kpis']
+}) {
+  const live = holdings.filter((h) => (h.action || '') !== 'Sold Out')
+  const byWt = [...live].sort((a, b) => (b.weight_pct || 0) - (a.weight_pct || 0))
+  const byVal = [...live].sort((a, b) => (b.value_k || 0) - (a.value_k || 0))
+  const news = live.filter((h) => h.action === 'New Buy')
+  const turned = (trades.length ? trades : holdings).filter((h) =>
+    ['New Buy', 'Add', 'Reduce', 'Sold Out'].includes(h.action || ''),
+  )
+  const top5 = byWt.slice(0, 5)
+  const hhiRows = byWt.map((h) => {
+    const w = (h.weight_pct || 0) / 100
+    return { h, w2: w * w }
+  })
+
+  if (id === 'equity') {
+    return (
+      <>
+        <p className={styles.detailLead}>
+          13F reported long US equity {fmtCap((kpis?.equity_k || 0) * 1000)} across {live.length}{' '}
+          names. Top by value:
+        </p>
+        <HoldingsTable rows={byVal.slice(0, 12)} />
+      </>
+    )
+  }
+  if (id === 'names') {
+    return (
+      <>
+        <p className={styles.detailLead}>{live.length} names in the latest 13F (click ticker for Financials).</p>
+        <HoldingsTable rows={byWt} />
+      </>
+    )
+  }
+  if (id === 'new') {
+    return news.length ? (
+      <>
+        <p className={styles.detailLead}>{news.length} new buy{news.length === 1 ? '' : 's'} vs the prior 13F.</p>
+        <HoldingsTable rows={news} />
+      </>
+    ) : (
+      <p className={styles.muted}>No new buys this quarter.</p>
+    )
+  }
+  if (id === 'turnover') {
+    return turned.length ? (
+      <>
+        <p className={styles.detailLead}>
+          Turnover proxy {kpis?.turnover_proxy != null ? `${kpis.turnover_proxy}%` : '—'} is half the
+          sum of absolute weight impacts from New Buy / Add / Reduce / Sold Out.
+        </p>
+        <HoldingsTable rows={turned} />
+      </>
+    ) : (
+      <p className={styles.muted}>No QoQ adds, cuts, or exits in the cached 13F.</p>
+    )
+  }
+  if (id === 'top5') {
+    return (
+      <>
+        <p className={styles.detailLead}>
+          Top 5 are {kpis?.top5_pct != null ? `${kpis.top5_pct}%` : '—'} of the book.
+        </p>
+        <HoldingsTable rows={top5} />
+      </>
+    )
+  }
+  return (
+    <>
+      <p className={styles.detailLead}>
+        HHI {kpis?.hhi != null ? kpis.hhi.toFixed(3) : '—'} = sum of squared weights. 0 is many small
+        names; 1 is a single name.
+        {(kpis?.hhi || 0) >= 0.25
+          ? ' This book is concentrated.'
+          : (kpis?.hhi || 0) >= 0.15
+            ? ' Moderate concentration.'
+            : ' Relatively diversified for a 13F.'}
+      </p>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th className="tabular">Weight</th>
+            <th className="tabular">w²</th>
+          </tr>
+        </thead>
+        <tbody>
+          {hhiRows.map((r, i) => (
+            <tr key={`${holdingLabel(r.h)}-${i}`}>
+              <td>{holdingLabel(r.h)}</td>
+              <td className="tabular">{(r.h.weight_pct || 0).toFixed(1)}%</td>
+              <td className="tabular">{r.w2.toFixed(4)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  )
+}
+
 export function GurusPage() {
   const [gurus, setGurus] = useState<Guru[]>([])
   const [gid, setGid] = useState('ackman')
   const [tab, setTab] = useState<'summary' | 'activity' | 'portfolio'>('summary')
   const [freq, setFreq] = useState<'q' | 'y'>('q')
+  const [kpiOpen, setKpiOpen] = useState<KpiId | null>(null)
   const [sum, setSum] = useState<Summary | null>(null)
   const [activity, setActivity] = useState<{
     trades?: Holding[]
@@ -198,6 +356,7 @@ export function GurusPage() {
   }, [loadList])
 
   useEffect(() => {
+    setKpiOpen(null)
     void loadGuru(gid)
   }, [gid, loadGuru])
 
@@ -254,9 +413,10 @@ export function GurusPage() {
             onChange={(e) => setGid(e.target.value)}
             aria-label="Select guru"
           >
-            {(gurus.length ? gurus : [{ id: 'ackman', name: 'Bill Ackman' }]).map((x) => (
+            {(gurus.length ? gurus : [{ id: 'ackman', name: 'Bill Ackman', firm: '' }]).map((x) => (
               <option key={x.id} value={x.id}>
                 {x.name}
+                {x.firm ? ` — ${x.firm}` : ''}
               </option>
             ))}
           </select>
@@ -294,20 +454,37 @@ export function GurusPage() {
       {!loading && tab === 'summary' && (
         <>
           <div className={styles.kpis}>
-            {[
-              ['Equity', fmtCap((k?.equity_k || 0) * 1000)],
-              ['Names', String(k?.n ?? '—')],
-              ['New buys', String(k?.n_new ?? '—')],
-              ['Turnover ~', k?.turnover_proxy != null ? `${k.turnover_proxy}%` : '—'],
-              ['Top 5', k?.top5_pct != null ? `${k.top5_pct}%` : '—'],
-              ['HHI', k?.hhi != null ? k.hhi.toFixed(3) : '—'],
-            ].map(([lab, val]) => (
-              <div key={lab} className={styles.kpi}>
+            {(
+              [
+                ['equity', 'Equity', fmtCap((k?.equity_k || 0) * 1000)],
+                ['names', 'Names', String(k?.n ?? '—')],
+                ['new', 'New buys', String(k?.n_new ?? '—')],
+                [
+                  'turnover',
+                  'Turnover ~',
+                  k?.turnover_proxy != null ? `${k.turnover_proxy}%` : '—',
+                ],
+                ['top5', 'Top 5', k?.top5_pct != null ? `${k.top5_pct}%` : '—'],
+                ['hhi', 'HHI', k?.hhi != null ? k.hhi.toFixed(3) : '—'],
+              ] as [KpiId, string, string][]
+            ).map(([id, lab, val]) => (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.kpi} ${kpiOpen === id ? styles.kpiOn : ''}`}
+                aria-expanded={kpiOpen === id}
+                onClick={() => setKpiOpen((cur) => (cur === id ? null : id))}
+              >
                 <span>{lab}</span>
                 <strong className="tabular">{val}</strong>
-              </div>
+              </button>
             ))}
           </div>
+          {kpiOpen && (
+            <div className={styles.kpiDetail}>
+              <KpiDetail id={kpiOpen} holdings={holdings} trades={trades} kpis={k} />
+            </div>
+          )}
           <section className={styles.card}>
             <h2>Position weights</h2>
             <BarChart rows={bars} />
@@ -328,7 +505,7 @@ export function GurusPage() {
             <div className={styles.legend}>
               {(hist?.series || []).map((s, i) => (
                 <span key={s.key}>
-                  <i style={{ background: ['#0a1628', '#5bb8d4', '#047857', '#b91c1c', '#d97706', '#7c3aed'][i % 6] }} />
+                  <i style={{ background: FLOW_COLORS[i % FLOW_COLORS.length] }} />
                   {s.key}
                 </span>
               ))}

@@ -152,7 +152,7 @@ Sector / GuruFocus boards. Date first added, cost, split-adjusted since-add %, n
 
 ### 5.3b Gurus (`/gurus`)
 
-SEC EDGAR 13F-HR (stored) + Form 4 / SC 13D/G index. Default **Bill Ackman / Pershing Square** (CIK 0001336528). Summary / Activity / Portfolio tabs. **No GuruFocus API** — GF is the workflow template only. Refresh pulls EDGAR.
+SEC EDGAR 13F-HR (stored) + Form 4 / SC 13D/G index. Roster: Ackman, Buffett, Icahn, Druckenmiller (Duquesne), Loeb (Third Point), Einhorn (Greenlight / DME), Tepper (Appaloosa), Marks (Oaktree), Burry (Scion), Paulson, Klarman (Baupost). Summary KPI tiles expand on click. Time-flow lines labeled with tickers. **No GuruFocus API** — GF is the workflow template only. Refresh pulls EDGAR.
 
 ### 5.4 Podcasts (`/podcasts`)
 
