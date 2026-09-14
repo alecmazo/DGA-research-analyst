@@ -30,9 +30,10 @@ def test_ticket_description_aliases():
     assert st._ticket_description({}) == ""
 
 
-def test_screenshot_never_dropped_for_size():
-    """Desk needs the page shot — there is no size cap that clears it."""
-    assert not hasattr(st, "_SUPPORT_SCREENSHOT_MAX")
+def test_screenshot_cap_omits_image_not_ticket():
+    """Oversized shots are dropped; the ticket description is still filed."""
+    assert st._SUPPORT_SCREENSHOT_MAX >= 500_000
+    assert "image/jpeg" in st._SUPPORT_SHOT_MIME
 
 
 def test_open_count_route_and_statuses():

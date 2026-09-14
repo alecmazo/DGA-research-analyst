@@ -194,6 +194,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Gurus + nav regroup** | **`ui611-20260914-gurus-lab`** | Topbar: Gurus + Lab▾ (Podcasts/Transcripts) + Accounts▾ (book/positions/options/memos). Gurus desk is SEC 13F/Form 4 (Ackman first); GF is UX only |
 | **Nav menus visible** | **`ui612-20260914-nav-menus`** | Lab/Accounts pulldowns use position:fixed — nav overflow no longer clips the panel |
 | **Gurus KPI + roster** | **`ui613-20260914-gurus-expand`** | SUP_20260914_78a40a9f — click Equity/Names/New buys/Turnover/Top 5/HHI to expand; ticker labels on time-flow lines; add Druckenmiller/Loeb/Einhorn/Tepper/Marks/Burry/Paulson/Klarman |
+| **Public surface harden** | **`ui614-20260914-sec-harden`** | Close /docs /redoc /openapi.json; diagnostics GP-only; CORS allowlist; security headers; login rate-limit by IP + v1; cap support screenshot size |
 
 ### One-click handoff (preferred)
 
@@ -381,4 +382,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui613-20260914-gurus-expand` · Next: `ui614-YYYYMMDD-slug`*
+*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui614-20260914-sec-harden` · Next: `ui615-YYYYMMDD-slug`*

@@ -19,6 +19,10 @@ router = APIRouter(tags=["support"])
 # Unsolved tickets the GP desk light and agent inbox both treat as "needs a fix".
 _OPEN_TICKET_STATUSES = ("open", "diagnosing", "diagnosed", "in_progress")
 _OPEN_STATUS_SQL = ", ".join("'" + s + "'" for s in _OPEN_TICKET_STATUSES)
+# Cap stored screenshot so a huge paste cannot fill Postgres. The ticket
+# itself is still filed; only the image is omitted.
+_SUPPORT_SCREENSHOT_MAX = 2_000_000  # ~1.5 MB decoded JPEG
+_SUPPORT_SHOT_MIME = frozenset({"image/jpeg", "image/jpg", "image/png", "image/webp"})
 
 
 class _Bag:
@@ -549,7 +553,9 @@ def support_ticket_create(
     if len(desc) > 8000:
         desc = desc[:8000]
     shot = body.get("screenshot_b64") or body.get("screenshot") or ""
-    if isinstance(shot, str) and shot.startswith("data:"):
+    if not isinstance(shot, str):
+        shot = ""
+    if shot.startswith("data:"):
         # data:image/jpeg;base64,....
         try:
             header, b64 = shot.split(",", 1)
@@ -560,7 +566,17 @@ def support_ticket_create(
             shot = ""
     else:
         mime = (body.get("screenshot_mime") or "image/jpeg").strip() or "image/jpeg"
-    if shot:
+    mime = (mime or "image/jpeg").split(";")[0].strip().lower()
+    if mime == "image/jpg":
+        mime = "image/jpeg"
+    if mime not in _SUPPORT_SHOT_MIME:
+        mime = "image/jpeg"
+    shot_omitted = False
+    if shot and len(shot) > _SUPPORT_SCREENSHOT_MAX:
+        print(f"[support] omitting oversized screenshot ({len(shot)} chars)", flush=True)
+        shot = ""
+        shot_omitted = True
+    elif shot:
         print(f"[support] keeping screenshot ({len(shot)} chars)", flush=True)
     tid = "SUP_" + datetime.utcnow().strftime("%Y%m%d_") + _uuid.uuid4().hex[:8]
     role = str(claims.get("role") or "gp").lower()
@@ -578,7 +594,8 @@ def support_ticket_create(
         claims.get("email") or claims.get("sub") or role,
         "submitted",
         f"Ticket filed from {surface} with "
-        + ("screenshot" if shot else "no screenshot") + ".")]
+        + ("screenshot omitted (too large)" if shot_omitted
+           else ("screenshot" if shot else "no screenshot")) + ".")]
     _ensure_support_tickets_table()
     try:
         with B._fund_conn() as conn, conn.cursor() as cur:

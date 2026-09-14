@@ -47,21 +47,28 @@ import hmac
 from collections import defaultdict
 
 # ── Login rate-limiting (in-memory, resets on restart) ──────────────────────
-_LOGIN_ATTEMPTS: dict = defaultdict(list)   # email → [epoch timestamps]
-_LOGIN_MAX       = 5        # max failures before lockout
+_LOGIN_ATTEMPTS: dict = defaultdict(list)   # key → [epoch timestamps]
+_LOGIN_MAX       = 5        # max failures per email before lockout
+_LOGIN_IP_MAX    = 25       # max failures per IP across emails (spray)
 _LOGIN_WINDOW    = 900      # 15-minute sliding window (seconds)
 
-def _rl_allowed(email: str) -> bool:
-    """Return True if this email is NOT rate-limited."""
+def _client_ip(request: Request) -> str:
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if xff:
+        return xff[:64]
+    return ((request.client.host if request.client else "unknown") or "unknown")[:64]
+
+def _rl_allowed(key: str, max_n: int = _LOGIN_MAX) -> bool:
+    """Return True if this key is NOT rate-limited."""
     now = time.time()
-    _LOGIN_ATTEMPTS[email] = [t for t in _LOGIN_ATTEMPTS[email] if now - t < _LOGIN_WINDOW]
-    return len(_LOGIN_ATTEMPTS[email]) < _LOGIN_MAX
+    _LOGIN_ATTEMPTS[key] = [t for t in _LOGIN_ATTEMPTS[key] if now - t < _LOGIN_WINDOW]
+    return len(_LOGIN_ATTEMPTS[key]) < max_n
 
-def _rl_record_failure(email: str):
-    _LOGIN_ATTEMPTS[email].append(time.time())
+def _rl_record_failure(key: str):
+    _LOGIN_ATTEMPTS[key].append(time.time())
 
-def _rl_clear(email: str):
-    _LOGIN_ATTEMPTS.pop(email, None)
+def _rl_clear(key: str):
+    _LOGIN_ATTEMPTS.pop(key, None)
 
 # ── Audit log ────────────────────────────────────────────────────────────────
 _AUDIT_PATH = Path(__file__).resolve().parent.parent / "audit.log"
@@ -1312,33 +1319,74 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import DGA_analyst as analyst
 
-app = FastAPI(title="DGA Research Analyst API", version="1.0.0")
+# Swagger / OpenAPI map every admin route. Off in production; set ENABLE_API_DOCS=1
+# only on a throwaway box if you need to browse the schema.
+_ENABLE_API_DOCS = (os.environ.get("ENABLE_API_DOCS") or "").strip().lower() in (
+    "1", "true", "yes",
+)
+app = FastAPI(
+    title="DGA Research Analyst API",
+    version="1.0.0",
+    docs_url="/docs" if _ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if _ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if _ENABLE_API_DOCS else None,
+)
 
 # Compress every response ≥1 KB. The GP shell is ~1 MB of raw HTML and JSON
 # payloads (positions, overview) are large — gzip cuts transfer ~5-7x.
 from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
+_CORS_ORIGINS = [
+    "https://portfolio.dgacapital.com",
+    "https://dga-portfolio.up.railway.app",
+    "https://sliw.edytasliwinska.com",
+    "https://weddings.edytasliwinska.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+_extra_cors = (os.environ.get("CORS_EXTRA_ORIGINS") or "").strip()
+if _extra_cors:
+    _CORS_ORIGINS.extend(o.strip() for o in _extra_cors.split(",") if o.strip())
+
 app.add_middleware(
     CORSMiddleware,
-    # Wildcard is intentional — the API is consumed by:
-    #   • https://dga-portfolio.up.railway.app       (current Railway URL)
-    #   • https://portfolio.dgacapital.com           (new custom domain, ui65+)
-    #   • iOS app via Expo runtime                   (mobile)
-    # All auth happens via tokens in the x-auth-token / x-auth-v2-token
-    # headers, not cookies — so wildcard is safe here and credentials are
-    # never sent cross-origin via the browser's credentials channel.
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    # Explicit origins only. Native iOS/Expo does not use CORS. Tokens travel
+    # in headers (not cookies), so credentials is off — a reflected * +
+    # credentials=True was letting any website read public API responses.
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+_SEC_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "X-DNS-Prefetch-Control": "off",
+}
+
+
+def _apply_sec_headers(request: Request, response):
+    for k, v in _SEC_HEADERS.items():
+        response.headers.setdefault(k, v)
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "").lower()
+    if proto == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains",
+        )
+    return response
 
 # ---------------------------------------------------------------------------
 # Auth — stateless HMAC token (survives restarts, no DB needed)
 # ---------------------------------------------------------------------------
 _PUBLIC_PATHS = {
-    "/health", "/healthz", "/info", "/api/auth", "/api/build", "/api/diagnostics", "/",
+    "/health", "/healthz", "/info", "/api/auth", "/api/build", "/",
     "/api/auth/v2/login",   # email+password login is unauthenticated by design
     # Free macro RSS wire — no PII, no LLM. Public so mobile never blanks
     # the Research card on a missing/expired JWT (common with v2-only sessions).
@@ -1860,9 +1908,17 @@ class AuthRequest(BaseModel):
     password: str
 
 @app.post("/api/auth")
-def auth(req: AuthRequest):
+def auth(req: AuthRequest, request: Request):
+    ip = _client_ip(request)
+    if not _rl_allowed(f"v1|{ip}", _LOGIN_IP_MAX):
+        _audit("login_v1", "", ip, False, "rate_limited")
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed attempts. Please wait 15 minutes and try again.",
+        )
     if hmac.compare_digest(req.password.strip(), _portfolio_password()):
         return {"token": _make_token(req.password.strip())}
+    _rl_record_failure(f"v1|{ip}")
     raise HTTPException(status_code=401, detail="Invalid password")
 
 
@@ -1891,9 +1947,9 @@ def auth_v2_login(req: AuthV2LoginRequest, request: Request):
     carrying role + scope (fund memberships, managed accounts).
     Rate-limited: 5 failures per email per 15 minutes → 429."""
     email = req.email.strip().lower()
-    ip    = (request.client.host if request.client else "unknown")
+    ip    = _client_ip(request)
 
-    if not _rl_allowed(email):
+    if not _rl_allowed(email) or not _rl_allowed(f"ip|{ip}", _LOGIN_IP_MAX):
         _audit("login", email, ip, False, "rate_limited")
         raise HTTPException(
             status_code=429,
@@ -1903,6 +1959,7 @@ def auth_v2_login(req: AuthV2LoginRequest, request: Request):
     result = auth_v2_mod.login(email, req.password)
     if not result:
         _rl_record_failure(email)
+        _rl_record_failure(f"ip|{ip}")
         _audit("login", email, ip, False, "bad_credentials")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -8071,7 +8128,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui613-20260914-gurus-expand"
+WEB_BUILD_VERSION = "ui614-20260914-sec-harden"
 
 
 @app.get("/api/build")
@@ -8788,10 +8845,14 @@ def health_data():
 
 
 @app.get("/api/diagnostics")
-def diagnostics():
+def diagnostics(request: Request):
     """Return non-secret config info so we can verify env vars are set
     without exposing the actual values.  Used to debug Gamma / Dropbox /
-    Drive integrations on Railway."""
+    Drive integrations on Railway. GP/admin only — was public and mapped
+    which vendor keys are live."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(status_code=403, detail="GP role required")
     def _is_set(name: str) -> bool:
         return bool((os.environ.get(name, "") or "").strip())
     return {
@@ -41190,6 +41251,13 @@ if BRANDING_DIR.exists():
 
 if WEB_DIR.exists():
     app.mount("/app", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    """Outermost so 401s from auth still get clickjacking / MIME / HSTS headers."""
+    response = await call_next(request)
+    return _apply_sec_headers(request, response)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
