@@ -128,3 +128,35 @@ def test_pulse_windows_support_export_and_stats():
     assert "/api/financials/{ticker}/comps.xlsx" in api
     assert "/api/desk/window-email" in api
     assert "A valid recipient email is required" in api
+
+
+def test_desk_actions_are_one_pulldown():
+    board = (ROOT / "web/gp-app/src/components/desk/DeskBoard.tsx").read_text()
+    assert 'aria-label="Desk actions"' in board
+    assert 'value="refresh"' in board
+    assert 'value="collapse"' in board
+    assert 'value="expand"' in board
+    assert 'value="reset"' in board
+    assert "Collapse all" in board
+    assert "Expand all" in board
+    assert "Reset layout" in board
+    assert "TicketStatusDot" in board
+    assert 'className={styles.resetBtn}' not in board
+    desk = (ROOT / "web/gp-app/src/pages/DeskPage.tsx").read_text()
+    assert "onRefresh" in desk
+    assert "extraActions" not in desk
+
+
+def test_pulse_row_shows_cap_rev_ni_fcf():
+    pulse = (ROOT / "web/gp-app/src/components/desk/MarketPulse.tsx").read_text()
+    assert "PulseFundLine" in pulse
+    assert "/api/financials/metrics" in pulse
+    assert "fmtCap" in pulse
+    assert "Rev " in pulse
+    assert "NI " in pulse
+    assert "FCF " in pulse
+    body = (ROOT / "api/domains/_financials_body.py").read_text()
+    assert '/api/financials/metrics' in body
+    assert "metrics_batch" in body
+    rc = (ROOT / "research_comps.py").read_text()
+    assert "def metrics_batch" in rc

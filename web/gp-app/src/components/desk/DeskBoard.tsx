@@ -187,9 +187,18 @@ type Props = {
   title?: ReactNode
   meta?: ReactNode
   extraActions?: ReactNode
+  onRefresh?: () => void
+  refreshBusy?: boolean
 }
 
-export function DeskBoard({ cards, title, meta, extraActions }: Props) {
+export function DeskBoard({
+  cards,
+  title,
+  meta,
+  extraActions,
+  onRefresh,
+  refreshBusy,
+}: Props) {
   const [layout, setLayout] = useState<DeskLayoutMap>(() => loadLayout())
   const boardRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
@@ -355,25 +364,29 @@ export function DeskBoard({ cards, title, meta, extraActions }: Props) {
         </div>
         <div className={styles.hintActions}>
           {extraActions}
-          <button
-            type="button"
-            className={styles.resetBtn}
-            onClick={() => setAllCollapsed(true)}
-            title="Collapse every desk card"
+          <select
+            className={styles.deskPull}
+            value=""
+            disabled={refreshBusy}
+            aria-label="Desk actions"
+            title="Refresh, collapse, expand, or reset layout"
+            onChange={(e) => {
+              const v = e.target.value
+              e.currentTarget.value = ''
+              if (v === 'refresh') onRefresh?.()
+              else if (v === 'collapse') setAllCollapsed(true)
+              else if (v === 'expand') setAllCollapsed(false)
+              else if (v === 'reset') reset()
+            }}
           >
-            Collapse all
-          </button>
-          <button
-            type="button"
-            className={styles.resetBtn}
-            onClick={() => setAllCollapsed(false)}
-            title="Expand every desk card"
-          >
-            Expand all
-          </button>
-          <button type="button" className={styles.resetBtn} onClick={reset}>
-            Reset layout
-          </button>
+            <option value="" disabled>
+              {refreshBusy ? 'Desk…' : 'Desk'}
+            </option>
+            <option value="refresh">Refresh</option>
+            <option value="collapse">Collapse all</option>
+            <option value="expand">Expand all</option>
+            <option value="reset">Reset layout</option>
+          </select>
           <TicketStatusDot />
         </div>
       </div>

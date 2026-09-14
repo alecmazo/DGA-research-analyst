@@ -2618,6 +2618,22 @@ if os.environ.get("MARKET_AUTOSYNC", "1") != "0":
         print(f"[market autosync] failed to start: {_e!s:.150}", flush=True)
 
 
+@app.get("/api/financials/metrics")
+def financials_metrics_batch(request: Request, tickers: str = ""):
+    """Last-FY revenue / NI / FCF + live market cap for Market Pulse rows."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    raw = [t.strip().upper() for t in (tickers or "").split(",") if t.strip()]
+    try:
+        import research_comps as _rc
+        rows = _rc.metrics_batch(raw)
+    except Exception as e:
+        print(f"[fin-metrics] {e!s:.160}", flush=True)
+        rows = {}
+    return {"ok": True, "metrics": rows, "count": len(rows)}
+
+
 @app.get("/api/financials/coverage")
 def financials_coverage(request: Request):
     """What's in the store: per-ticker period counts and date range."""

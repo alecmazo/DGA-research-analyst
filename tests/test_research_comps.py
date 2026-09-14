@@ -84,6 +84,15 @@ def test_excel_valuation_uses_store_comps_not_report_e():
         rc_mod.load = real_load
 
 
+def test_metrics_batch_empty_and_cap():
+    assert rc.metrics_batch([]) == {}
+    assert rc.metrics_batch(["", None]) == {}  # type: ignore[list-item]
+    many = [f"T{i}" for i in range(100)]
+    # Caps at 80 even with no DB
+    got = rc.metrics_batch(many)
+    assert len(got) <= 80
+
+
 def test_row_ps_and_missing_is_none():
     fin = {
         "revenue": 200_000_000,

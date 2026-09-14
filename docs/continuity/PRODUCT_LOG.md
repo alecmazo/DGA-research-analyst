@@ -133,7 +133,7 @@ Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status do
 | Portfolio Strategist | Whole-book review + IC snapshot; EV; both engines’ PTs. |
 | Live Markets | TradingView. |
 | Market Wire | Official + wire RSS (**no Reuters, no AP**). |
-| Market Pulse | Per-name headline + **three** chips: DCF, Comps, Street. DCF/Street → valuation bridge. Comps → last-FY peer window. |
+| Market Pulse | Per-name headline + **three** chips: DCF, Comps, Street. Top line: day % + mkt cap / Rev / NI / FCF (last FY). DCF/Street → valuation bridge. Comps → last-FY peer window. |
 | Top Movers | $1B+ names by \|day %\|. |
 | Analyze Ticker | Multi-engine Analyze (Grok / Claude / DeepSeek / Kimi). Overlay while running. |
 | Desk health | Quote / report / pulse counts. |

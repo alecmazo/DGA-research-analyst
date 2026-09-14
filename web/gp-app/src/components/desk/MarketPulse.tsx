@@ -9,12 +9,19 @@ import {
   type ValuationApproach,
 } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
-import { fmtPct, pctClass } from '@/lib/format'
+import { fmtCap, fmtPct, pctClass } from '@/lib/format'
 import { openValuationWindow } from '@/pages/ValuationBridgePage'
 import { openCompsWindow } from '@/pages/CompsPage'
 import styles from './deskWidgets.module.css'
 
 type PulseResp = MarketPulseResponse
+
+type PulseMetrics = {
+  market_cap?: number | null
+  revenue?: number | null
+  net_income?: number | null
+  free_cash_flow?: number | null
+}
 
 function quotePct(q?: Quote | null): number | null {
   if (!q) return null
@@ -109,6 +116,20 @@ function pulseChips(rep?: SavedReport | null): PulseChip[] {
   ]
 }
 
+function PulseFundLine({ m }: { m?: PulseMetrics }) {
+  if (!m) return null
+  return (
+    <span className={styles.pulseStats}>
+      <span title="Market cap">{fmtCap(m.market_cap)}</span>
+      <span title="Revenue, last reported FY">Rev {fmtCap(m.revenue)}</span>
+      <span title="Net income, last reported FY">NI {fmtCap(m.net_income)}</span>
+      <span title="Free cash flow, last reported FY">
+        FCF {fmtCap(m.free_cash_flow)}
+      </span>
+    </span>
+  )
+}
+
 function newsItems(row?: PulseHeadline | null): PulseNewsItem[] {
   const items = row?.items || []
   if (items.length) return items
@@ -144,6 +165,7 @@ export function MarketPulse({
   const [extra, setExtra] = useState<Record<string, PulseHeadline>>({})
   const [extraBusy, setExtraBusy] = useState<Record<string, boolean>>({})
   const [reports, setReports] = useState<Record<string, SavedReport>>({})
+  const [metrics, setMetrics] = useState<Record<string, PulseMetrics>>({})
 
   const tickers = useMemo(
     () =>
@@ -190,6 +212,26 @@ export function MarketPulse({
       setExtraBusy((s) => ({ ...s, [tk]: false }))
     }
   }, [])
+
+  useEffect(() => {
+    if (!tickers.length) {
+      setMetrics({})
+      return
+    }
+    let alive = true
+    void api<{ metrics?: Record<string, PulseMetrics> }>(
+      `/api/financials/metrics?tickers=${encodeURIComponent(tickers.join(','))}`,
+    )
+      .then((d) => {
+        if (alive) setMetrics(d.metrics || {})
+      })
+      .catch(() => {
+        if (alive) setMetrics({})
+      })
+    return () => {
+      alive = false
+    }
+  }, [tickers])
 
   useEffect(() => {
     void api<SavedReport[]>('/api/reports')
@@ -342,6 +384,7 @@ export function MarketPulse({
                     {fmtPct(pct)}
                   </span>
                 )}
+                <PulseFundLine m={metrics[tk] || metrics[tk.toUpperCase()]} />
                 {row.publisher ? (
                   <span className={styles.pulsePub}>{row.publisher}</span>
                 ) : null}

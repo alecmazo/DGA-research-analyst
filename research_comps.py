@@ -97,6 +97,86 @@ def _quotes(symbols: list[str]) -> dict[str, float]:
     return out
 
 
+def _as_dollars(v: Optional[float]) -> Optional[float]:
+    """company_financials is usually USD. Values already in millions stay millions×1e6
+    only when they were normalized by _millions (≥ $100k)."""
+    if v is None:
+        return None
+    if abs(v) >= 100_000:
+        return v
+    # Tiny raw numbers are already dollars (or missing scale) — leave them.
+    return v
+
+
+def metrics_batch(tickers: list[str]) -> dict[str, dict]:
+    """Last reported FY revenue / NI / FCF + live market cap. Missing → None.
+
+    Used by Market Pulse so the desk does not N+1 stock-info.
+    """
+    out: dict[str, dict] = {}
+    syms = []
+    seen = set()
+    for t in tickers or []:
+        s = str(t or "").strip().upper()
+        if s and s not in seen:
+            seen.add(s)
+            syms.append(s)
+        if len(syms) >= 80:
+            break
+    if not syms:
+        return out
+    conn = _conn()
+    fin_map: dict[str, dict] = {}
+    if conn is not None:
+        try:
+            from psycopg2.extras import RealDictCursor
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (ticker)
+                           ticker, revenue, net_income, free_cash_flow,
+                           shares_outstanding, diluted_shares
+                      FROM company_financials
+                     WHERE ticker = ANY(%s) AND period_type='annual'
+                     ORDER BY ticker, period_end DESC
+                    """,
+                    (syms,),
+                )
+                for r in cur.fetchall() or []:
+                    fin_map[(r.get("ticker") or "").upper()] = dict(r)
+        except Exception as e:
+            print(f"[research_comps] metrics: {e!s:.160}", flush=True)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    if not fin_map:
+        for tk in syms:
+            out[tk] = {
+                "ticker": tk,
+                "market_cap": None,
+                "revenue": None,
+                "net_income": None,
+                "free_cash_flow": None,
+            }
+        return out
+    quotes = _quotes(list(fin_map.keys()))
+    for tk in syms:
+        fin = fin_map.get(tk) or {}
+        px = quotes.get(tk)
+        sh = _shares(_f(fin.get("shares_outstanding")) or _f(fin.get("diluted_shares")))
+        mkt = (px * sh * 1_000_000.0) if (px and sh) else None
+        out[tk] = {
+            "ticker": tk,
+            "market_cap": round(mkt, 0) if mkt is not None else None,
+            "revenue": _as_dollars(_f(fin.get("revenue"))),
+            "net_income": _as_dollars(_f(fin.get("net_income"))),
+            "free_cash_flow": _as_dollars(_f(fin.get("free_cash_flow"))),
+        }
+    return out
+
+
 def _row(tkr: str, fin: dict, price: Optional[float], *, is_subject: bool, name: str = "") -> dict:
     sh = _shares(_f(fin.get("shares_outstanding")) or _f(fin.get("diluted_shares")))
     # shares() already converted large counts to millions

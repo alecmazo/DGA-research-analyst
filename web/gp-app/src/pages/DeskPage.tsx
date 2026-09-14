@@ -646,11 +646,8 @@ export function DeskPage() {
       <DeskBoard
         title="Desk"
         meta={`${rows.length} watch · ${Object.keys(wl?.reports || {}).length} reports`}
-        extraActions={
-          <Button variant="secondary" size="sm" onClick={() => void load()} disabled={busy}>
-            Refresh
-          </Button>
-        }
+        onRefresh={() => void load()}
+        refreshBusy={busy}
         cards={cards}
       />
 
