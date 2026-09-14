@@ -192,6 +192,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Handoff package** | **`ui609-20260914-handoff-pkg`** | One Download package zip (records only). Copy briefing is the handoff. New agent reads support fix trail. |
 | **Desk pulldown + pulse stats** | **`ui610-20260914-desk-pulse`** | SUP_20260914_1253348c / _c201c300 — one Desk pulldown (Refresh / Collapse / Expand / Reset); Market Pulse top line shows mkt cap, Rev, NI, FCF |
 | **Gurus + nav regroup** | **`ui611-20260914-gurus-lab`** | Topbar: Gurus + Lab▾ (Podcasts/Transcripts) + Accounts▾ (book/positions/options/memos). Gurus desk is SEC 13F/Form 4 (Ackman first); GF is UX only |
+| **Nav menus visible** | **`ui612-20260914-nav-menus`** | Lab/Accounts pulldowns use position:fixed — nav overflow no longer clips the panel |
 
 ### One-click handoff (preferred)
 
@@ -379,4 +380,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui611-20260914-gurus-lab` · Next: `ui612-YYYYMMDD-slug`*
+*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui612-20260914-nav-menus` · Next: `ui613-YYYYMMDD-slug`*

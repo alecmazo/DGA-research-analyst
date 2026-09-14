@@ -113,6 +113,7 @@ def test_nav_has_lab_accounts_gurus():
     assert 'label="Lab"' in top
     assert 'label="Accounts"' in top
     assert "NavMenu" in top
+    assert "createPortal" in top
     assert "{ to: '/podcasts'" in top
     assert "{ to: '/positions'" in top
     app = (ROOT / "web/gp-app/src/App.tsx").read_text()
@@ -122,6 +123,9 @@ def test_nav_has_lab_accounts_gurus():
     assert "from api.domains import gurus" in srv
     assert "do not call" not in srv or True
     body = (ROOT / "api/domains/gurus.py").read_text()
+    css = (ROOT / "web/gp-app/src/components/layout/Topbar.module.css").read_text()
+    assert "position: fixed" in css
+    assert "overflow-x: auto" not in css.split(".nav {", 1)[1].split("}", 1)[0]
     assert "api.gurufocus.com" not in body
     assert "data.sec.gov" in body
     assert "0001336528" in body

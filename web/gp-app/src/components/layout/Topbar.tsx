@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { NavLink, useLocation } from 'react-router-dom'
 import type { GpUser } from '@/lib/auth'
 import { logout } from '@/lib/auth'
@@ -48,45 +49,79 @@ function NavMenu({
 }) {
   const loc = useLocation()
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
   const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const active = items.some((it) => pathActive(loc.pathname, it.to))
+
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    setPos({ top: Math.round(r.bottom + 4), left: Math.round(r.left) })
+  }
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
     }
     document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
   }, [])
 
   return (
     <div className={styles.menuWrap} ref={ref}>
       <button
+        ref={btnRef}
         type="button"
         className={`${styles.link} ${styles.menuBtn} ${active ? styles.linkActive : ''}`}
         aria-expanded={open}
         aria-haspopup="menu"
-        onClick={() => setOpen((o) => !o)}
+        onClick={(e) => {
+          e.stopPropagation()
+          place()
+          setOpen((o) => !o)
+        }}
       >
         {label} <span aria-hidden>{open ? '▴' : '▾'}</span>
       </button>
-      {open && (
-        <div className={styles.menuPanel} role="menu">
-          {items.map((it) => (
-            <NavLink
-              key={it.to}
-              to={it.to}
-              role="menuitem"
-              className={({ isActive }) =>
-                `${styles.menuItem} ${isActive ? styles.menuItemOn : ''}`
-              }
-              onClick={() => setOpen(false)}
-            >
-              {it.label}
-            </NavLink>
-          ))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className={styles.menuPanel}
+            role="menu"
+            style={{ top: pos.top, left: pos.left }}
+          >
+            {items.map((it) => (
+              <NavLink
+                key={it.to}
+                to={it.to}
+                role="menuitem"
+                className={({ isActive }) =>
+                  `${styles.menuItem} ${isActive ? styles.menuItemOn : ''}`
+                }
+                onClick={() => setOpen(false)}
+              >
+                {it.label}
+              </NavLink>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
