@@ -150,7 +150,71 @@ _ISSUER_TICKER = {
     "SPDR S P 500": "SPY",
     "INVESCO QQQ": "QQQ",
     "BERKSHIRE": "BRK.B",
+    "FERGUSON": "FERG",
+    "GENUINE PARTS": "GPC",
+    "TELEFLEX": "TFX",
+    "NORWEGIAN CRUISE": "NCLH",
+    "MOLINA": "MOH",
+    "CME GROUP": "CME",
+    "HERBALIFE": "HLF",
+    "EAGLE MAT": "EXP",
+    "EAGLE MATERIALS": "EXP",
+    "GDS HLDGS": "GDS",
+    "GDS HOLDINGS": "GDS",
+    "AMERICOLD": "COLD",
+    "AXALTA": "AXTA",
+    "DNOW INC": "DNOW",
+    "PERSHING SQUARE": "PS",
+    "ELEVANCE": "ELV",
+    "SEAPORT ENT": "SEG",
+    "SEAPORT ENTERTAINMENT": "SEG",
+    "PFIZER": "PFE",
+    "HALLIBURTON": "HAL",
+    "LULULEMON": "LULU",
+    "SLM CORP": "SLM",
+    "BRUKER": "BRKR",
+    "MADRIGAL": "MDGL",
+    "PERPETUA": "PPTA",
+    "ACADIAN ASSET": "AAMI",
+    "BAUSCH HEALTH": "BHC",
+    "BAUSCH PLUS LOMB": "BLCO",
+    "BAUSCH + LOMB": "BLCO",
+    "INTERNATIONAL TOWER HILL": "THM",
+    "NOVAGOLD": "NG",
+    "THRYV": "THRY",
+    "CENTURI": "CTRI",
+    "INTERNATIONAL FLAVORS": "IFF",
+    "ECHOSTAR": "SATS",
+    "JETBLUE": "JBLU",
+    "MONRO": "MNRO",
+    "CAESARS": "CZR",
+    "SANDRIDGE": "SD",
+    "AMERICAN ELECTRIC POWER": "AEP",
+    "CVR PARTNERS": "UAN",
 }
+
+_LEGAL_SUFFIX = {
+    "INC", "CORP", "LTD", "LLC", "LP", "PLC", "CO", "COMPANY", "INCORPORATED",
+    "CORPORATION", "HOLDINGS", "HLDGS", "GROUP", "LIMITED", "PLC", "SA", "NV",
+    "AG", "PLC", "THE", "PLC",
+}
+_ABBR = {
+    "MATLS": "MATERIALS",
+    "HLDGS": "HOLDINGS",
+    "INTL": "INTERNATIONAL",
+    "INDS": "INDUSTRIES",
+    "SVCS": "SERVICES",
+    "MGMT": "MANAGEMENT",
+    "ENTMT": "ENTERTAINMENT",
+    "INCORPORATED": "INC",
+}
+_CUSIP_TICKER = {
+    "02079K107": "GOOGL",
+    "02079K305": "GOOG",
+}
+_SEC_TITLE_TICKER: dict[str, str] = {}
+_SEC_TITLE_LOADED = 0.0
+_CUSIP_CACHE: dict[str, str] = {}
 
 
 def mount(ns: dict) -> None:
@@ -214,19 +278,40 @@ def _f(v: Any) -> Optional[float]:
         return None
 
 
-def ticker_from_issuer(name: str, title: str = "") -> Optional[str]:
+def _norm_issuer(name: str) -> str:
+    n = " ".join(
+        (name or "").upper().replace(".", " ").replace(",", " ").replace("/", " ").split()
+    )
+    parts = [_ABBR.get(p, p) for p in n.split() if p]
+    while parts and parts[0] in ("THE",):
+        parts.pop(0)
+    while parts and parts[-1] in _LEGAL_SUFFIX:
+        parts.pop()
+    return " ".join(parts)
+
+
+def ticker_from_issuer(name: str, title: str = "", cusip: str = "") -> Optional[str]:
     n = " ".join((name or "").upper().replace(".", " ").replace(",", " ").split())
     t = " ".join((title or "").upper().replace(".", " ").replace(",", " ").split())
+    c = (cusip or "").upper()
+    if c and c in _CUSIP_TICKER:
+        return _CUSIP_TICKER[c]
     if not n:
         return None
     if "ALPHABET" in n:
-        if "CL C" in t or "CLASS C" in t:
+        if "CL C" in t or "CLASS C" in t or c == "02079K305":
             return "GOOG"
         return "GOOGL"
     if "BERKSHIRE" in n:
         if "CL A" in t or "CLASS A" in t:
             return "BRK.A"
         return "BRK.B"
+    if "LIBERTY GLOBAL" in n:
+        if "CL C" in t or "CLASS C" in t:
+            return "LBTYK"
+        if "CL A" in t or "CLASS A" in t:
+            return "LBTYA"
+        return "LBTYK"
     for needle, tk in _ISSUER_TICKER.items():
         if needle in n:
             return tk
@@ -261,7 +346,7 @@ def parse_13f_infotable(xml_text: str) -> list[dict]:
             "issuer": issuer,
             "title": title,
             "cusip": cusip,
-            "symbol": ticker_from_issuer(issuer, title),
+            "symbol": ticker_from_issuer(issuer, title, cusip),
             "value_k": value_k,
             "shares": shares,
             "put_call": put_call,
@@ -370,6 +455,159 @@ def _get(url: str, timeout: int = 25):
     return r
 
 
+def _load_sec_titles() -> None:
+    """SEC company_tickers.json → normalized issuer title → ticker."""
+    global _SEC_TITLE_LOADED
+    if _SEC_TITLE_TICKER and (time.time() - _SEC_TITLE_LOADED) < 6 * 3600:
+        return
+    try:
+        r = _get("https://www.sec.gov/files/company_tickers.json", timeout=30)
+        if r.status_code != 200:
+            return
+        data = r.json() or {}
+    except Exception:
+        return
+    n = 0
+    for entry in data.values() if isinstance(data, dict) else []:
+        if not isinstance(entry, dict):
+            continue
+        tk = str(entry.get("ticker") or "").strip().upper()
+        title = _norm_issuer(str(entry.get("title") or ""))
+        if not tk or not title:
+            continue
+        _SEC_TITLE_TICKER.setdefault(title, tk)
+        n += 1
+    _SEC_TITLE_LOADED = time.time()
+    print(f"[gurus] SEC title map {n} names", flush=True)
+
+
+def _load_cusip_cache() -> None:
+    if _CUSIP_CACHE or not getattr(B, "_PSYCOPG2_OK", False):
+        return
+    try:
+        with B._fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT cusip, symbol FROM guru_cusip_map WHERE symbol IS NOT NULL")
+            for c, s in cur.fetchall() or []:
+                if c and s:
+                    _CUSIP_CACHE[str(c).upper()] = str(s).upper()
+    except Exception:
+        pass
+
+
+def _save_cusip_map(pairs: list[tuple[str, str, str]]) -> None:
+    if not pairs or not getattr(B, "_PSYCOPG2_OK", False):
+        return
+    try:
+        with B._fund_conn() as conn, conn.cursor() as cur:
+            for cusip, symbol, issuer in pairs:
+                cur.execute(
+                    """INSERT INTO guru_cusip_map (cusip, symbol, issuer)
+                       VALUES (%s,%s,%s)
+                       ON CONFLICT (cusip) DO UPDATE SET
+                         symbol=EXCLUDED.symbol, issuer=EXCLUDED.issuer,
+                         updated_at=now()""",
+                    (cusip, symbol, issuer),
+                )
+                _CUSIP_CACHE[cusip] = symbol
+            conn.commit()
+    except Exception as e:
+        print(f"[gurus] cusip map save: {e!s:.160}", flush=True)
+
+
+def _openfigi_cusips(cusips: list[str]) -> dict[str, str]:
+    """CUSIP → listed ticker via OpenFIGI (free, batched)."""
+    out: dict[str, str] = {}
+    want = [c.upper() for c in cusips if c and len(c) >= 8]
+    if not want:
+        return out
+    import os
+    import requests
+    key = (os.environ.get("OPENFIGI_API_KEY") or "").strip()
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["X-OPENFIGI-APIKEY"] = key
+    for i in range(0, len(want), 10):
+        chunk = want[i:i + 10]
+        body = [{"idType": "ID_CUSIP", "idValue": c} for c in chunk]
+        try:
+            time.sleep(0.25)
+            r = requests.post(
+                "https://api.openfigi.com/v3/mapping",
+                json=body,
+                headers=headers,
+                timeout=20,
+            )
+            if r.status_code != 200:
+                continue
+            rows = r.json() or []
+        except Exception:
+            continue
+        for cusip, rec in zip(chunk, rows):
+            data = (rec or {}).get("data") or []
+            pick = None
+            for d in data:
+                tk = str(d.get("ticker") or "").strip().upper()
+                if not tk or " " in tk:
+                    continue
+                exch = str(d.get("exchCode") or "").upper()
+                if exch in ("US", "UN", "UW", "UA", "UN", "NYSE", "NASDAQ", "AMEX", "ARCA", "BATS"):
+                    pick = tk
+                    break
+                if pick is None:
+                    pick = tk
+            if pick:
+                out[cusip] = pick.split("/")[0]
+    return out
+
+
+def _fill_missing_symbols(gid: str, rows: list[dict]) -> list[dict]:
+    """Stamp a ticker on 13F rows that only have an issuer/CUSIP."""
+    if not rows:
+        return rows
+    _load_sec_titles()
+    _load_cusip_cache()
+    found: list[tuple[str, str, str]] = []
+    still: list[dict] = []
+    for r in rows:
+        if r.get("symbol"):
+            continue
+        tk = ticker_from_issuer(r.get("issuer") or "", r.get("title") or "", r.get("cusip") or "")
+        if not tk:
+            tk = _CUSIP_CACHE.get((r.get("cusip") or "").upper())
+        if not tk:
+            tk = _SEC_TITLE_TICKER.get(_norm_issuer(r.get("issuer") or ""))
+        if tk:
+            r["symbol"] = tk
+            if r.get("cusip"):
+                found.append((str(r["cusip"]).upper(), tk, r.get("issuer") or ""))
+        else:
+            still.append(r)
+    if still:
+        figi = _openfigi_cusips([str(r.get("cusip") or "") for r in still])
+        for r in still:
+            tk = figi.get((r.get("cusip") or "").upper())
+            if tk:
+                r["symbol"] = tk
+                found.append((str(r["cusip"]).upper(), tk, r.get("issuer") or ""))
+    if found:
+        _save_cusip_map(found)
+        if getattr(B, "_PSYCOPG2_OK", False):
+            try:
+                with B._fund_conn() as conn, conn.cursor() as cur:
+                    for cusip, symbol, _iss in found:
+                        cur.execute(
+                            """UPDATE guru_13f_holdings
+                                  SET symbol=%s
+                                WHERE guru_id=%s AND cusip=%s
+                                  AND (symbol IS NULL OR symbol='')""",
+                            (symbol, gid, cusip),
+                        )
+                    conn.commit()
+            except Exception as e:
+                print(f"[gurus] symbol backfill: {e!s:.160}", flush=True)
+    return rows
+
+
 def _ensure_tables() -> None:
     if not getattr(B, "_PSYCOPG2_OK", False):
         return
@@ -417,6 +655,14 @@ def _ensure_tables() -> None:
                 price DOUBLE PRECISION,
                 accession TEXT,
                 id SERIAL PRIMARY KEY
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS guru_cusip_map (
+                cusip TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                issuer TEXT,
+                updated_at TIMESTAMPTZ DEFAULT now()
             )
         """)
         conn.commit()
@@ -595,6 +841,7 @@ def _holdings_rows(gid: str, portdate: Optional[str] = None) -> tuple[str | None
             (gid, portdate),
         )
         rows = [dict(r) for r in (cur.fetchall() or [])]
+    rows = _fill_missing_symbols(gid, rows)
     return portdate, rows
 
 
@@ -690,6 +937,7 @@ def gurus_history(gid: str, request: Request, freq: str = "q"):
             (gid,),
         )
         rows = [dict(r) for r in (cur.fetchall() or [])]
+    rows = _fill_missing_symbols(gid, rows)
     by_date: dict[str, list] = {}
     for r in rows:
         d = str(r.get("portdate") or "")[:10]

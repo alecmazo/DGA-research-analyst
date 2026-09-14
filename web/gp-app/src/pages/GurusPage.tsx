@@ -52,24 +52,44 @@ function fmtShares(v: number | null | undefined): string {
   return Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })
 }
 
+function actionTone(action?: string | null): 'up' | 'down' | '' {
+  const a = action || ''
+  if (a === 'New Buy' || a === 'Add') return 'up'
+  if (a === 'Reduce' || a === 'Sold Out') return 'down'
+  return ''
+}
+
+function toneClass(action?: string | null): string {
+  const t = actionTone(action)
+  return t === 'up' ? styles.up : t === 'down' ? styles.down : ''
+}
+
 function BarChart({
   rows,
 }: {
-  rows: { label: string; value: number }[]
+  rows: { label: string; value: number; action?: string | null }[]
 }) {
   const max = Math.max(1, ...rows.map((r) => r.value))
   return (
     <div className={styles.bars}>
       {rows.map((r) => (
         <div key={r.label} className={styles.barRow}>
-          <span className={styles.barLbl}>{r.label}</span>
+          <span className={`${styles.barLbl} ${toneClass(r.action)}`}>{r.label}</span>
           <span className={styles.barTrack}>
             <span
-              className={styles.barFill}
+              className={`${styles.barFill} ${
+                actionTone(r.action) === 'up'
+                  ? styles.barFillUp
+                  : actionTone(r.action) === 'down'
+                    ? styles.barFillDown
+                    : ''
+              }`}
               style={{ width: `${(r.value / max) * 100}%` }}
             />
           </span>
-          <span className={`tabular ${styles.barVal}`}>{r.value.toFixed(1)}%</span>
+          <span className={`tabular ${styles.barVal} ${toneClass(r.action)}`}>
+            {r.value.toFixed(1)}%
+          </span>
         </div>
       ))}
     </div>
@@ -80,7 +100,13 @@ const FLOW_COLORS = ['#0a1628', '#5bb8d4', '#047857', '#b91c1c', '#d97706', '#7c
 
 type KpiId = 'equity' | 'names' | 'new' | 'turnover' | 'top5' | 'hhi'
 
-function HistoryChart({ data }: { data: History | null }) {
+function HistoryChart({
+  data,
+  actions,
+}: {
+  data: History | null
+  actions?: Record<string, string | null | undefined>
+}) {
   const dates = data?.dates || []
   const series = data?.series || []
   if (dates.length < 2 || !series.length) {
@@ -155,18 +181,23 @@ function HistoryChart({ data }: { data: History | null }) {
           />
         )
       })}
-      {labels.map((lb) => (
-        <text
-          key={lb.key}
-          x={lb.atEnd ? lb.x + 6 : lb.x + 4}
-          y={lb.y + 3}
-          className={styles.lineLbl}
-          fill={lb.color}
-          textAnchor="start"
-        >
-          {lb.key}
-        </text>
-      ))}
+      {labels.map((lb) => {
+        const tone = actionTone(actions?.[lb.key])
+        const fill =
+          tone === 'up' ? '#15915a' : tone === 'down' ? '#c23b3b' : lb.color
+        return (
+          <text
+            key={lb.key}
+            x={lb.atEnd ? lb.x + 6 : lb.x + 4}
+            y={lb.y + 3}
+            className={styles.lineLbl}
+            fill={fill}
+            textAnchor="start"
+          >
+            {lb.key}
+          </text>
+        )
+      })}
       {dates.map((d, i) => (
         <text key={d} x={x(i)} y={H - 8} className={styles.axis} textAnchor="middle">
           {d.slice(0, 7)}
@@ -387,6 +418,7 @@ export function GurusPage() {
         .map((h) => ({
           label: h.symbol || (h.issuer || '—').slice(0, 18),
           value: Number(h.weight_pct) || 0,
+          action: h.action,
         })),
     [holdings],
   )
@@ -501,7 +533,18 @@ export function GurusPage() {
                 <option value="y">Year-end</option>
               </select>
             </div>
-            <HistoryChart data={hist} />
+            <HistoryChart
+              data={hist}
+              actions={Object.fromEntries(
+                holdings.flatMap((h) => {
+                  const a = h.action || ''
+                  const out: [string, string][] = []
+                  if (h.symbol) out.push([h.symbol, a])
+                  if (h.issuer) out.push([h.issuer, a])
+                  return out
+                }),
+              )}
+            />
             <div className={styles.legend}>
               {(hist?.series || []).map((s, i) => (
                 <span key={s.key}>
@@ -595,13 +638,14 @@ function HoldingsTable({ rows }: { rows: Holding[] }) {
         <tbody>
           {rows.map((h, i) => {
             const tk = h.symbol
+            const tone = toneClass(h.action)
             return (
-              <tr key={`${tk || h.cusip || h.issuer}-${i}`}>
+              <tr key={`${tk || h.cusip || h.issuer}-${i}`} className={tone}>
                 <td>
                   {tk ? (
                     <button
                       type="button"
-                      className={styles.tk}
+                      className={`${styles.tk} ${tone}`}
                       onClick={() => openFinancialsPage(tk)}
                     >
                       {tk}
@@ -610,13 +654,13 @@ function HoldingsTable({ rows }: { rows: Holding[] }) {
                     '—'
                   )}
                 </td>
-                <td>{h.issuer || '—'}</td>
+                <td className={tone}>{h.issuer || '—'}</td>
                 <td className="tabular">{fmtShares(h.shares)}</td>
                 <td className="tabular">{fmtCap((h.value_k || 0) * 1000)}</td>
                 <td className="tabular">
                   {h.weight_pct != null ? `${Number(h.weight_pct).toFixed(1)}%` : '—'}
                 </td>
-                <td>{h.action || '—'}</td>
+                <td className={tone}>{h.action || '—'}</td>
                 <td className="tabular">{fmtShares(h.share_change)}</td>
                 <td className="tabular">{fmtPct(h.impact)}</td>
               </tr>

@@ -137,6 +137,16 @@ def test_alphabet_share_class_tickers():
     assert g.ticker_from_issuer("CHUBB LIMITED") == "CB"
 
 
+def test_issuer_map_fills_klarman_and_seaport():
+    assert g.ticker_from_issuer("FERGUSON ENTERPRISES INC") == "FERG"
+    assert g.ticker_from_issuer("GENUINE PARTS CO") == "GPC"
+    assert g.ticker_from_issuer("SEAPORT ENTMT GROUP INC") == "SEG"
+    assert g.ticker_from_issuer("NORWEGIAN CRUISE LINE HLDGS") == "NCLH"
+    assert g.ticker_from_issuer("TELEFLEX INCORPORATED") == "TFX"
+    assert g.ticker_from_issuer("ELEVANCE HEALTH INC FORMERLY") == "ELV"
+    assert g._norm_issuer("SEAPORT ENTMT GROUP INC") == "SEAPORT ENTERTAINMENT"
+
+
 def test_nav_has_lab_accounts_gurus():
     top = (ROOT / "web/gp-app/src/components/layout/Topbar.tsx").read_text()
     assert 'label="Gurus"' in top or "label: 'Gurus'" in top
@@ -164,3 +174,8 @@ def test_nav_has_lab_accounts_gurus():
     assert "aria-expanded" in page
     assert "lineLbl" in page
     assert "KpiDetail" in page
+    assert "actionTone" in page
+    assert "styles.up" in page
+    assert "styles.down" in page
+    assert "_fill_missing_symbols" in body
+    assert "openfigi.com" in body

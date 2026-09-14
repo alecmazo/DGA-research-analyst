@@ -302,6 +302,35 @@
   padding: 0;
 }
 
+.up {
+  color: #15915a;
+}
+
+.down {
+  color: #c23b3b;
+}
+
+[data-theme='dark'] .up {
+  color: #86efac;
+}
+
+[data-theme='dark'] .down {
+  color: #fca5a5;
+}
+
+.barFillUp {
+  background: #22c55e;
+}
+
+.barFillDown {
+  background: #ef4444;
+}
+
+.tk.up,
+.tk.down {
+  color: inherit;
+}
+
 .filters {
   display: flex;
   gap: 4px;
