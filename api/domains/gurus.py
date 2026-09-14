@@ -48,6 +48,10 @@ _ISSUER_TICKER = {
     "AMAZON COM": "AMZN",
     "AMAZON.COM": "AMZN",
     "MICROSOFT": "MSFT",
+    "META PLATFORMS": "META",
+    "FACEBOOK": "META",
+    "HERTZ GLOBAL": "HTZ",
+    "HILTON": "HLT",
     "BROOKFIELD CORP": "BN",
     "BROOKFIELD ASSET": "BAM",
     "RESTAURANT BRANDS": "QSR",
@@ -156,18 +160,24 @@ def parse_13f_infotable(xml_text: str) -> list[dict]:
         issuer = _text(_find(row, "nameofissuer"))
         title = _text(_find(row, "titleofclass"))
         cusip = _text(_find(row, "cusip")).upper()
-        value = _f(_text(_find(row, "value")))  # $ thousands
+        value = _f(_text(_find(row, "value")))
         sh_el = _find(row, "shrsorprnamt", "sshprnamt")
         shares = _f(_text(_find(sh_el, "sshprnamt") if sh_el is not None else _find(row, "sshprnamt")))
         put_call = _text(_find(row, "putcall")) or None
         if not issuer and not cusip:
             continue
+        # SEC spec is $ thousands; some filers put dollars. Infer from implied price.
+        value_k = value
+        if value is not None and shares and shares > 0:
+            px = value / shares
+            if 0.25 <= px <= 50000:
+                value_k = value / 1000.0  # was dollars
         out.append({
             "issuer": issuer,
             "title": title,
             "cusip": cusip,
             "symbol": ticker_from_issuer(issuer),
-            "value_k": value,
+            "value_k": value_k,
             "shares": shares,
             "put_call": put_call,
         })
