@@ -15,6 +15,7 @@ import { ReportPage } from '@/pages/ReportPage'
 import { ResearchAnswerPage } from '@/pages/ResearchAnswerPage'
 import { ValuationBridgePage } from '@/pages/ValuationBridgePage'
 import { CompsPage } from '@/pages/CompsPage'
+import { GurusPage } from '@/pages/GurusPage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import {
@@ -130,6 +131,14 @@ export default function App() {
                 element={
                   <ErrorBoundary label="Builder">
                     <BuilderPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="gurus"
+                element={
+                  <ErrorBoundary label="Gurus">
+                    <GurusPage />
                   </ErrorBoundary>
                 }
               />

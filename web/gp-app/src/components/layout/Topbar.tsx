@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import type { GpUser } from '@/lib/auth'
 import { logout } from '@/lib/auth'
 import { useTheme } from '@/hooks/useTheme'
@@ -12,16 +12,19 @@ const WORK: { to: string; label: string }[] = [
   { to: '/', label: 'Desk' },
   { to: '/financials', label: 'Financials' },
   { to: '/builder', label: 'Builder' },
-  { to: '/podcasts', label: 'Podcasts' },
-  { to: '/transcripts', label: 'Transcripts' },
-  { to: '/positions', label: 'Positions' },
-  { to: '/options', label: 'Options' },
+  { to: '/gurus', label: 'Gurus' },
 ]
 
-const OPS: { to: string; label: string }[] = [
+const LAB: { to: string; label: string }[] = [
+  { to: '/podcasts', label: 'Podcasts' },
+  { to: '/transcripts', label: 'Transcripts' },
+]
+
+const ACCOUNTS: { to: string; label: string }[] = [
   { to: '/fund', label: 'Accounts' },
+  { to: '/positions', label: 'Positions' },
+  { to: '/options', label: 'Options' },
   { to: '/memos', label: 'Memos' },
-  { to: '/settings', label: 'Settings' },
 ]
 
 /** Sliw Agent — Edyta corporate desk. Same allowlist as pre-React topbar
@@ -30,6 +33,63 @@ const SLIW_ALLOWED = new Set([
   'alecmazo1@gmail.com',
   'edytasliw@gmail.com',
 ])
+
+function pathActive(pathname: string, to: string) {
+  if (to === '/') return pathname === '/'
+  return pathname === to || pathname.startsWith(`${to}/`)
+}
+
+function NavMenu({
+  label,
+  items,
+}: {
+  label: string
+  items: { to: string; label: string }[]
+}) {
+  const loc = useLocation()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const active = items.some((it) => pathActive(loc.pathname, it.to))
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  return (
+    <div className={styles.menuWrap} ref={ref}>
+      <button
+        type="button"
+        className={`${styles.link} ${styles.menuBtn} ${active ? styles.linkActive : ''}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {label} <span aria-hidden>{open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <div className={styles.menuPanel} role="menu">
+          {items.map((it) => (
+            <NavLink
+              key={it.to}
+              to={it.to}
+              role="menuitem"
+              className={({ isActive }) =>
+                `${styles.menuItem} ${isActive ? styles.menuItemOn : ''}`
+              }
+              onClick={() => setOpen(false)}
+            >
+              {it.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function canAccessSliw(user: GpUser | null): boolean {
   const email = String(user?.email || '')
@@ -268,18 +328,17 @@ export function Topbar({ user, build }: Props) {
               {l.label}
             </NavLink>
           ))}
+          <NavMenu label="Lab" items={LAB} />
           <span className={styles.divider} role="separator" />
-          {OPS.map((l) => (
-            <NavLink
-              key={l.to}
-              to={l.to}
-              className={({ isActive }) =>
-                `${styles.link} ${isActive ? styles.linkActive : ''}`
-              }
-            >
-              {l.label}
-            </NavLink>
-          ))}
+          <NavMenu label="Accounts" items={ACCOUNTS} />
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `${styles.link} ${isActive ? styles.linkActive : ''}`
+            }
+          >
+            Settings
+          </NavLink>
           {canAccessSliw(user) && (
             <a
               className={styles.link}

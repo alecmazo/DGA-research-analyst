@@ -150,6 +150,10 @@ DGA Score: negative book equity is **not** a free 100 on ROE; no-debt is fortres
 
 Sector / GuruFocus boards. Date first added, cost, split-adjusted since-add %, notes/FV. Hover snapshot. New-tab financials. Watchlist dropdown, compact rows, add/delete lists. Board switch must stay fast (cache + `_batch_quotes_fast`, no force DCF).
 
+### 5.3b Gurus (`/gurus`)
+
+SEC EDGAR 13F-HR (stored) + Form 4 / SC 13D/G index. Default **Bill Ackman / Pershing Square** (CIK 0001336528). Summary / Activity / Portfolio tabs. **No GuruFocus API** — GF is the workflow template only. Refresh pulls EDGAR.
+
 ### 5.4 Podcasts (`/podcasts`)
 
 Lab: generate / play / upload roundups. Internal tab id remains `lab`.

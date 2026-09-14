@@ -8071,7 +8071,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui610-20260914-desk-pulse"
+WEB_BUILD_VERSION = "ui611-20260914-gurus-lab"
 
 
 @app.get("/api/build")
@@ -8224,6 +8224,7 @@ def _continuity_pack() -> dict:
         f"- **Accounts:** SMA/IRA + LP funds; account switcher; Download pulldown; "
         f"SnapTrade live; planning Tax YTD\n"
         f"- **Options:** wheel held = Positions book\n"
+        f"- **Gurus:** SEC 13F + Form 4/13D (Ackman first); GF is UX only\n"
         f"- **Valuation bridge:** GARP/VALUE/… pills; DCF User FCF multiple\n"
         f"- **Mobile:** Expo **DGA Capital**; LP Positions must not 500\n"
         f"- **Support:** FAB files tickets; GP inbox; close with PATCH + trail\n\n"
@@ -8232,8 +8233,9 @@ def _continuity_pack() -> dict:
         f"- API: `api/server.py`. Analyze: `DGA_analyst.py`. Excel: `excel_model.py`.\n"
         f"- Auth: `x-auth-v2-token` · `POST /api/auth/v2/login`.\n"
         f"- Legacy HTML `/gp-legacy` is **not** the source of truth.\n"
-        f"- Nav: Desk · Financials · Builder · Podcasts · Transcripts · "
-        f"Positions · Options | Accounts · Memos · Settings · Sliw\n"
+        f"- Nav: Desk · Financials · Builder · Gurus · Lab ▾ "
+        f"(Podcasts/Transcripts) | Accounts ▾ (book/positions/options/memos) · "
+        f"Settings · Sliw\n"
     )
     return {
         "ok": True,
@@ -42204,6 +42206,18 @@ try:
     })
 except Exception as _dom_err:
     print(f"[boot] support domain mount failed: {_dom_err!s:.200}", flush=True)
+
+try:
+    from api.domains import gurus as _gurus_domain
+    _gurus_domain.mount({
+        "app": app,
+        "_fund_conn": _fund_conn,
+        "_RealDictCursor": globals().get("_RealDictCursor"),
+        "_PSYCOPG2_OK": globals().get("_PSYCOPG2_OK", False),
+        "_claims_or_401": _claims_or_401,
+    })
+except Exception as _gurus_err:
+    print(f"[boot] gurus domain mount failed: {_gurus_err!s:.200}", flush=True)
 
 try:
     from api.domains import lp_planning as _lp_plan_domain
