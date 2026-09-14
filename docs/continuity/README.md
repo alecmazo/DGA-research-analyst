@@ -12,7 +12,7 @@ opens the files here. Do not skip them. Do not send Alec to Terminal.
 | **`../../CONTINUITY.md`** | `uiNNN` version log + bump rules | Before any deploy |
 | **`../../LLM_COORDINATION.md`** | Multi-agent claims / do-not-stomp | Before overlapping edits |
 | **`../../ACCESS_CONTROL_POLICY.md`** | GP / LP / demo isolation | Before auth or demo work |
-| **`../../docs/support-inbox/README.md`** | How to fix GP/LP support tickets | When the user says “fix ticket” |
+| **`../../docs/support-inbox/README.md`** | How to fix GP/LP support tickets | Always: read the live fix trail |
 
 ## Two layers (do not collapse them)
 
@@ -33,8 +33,13 @@ Alec does **not** clone, pull, or open Terminal.
 3. Stop. The new agent clones or pulls
    https://github.com/alecmazo/DGA-research-analyst (main).
    If GitHub is locked, it asks Alec to log in — then it continues.
-4. That agent curls /api/build, opens PRODUCT_LOG.md + CONTINUITY.md, does the task.
+4. That agent curls /api/build, opens PRODUCT_LOG.md + CONTINUITY.md,
+   and reads GET /api/support/tickets (the fix trail). Then it does the task.
 ```
+
+**Download package** (Settings) is a dated zip of briefing + product log +
+version log for **records**, or a file copy of the briefing if clipboard is
+unavailable. It is not how a new agent catches up — GitHub has the live docs.
 
 Live site: `https://portfolio.dgacapital.com/gp`  
 Repo: `https://github.com/alecmazo/DGA-research-analyst` (`main`)  

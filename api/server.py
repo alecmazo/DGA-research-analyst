@@ -8071,7 +8071,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui608-20260914-pulse-windows"
+WEB_BUILD_VERSION = "ui609-20260914-handoff-pkg"
 
 
 @app.get("/api/build")
@@ -8137,7 +8137,7 @@ def _continuity_pack() -> dict:
 
     The full encyclopedia lives in docs/continuity/PRODUCT_LOG.md so a new
     model's context window is not filled with the entire version history.
-    Settings downloads that file separately.
+    Settings Copy briefing is the handoff; Download package is records only.
     """
     build_file = ""
     try:
@@ -8170,14 +8170,23 @@ def _continuity_pack() -> dict:
         f"Then **you** clone. Do not send him to Terminal.app.\n"
         f"2. `curl -s https://portfolio.dgacapital.com/api/build` "
         f"(must match **{WEB_BUILD_VERSION}** or newer)\n"
-        f"3. Open **in this order** from the repo (not this paste):\n"
+        f"3. Open **in this order** from the **repo** (GitHub is the source of "
+        f"truth — do not wait for a zip):\n"
         f"   - `docs/continuity/README.md` — two-layer kit\n"
         f"   - `docs/continuity/PRODUCT_LOG.md` — **every feature, categorized**\n"
         f"   - `CONTINUITY.md` — uiNNN version log (never decrease N)\n"
         f"   - `LLM_COORDINATION.md` — do not stomp other agents\n"
-        f"4. Then do the user's task.\n"
-        f"5. If they say **fix ticket**: `GET /api/support/agent-inbox` "
-        f"and `docs/support-inbox/README.md`.\n\n"
+        f"4. **Read the support fix trail** so you know what we already fixed, "
+        f"one problem at a time:\n"
+        f"   - `GET /api/support/tickets?limit=30` (same as Settings → Support "
+        f"tickets & fix trail)\n"
+        f"   - For each recent ticket read `status`, `diagnosis`, "
+        f"`fixed_summary`, and `fix_trail`\n"
+        f"   - Open work: `GET /api/support/agent-inbox` + screenshot. "
+        f"If the user says **fix ticket**, those are the job. "
+        f"`docs/support-inbox/README.md`\n"
+        f"   - Do not re-open a `fixed` ticket unless the user asks\n"
+        f"5. Then do the user's task.\n\n"
         f"## 2. Live production (authoritative)\n\n"
         f"- **Build:** `{WEB_BUILD_VERSION}`\n"
         f"- **Probe:** `GET https://portfolio.dgacapital.com/api/build`\n"
@@ -8240,10 +8249,65 @@ def _continuity_pack() -> dict:
         "product_log_filename": "DGA-PRODUCT-LOG.md",
         "version_log_filename": "CONTINUITY.md",
         "instructions": (
-            "Alec copies this briefing and pastes it into the new agent. "
-            "That agent clones or pulls GitHub. Do not tell him to open a terminal."
+            "Copy briefing is the handoff. Download package is records only — "
+            "GitHub has the live docs. The new agent clones the repo and reads "
+            "the support fix trail."
         ),
     }
+
+
+def _continuity_package_zip() -> tuple[bytes, str, str]:
+    """Snapshot zip: briefing + product log + version log. Records only."""
+    import zipfile
+    pack = _continuity_pack()
+    now = (pack.get("generated_at") or "")[:10] or datetime.utcnow().strftime("%Y-%m-%d")
+    readme = (
+        "DGA Capital — continuity package (records)\n"
+        "==========================================\n\n"
+        "This zip is a snapshot for your files. It is NOT how you start a new "
+        "agent or computer.\n\n"
+        "Handoff: Settings → Copy briefing for next agent → paste into the new "
+        "chat. That agent clones https://github.com/alecmazo/DGA-research-analyst "
+        "(main) and reads the live docs there, plus the support fix trail "
+        "(GET /api/support/tickets).\n\n"
+        "Use this zip only:\n"
+        "  • as a dated archive of briefing + logs, or\n"
+        "  • if you need a file copy of the briefing because clipboard is not "
+        "available.\n\n"
+        "Do not treat these files as newer than GitHub. Live /api/build wins "
+        "for WEB_BUILD_VERSION N.\n\n"
+        f"Build: {pack.get('build')}\n"
+        f"Generated: {pack.get('generated_at')}\n"
+        f"Git: {pack.get('git_branch')}@{pack.get('git_sha')} — {pack.get('git_subject')}\n"
+        "\nFiles:\n"
+        "  00-README.txt\n"
+        "  01-briefing.md\n"
+        "  02-PRODUCT_LOG.md\n"
+        "  03-CONTINUITY.md\n"
+    )
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("00-README.txt", readme)
+        z.writestr("01-briefing.md", pack.get("paste_markdown") or "")
+        z.writestr("02-PRODUCT_LOG.md", _continuity_read("docs", "continuity", "PRODUCT_LOG.md"))
+        z.writestr("03-CONTINUITY.md", _continuity_read("CONTINUITY.md"))
+    return bio.getvalue(), now, pack.get("build") or WEB_BUILD_VERSION
+
+
+@app.get("/api/continuity/package")
+def continuity_package(request: Request):
+    """One zip of briefing + product log + version log. Records / archive only."""
+    _plaid_require_gp(request)
+    raw, day, build = _continuity_package_zip()
+    fname = f"dga-continuity-package-{day}.zip"
+    return Response(
+        content=raw,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+            "X-DGA-Build": str(build),
+        },
+    )
 
 
 @app.get("/api/continuity/handoff")

@@ -7,7 +7,9 @@
 **New session:** Alec copies Settings → **Copy briefing for next agent** and
 pastes it here. **You** clone or pull `https://github.com/alecmazo/DGA-research-analyst`
 (`main`). If GitHub is locked, ask him to log in in this tool — then you
-continue. Do not send him to Terminal to clone.
+continue. Do not send him to Terminal to clone. Then read
+`GET /api/support/tickets` (Settings → Support tickets & fix trail) so you
+know what we already fixed, one problem at a time.
 
 Live probe: `GET https://portfolio.dgacapital.com/api/build`  
 GP UI: `https://portfolio.dgacapital.com/gp`  

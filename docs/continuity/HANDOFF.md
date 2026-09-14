@@ -22,12 +22,17 @@ ask him to open Terminal or clone anything himself.
      tool** (`gh auth login`, or connect the GitHub account / MCP). Then you
      clone. Do not send him to Terminal.app.
 2. `curl -s https://portfolio.dgacapital.com/api/build`
-3. Open **in this order** from the repo (not this paste):
+3. Open **in this order** from the **repo** (GitHub is the source of truth):
    - `docs/continuity/README.md`
    - `docs/continuity/PRODUCT_LOG.md` ← every feature, categorized
    - `CONTINUITY.md` ← uiNNN log; never decrease N
    - `LLM_COORDINATION.md`
-4. Then do the user’s task.
+4. **Read the support fix trail** (`GET /api/support/tickets?limit=30` or
+   Settings → Support tickets & fix trail). Status, diagnosis,
+   `fixed_summary`, `fix_trail` — one problem at a time. Open work:
+   `GET /api/support/agent-inbox`. Do not re-open a `fixed` ticket unless
+   asked.
+5. Then do the user’s task.
 
 ## 2. Live production
 

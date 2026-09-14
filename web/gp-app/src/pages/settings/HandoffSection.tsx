@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
-import { api } from '@/lib/api'
+import { api, apiBlob } from '@/lib/api'
 import styles from '../SettingsPage.module.css'
 
 type HandoffPack = {
@@ -16,10 +16,7 @@ type HandoffPack = {
   instructions?: string
 }
 
-type MdFile = { markdown?: string; filename?: string }
-
-function downloadText(text: string, name: string) {
-  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' })
+function downloadBlob(blob: Blob, name: string) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = name
@@ -46,7 +43,8 @@ export function HandoffSection() {
   const [status, setStatus] = useState('')
   const [statusOk, setStatusOk] = useState(true)
   const [loading, setLoading] = useState(true)
-  const [copyLabel, setCopyLabel] = useState('1. Copy briefing for next agent')
+  const [copyLabel, setCopyLabel] = useState('Copy briefing for next agent')
+  const [dlBusy, setDlBusy] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -86,50 +84,31 @@ export function HandoffSection() {
       await copyText(text)
       setStatusOk(true)
       setStatus(
-        '✓ Copied. Paste this into the new Grok / Claude / Cursor chat — that agent will clone or pull GitHub. You do not need to open Terminal.',
+        '✓ Copied. Paste this into the new Grok / Claude / Cursor chat — that agent will clone GitHub and read the docs plus the support fix trail. You do not need to open Terminal.',
       )
       setCopyLabel('✓ Copied briefing')
-      setTimeout(() => setCopyLabel('1. Copy briefing for next agent'), 2800)
+      setTimeout(() => setCopyLabel('Copy briefing for next agent'), 2800)
     } catch {
       setStatusOk(false)
-      setStatus('Copy failed — use Download briefing instead.')
+      setStatus('Copy failed — try again, or Download package if you need a file copy of the briefing.')
     }
   }
 
-  const downloadBriefing = async () => {
+  const downloadPackage = async () => {
+    setDlBusy(true)
     try {
-      const text = await briefing()
-      if (!text) {
-        setStatusOk(false)
-        setStatus('Nothing to download.')
-        return
-      }
-      const name = pack?.filename || 'dga-agent-briefing.md'
-      downloadText(text, name)
+      const blob = await apiBlob('/api/continuity/package')
+      const day = (pack?.generated_at || new Date().toISOString()).slice(0, 10)
+      downloadBlob(blob, `dga-continuity-package-${day}.zip`)
       setStatusOk(true)
-      setStatus(`✓ Downloaded ${name} — give this file to the next agent.`)
+      setStatus(
+        '✓ Downloaded the records zip (briefing + product log + version log). For a new agent, paste the copied briefing instead — GitHub has the live docs.',
+      )
     } catch (e) {
       setStatusOk(false)
       setStatus(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
-
-  const downloadRemote = async (path: string, fallbackName: string) => {
-    try {
-      const d = await api<MdFile>(path)
-      const text = d.markdown || ''
-      if (!text) {
-        setStatusOk(false)
-        setStatus('File empty on this deploy.')
-        return
-      }
-      const name = d.filename || fallbackName
-      downloadText(text, name)
-      setStatusOk(true)
-      setStatus(`✓ Downloaded ${name}`)
-    } catch (e) {
-      setStatusOk(false)
-      setStatus(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setDlBusy(false)
     }
   }
 
@@ -148,12 +127,9 @@ export function HandoffSection() {
       }
     >
       <p className={styles.hint}>
-        Your only step is copy → paste into the new chat. The new model clones
-        or pulls GitHub itself (it will ask you to log in to GitHub if it cannot).
-        Do not open Terminal. The <strong>briefing</strong> is short on purpose.
-        The <strong>product log</strong> is the encyclopedia; the{' '}
-        <strong>version log</strong> is every <code>uiNNN</code> bump. Never
-        decrease N.
+        Your only handoff step is <strong>Copy briefing for next agent</strong> →
+        paste into the new chat. That agent clones GitHub, reads the live docs
+        in the repo, and reviews the support fix trail. Do not open Terminal.
       </p>
 
       <ol className={styles.steps}>
@@ -167,12 +143,8 @@ export function HandoffSection() {
         <li>
           Stop. That agent clones{' '}
           <code>https://github.com/alecmazo/DGA-research-analyst</code> (or
-          pulls <code>main</code> if it already has the repo). If GitHub is
-          locked, it will ask you to log in — then it continues. You do not clone.
-        </li>
-        <li>
-          After they ship: poll <code>/api/build</code> and confirm the new uiN
-          is live. Desk ticket light goes green when the inbox is empty.
+          pulls <code>main</code>). If GitHub is locked, it will ask you to log
+          in — then it continues. You do not clone.
         </li>
       </ol>
 
@@ -180,33 +152,26 @@ export function HandoffSection() {
         <Button size="sm" variant="primary" onClick={() => void copy()}>
           {copyLabel}
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => void downloadBriefing()}>
-          Download briefing
-        </Button>
         <Button
           size="sm"
           variant="secondary"
-          onClick={() =>
-            void downloadRemote('/api/continuity/product-log', 'DGA-PRODUCT-LOG.md')
-          }
-          title="Full categorized feature encyclopedia"
+          disabled={dlBusy}
+          title="Optional records zip — not required to start a new agent"
+          onClick={() => void downloadPackage()}
         >
-          Download product log
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() =>
-            void downloadRemote('/api/continuity/version-log', 'CONTINUITY.md')
-          }
-          title="uiNNN sequence — never decrease N"
-        >
-          Download version log
+          {dlBusy ? 'Downloading…' : 'Download package'}
         </Button>
         {status && (
           <span className={statusOk ? styles.statusOk : styles.statusErr}>{status}</span>
         )}
       </div>
+      <p className={styles.help}>
+        <strong>Download package</strong> is optional. It saves a dated zip of
+        the briefing + product log + version log for your records, or if you
+        need a file copy of the briefing because clipboard is not available.
+        It is <em>not</em> how a new agent or computer catches up — GitHub
+        already has those docs, and they stay current there. Prefer copy/paste.
+      </p>
 
       {pack && (
         <div className={styles.meta} style={{ marginBottom: 8 }}>

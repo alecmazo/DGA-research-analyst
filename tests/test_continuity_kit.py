@@ -35,6 +35,7 @@ def test_server_has_two_layer_endpoints():
     assert '@app.get("/api/continuity/handoff")' in src
     assert '@app.get("/api/continuity/product-log")' in src
     assert '@app.get("/api/continuity/version-log")' in src
+    assert '@app.get("/api/continuity/package")' in src
     assert "docs/continuity/PRODUCT_LOG.md" in src
     # Short briefing must NOT embed the entire CONTINUITY.md
     pack_fn = src.split("def _continuity_pack")[1].split("def ")[0]
@@ -61,3 +62,12 @@ def test_briefing_agent_gets_the_repo():
     handoff = (ROOT / "docs/continuity/HANDOFF.md").read_text()
     assert "Get the code yourself" in handoff
     assert "log in to GitHub" in handoff
+    assert "support fix trail" in pack_fn.lower() or "fix trail" in pack_fn
+    assert "/api/support/tickets" in pack_fn
+    assert "Download package" in tsx
+    assert "Download briefing" not in tsx
+    assert "Download product log" not in tsx
+    assert "Download version log" not in tsx
+    assert "records" in tsx.lower()
+    assert "GitHub" in tsx
+    assert "fix trail" in tsx.lower()

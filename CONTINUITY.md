@@ -189,6 +189,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Pulse three chips** | **`ui606-20260914-pulse-comps`** | SUP_20260914_1f66fa9d — Market Pulse tags are DCF / Comps / Street only; Comps opens last-FY `company_financials` peer window (n/a if missing) |
 | **Handoff copy-paste** | **`ui607-20260914-handoff-copy`** | Alec’s only step is Copy briefing → paste. The new agent clones/pulls GitHub (asks him to log in if needed). No Terminal clone. |
 | **Pulse window export** | **`ui608-20260914-pulse-windows`** | DCF / Comps / Street windows: Support FAB, Download pulldown (Print PDF / Excel / Email), ticker stats line (mkt cap, P/E, EV/EBITDA, FCF, 52w) |
+| **Handoff package** | **`ui609-20260914-handoff-pkg`** | One Download package zip (records only). Copy briefing is the handoff. New agent reads support fix trail. |
 
 ### One-click handoff (preferred)
 
@@ -204,6 +205,12 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
    - `docs/continuity/PRODUCT_LOG.md` — every feature, categorized
    - `CONTINUITY.md` — this uiNNN log
    - `docs/continuity/README.md` — how the kit works
+   - **Support fix trail** — `GET /api/support/tickets?limit=30` (what we
+     already fixed, one problem at a time). Open work: agent-inbox.
+
+**Download package** in Settings is a dated zip of those files for **records**
+(or a file copy of the briefing). It is not the handoff. GitHub has the live
+docs.
 
 If Mac mini later ships a higher N while offline, the **agent** pulls `main`
 first, then sets `WEB_BUILD_VERSION` to
@@ -370,4 +377,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui608-20260914-pulse-windows` · Next: `ui609-YYYYMMDD-slug`*
+*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui609-20260914-handoff-pkg` · Next: `ui610-YYYYMMDD-slug`*
