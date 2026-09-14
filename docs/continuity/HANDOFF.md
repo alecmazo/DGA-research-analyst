@@ -8,11 +8,21 @@ You are taking over **DGA Capital** — GP research + fund-administration softwa
 (portfolio.dgacapital.com). Do not invent a new product. Do not go backwards
 on features or `WEB_BUILD_VERSION`.
 
-## 1. First 90 seconds
+Alec copied this from GP Settings (**Copy briefing for next agent**) and
+pasted it here. That is his only step. **You** get the GitHub repo. Do not
+ask him to open Terminal or clone anything himself.
 
-1. `git pull origin main`
+## 1. First 90 seconds (you, the agent)
+
+1. **Get the code yourself**
+   - Repo: `https://github.com/alecmazo/DGA-research-analyst` (`main`)
+   - If this workspace already is that repo: `git pull origin main`
+   - Else: clone it into the workspace.
+   - If GitHub is not authenticated: ask Alec to **log in to GitHub in this
+     tool** (`gh auth login`, or connect the GitHub account / MCP). Then you
+     clone. Do not send him to Terminal.app.
 2. `curl -s https://portfolio.dgacapital.com/api/build`
-3. Open **in this order** (repo, not the clipboard):
+3. Open **in this order** from the repo (not this paste):
    - `docs/continuity/README.md`
    - `docs/continuity/PRODUCT_LOG.md` ← every feature, categorized
    - `CONTINUITY.md` ← uiNNN log; never decrease N

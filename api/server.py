@@ -7927,7 +7927,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui606-20260914-pulse-comps"
+WEB_BUILD_VERSION = "ui607-20260914-handoff-copy"
 
 
 @app.get("/api/build")
@@ -8010,13 +8010,23 @@ def _continuity_pack() -> dict:
         f"You are taking over **DGA Capital** GP research + fund-administration "
         f"software. Do **not** invent a new product. Do **not** decrease "
         f"`WEB_BUILD_VERSION`. Do **not** auto-send email.\n\n"
-        f"**How to use this paste:** it is the short layer. After `git pull`, "
-        f"open the long files listed in §1. Do not skip them.\n\n"
-        f"## 1. First 90 seconds (required)\n\n"
-        f"1. `git pull origin main`\n"
+        f"**How this paste got here:** Alec hit **Copy briefing for next agent** "
+        f"in GP Settings and pasted it into this chat. That is his only step. "
+        f"**You** get the GitHub repo. Do **not** ask him to open Terminal or "
+        f"clone anything himself.\n\n"
+        f"## 1. First 90 seconds (you, the agent)\n\n"
+        f"1. **Get the code yourself**\n"
+        f"   - Repo: `https://github.com/alecmazo/DGA-research-analyst` "
+        f"(`main`)\n"
+        f"   - If this workspace already is that repo: `git pull origin main`\n"
+        f"   - Else: clone it into the workspace "
+        f"(`git clone https://github.com/alecmazo/DGA-research-analyst.git`).\n"
+        f"   - If GitHub is not authenticated: **ask Alec to log in to GitHub "
+        f"in this tool** (`gh auth login`, or connect the GitHub account / MCP). "
+        f"Then **you** clone. Do not send him to Terminal.app.\n"
         f"2. `curl -s https://portfolio.dgacapital.com/api/build` "
         f"(must match **{WEB_BUILD_VERSION}** or newer)\n"
-        f"3. Open **in this order** from the repo:\n"
+        f"3. Open **in this order** from the repo (not this paste):\n"
         f"   - `docs/continuity/README.md` — two-layer kit\n"
         f"   - `docs/continuity/PRODUCT_LOG.md` — **every feature, categorized**\n"
         f"   - `CONTINUITY.md` — uiNNN version log (never decrease N)\n"
@@ -8086,8 +8096,8 @@ def _continuity_pack() -> dict:
         "product_log_filename": "DGA-PRODUCT-LOG.md",
         "version_log_filename": "CONTINUITY.md",
         "instructions": (
-            "Copy the briefing into the next agent, then have it open "
-            "docs/continuity/PRODUCT_LOG.md and CONTINUITY.md from the repo."
+            "Alec copies this briefing and pastes it into the new agent. "
+            "That agent clones or pulls GitHub. Do not tell him to open a terminal."
         ),
     }
 

@@ -187,6 +187,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Fund account menus** | **`ui604-20260912-fund-menus`** | SUP_20260912_9de2a14e — account switcher + Download pulldown; chart/table and monthly/quarterly/annual selects |
 | **Continuity kit** | **`ui605-20260914-continuity-kit`** | Settings handoff is a short briefing + downloadable product log (`docs/continuity/PRODUCT_LOG.md`) and version log |
 | **Pulse three chips** | **`ui606-20260914-pulse-comps`** | SUP_20260914_1f66fa9d — Market Pulse tags are DCF / Comps / Street only; Comps opens last-FY `company_financials` peer window (n/a if missing) |
+| **Handoff copy-paste** | **`ui607-20260914-handoff-copy`** | Alec’s only step is Copy briefing → paste. The new agent clones/pulls GitHub (asks him to log in if needed). No Terminal clone. |
 
 ### One-click handoff (preferred)
 
@@ -194,14 +195,18 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 
 1. **Settings → Continuity handoff → Copy briefing for next agent**  
    Short paste (`GET /api/continuity/handoff`): live build, next-N, hard rules,
-   “open these files.”
-2. **Then open from the repo** (or Download from the same Settings card):
+   “you (the agent) clone GitHub.”
+2. **Paste into the new chat.** That is Alec’s only step. The new agent
+   clones or pulls `alecmazo/DGA-research-analyst`. If GitHub is locked it
+   asks him to log in — it does not send him to Terminal to clone.
+3. **That agent then opens from the repo:**
    - `docs/continuity/PRODUCT_LOG.md` — every feature, categorized
    - `CONTINUITY.md` — this uiNNN log
    - `docs/continuity/README.md` — how the kit works
 
-If Mac mini later ships a higher N while offline, **pull main first**, then set
-`WEB_BUILD_VERSION` to `max(local, remote /api/build, CONTINUITY.md) + 1`.
+If Mac mini later ships a higher N while offline, the **agent** pulls `main`
+first, then sets `WEB_BUILD_VERSION` to
+`max(local, remote /api/build, CONTINUITY.md) + 1`.
 
 ---
 
@@ -364,4 +369,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui606-20260914-pulse-comps` · Next: `ui607-YYYYMMDD-slug`*
+*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui607-20260914-handoff-copy` · Next: `ui608-YYYYMMDD-slug`*

@@ -1,8 +1,9 @@
 # Continuity kit — DGA Capital GP desk
 
 This folder is the **source of truth for a human or model taking over the
-product**. Settings → Continuity handoff copies a **short briefing**. That
-briefing tells the next agent to open the files here. Do not skip them.
+product**. Alec’s only move is Settings → **Copy briefing for next agent** →
+paste into the new chat. The **new agent** clones or pulls GitHub and then
+opens the files here. Do not skip them. Do not send Alec to Terminal.
 
 | File | What it is | When to open |
 |------|------------|--------------|
@@ -16,22 +17,23 @@ briefing tells the next agent to open the files here. Do not skip them.
 ## Two layers (do not collapse them)
 
 1. **Briefing (clipboard).** Settings → **Copy briefing for next agent**.
-   Short. Live build, next-N, standing rules, “open these files.” Fits in a
+   Short. Live build, next-N, standing rules, “you clone GitHub.” Fits in a
    new chat without eating the context window.
 2. **Product log (this folder + CONTINUITY.md).** Long. Feature encyclopedia
    and the uiNNN sequence. The next model **must open these from the repo**
-   after `git pull`. Do not try to paste the whole log into every chat.
+   after **it** clones or pulls. Do not paste the whole log into every chat.
 
 ## Switching computers or models
 
+Alec does **not** clone, pull, or open Terminal.
+
 ```text
-1. git pull origin main
-2. curl -s https://portfolio.dgacapital.com/api/build
-3. Open docs/continuity/PRODUCT_LOG.md
-4. Open CONTINUITY.md (append a row if you ship)
-5. Paste the Settings briefing into the new agent as the first user message
-   (or skip paste if the agent already has this repo).
-6. Do the task. Never decrease WEB_BUILD_VERSION.
+1. Settings → Copy briefing for next agent
+2. Paste that clipboard into the new Grok / Claude / Cursor chat
+3. Stop. The new agent clones or pulls
+   https://github.com/alecmazo/DGA-research-analyst (main).
+   If GitHub is locked, it asks Alec to log in — then it continues.
+4. That agent curls /api/build, opens PRODUCT_LOG.md + CONTINUITY.md, does the task.
 ```
 
 Live site: `https://portfolio.dgacapital.com/gp`  

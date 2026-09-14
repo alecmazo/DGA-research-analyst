@@ -4,6 +4,11 @@
 **Purpose:** do not drop features, versions, or constraints.  
 **Companion:** `CONTINUITY.md` is the **uiNNN version log**. This file is **what the product is**.
 
+**New session:** Alec copies Settings → **Copy briefing for next agent** and
+pastes it here. **You** clone or pull `https://github.com/alecmazo/DGA-research-analyst`
+(`main`). If GitHub is locked, ask him to log in in this tool — then you
+continue. Do not send him to Terminal to clone.
+
 Live probe: `GET https://portfolio.dgacapital.com/api/build`  
 GP UI: `https://portfolio.dgacapital.com/gp`  
 Repo: `https://github.com/alecmazo/DGA-research-analyst` (`main`)  

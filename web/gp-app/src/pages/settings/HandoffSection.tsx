@@ -86,7 +86,7 @@ export function HandoffSection() {
       await copyText(text)
       setStatusOk(true)
       setStatus(
-        '✓ Copied the short briefing. Paste it into the new Grok / Claude / Cursor chat, then have that agent open docs/continuity/PRODUCT_LOG.md and CONTINUITY.md after git pull.',
+        '✓ Copied. Paste this into the new Grok / Claude / Cursor chat — that agent will clone or pull GitHub. You do not need to open Terminal.',
       )
       setCopyLabel('✓ Copied briefing')
       setTimeout(() => setCopyLabel('1. Copy briefing for next agent'), 2800)
@@ -148,27 +148,27 @@ export function HandoffSection() {
       }
     >
       <p className={styles.hint}>
-        Two layers so a new model does not burn its context window — and does not
-        forget the product. The <strong>briefing</strong> is short (copy/paste).
-        The <strong>product log</strong> is the encyclopedia of every desk, fund,
-        mobile, and constraint. The <strong>version log</strong> is every{' '}
-        <code>uiNNN</code> bump. Never decrease N.
+        Your only step is copy → paste into the new chat. The new model clones
+        or pulls GitHub itself (it will ask you to log in to GitHub if it cannot).
+        Do not open Terminal. The <strong>briefing</strong> is short on purpose.
+        The <strong>product log</strong> is the encyclopedia; the{' '}
+        <strong>version log</strong> is every <code>uiNNN</code> bump. Never
+        decrease N.
       </p>
 
       <ol className={styles.steps}>
         <li>
-          On the <em>new</em> computer: clone or <code>git pull origin main</code>, then{' '}
-          <code>curl -s https://portfolio.dgacapital.com/api/build</code>.
+          Click <strong>Copy briefing for next agent</strong>.
         </li>
         <li>
-          Click <strong>Copy briefing for next agent</strong> and paste it as the
-          first message in Grok Build / Claude Code / Cursor.
+          Paste it as the first message in the new Grok Build / Claude Code /
+          Cursor chat.
         </li>
         <li>
-          That briefing tells the agent to open{' '}
-          <code>docs/continuity/PRODUCT_LOG.md</code> (every feature) and{' '}
-          <code>CONTINUITY.md</code> (version log). Download those below if you
-          are handing a zip to someone without git yet.
+          Stop. That agent clones{' '}
+          <code>https://github.com/alecmazo/DGA-research-analyst</code> (or
+          pulls <code>main</code> if it already has the repo). If GitHub is
+          locked, it will ask you to log in — then it continues. You do not clone.
         </li>
         <li>
           After they ship: poll <code>/api/build</code> and confirm the new uiN
@@ -229,7 +229,7 @@ export function HandoffSection() {
         <div className={styles.statusErr}>Briefing unavailable. Try refresh.</div>
       )}
       <details className={styles.previewWrap}>
-        <summary>Preview briefing (short — paste this, then open the product log)</summary>
+        <summary>Preview briefing (this is what you paste — the agent gets the repo)</summary>
         <pre className={styles.pre}>{pack?.paste_markdown || (loading ? 'Loading…' : '')}</pre>
       </details>
     </CollapsibleCard>
