@@ -185,14 +185,19 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Desk ticket light** | **`ui602-20260911-ticket-dot`** | Green/red dot next to Reset layout; hover shows open-ticket count (GP, incl. LP-filed) |
 | **DCF User share count** | **`ui603-20260911-dcf-shares`** | Valuation DCF User uses SEC diluted shares (BSX 7.1m leftover → ~1.5bn); drop insane stored $/share on pulse |
 | **Fund account menus** | **`ui604-20260912-fund-menus`** | SUP_20260912_9de2a14e — account switcher + Download pulldown; chart/table and monthly/quarterly/annual selects |
+| **Continuity kit** | **`ui605-20260914-continuity-kit`** | Settings handoff is a short briefing + downloadable product log (`docs/continuity/PRODUCT_LOG.md`) and version log |
 
 ### One-click handoff (preferred)
 
-In the live GP app: **Settings → Continuity handoff → Copy handoff for agent**.
+**Two layers** so a new model does not eat its context window:
 
-That calls `GET /api/continuity/handoff` and copies a full markdown pack (live
-build, git tip, next-N rule, nav layout, embedded `CONTINUITY.md`) to the
-clipboard. Paste it into Claude Code / Grok Build / Cursor on any computer.
+1. **Settings → Continuity handoff → Copy briefing for next agent**  
+   Short paste (`GET /api/continuity/handoff`): live build, next-N, hard rules,
+   “open these files.”
+2. **Then open from the repo** (or Download from the same Settings card):
+   - `docs/continuity/PRODUCT_LOG.md` — every feature, categorized
+   - `CONTINUITY.md` — this uiNNN log
+   - `docs/continuity/README.md` — how the kit works
 
 If Mac mini later ships a higher N while offline, **pull main first**, then set
 `WEB_BUILD_VERSION` to `max(local, remote /api/build, CONTINUITY.md) + 1`.
@@ -341,6 +346,7 @@ When switching machine or agent (Claude ↔ Grok):
 | `mobile/` | Expo app (OTA); keep YTD/IPO/watchlist in sync when you touch desk quotes |
 | `market_data.py` / `snaptrade_link.py` | Quotes / SnapTrade |
 | `docs/support-inbox/` | Support ticket notes (if present) |
+| `docs/continuity/` | **Handoff kit** — README, short HANDOFF.md, PRODUCT_LOG.md |
 
 ---
 
@@ -357,4 +363,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-03 · Agent: Grok Build · Live: `ui575-20260903-post-json-body` · Next: `ui576-YYYYMMDD-slug`*
+*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui605-20260914-continuity-kit` · Next: `ui606-YYYYMMDD-slug`*

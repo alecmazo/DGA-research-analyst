@@ -7927,7 +7927,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui604-20260912-fund-menus"
+WEB_BUILD_VERSION = "ui605-20260914-continuity-kit"
 
 
 @app.get("/api/build")
@@ -7941,47 +7941,42 @@ def build_version():
     return {"build": WEB_BUILD_VERSION}
 
 
-def _continuity_pack() -> dict:
-    """Assemble a cross-machine / cross-agent handoff package.
-
-    Used by Settings → Continuity handoff so work can move between Grok Build,
-    Claude Code, Cursor, and different computers without UI counter collisions.
-    """
+def _repo_root() -> "Path":
     from pathlib import Path as _Path
-    root = _Path(__file__).resolve().parent.parent  # repo root (…/api/server.py → …)
-    cont_path = root / "CONTINUITY.md"
-    build_path = root / "BUILD_VERSION"
-    cont_md = ""
-    build_file = ""
-    try:
-        if cont_path.is_file():
-            cont_md = cont_path.read_text(encoding="utf-8", errors="replace")
-    except Exception as e:
-        cont_md = f"(Could not read CONTINUITY.md: {e!s:.120})"
-    try:
-        if build_path.is_file():
-            build_file = build_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()[0]
-    except Exception:
-        build_file = ""
+    return _Path(__file__).resolve().parent.parent
 
-    git_sha = ""
-    git_branch = ""
-    git_msg = ""
+
+def _continuity_read(*parts: str) -> str:
+    """Read a repo markdown file; never throw into the Settings pack."""
+    path = _repo_root().joinpath(*parts)
+    try:
+        if path.is_file():
+            return path.read_text(encoding="utf-8", errors="replace")
+        return f"(missing {path.as_posix()})"
+    except Exception as e:
+        return f"(could not read {'/'.join(parts)}: {e!s:.120})"
+
+
+def _continuity_git() -> tuple[str, str, str]:
+    git_sha = git_branch = git_msg = ""
     try:
         import subprocess as _sp
+        root = str(_repo_root())
         git_sha = _sp.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=str(root),
+            ["git", "rev-parse", "--short", "HEAD"], cwd=root,
             stderr=_sp.DEVNULL, timeout=3).decode().strip()
         git_branch = _sp.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(root),
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root,
             stderr=_sp.DEVNULL, timeout=3).decode().strip()
         git_msg = _sp.check_output(
-            ["git", "log", "-1", "--pretty=%s"], cwd=str(root),
+            ["git", "log", "-1", "--pretty=%s"], cwd=root,
             stderr=_sp.DEVNULL, timeout=3).decode().strip()
     except Exception:
         pass
+    return git_sha, git_branch, git_msg
 
-    # Next suggested N = current + 1 (parse uiNNN-…)
+
+def _continuity_next_n() -> str:
     next_build = WEB_BUILD_VERSION
     try:
         import re as _re
@@ -7990,54 +7985,93 @@ def _continuity_pack() -> dict:
             next_build = f"ui{int(m.group(1)) + 1}-YYYYMMDD-slug"
     except Exception:
         pass
+    return next_build
 
+
+def _continuity_pack() -> dict:
+    """Short clipboard briefing + pointers to the big product log.
+
+    The full encyclopedia lives in docs/continuity/PRODUCT_LOG.md so a new
+    model's context window is not filled with the entire version history.
+    Settings downloads that file separately.
+    """
+    build_file = ""
+    try:
+        raw = _continuity_read("BUILD_VERSION")
+        if raw and not raw.startswith("("):
+            build_file = raw.strip().splitlines()[0]
+    except Exception:
+        build_file = ""
+    git_sha, git_branch, git_msg = _continuity_git()
+    next_build = _continuity_next_n()
     now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     paste = (
-        f"# DGA Capital — agent handoff\n\n"
-        f"Paste this entire block into **Claude Code**, **Grok Build**, or **Cursor** "
-        f"on any computer. Do not skip the rules.\n\n"
-        f"## Live production (authoritative)\n"
+        f"# DGA Capital — START HERE (agent briefing)\n\n"
+        f"You are taking over **DGA Capital** GP research + fund-administration "
+        f"software. Do **not** invent a new product. Do **not** decrease "
+        f"`WEB_BUILD_VERSION`. Do **not** auto-send email.\n\n"
+        f"**How to use this paste:** it is the short layer. After `git pull`, "
+        f"open the long files listed in §1. Do not skip them.\n\n"
+        f"## 1. First 90 seconds (required)\n\n"
+        f"1. `git pull origin main`\n"
+        f"2. `curl -s https://portfolio.dgacapital.com/api/build` "
+        f"(must match **{WEB_BUILD_VERSION}** or newer)\n"
+        f"3. Open **in this order** from the repo:\n"
+        f"   - `docs/continuity/README.md` — two-layer kit\n"
+        f"   - `docs/continuity/PRODUCT_LOG.md` — **every feature, categorized**\n"
+        f"   - `CONTINUITY.md` — uiNNN version log (never decrease N)\n"
+        f"   - `LLM_COORDINATION.md` — do not stomp other agents\n"
+        f"4. Then do the user's task.\n"
+        f"5. If they say **fix ticket**: `GET /api/support/agent-inbox` "
+        f"and `docs/support-inbox/README.md`.\n\n"
+        f"## 2. Live production (authoritative)\n\n"
         f"- **Build:** `{WEB_BUILD_VERSION}`\n"
         f"- **Probe:** `GET https://portfolio.dgacapital.com/api/build`\n"
-        f"- **Site:** `https://portfolio.dgacapital.com/gp` (GP React)\n"
-        f"- **Repo:** `https://github.com/alecmazo/DGA-research-analyst` (branch `main`)\n"
+        f"- **Site:** `https://portfolio.dgacapital.com/gp` (React GP)\n"
+        f"- **Repo:** `https://github.com/alecmazo/DGA-research-analyst` (`main`)\n"
         f"- **Git:** `{git_branch or '—'}@{git_sha or '—'}` — {git_msg or '—'}\n"
-        f"- **Railway:** project `upbeat-ambition`, service `web` (GP), `sliw` (Sliw), Postgres\n"
-        f"- **Handoff generated:** {now}\n"
-        f"- **BUILD_VERSION file:** `{build_file or WEB_BUILD_VERSION}`\n\n"
-        f"## Hard rules\n"
-        f"1. `git pull origin main` before editing.\n"
-        f"2. Read `CONTINUITY.md` (embedded below) and `BUILD_VERSION`.\n"
-        f"3. **Never decrease** `WEB_BUILD_VERSION` N in `api/server.py`. Also bump "
+        f"- **Railway:** project `upbeat-ambition`, service `web` (GP), "
+        f"`sliw` (Sliw), Postgres\n"
+        f"- **Next N:** `{next_build}` "
+        f"or `max(live /api/build, CONTINUITY.md, BUILD_VERSION) + 1`\n"
+        f"- **BUILD_VERSION file:** `{build_file or WEB_BUILD_VERSION}`\n"
+        f"- **Briefing generated:** {now}\n\n"
+        f"## 3. Hard rules (always)\n\n"
+        f"1. Never decrease `WEB_BUILD_VERSION` N in `api/server.py`. Also bump "
         f"`BUILD_VERSION` and append a row to `CONTINUITY.md`.\n"
-        f"4. Next deploy ≈ `{next_build}` (replace date/slug) — or "
-        f"`max(live /api/build, CONTINUITY.md, BUILD_VERSION) + 1`.\n"
-        f"5. After UI edits: `npm run build` in `web/gp-app/` and **commit `dist/`** "
+        f"2. After UI edits: `npm run build` in `web/gp-app/` and **commit `dist/`** "
         f"(Railway Nixpacks does not run Node).\n"
-        f"6. After push, poll `/api/build` until the new string is live.\n"
-        f"7. Do **not** auto-send email. Report Share prompts for a recipient.\n"
-        f"8. Sliw is Alec/Edyta only. Do not resurrect Contacted history unless asked.\n"
-        f"9. Never persist Grok live-search tool dumps as `report_md`.\n"
-        f"10. Financials print CSS stays scoped to `.shell` — never `body *` "
-        f"(that blanked Saved Report print).\n"
-        f"11. Saved Reports: when both Grok and Claude have a 12m PT, show each "
-        f"target with its live upside underneath (not a single conservative %).\n"
-        f"12. Accounts rebalance uses the **Grok** 12m PT (fallback only if Grok "
-        f"has none). Upside is always PT vs live last.\n"
-        f"13. Portfolio Strategist receives **both** Grok and Claude upside numbers.\n\n"
-        f"## Canonical code (2026-08)\n"
-        f"- GP UI: `web/gp-app/` (React+TS). Routes in `src/App.tsx`. Desk: "
-        f"`src/pages/DeskPage.tsx`. Report window: `src/pages/ReportPage.tsx`.\n"
-        f"- API: `api/server.py` (FastAPI, huge). Analyze: `DGA_analyst.py`.\n"
-        f"- Auth header: `x-auth-v2-token`. Login `/api/auth/v2/login`.\n"
-        f"- Legacy GP HTML is `/gp-legacy` (`web/gp/`) — not the source of truth.\n\n"
-        f"## Nav (do not reshuffle casually)\n"
-        f"Work: Desk · Financials · Builder · Podcasts · Transcripts · Positions · Options\n"
-        f"| Firm ops: Accounts · Memos · Settings · Sliw\n\n"
-        f"## CONTINUITY.md (repo copy at handoff time)\n\n"
-        f"{cont_md or '_(file missing on this deploy — use rules above)_'}\n"
+        f"3. After push, poll `/api/build` until the new string is live.\n"
+        f"4. Do **not** auto-send email. Share prompts for a recipient.\n"
+        f"5. Sliw is Alec/Edyta only. CRM in shared Postgres.\n"
+        f"6. Never persist Grok live-search tool dumps as `report_md`.\n"
+        f"7. Demo (`demo@dgacapital.com` / `demo123`) must never see live LP/GP PII.\n"
+        f"8. Do not App Store-submit iOS without explicit confirmation.\n"
+        f"9. Do not commit `grok_bot.py`, `ticket_*.jpg`, GrokBot/FabDock, "
+        f"`mobile/logo-options/`.\n"
+        f"10. Financials print CSS stays scoped to `.shell` — never `body *`.\n"
+        f"11. Accounts rebalance = **Grok** 12m PT vs **live last**.\n"
+        f"12. Saved Reports: Grok and Claude each show their own TGT + live upside.\n"
+        f"13. DCF User $/share uses **SEC diluted shares**, not leftover 7.1m report cells.\n\n"
+        f"## 4. Feature map (details in PRODUCT_LOG.md)\n\n"
+        f"- **Desk:** watchlist, earnings, pulse, reports, analyst, strategist, "
+        f"wire, pulse chips, movers, analyze, health, **ticket light**\n"
+        f"- **Financials:** DGA Score, Value Line, SEC store, charts\n"
+        f"- **Builder:** GuruFocus boards, split-adjusted since-add\n"
+        f"- **Accounts:** SMA/IRA + LP funds; account switcher; Download pulldown; "
+        f"SnapTrade live; planning Tax YTD\n"
+        f"- **Options:** wheel held = Positions book\n"
+        f"- **Valuation bridge:** GARP/VALUE/… pills; DCF User FCF multiple\n"
+        f"- **Mobile:** Expo **DGA Capital**; LP Positions must not 500\n"
+        f"- **Support:** FAB files tickets; GP inbox; close with PATCH + trail\n\n"
+        f"## 5. Canonical code\n\n"
+        f"- GP UI: `web/gp-app/` (React+TS). Routes: `src/App.tsx`.\n"
+        f"- API: `api/server.py`. Analyze: `DGA_analyst.py`. Excel: `excel_model.py`.\n"
+        f"- Auth: `x-auth-v2-token` · `POST /api/auth/v2/login`.\n"
+        f"- Legacy HTML `/gp-legacy` is **not** the source of truth.\n"
+        f"- Nav: Desk · Financials · Builder · Podcasts · Transcripts · "
+        f"Positions · Options | Accounts · Memos · Settings · Sliw\n"
     )
-
     return {
         "ok": True,
         "build": WEB_BUILD_VERSION,
@@ -8047,20 +8081,55 @@ def _continuity_pack() -> dict:
         "git_sha": git_sha,
         "git_branch": git_branch,
         "git_subject": git_msg,
-        "continuity_md": cont_md,
         "paste_markdown": paste,
-        "filename": f"dga-continuity-handoff-{now[:10]}.md",
+        "filename": f"dga-agent-briefing-{now[:10]}.md",
+        "product_log_filename": "DGA-PRODUCT-LOG.md",
+        "version_log_filename": "CONTINUITY.md",
+        "instructions": (
+            "Copy the briefing into the next agent, then have it open "
+            "docs/continuity/PRODUCT_LOG.md and CONTINUITY.md from the repo."
+        ),
     }
 
 
 @app.get("/api/continuity/handoff")
 def continuity_handoff(request: Request):
-    """GP Settings handoff pack — markdown paste for Claude / Grok / Cursor.
+    """GP Settings — short briefing for the next computer/model.
 
-    No secrets (keys, tokens, or passwords). Safe to copy between machines.
+    No secrets. The long product encyclopedia is /api/continuity/product-log.
     """
     _plaid_require_gp(request)
     return _continuity_pack()
+
+
+@app.get("/api/continuity/product-log")
+def continuity_product_log(request: Request):
+    """Full categorized feature encyclopedia (docs/continuity/PRODUCT_LOG.md)."""
+    _plaid_require_gp(request)
+    md = _continuity_read("docs", "continuity", "PRODUCT_LOG.md")
+    now = datetime.utcnow().strftime("%Y-%m-%d")
+    return {
+        "ok": True,
+        "kind": "product_log",
+        "build": WEB_BUILD_VERSION,
+        "markdown": md,
+        "filename": f"DGA-PRODUCT-LOG-{now}.md",
+    }
+
+
+@app.get("/api/continuity/version-log")
+def continuity_version_log(request: Request):
+    """uiNNN sequence (CONTINUITY.md) — download from Settings."""
+    _plaid_require_gp(request)
+    md = _continuity_read("CONTINUITY.md")
+    now = datetime.utcnow().strftime("%Y-%m-%d")
+    return {
+        "ok": True,
+        "kind": "version_log",
+        "build": WEB_BUILD_VERSION,
+        "markdown": md,
+        "filename": f"CONTINUITY-{now}.md",
+    }
 
 
 @app.get("/health")
