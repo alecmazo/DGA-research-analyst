@@ -106,3 +106,25 @@ def test_pulse_three_chips_dcf_comps_street():
     assert '/api/financials/{ticker}/comps' in body
     assert "research_comps" in body
     assert "def financials_comps" in body
+
+
+def test_pulse_windows_support_export_and_stats():
+    val = (ROOT / "web/gp-app/src/pages/ValuationBridgePage.tsx").read_text()
+    comps = (ROOT / "web/gp-app/src/pages/CompsPage.tsx").read_text()
+    chrome = (ROOT / "web/gp-app/src/components/desk/WindowChrome.tsx").read_text()
+    for src in (val, comps):
+        assert "SupportFab" in src
+        assert "WindowExportMenu" in src
+        assert "TickerStatsLine" in src
+        assert "window.print" in src
+        assert "/api/desk/window-email" in src
+    assert "Print PDF" in chrome
+    assert "Excel" in chrome
+    assert "Email" in chrome
+    assert "Mkt cap" in chrome
+    assert "EV/EBITDA" in chrome
+    api = (ROOT / "api" / "server.py").read_text()
+    assert "/api/reports/{ticker}/valuation.xlsx" in api
+    assert "/api/financials/{ticker}/comps.xlsx" in api
+    assert "/api/desk/window-email" in api
+    assert "A valid recipient email is required" in api

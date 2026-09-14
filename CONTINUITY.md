@@ -188,6 +188,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Continuity kit** | **`ui605-20260914-continuity-kit`** | Settings handoff is a short briefing + downloadable product log (`docs/continuity/PRODUCT_LOG.md`) and version log |
 | **Pulse three chips** | **`ui606-20260914-pulse-comps`** | SUP_20260914_1f66fa9d — Market Pulse tags are DCF / Comps / Street only; Comps opens last-FY `company_financials` peer window (n/a if missing) |
 | **Handoff copy-paste** | **`ui607-20260914-handoff-copy`** | Alec’s only step is Copy briefing → paste. The new agent clones/pulls GitHub (asks him to log in if needed). No Terminal clone. |
+| **Pulse window export** | **`ui608-20260914-pulse-windows`** | DCF / Comps / Street windows: Support FAB, Download pulldown (Print PDF / Excel / Email), ticker stats line (mkt cap, P/E, EV/EBITDA, FCF, 52w) |
 
 ### One-click handoff (preferred)
 
@@ -369,4 +370,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui607-20260914-handoff-copy` · Next: `ui608-YYYYMMDD-slug`*
+*Last updated: 2026-09-14 · Agent: Grok Build · Live: `ui608-20260914-pulse-windows` · Next: `ui609-YYYYMMDD-slug`*

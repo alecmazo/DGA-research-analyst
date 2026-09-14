@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, type ValuationApproach } from '@/lib/api'
+import { api, downloadAuth, type ValuationApproach } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
+import { getCachedUser } from '@/lib/auth'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
+import { SupportFab } from '@/components/support/SupportFab'
+import {
+  TickerStatsLine,
+  WindowExportMenu,
+  type WindowExportKind,
+} from '@/components/desk/WindowChrome'
 import styles from './ValuationBridgePage.module.css'
 
 type StyleRule = {
@@ -89,6 +96,7 @@ export function ValuationBridgePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [mult, setMult] = useState<string>('')
+  const [shareBusy, setShareBusy] = useState(false)
 
   const load = useCallback(async () => {
     if (!ticker) {
@@ -147,24 +155,87 @@ export function ValuationBridgePage() {
     return approaches.find((a) => String(a.id || '').toLowerCase() === focus)
   }, [approaches, focus])
 
+  const onExport = async (kind: WindowExportKind) => {
+    if (!ticker) return
+    if (kind === 'pdf') {
+      window.print()
+      return
+    }
+    if (kind === 'excel') {
+      setShareBusy(true)
+      try {
+        await downloadAuth(
+          `/api/reports/${encodeURIComponent(ticker)}/valuation.xlsx`,
+          `${ticker}_valuation.xlsx`,
+        )
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') return
+        setErr(e instanceof Error ? e.message : 'Excel download failed')
+      } finally {
+        setShareBusy(false)
+      }
+      return
+    }
+    const def = getCachedUser()?.email || ''
+    const to = window.prompt('Email this valuation window as a PDF to:', def)
+    if (!to) return
+    setShareBusy(true)
+    try {
+      const root = document.getElementById('dga-window-export')
+      const d = await api<{ ok?: boolean; detail?: string }>(
+        '/api/desk/window-email',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            to,
+            ticker,
+            kind: 'valuation',
+            title: `${ticker} valuation bridge`,
+            html: root?.innerHTML || '',
+          }),
+        },
+      )
+      if (!d.ok) throw new Error(d.detail || 'Send failed')
+      window.alert('Sent to ' + to)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Email failed')
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
   return (
-    <div className={styles.page}>
+    <div className={styles.page} id="dga-window-export">
       <PrintLetterhead
         doc={`${ticker || '—'} valuation bridge`}
         meta={[style?.label || '', pack?.rating || ''].filter(Boolean)}
       />
       <header className={styles.head}>
-        <div>
-          <div className={styles.kicker}>Valuation bridge · not a blended score</div>
-          <h1 className={styles.h1}>
-            {ticker || '—'}
-            {style?.label ? <span className={styles.styleTag}>{style.label}</span> : null}
-          </h1>
-          <p className={styles.sub}>
-            Last {fmtPx(pack?.last)} · 12m PT {fmtPx(pack?.pt)}
-            {pack?.rating ? ` · ${pack.rating}` : ''}
-          </p>
+        <div className={styles.headTop}>
+          <div>
+            <div className={styles.kicker}>Valuation bridge · not a blended score</div>
+            <h1 className={styles.h1}>
+              {ticker || '—'}
+              {style?.label ? <span className={styles.styleTag}>{style.label}</span> : null}
+            </h1>
+          </div>
+          <div className={`${styles.headActions} ${styles.noPrint}`}>
+            <WindowExportMenu busy={shareBusy} onPick={(k) => void onExport(k)} />
+            <button
+              type="button"
+              className={styles.closeBtn}
+              onClick={() => window.close()}
+            >
+              Close
+            </button>
+          </div>
         </div>
+        <TickerStatsLine
+          ticker={ticker}
+          evEbitda={capital.ev_ebitda}
+          pt={pack?.pt}
+          rating={pack?.rating}
+        />
       </header>
 
       {loading && <div className={styles.empty}>Loading valuation…</div>}
@@ -385,6 +456,9 @@ export function ValuationBridgePage() {
           ) : null}
         </>
       )}
+      <div className={styles.noPrint}>
+        <SupportFab />
+      </div>
     </div>
   )
 }

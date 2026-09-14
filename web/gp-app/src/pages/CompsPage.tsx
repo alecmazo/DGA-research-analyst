@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api } from '@/lib/api'
+import { api, downloadAuth } from '@/lib/api'
+import { getCachedUser } from '@/lib/auth'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
+import { SupportFab } from '@/components/support/SupportFab'
+import {
+  TickerStatsLine,
+  WindowExportMenu,
+  type WindowExportKind,
+} from '@/components/desk/WindowChrome'
 import styles from './ValuationBridgePage.module.css'
 
 type CompRow = {
@@ -56,6 +63,7 @@ export function CompsPage() {
   const [pack, setPack] = useState<Pack | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [shareBusy, setShareBusy] = useState(false)
 
   const load = useCallback(async () => {
     if (!ticker) {
@@ -88,24 +96,84 @@ export function CompsPage() {
 
   const peers = pack?.peers || []
   const meta = [pack?.industry, pack?.sector].filter(Boolean).join(' · ')
+  const subject = peers.find((p) => p.is_subject) || peers[0]
+
+  const onExport = async (kind: WindowExportKind) => {
+    if (!ticker) return
+    if (kind === 'pdf') {
+      window.print()
+      return
+    }
+    if (kind === 'excel') {
+      setShareBusy(true)
+      try {
+        await downloadAuth(
+          `/api/financials/${encodeURIComponent(ticker)}/comps.xlsx`,
+          `${ticker}_comps.xlsx`,
+        )
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') return
+        setErr(e instanceof Error ? e.message : 'Excel download failed')
+      } finally {
+        setShareBusy(false)
+      }
+      return
+    }
+    const def = getCachedUser()?.email || ''
+    const to = window.prompt('Email this comps window as a PDF to:', def)
+    if (!to) return
+    setShareBusy(true)
+    try {
+      const root = document.getElementById('dga-window-export')
+      const d = await api<{ ok?: boolean; detail?: string }>(
+        '/api/desk/window-email',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            to,
+            ticker,
+            kind: 'comps',
+            title: `${ticker} comparable companies`,
+            html: root?.innerHTML || '',
+          }),
+        },
+      )
+      if (!d.ok) throw new Error(d.detail || 'Send failed')
+      window.alert('Sent to ' + to)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Email failed')
+    } finally {
+      setShareBusy(false)
+    }
+  }
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} id="dga-window-export">
       <PrintLetterhead
         doc={`${ticker || '—'} comparable companies`}
         meta={[meta, 'last reported FY'].filter(Boolean)}
       />
       <header className={styles.head}>
-        <div>
-          <div className={styles.kicker}>
-            Comparable companies · last reported FY · not NTM / not (E)
+        <div className={styles.headTop}>
+          <div>
+            <div className={styles.kicker}>
+              Comparable companies · last reported FY · not NTM / not (E)
+            </div>
+            <h1 className={styles.h1}>{ticker || '—'}</h1>
           </div>
-          <h1 className={styles.h1}>{ticker || '—'}</h1>
-          <p className={styles.sub}>
-            {meta || 'Real competitors from company_financials'}
-            {pack?.source ? ` · ${pack.source}` : ''}
-          </p>
+          <div className={`${styles.headActions} ${styles.noPrint}`}>
+            <WindowExportMenu busy={shareBusy} onPick={(k) => void onExport(k)} />
+            <button
+              type="button"
+              className={styles.closeBtn}
+              onClick={() => window.close()}
+            >
+              Close
+            </button>
+          </div>
         </div>
+        <TickerStatsLine ticker={ticker} evEbitda={subject?.ev_ebitda} />
+        {meta ? <p className={styles.sub}>{meta}</p> : null}
       </header>
 
       {loading && <div className={styles.empty}>Loading comps…</div>}
@@ -177,6 +245,9 @@ export function CompsPage() {
           </p>
         </section>
       )}
+      <div className={styles.noPrint}>
+        <SupportFab />
+      </div>
     </div>
   )
 }

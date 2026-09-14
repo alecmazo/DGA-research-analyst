@@ -10,6 +10,18 @@ export function fmtPct(v: number | null | undefined, digits = 2): string {
   return `${sign}${n.toFixed(digits)}%`
 }
 
+/** Market cap / EV: $1.48T / $12.3B / $540.1M */
+export function fmtCap(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(Number(v))) return '—'
+  const n = Number(v)
+  const abs = Math.abs(n)
+  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`
+  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`
+  if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`
+  return `$${n.toFixed(0)}`
+}
+
 export function fmtUsd(v: number | null | undefined, digits = 0): string {
   if (v == null || Number.isNaN(Number(v))) return '—'
   return new Intl.NumberFormat('en-US', {

@@ -207,6 +207,8 @@ Opened from GARP/VALUE/GROWTH/RICH/CORE pills and Market Pulse chips.
 - Report leftover share counts (BSX 7.1m) must yield to SEC (~1.48bn). `normalize_shares_millions`
 - Insane stored DCF User $/share (60× last) must not overlay Market Pulse
 - Market Pulse chips are **only** DCF / Comps / Street (not DCF base, EV/EBITDA Comps, P/E Comps, FY26E, street-anchored, 12m PT)
+- Support FAB on the window. Download pulldown: **Print PDF** (`window.print`), **Excel** (`/valuation.xlsx`), **Email** (prompt for recipient — never auto-send)
+- Stats line under the ticker: last, day %, market cap, P/E, EV/EBITDA, FCF yield, 52w
 
 ### 5.15 Comps window (`/comps?ticker=`)
 
@@ -215,6 +217,7 @@ Opened from the Market Pulse **Comps** chip.
 - `GET /api/financials/{ticker}/comps` → `research_comps.load()` (company_financials last FY + live last)
 - Columns: EV/EBITDA, P/E, P/S, FCF yield, rev growth, EBITDA margin
 - Missing cells render **n/a** — never NTM / (E)
+- Same Support FAB + Download pulldown (Excel = `/comps.xlsx`) + ticker stats line as the valuation window
 
 ---
 

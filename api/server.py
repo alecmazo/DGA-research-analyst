@@ -7458,6 +7458,150 @@ def get_report_valuation(ticker: str, request: Request):
     return {"ok": True, **pack}
 
 
+def _xlsx_bytes(sheet_name: str, blocks: list) -> bytes:
+    """Simple one-sheet workbook from titled row blocks. Missing cells → n/a."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = (sheet_name or "Sheet")[:31]
+    title_font = Font(bold=True, size=14, color="0A1628")
+    section_font = Font(bold=True, size=11, color="0A1628")
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="0A1628")
+    r = 1
+
+    def _cell(v):
+        if v is None or v == "":
+            return "n/a"
+        return v
+
+    for i, block in enumerate(blocks or []):
+        title, rows = block[0], block[1] if len(block) > 1 else []
+        ws.cell(r, 1, title).font = title_font if i == 0 else section_font
+        r += 1
+        for ri, row in enumerate(rows or []):
+            for c, val in enumerate(row or [], 1):
+                cell = ws.cell(r, c, _cell(val))
+                cell.alignment = Alignment(wrap_text=False)
+                if ri == 0:
+                    cell.font = header_font
+                    cell.fill = header_fill
+            r += 1
+        r += 1
+    for col in ws.columns:
+        letter = col[0].column_letter
+        width = 10
+        for cell in col:
+            width = max(width, min(36, len(str(cell.value or "")) + 2))
+        ws.column_dimensions[letter].width = width
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
+def _xlsx_response(raw: bytes, filename: str):
+    return Response(
+        content=raw,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _fmt_x_cell(v):
+    if v is None:
+        return "n/a"
+    try:
+        return round(float(v), 1)
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+@app.get("/api/reports/{ticker}/valuation.xlsx")
+def get_report_valuation_xlsx(ticker: str, request: Request):
+    """Excel of the valuation-bridge window (approaches, DCF User, multiples)."""
+    pack = get_report_valuation(ticker, request)
+    tk = (pack.get("ticker") or ticker or "").upper()
+    last = pack.get("last")
+    cap = pack.get("capital") or {}
+    user = pack.get("dcf_user") or {}
+    dcf = pack.get("dcf") or {}
+    style = pack.get("style") or {}
+    stats_rows = [
+        ["Ticker", "Last", "12m PT", "Rating", "Style", "Mkt cap ($m)",
+         "P/E", "EV/EBITDA", "EV/Sales", "FCF yield"],
+        [
+            tk, last, pack.get("pt"), pack.get("rating"), style.get("label"),
+            cap.get("market_cap"), _fmt_x_cell(cap.get("pe")),
+            _fmt_x_cell(cap.get("ev_ebitda")), _fmt_x_cell(cap.get("ev_sales")),
+            cap.get("fcf_yield"),
+        ],
+    ]
+    app_rows = [["Approach", "$/share", "Gap", "Verdict", "Notes"]]
+    for a in pack.get("approaches") or []:
+        app_rows.append([
+            a.get("name") or a.get("id"), a.get("value"), a.get("gap"),
+            a.get("verdict"), a.get("note"),
+        ])
+    dcf_rows = [
+        ["Item", "Value"],
+        ["DCF $/share", style.get("dcf_value") or dcf.get("implied_price")],
+        ["WACC", dcf.get("wacc")],
+        ["Terminal g", dcf.get("terminal_growth")],
+        ["Net debt ($m)", dcf.get("net_debt")],
+        ["Shares (m)", dcf.get("shares")],
+        ["Year-0 FCF ($m)", dcf.get("year0_fcf")],
+        ["DCF User multiple", user.get("multiple")],
+        ["DCF User $/share", user.get("value")],
+        ["DCF User verdict", user.get("verdict")],
+    ]
+    blocks = [
+        (f"{tk} valuation bridge", stats_rows),
+        ("Each approach vs last", app_rows),
+        ("DCF / DCF User", dcf_rows),
+    ]
+    deriv = pack.get("derivation") or {}
+    if deriv.get("rows"):
+        blocks.append((
+            deriv.get("title") or "Derivation",
+            [deriv.get("headers") or []] + list(deriv.get("rows") or []),
+        ))
+    return _xlsx_response(_xlsx_bytes("Valuation", blocks), f"{tk}_valuation.xlsx")
+
+
+@app.get("/api/financials/{ticker}/comps.xlsx")
+def financials_comps_xlsx(ticker: str, request: Request):
+    """Excel of the Market Pulse comps window (last-FY company_financials)."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+    try:
+        import research_comps as _rc
+        data = _rc.load(tk, limit=8)
+    except Exception as e:
+        raise HTTPException(500, f"comps failed: {e!s:.160}") from e
+    peers = list((data or {}).get("peers") or [])
+    hdr = ["Ticker", "Name", "Price", "EV/EBITDA", "P/E", "P/S",
+           "FCF yield", "Rev growth %", "EBITDA margin %", "FY"]
+    rows = [hdr]
+    for p in peers:
+        rows.append([
+            p.get("ticker"), p.get("name"), p.get("price"),
+            p.get("ev_ebitda"), p.get("pe"), p.get("ps"),
+            p.get("fcf_yield"), p.get("rev_yoy_pct"),
+            p.get("ebitda_margin_pct"), p.get("fy") or "n/a",
+        ])
+    note = (data or {}).get("note") or "Last reported FY + live last. Not NTM / not (E)."
+    blocks = [
+        (f"{tk} comparable companies", [["Note"], [note]]),
+        ("Last reported FY + live last", rows),
+    ]
+    return _xlsx_response(_xlsx_bytes("Comps", blocks), f"{tk}_comps.xlsx")
+
+
 @app.post("/api/reports/{ticker}/dcf-user")
 def set_report_dcf_user(ticker: str, request: Request):
     """Assign (or clear) the GP's FCF multiple → DCF User."""
@@ -7927,7 +8071,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui607-20260914-handoff-copy"
+WEB_BUILD_VERSION = "ui608-20260914-pulse-windows"
 
 
 @app.get("/api/build")
@@ -9380,6 +9524,92 @@ def email_saved_report_pdf(ticker: str, body: SavedReportEmailRequest, request: 
         ip="",
         ok=True,
         detail=f"{tk} {provider} -> {_mask_email(to_addr)}",
+    )
+    return {"ok": True, "sent_to": to_addr, "transport": res.get("transport")}
+
+
+class WindowEmailRequest(BaseModel):
+    """Email a Market Pulse DCF / Comps / Street window as a PDF. Never auto-send."""
+    to: str
+    ticker: str = ""
+    kind: str = "valuation"
+    title: str = ""
+    html: str = ""
+    subject: Optional[str] = None
+
+
+@app.post("/api/desk/window-email")
+def email_desk_window_pdf(body: WindowEmailRequest, request: Request):
+    """Prompted email of the valuation or comps window as a PDF attachment."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    if _request_is_demo(request):
+        raise HTTPException(403, "Demo sessions cannot email")
+    to_addr = (body.to or "").strip()
+    if not _valid_email_addr(to_addr):
+        raise HTTPException(400, "A valid recipient email is required.")
+    html_body = (body.html or "").strip()
+    if not html_body:
+        raise HTTPException(400, "No window content to send.")
+    html_body = re.sub(r"<script[\s\S]*?</script>", "", html_body, flags=re.I)
+    html_body = re.sub(r"<button[\s\S]*?</button>", "", html_body, flags=re.I)
+    html_body = re.sub(r"<select[\s\S]*?</select>", "", html_body, flags=re.I)
+    tk = (body.ticker or "").strip().upper()
+    if not tk or len(tk) > 12 or not re.fullmatch(r"[A-Z0-9.\-]+", tk):
+        raise HTTPException(422, "Invalid ticker")
+    kind = (body.kind or "valuation").strip().lower()
+    if kind not in ("valuation", "comps", "street", "dcf"):
+        kind = "valuation"
+    title = (body.title or f"{tk} {kind}").strip()[:160]
+    import html as _html
+    css = (
+        "body{font-family:Inter,Helvetica,Arial,sans-serif;color:#0A1628;font-size:11px;}"
+        "table{border-collapse:collapse;width:100%;}"
+        "th,td{border-bottom:1px solid #e2e8f0;padding:4px 6px;text-align:left;}"
+        "th{font-size:9px;text-transform:uppercase;color:#64748b;}"
+        "h1{font-size:18px;margin:4px 0;}"
+        "h2{font-size:13px;margin:12px 0 6px;}"
+        ".kicker,.statLbl{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;}"
+    )
+    html_doc = (
+        "<html><head><meta charset='utf-8'><style>" + css + "</style></head><body>"
+        "<div style='font-size:10px;letter-spacing:.12em;text-transform:uppercase;"
+        "color:#5BB8D4;font-weight:800;'>DGA CAPITAL</div>"
+        f"<h1>{_html.escape(title)}</h1>"
+        f"<div>{html_body}</div>"
+        "<p style='color:#94a3b8;font-size:9px;margin-top:18px;'>DGA Capital · Confidential. "
+        "Not investment advice.</p></body></html>"
+    )
+    try:
+        pdf = _render_saved_report_pdf(html_doc)
+    except Exception as e:
+        raise HTTPException(500, f"PDF render failed: {e!s:.200}")
+    subject = (body.subject or f"DGA Capital — {tk} {title}").strip()[:180]
+    email_html = (
+        '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
+        'color:#0A1628;max-width:560px;">'
+        '<div style="background:#0A1628;padding:16px 18px;border-radius:8px 8px 0 0;">'
+        '<div style="color:#fff;font-weight:800;font-size:15px;letter-spacing:0.6px;">DGA CAPITAL</div>'
+        f'<div style="color:#5BB8D4;font-size:11px;font-weight:700;margin-top:3px;">'
+        f'{_html.escape(tk)} · {_html.escape(kind)}</div></div>'
+        '<div style="border:1px solid #e2e8f0;border-top:3px solid #5BB8D4;'
+        'padding:16px 18px;border-radius:0 0 8px 8px;">'
+        f'<p style="margin:0 0 12px;font-size:14px;">Please find the attached '
+        f'<strong>{_html.escape(title)}</strong> PDF.</p>'
+        '<p style="color:#94a3b8;font-size:11px;margin:0;">DGA Capital · Confidential — '
+        'for the intended recipient only. Not investment advice.</p></div></div>'
+    )
+    fn = f"DGA_{tk}_{kind}.pdf"
+    res = _send_email_with_pdf_attachment(to_addr, subject, email_html, pdf, fn)
+    if not res.get("ok"):
+        raise HTTPException(502, res.get("error", "Email send failed"))
+    _audit(
+        action="desk_window_emailed",
+        user=str(claims.get("email") or "gp"),
+        ip="",
+        ok=True,
+        detail=f"{tk} {kind} -> {_mask_email(to_addr)}",
     )
     return {"ok": True, "sent_to": to_addr, "transport": res.get("transport")}
 
