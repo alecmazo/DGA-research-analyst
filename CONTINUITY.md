@@ -198,6 +198,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Gurus tickers + colors** | **`ui615-20260914-gurus-tickers`** | SUP_20260914_ea14b128 / _9c823a25 — issuer/CUSIP→ticker (SEC titles + OpenFIGI); Add/New Buy light green, Reduce/Sold Out light red |
 | **Wire + dense Gurus** | **`ui616-20260915-wire-gurus`** | Market Wire drops Bloomberg; WSJ/IBD/Fox Business/RCM + max 2 per source. Gurus packed: small chart, buys/sells, roster, overlap |
 | **Roster turnover** | **`ui617-20260915-gurus-roster`** | Roster snapshot uses 13F impact for turnover; overlap de-dupes the same guru twice |
+| **Concentrated $10B+ gurus** | **`ui618-20260915-gurus-10b`** | Add 13 managers with latest 13F ≥ $10B and ≤ 50 names (TCI, Gates, Tiger, Elliott, Lone Pine, Fundsmith, …). Screened on SEC EDGAR, not GuruFocus. |
 
 ### One-click handoff (preferred)
 
@@ -385,4 +386,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-15 · Agent: Grok Build · Live: `ui617-20260915-gurus-roster` · Next: `ui618-YYYYMMDD-slug`*
+*Last updated: 2026-09-15 · Agent: Grok Build · Live: `ui618-20260915-gurus-10b` · Next: `ui619-YYYYMMDD-slug`*

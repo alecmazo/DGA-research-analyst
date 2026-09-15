@@ -89,6 +89,85 @@ GURU_SEED = [
         "firm": "The Baupost Group",
         "cik": "0001061768",
     },
+    # Added ui618: latest 13F-HR ≥ $10B and ≤ 50 positions (SEC EDGAR Q2 2026).
+    {
+        "id": "hohn",
+        "name": "Chris Hohn",
+        "firm": "TCI Fund Management Ltd",
+        "cik": "0001647251",
+    },
+    {
+        "id": "gates",
+        "name": "Bill Gates",
+        "firm": "Gates Foundation Trust",
+        "cik": "0001166559",
+    },
+    {
+        "id": "coleman",
+        "name": "Chase Coleman",
+        "firm": "Tiger Global Management LLC",
+        "cik": "0001167483",
+    },
+    {
+        "id": "singer",
+        "name": "Paul Singer",
+        "firm": "Elliott Investment Management L.P.",
+        "cik": "0001791786",
+    },
+    {
+        "id": "aschenbrenner",
+        "name": "Leopold Aschenbrenner",
+        "firm": "Situational Awareness LP",
+        "cik": "0002045724",
+    },
+    {
+        "id": "mandel",
+        "name": "Stephen Mandel",
+        "firm": "Lone Pine Capital LLC",
+        "cik": "0001061165",
+    },
+    {
+        "id": "baker",
+        "name": "Gavin Baker",
+        "firm": "Atreides Management, LP",
+        "cik": "0001777813",
+    },
+    {
+        "id": "fundsmith",
+        "name": "Terry Smith",
+        "firm": "Fundsmith LLP",
+        "cik": "0001569205",
+    },
+    {
+        "id": "sacerdote",
+        "name": "Alex Sacerdote",
+        "firm": "Whale Rock Capital Management LLC",
+        "cik": "0001387322",
+    },
+    {
+        "id": "avoro",
+        "name": "Behzad Aghazadeh",
+        "firm": "Avoro Capital Advisors LLC",
+        "cik": "0001633313",
+    },
+    {
+        "id": "armitage",
+        "name": "John Armitage",
+        "firm": "Egerton Capital (UK) LLP",
+        "cik": "0001581811",
+    },
+    {
+        "id": "generation",
+        "name": "Al Gore / David Blood",
+        "firm": "Generation Investment Management LLP",
+        "cik": "0001375534",
+    },
+    {
+        "id": "ellenbogen",
+        "name": "Henry Ellenbogen",
+        "firm": "Durable Capital Partners LP",
+        "cik": "0001798849",
+    },
 ]
 
 _ISSUER_TICKER = {

@@ -129,6 +129,29 @@ def test_guru_seed_new_names():
     assert by["paulson"] == "0001035674"
     assert by["klarman"] == "0001061768"
     assert by["paulson"] != "0001037389"  # that CIK is Renaissance
+    # ui618: 13F ≥ $10B and ≤ 50 positions (SEC Q2 2026)
+    assert {
+        "hohn",
+        "gates",
+        "coleman",
+        "singer",
+        "aschenbrenner",
+        "mandel",
+        "baker",
+        "fundsmith",
+        "sacerdote",
+        "avoro",
+        "armitage",
+        "generation",
+        "ellenbogen",
+    } <= ids
+    assert by["hohn"] == "0001647251"
+    assert by["gates"] == "0001166559"
+    assert by["coleman"] == "0001167483"
+    assert by["singer"] == "0001791786"
+    assert by["mandel"] == "0001061165"
+    assert by["fundsmith"] == "0001569205"
+    assert by["generation"] == "0001375534"
 
 
 def test_alphabet_share_class_tickers():
