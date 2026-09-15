@@ -205,6 +205,10 @@ def test_nav_has_lab_accounts_gurus():
     assert "overlap" in page
     assert "Roster snapshot" in page
     assert "Weight over time" in page
+    assert "BookSpark" not in page
+    assert "HistoryChart data={hist}" in page
+    assert "tone === 'up' ? '#15915a'" not in page
+    assert "_ident" in body
     feeds = srv.split("_MARKET_WIRE_FEEDS:")[1].split("_WIRE_MAX_PER_FEED", 1)[0]
     assert '("BBG"' not in feeds
     assert "Bloomberg" not in feeds

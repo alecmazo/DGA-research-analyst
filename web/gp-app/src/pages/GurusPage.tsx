@@ -80,51 +80,19 @@ function toneClass(action?: string | null): string {
   return t === 'up' ? styles.up : t === 'down' ? styles.down : ''
 }
 
-const FLOW_COLORS = ['#0a1628', '#5bb8d4', '#047857', '#b91c1c', '#d97706', '#7c3aed']
+const FLOW_COLORS = ['#2563eb', '#ea580c', '#7c3aed', '#0891b2', '#ca8a04', '#db2777']
 
 type KpiId = 'equity' | 'names' | 'new' | 'sold' | 'turnover' | 'top5' | 'top10' | 'hhi'
 
-function BookSpark({
-  points,
-}: {
-  points: { portdate?: string; equity_k?: number }[]
-}) {
-  if (points.length < 2) return null
-  const W = 240
-  const H = 36
-  const vals = points.map((p) => Number(p.equity_k) || 0)
-  const max = Math.max(...vals, 1)
-  const min = Math.min(...vals, 0)
-  const span = max - min || 1
-  const d = vals
-    .map((v, i) => {
-      const x = (i / Math.max(1, vals.length - 1)) * W
-      const y = H - 2 - ((v - min) / span) * (H - 4)
-      return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className={styles.spark} role="img" aria-label="13F equity history">
-      <path d={d} fill="none" stroke="#0a1628" strokeWidth="1.5" />
-    </svg>
-  )
-}
-
-function HistoryChart({
-  data,
-  actions,
-}: {
-  data: History | null
-  actions?: Record<string, string | null | undefined>
-}) {
+function HistoryChart({ data }: { data: History | null }) {
   const dates = data?.dates || []
   const series = data?.series || []
   if (dates.length < 2 || !series.length) {
     return <div className={styles.muted}>Need at least two 13F quarters for a time-flow chart.</div>
   }
   const W = 640
-  const H = 128
-  const pad = { l: 28, r: 52, t: 8, b: 18 }
+  const H = 168
+  const pad = { l: 28, r: 56, t: 10, b: 22 }
   const innerW = W - pad.l - pad.r
   const innerH = H - pad.t - pad.b
   const max = Math.max(
@@ -133,7 +101,7 @@ function HistoryChart({
   )
   const x = (i: number) => pad.l + (i / Math.max(1, dates.length - 1)) * innerW
   const y = (v: number) => pad.t + innerH - (v / max) * innerH
-  const labels = series
+  const labeled = series
     .map((s, si) => {
       const weights = s.weights || []
       let lastI = -1
@@ -150,70 +118,75 @@ function HistoryChart({
         color: FLOW_COLORS[si % FLOW_COLORS.length],
         x: x(lastI),
         y: y(lastV),
-        atEnd: lastI === dates.length - 1,
       }
     })
     .filter((v): v is NonNullable<typeof v> => v != null)
-    .sort((a, b) => a.y - b.y)
-  for (let i = 1; i < labels.length; i++) {
-    if (labels[i].y - labels[i - 1].y < 10) {
-      labels[i] = { ...labels[i], y: labels[i - 1].y + 10 }
+  const placed = [...labeled].sort((a, b) => a.y - b.y)
+  for (let i = 1; i < placed.length; i++) {
+    if (placed[i].y - placed[i - 1].y < 11) {
+      placed[i] = { ...placed[i], y: placed[i - 1].y + 11 }
     }
   }
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className={styles.svg} role="img">
-      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-        const v = max * t
-        const yy = y(v)
-        return (
-          <g key={t}>
-            <line x1={pad.l} x2={W - pad.r} y1={yy} y2={yy} className={styles.grid} />
-            <text x={pad.l - 4} y={yy + 3} className={styles.axis} textAnchor="end">
-              {v.toFixed(0)}%
-            </text>
-          </g>
-        )
-      })}
-      {series.map((s, si) => {
-        const pts = (s.weights || [])
-          .map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(Number(v)).toFixed(1)}`))
-          .filter(Boolean)
-          .join(' ')
-        return (
-          <polyline
-            key={s.key}
-            fill="none"
-            stroke={FLOW_COLORS[si % FLOW_COLORS.length]}
-            strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            points={pts}
-          />
-        )
-      })}
-      {labels.map((lb) => {
-        const tone = actionTone(actions?.[lb.key])
-        const fill =
-          tone === 'up' ? '#15915a' : tone === 'down' ? '#c23b3b' : lb.color
-        return (
+    <>
+      <svg viewBox={`0 0 ${W} ${H}`} className={styles.svg} role="img">
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const v = max * t
+          const yy = y(v)
+          return (
+            <g key={t}>
+              <line x1={pad.l} x2={W - pad.r} y1={yy} y2={yy} className={styles.grid} />
+              <text x={pad.l - 4} y={yy + 3} className={styles.axis} textAnchor="end">
+                {v.toFixed(0)}%
+              </text>
+            </g>
+          )
+        })}
+        {series.map((s, si) => {
+          const pts = (s.weights || [])
+            .map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(Number(v)).toFixed(1)}`))
+            .filter(Boolean)
+            .join(' ')
+          const color = FLOW_COLORS[si % FLOW_COLORS.length]
+          return (
+            <polyline
+              key={s.key}
+              fill="none"
+              stroke={color}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              points={pts}
+            />
+          )
+        })}
+        {placed.map((lb) => (
           <text
             key={lb.key}
-            x={lb.atEnd ? lb.x + 6 : lb.x + 4}
+            x={lb.x + 6}
             y={lb.y + 3}
             className={styles.lineLbl}
-            fill={fill}
+            fill={lb.color}
             textAnchor="start"
           >
             {lb.key}
           </text>
-        )
-      })}
-      {dates.map((d, i) => (
-        <text key={d} x={x(i)} y={H - 8} className={styles.axis} textAnchor="middle">
-          {d.slice(0, 7)}
-        </text>
-      ))}
-    </svg>
+        ))}
+        {dates.map((d, i) => (
+          <text key={d} x={x(i)} y={H - 6} className={styles.axis} textAnchor="middle">
+            {d.slice(2, 7)}
+          </text>
+        ))}
+      </svg>
+      <div className={styles.legend}>
+        {series.map((s, i) => (
+          <span key={s.key} style={{ color: FLOW_COLORS[i % FLOW_COLORS.length] }}>
+            <i style={{ background: FLOW_COLORS[i % FLOW_COLORS.length] }} />
+            {s.key}
+          </span>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -556,26 +529,7 @@ export function GurusPage() {
                   <option value="y">Y</option>
                 </select>
               </div>
-              <HistoryChart
-                data={hist}
-                actions={Object.fromEntries(
-                  holdings.flatMap((h) => {
-                    const a = h.action || ''
-                    const out: [string, string][] = []
-                    if (h.symbol) out.push([h.symbol, a])
-                    if (h.issuer) out.push([h.issuer, a])
-                    return out
-                  }),
-                )}
-              />
-              {(sum?.book_hist || []).length > 1 && (
-                <>
-                  <div className={styles.muted} style={{ padding: '6px 0 2px' }}>
-                    13F equity {fmtCap(((sum?.book_hist || []).slice(-1)[0]?.equity_k || 0) * 1000)}
-                  </div>
-                  <BookSpark points={sum?.book_hist || []} />
-                </>
-              )}
+              <HistoryChart data={hist} />
             </section>
           </div>
           <div className={styles.split}>

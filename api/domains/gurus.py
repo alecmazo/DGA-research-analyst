@@ -1125,7 +1125,7 @@ def gurus_history(gid: str, request: Request, freq: str = "q"):
     _ensure_tables()
     with B._fund_conn() as conn, conn.cursor(cursor_factory=B._RealDictCursor) as cur:
         cur.execute(
-            """SELECT portdate, symbol, issuer, weight_pct, value_k, shares
+            """SELECT portdate, symbol, issuer, title, cusip, weight_pct, value_k, shares
                  FROM guru_13f_holdings
                 WHERE guru_id=%s AND (action IS NULL OR action <> 'Sold Out')
                 ORDER BY portdate""",
@@ -1133,6 +1133,19 @@ def gurus_history(gid: str, request: Request, freq: str = "q"):
         )
         rows = [dict(r) for r in (cur.fetchall() or [])]
     rows = _fill_missing_symbols(gid, rows)
+
+    def _ident(r: dict) -> str:
+        return (r.get("cusip") or r.get("symbol") or r.get("issuer") or "?").upper()
+
+    def _label(r: dict) -> str:
+        tk = (r.get("symbol") or ticker_from_issuer(
+            r.get("issuer") or "", r.get("title") or "", r.get("cusip") or "",
+        ) or "").upper()
+        if tk:
+            return tk
+        iss = " ".join((r.get("issuer") or "?").split())
+        return iss[:8]
+
     by_date: dict[str, list] = {}
     for r in rows:
         d = str(r.get("portdate") or "")[:10]
@@ -1146,22 +1159,21 @@ def gurus_history(gid: str, request: Request, freq: str = "q"):
         for d in dates:
             year_last[d[:4]] = d
         dates = [year_last[y] for y in sorted(year_last)]
-    # Top names by latest weight
     latest = by_date.get(dates[-1], []) if dates else []
     top = sorted(latest, key=lambda x: -(x.get("weight_pct") or 0))[:6]
-    keys = [(r.get("symbol") or r.get("issuer") or "?") for r in top]
     series = []
-    for k in keys:
+    used_labels: set[str] = set()
+    for r in top:
+        ident = _ident(r)
+        lab = _label(r)
+        if lab in used_labels:
+            lab = f"{lab}·{(r.get('cusip') or '')[-3:]}"
+        used_labels.add(lab)
         vals = []
         for d in dates:
-            hit = next(
-                (x for x in by_date.get(d, [])
-                 if (x.get("symbol") or x.get("issuer")) == k
-                 or (x.get("issuer") or "") == k),
-                None,
-            )
+            hit = next((x for x in by_date.get(d, []) if _ident(x) == ident), None)
             vals.append(None if not hit else hit.get("weight_pct"))
-        series.append({"key": k, "weights": vals})
+        series.append({"key": lab, "weights": vals})
     return {"ok": True, "freq": "y" if freq.startswith("y") else "q", "dates": dates, "series": series}
 
 
