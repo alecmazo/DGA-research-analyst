@@ -197,6 +197,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Public surface harden** | **`ui614-20260914-sec-harden`** | Close /docs /redoc /openapi.json; diagnostics GP-only; CORS allowlist; security headers; login rate-limit by IP + v1; cap support screenshot size |
 | **Gurus tickers + colors** | **`ui615-20260914-gurus-tickers`** | SUP_20260914_ea14b128 / _9c823a25 — issuer/CUSIP→ticker (SEC titles + OpenFIGI); Add/New Buy light green, Reduce/Sold Out light red |
 | **Wire + dense Gurus** | **`ui616-20260915-wire-gurus`** | Market Wire drops Bloomberg; WSJ/IBD/Fox Business/RCM + max 2 per source. Gurus packed: small chart, buys/sells, roster, overlap |
+| **Roster turnover** | **`ui617-20260915-gurus-roster`** | Roster snapshot uses 13F impact for turnover; overlap de-dupes the same guru twice |
 
 ### One-click handoff (preferred)
 
@@ -384,4 +385,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-15 · Agent: Grok Build · Live: `ui616-20260915-wire-gurus` · Next: `ui617-YYYYMMDD-slug`*
+*Last updated: 2026-09-15 · Agent: Grok Build · Live: `ui617-20260915-gurus-roster` · Next: `ui618-YYYYMMDD-slug`*

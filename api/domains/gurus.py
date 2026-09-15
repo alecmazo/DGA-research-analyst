@@ -918,7 +918,12 @@ def _overlap_for(gid: str, live: list[dict]) -> list[dict]:
         others = cur.fetchall() or []
     by_sym: dict[str, list] = {}
     name_of = {g["id"]: g["name"] for g in GURU_SEED}
+    seen: set[tuple[str, str]] = set()
     for ogid, sym, wt in others:
+        key = (str(ogid), str(sym))
+        if key in seen:
+            continue
+        seen.add(key)
         by_sym.setdefault(sym, []).append({
             "id": ogid,
             "name": name_of.get(ogid, ogid),
@@ -953,16 +958,16 @@ def gurus_list(request: Request):
                   SELECT guru_id, max(portdate) AS d
                     FROM guru_13f_holdings GROUP BY guru_id
                 )
-                SELECT h.guru_id, h.portdate, h.action, h.weight_pct, h.value_k
+                SELECT h.guru_id, h.portdate, h.action, h.weight_pct, h.value_k, h.impact
                   FROM guru_13f_holdings h
                   JOIN latest l ON l.guru_id=h.guru_id AND l.d=h.portdate
                 """
             )
             bag: dict[str, list] = {}
             dates: dict[str, str] = {}
-            for gid, d, action, wt, vk in cur.fetchall() or []:
+            for gid, d, action, wt, vk, impact in cur.fetchall() or []:
                 bag.setdefault(gid, []).append({
-                    "action": action, "weight_pct": wt, "value_k": vk,
+                    "action": action, "weight_pct": wt, "value_k": vk, "impact": impact,
                 })
                 dates[gid] = str(d)[:10]
             for gid, rows in bag.items():
