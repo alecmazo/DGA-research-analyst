@@ -179,3 +179,13 @@ def test_nav_has_lab_accounts_gurus():
     assert "styles.down" in page
     assert "_fill_missing_symbols" in body
     assert "openfigi.com" in body
+    assert "overlap" in page
+    assert "Roster snapshot" in page
+    assert "Weight over time" in page
+    feeds = srv.split("_MARKET_WIRE_FEEDS:")[1].split("_WIRE_MAX_PER_FEED", 1)[0]
+    assert '("BBG"' not in feeds
+    assert "Bloomberg" not in feeds
+    assert '("WSJ"' in feeds
+    assert '("IBD"' in feeds
+    assert '("FBN"' in feeds
+    assert "_wire_diverse" in srv

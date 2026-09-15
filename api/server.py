@@ -2666,9 +2666,9 @@ _FILINGS_TTL = 1800
 _CIK_SUB_CACHE: dict = {}  # cik → {ts, recent_rows}
 _CIK_SUB_TTL = 2700  # 45 min
 
-# Curated official + market RSS only. No paid APIs, no LLM, no Yahoo/CNBC
-# clickbait. Reuters and AP are out (MSM wire). Prefer primary releases
-# (Fed/Treasury/BLS/SEC/EIA/FDIC/ECB) plus markets tape (Bloomberg, MW).
+# Curated official + balanced markets tape. No paid APIs, no LLM.
+# Reuters/AP blocked. Bloomberg dropped — the markets RSS drowned the card.
+# Mix: primary releases + WSJ/IBD/Fox Business/RealClearMarkets/MarketWatch.
 _MARKET_WIRE_FEEDS: list[tuple[str, str]] = [
     ("Fed", "https://www.federalreserve.gov/feeds/press_all.xml"),
     ("Treasury", "https://home.treasury.gov/rss/press-releases"),
@@ -2677,10 +2677,13 @@ _MARKET_WIRE_FEEDS: list[tuple[str, str]] = [
     ("EIA", "https://www.eia.gov/rss/todayinenergy.xml"),
     ("FDIC", "https://www.fdic.gov/rss.xml"),
     ("ECB", "https://www.ecb.europa.eu/rss/press.html"),
-    ("BBG", "https://feeds.bloomberg.com/markets/news.rss"),
+    ("WSJ", "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"),
     ("MW", "https://feeds.content.dowjones.io/public/rss/mw_marketpulse"),
-    ("BBC", "https://feeds.bbci.co.uk/news/business/rss.xml"),
+    ("IBD", "https://www.investors.com/feed/"),
+    ("FBN", "https://moxie.foxbusiness.com/google-publisher/markets.xml"),
+    ("RCM", "https://www.realclearmarkets.com/index.xml"),
 ]
+_WIRE_MAX_PER_FEED = 2
 _WIRE_BLOCK_REUTERS = re.compile(r"reuters\.com|\breuters\b", re.I)
 _WIRE_BLOCK_AP = re.compile(
     r"apnews\.com|\bassociated press\b|\bap news\b|\(ap\)"
@@ -2837,11 +2840,26 @@ def _market_wire_score(item: dict, now_ts: float) -> float:
         score += 16.0
     elif feed in ("sec", "sec press"):
         score += 10.0
-    elif feed in ("bbg", "mw", "wsj"):
-        score += 10.0
-    elif feed in ("bbc",):
-        score += 6.0
+    elif feed in ("wsj", "mw", "ibd", "fbn", "rcm"):
+        score += 8.0
     return score
+
+
+def _wire_diverse(scored: list[dict], limit: int = 14, max_per_feed: int = _WIRE_MAX_PER_FEED) -> list[dict]:
+    """Keep the ranked list from collapsing into one loud publisher."""
+    counts: dict[str, int] = {}
+    out: list[dict] = []
+    cap = max(1, int(max_per_feed or 2))
+    want = max(5, min(int(limit or 14), 25))
+    for it in scored:
+        feed = str(it.get("feed") or it.get("publisher") or "").strip().lower() or "?"
+        if counts.get(feed, 0) >= cap:
+            continue
+        counts[feed] = counts.get(feed, 0) + 1
+        out.append(it)
+        if len(out) >= want:
+            break
+    return out
 
 
 def _build_market_wire(limit: int = 14) -> dict:
@@ -2881,7 +2899,7 @@ def _build_market_wire(limit: int = 14) -> dict:
         it2["score"] = round(s, 1)
         scored.append(it2)
     scored.sort(key=lambda x: (-(x.get("score") or 0), -(x.get("pub_ts") or 0)))
-    items = scored[: max(5, min(int(limit or 14), 25))]
+    items = _wire_diverse(scored, limit=max(5, min(int(limit or 14), 25)))
 
     data = {
         "ok": True,
@@ -2892,7 +2910,7 @@ def _build_market_wire(limit: int = 14) -> dict:
         "feeds_ok": len(_MARKET_WIRE_FEEDS) - len(errors),
         "feeds_total": len(_MARKET_WIRE_FEEDS),
         "errors": errors[:6],
-        "note": "Official + market RSS (Fed, Treasury, BLS, SEC, EIA, FDIC, ECB, Bloomberg, MarketWatch, BBC). Reuters/AP blocked.",
+        "note": "Official + balanced tape (Fed, Treasury, BLS, SEC, EIA, FDIC, ECB, WSJ, IBD, Fox Business, RealClearMarkets, MarketWatch). Max 2 per source. Reuters/AP/Bloomberg out.",
         "cached": False,
     }
     c["data"] = data
@@ -8128,7 +8146,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui615-20260914-gurus-tickers"
+WEB_BUILD_VERSION = "ui616-20260915-wire-gurus"
 
 
 @app.get("/api/build")

@@ -103,7 +103,7 @@ export function MarketWire({ bare = false }: { bare?: boolean }) {
         })}
       </div>
       <div className={styles.wireFoot}>
-        Fed · Treasury · BLS · SEC · EIA · FDIC · ECB · Bloomberg · MarketWatch · BBC
+        Official + WSJ · IBD · Fox Business · RealClearMarkets · MarketWatch
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { fmtCap, fmtPct } from '@/lib/format'
 import { openFinancialsPage } from '@/lib/financialsNav'
@@ -11,6 +11,12 @@ type Guru = {
   firm?: string
   cik?: string
   last_13f?: string | null
+  equity_k?: number | null
+  n?: number | null
+  n_new?: number | null
+  n_sold?: number | null
+  turnover_proxy?: number | null
+  top5_pct?: number | null
 }
 
 type Holding = {
@@ -35,10 +41,20 @@ type Summary = {
     equity_k?: number
     n?: number
     n_new?: number
+    n_sold?: number
+    n_add?: number
+    n_cut?: number
     turnover_proxy?: number
     top5_pct?: number
+    top10_pct?: number
     hhi?: number
   }
+  book_hist?: { portdate?: string; equity_k?: number; n?: number }[]
+  overlap?: {
+    symbol?: string
+    weight_pct?: number | null
+    also?: { id: string; name?: string; weight_pct?: number }[]
+  }[]
   caveat?: string
 }
 
@@ -64,41 +80,35 @@ function toneClass(action?: string | null): string {
   return t === 'up' ? styles.up : t === 'down' ? styles.down : ''
 }
 
-function BarChart({
-  rows,
-}: {
-  rows: { label: string; value: number; action?: string | null }[]
-}) {
-  const max = Math.max(1, ...rows.map((r) => r.value))
-  return (
-    <div className={styles.bars}>
-      {rows.map((r) => (
-        <div key={r.label} className={styles.barRow}>
-          <span className={`${styles.barLbl} ${toneClass(r.action)}`}>{r.label}</span>
-          <span className={styles.barTrack}>
-            <span
-              className={`${styles.barFill} ${
-                actionTone(r.action) === 'up'
-                  ? styles.barFillUp
-                  : actionTone(r.action) === 'down'
-                    ? styles.barFillDown
-                    : ''
-              }`}
-              style={{ width: `${(r.value / max) * 100}%` }}
-            />
-          </span>
-          <span className={`tabular ${styles.barVal} ${toneClass(r.action)}`}>
-            {r.value.toFixed(1)}%
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 const FLOW_COLORS = ['#0a1628', '#5bb8d4', '#047857', '#b91c1c', '#d97706', '#7c3aed']
 
-type KpiId = 'equity' | 'names' | 'new' | 'turnover' | 'top5' | 'hhi'
+type KpiId = 'equity' | 'names' | 'new' | 'sold' | 'turnover' | 'top5' | 'top10' | 'hhi'
+
+function BookSpark({
+  points,
+}: {
+  points: { portdate?: string; equity_k?: number }[]
+}) {
+  if (points.length < 2) return null
+  const W = 240
+  const H = 36
+  const vals = points.map((p) => Number(p.equity_k) || 0)
+  const max = Math.max(...vals, 1)
+  const min = Math.min(...vals, 0)
+  const span = max - min || 1
+  const d = vals
+    .map((v, i) => {
+      const x = (i / Math.max(1, vals.length - 1)) * W
+      const y = H - 2 - ((v - min) / span) * (H - 4)
+      return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className={styles.spark} role="img" aria-label="13F equity history">
+      <path d={d} fill="none" stroke="#0a1628" strokeWidth="1.5" />
+    </svg>
+  )
+}
 
 function HistoryChart({
   data,
@@ -112,9 +122,9 @@ function HistoryChart({
   if (dates.length < 2 || !series.length) {
     return <div className={styles.muted}>Need at least two 13F quarters for a time-flow chart.</div>
   }
-  const W = 720
-  const H = 240
-  const pad = { l: 36, r: 72, t: 14, b: 28 }
+  const W = 640
+  const H = 128
+  const pad = { l: 28, r: 52, t: 8, b: 18 }
   const innerW = W - pad.l - pad.r
   const innerH = H - pad.t - pad.b
   const max = Math.max(
@@ -146,8 +156,8 @@ function HistoryChart({
     .filter((v): v is NonNullable<typeof v> => v != null)
     .sort((a, b) => a.y - b.y)
   for (let i = 1; i < labels.length; i++) {
-    if (labels[i].y - labels[i - 1].y < 12) {
-      labels[i] = { ...labels[i], y: labels[i - 1].y + 12 }
+    if (labels[i].y - labels[i - 1].y < 10) {
+      labels[i] = { ...labels[i], y: labels[i - 1].y + 10 }
     }
   }
   return (
@@ -277,6 +287,17 @@ function KpiDetail({
       <p className={styles.muted}>No QoQ adds, cuts, or exits in the cached 13F.</p>
     )
   }
+  if (id === 'sold') {
+    const sold = (trades.length ? trades : holdings).filter((h) => h.action === 'Sold Out')
+    return sold.length ? (
+      <>
+        <p className={styles.detailLead}>{sold.length} sold out vs the prior 13F.</p>
+        <HoldingsTable rows={sold} />
+      </>
+    ) : (
+      <p className={styles.muted}>No sold-out names this quarter.</p>
+    )
+  }
   if (id === 'top5') {
     return (
       <>
@@ -284,6 +305,16 @@ function KpiDetail({
           Top 5 are {kpis?.top5_pct != null ? `${kpis.top5_pct}%` : '—'} of the book.
         </p>
         <HoldingsTable rows={top5} />
+      </>
+    )
+  }
+  if (id === 'top10') {
+    return (
+      <>
+        <p className={styles.detailLead}>
+          Top 10 are {kpis?.top10_pct != null ? `${kpis.top10_pct}%` : '—'} of the book.
+        </p>
+        <HoldingsTable rows={byWt.slice(0, 10)} />
       </>
     )
   }
@@ -411,17 +442,6 @@ export function GurusPage() {
 
   const holdings = sum?.holdings || []
   const k = sum?.kpis
-  const bars = useMemo(
-    () =>
-      holdings
-        .slice(0, 12)
-        .map((h) => ({
-          label: h.symbol || (h.issuer || '—').slice(0, 18),
-          value: Number(h.weight_pct) || 0,
-          action: h.action,
-        })),
-    [holdings],
-  )
 
   const trades = (activity?.trades || []).filter((t) => {
     if (actFilter === 'buys') return t.action === 'New Buy' || t.action === 'Add'
@@ -490,13 +510,15 @@ export function GurusPage() {
               [
                 ['equity', 'Equity', fmtCap((k?.equity_k || 0) * 1000)],
                 ['names', 'Names', String(k?.n ?? '—')],
-                ['new', 'New buys', String(k?.n_new ?? '—')],
+                ['new', 'New', String(k?.n_new ?? '—')],
+                ['sold', 'Sold', String(k?.n_sold ?? '—')],
                 [
                   'turnover',
-                  'Turnover ~',
+                  'Turnover',
                   k?.turnover_proxy != null ? `${k.turnover_proxy}%` : '—',
                 ],
                 ['top5', 'Top 5', k?.top5_pct != null ? `${k.top5_pct}%` : '—'],
+                ['top10', 'Top 10', k?.top10_pct != null ? `${k.top10_pct}%` : '—'],
                 ['hhi', 'HHI', k?.hhi != null ? k.hhi.toFixed(3) : '—'],
               ] as [KpiId, string, string][]
             ).map(([id, lab, val]) => (
@@ -517,41 +539,133 @@ export function GurusPage() {
               <KpiDetail id={kpiOpen} holdings={holdings} trades={trades} kpis={k} />
             </div>
           )}
-          <section className={styles.card}>
-            <h2>Position weights</h2>
-            <BarChart rows={bars} />
-          </section>
-          <section className={styles.card}>
-            <div className={styles.cardHead}>
-              <h2>Time flow (weight %)</h2>
-              <select
-                className={styles.pullSm}
-                value={freq}
-                onChange={(e) => setFreq(e.target.value as 'q' | 'y')}
-              >
-                <option value="q">Quarterly</option>
-                <option value="y">Year-end</option>
-              </select>
-            </div>
-            <HistoryChart
-              data={hist}
-              actions={Object.fromEntries(
-                holdings.flatMap((h) => {
-                  const a = h.action || ''
-                  const out: [string, string][] = []
-                  if (h.symbol) out.push([h.symbol, a])
-                  if (h.issuer) out.push([h.issuer, a])
-                  return out
-                }),
+          <div className={styles.split}>
+            <section className={styles.card}>
+              <h2>Top holdings</h2>
+              <HoldingsTable rows={holdings.slice(0, 12)} />
+            </section>
+            <section className={styles.card}>
+              <div className={styles.cardHead}>
+                <h2>Weight over time</h2>
+                <select
+                  className={styles.pullSm}
+                  value={freq}
+                  onChange={(e) => setFreq(e.target.value as 'q' | 'y')}
+                >
+                  <option value="q">Q</option>
+                  <option value="y">Y</option>
+                </select>
+              </div>
+              <HistoryChart
+                data={hist}
+                actions={Object.fromEntries(
+                  holdings.flatMap((h) => {
+                    const a = h.action || ''
+                    const out: [string, string][] = []
+                    if (h.symbol) out.push([h.symbol, a])
+                    if (h.issuer) out.push([h.issuer, a])
+                    return out
+                  }),
+                )}
+              />
+              {(sum?.book_hist || []).length > 1 && (
+                <>
+                  <div className={styles.muted} style={{ padding: '6px 0 2px' }}>
+                    13F equity {fmtCap(((sum?.book_hist || []).slice(-1)[0]?.equity_k || 0) * 1000)}
+                  </div>
+                  <BookSpark points={sum?.book_hist || []} />
+                </>
               )}
-            />
-            <div className={styles.legend}>
-              {(hist?.series || []).map((s, i) => (
-                <span key={s.key}>
-                  <i style={{ background: FLOW_COLORS[i % FLOW_COLORS.length] }} />
-                  {s.key}
-                </span>
+            </section>
+          </div>
+          <div className={styles.split}>
+            <section className={styles.card}>
+              <h2>Buys / adds this 13F</h2>
+              <HoldingsTable
+                rows={holdings.filter((h) => h.action === 'New Buy' || h.action === 'Add')}
+              />
+            </section>
+            <section className={styles.card}>
+              <h2>Cuts / sold out</h2>
+              <HoldingsTable
+                rows={(activity?.trades || []).filter(
+                  (h) => h.action === 'Reduce' || h.action === 'Sold Out',
+                )}
+              />
+            </section>
+          </div>
+          {(sum?.overlap || []).length > 0 && (
+            <section className={styles.card}>
+              <h2>Also held on this roster</h2>
+              {(sum?.overlap || []).map((row) => (
+                <div key={row.symbol} className={styles.also}>
+                  <button
+                    type="button"
+                    className={`${styles.tk} ${styles.alsoTk}`}
+                    onClick={() => row.symbol && openFinancialsPage(row.symbol)}
+                  >
+                    {row.symbol}
+                  </button>
+                  <span className={styles.muted} style={{ padding: 0 }}>
+                    {row.weight_pct != null ? `${Number(row.weight_pct).toFixed(1)}%` : ''}
+                  </span>
+                  {(row.also || []).map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className={styles.alsoChip}
+                      onClick={() => setGid(a.id)}
+                    >
+                      {a.name} {a.weight_pct != null ? `${a.weight_pct}%` : ''}
+                    </button>
+                  ))}
+                </div>
               ))}
+            </section>
+          )}
+          <section className={styles.card}>
+            <h2>Roster snapshot</h2>
+            <div className={styles.scroll}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Guru</th>
+                    <th>As of</th>
+                    <th className="tabular">Equity</th>
+                    <th className="tabular">N</th>
+                    <th className="tabular">New</th>
+                    <th className="tabular">Turn</th>
+                    <th className="tabular">Top 5</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gurus.map((row) => (
+                    <tr key={row.id} className={row.id === gid ? styles.rowOn : undefined}>
+                      <td>
+                        <button
+                          type="button"
+                          className={styles.rosterBtn}
+                          onClick={() => setGid(row.id)}
+                        >
+                          {row.name}
+                        </button>
+                      </td>
+                      <td>{row.last_13f || '—'}</td>
+                      <td className="tabular">
+                        {row.equity_k != null ? fmtCap(row.equity_k * 1000) : '—'}
+                      </td>
+                      <td className="tabular">{row.n ?? '—'}</td>
+                      <td className="tabular">{row.n_new ?? '—'}</td>
+                      <td className="tabular">
+                        {row.turnover_proxy != null ? `${row.turnover_proxy}%` : '—'}
+                      </td>
+                      <td className="tabular">
+                        {row.top5_pct != null ? `${row.top5_pct}%` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
         </>
@@ -612,16 +726,16 @@ export function GurusPage() {
       {!loading && tab === 'portfolio' && (
         <section className={styles.card}>
           <h2>Current 13F book</h2>
-          <HoldingsTable rows={holdings} />
+          <HoldingsTable rows={holdings} tall />
         </section>
       )}
     </div>
   )
 }
 
-function HoldingsTable({ rows }: { rows: Holding[] }) {
+function HoldingsTable({ rows, tall }: { rows: Holding[]; tall?: boolean }) {
   return (
-    <div className={styles.scroll}>
+    <div className={tall ? styles.scrollTall : styles.scroll}>
       <table className={styles.table}>
         <thead>
           <tr>

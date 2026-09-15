@@ -845,19 +845,139 @@ def _holdings_rows(gid: str, portdate: Optional[str] = None) -> tuple[str | None
     return portdate, rows
 
 
+def _kpis_from_rows(rows: list[dict]) -> dict:
+    live = [r for r in rows if (r.get("action") or "") != "Sold Out"]
+    equity_k = sum((r.get("value_k") or 0) for r in live)
+    n_new = sum(1 for r in live if r.get("action") == "New Buy")
+    n_sold = sum(1 for r in rows if r.get("action") == "Sold Out")
+    n_add = sum(1 for r in live if r.get("action") == "Add")
+    n_cut = sum(1 for r in live if r.get("action") == "Reduce")
+    turned = sum(abs(r.get("impact") or 0) for r in rows if r.get("action") in ("New Buy", "Add", "Reduce", "Sold Out"))
+    ranked = sorted(live, key=lambda x: -(x.get("weight_pct") or 0))
+    top5 = sum((r.get("weight_pct") or 0) for r in ranked[:5])
+    top10 = sum((r.get("weight_pct") or 0) for r in ranked[:10])
+    hhi = sum(((r.get("weight_pct") or 0) / 100.0) ** 2 for r in live)
+    return {
+        "equity_k": equity_k,
+        "n": len(live),
+        "n_new": n_new,
+        "n_sold": n_sold,
+        "n_add": n_add,
+        "n_cut": n_cut,
+        "turnover_proxy": round(turned / 2.0, 1),
+        "top5_pct": round(top5, 1),
+        "top10_pct": round(top10, 1),
+        "hhi": round(hhi, 4),
+    }
+
+
+def _book_hist(gid: str) -> list[dict]:
+    _ensure_tables()
+    if not getattr(B, "_PSYCOPG2_OK", False):
+        return []
+    with B._fund_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT portdate, action, value_k
+                 FROM guru_13f_holdings WHERE guru_id=%s
+                 ORDER BY portdate""",
+            (gid,),
+        )
+        raw = cur.fetchall() or []
+    by: dict[str, dict] = {}
+    for d, action, vk in raw:
+        key = str(d)[:10]
+        rec = by.setdefault(key, {"portdate": key, "equity_k": 0.0, "n": 0})
+        if (action or "") != "Sold Out":
+            rec["equity_k"] += float(vk or 0)
+            rec["n"] += 1
+    return [by[k] for k in sorted(by)]
+
+
+def _overlap_for(gid: str, live: list[dict]) -> list[dict]:
+    """Other roster books that also hold this guru's top names (latest 13F)."""
+    syms = [str(r.get("symbol") or "").upper() for r in live if r.get("symbol")][:12]
+    if not syms or not getattr(B, "_PSYCOPG2_OK", False):
+        return []
+    _ensure_tables()
+    with B._fund_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH latest AS (
+              SELECT guru_id, max(portdate) AS d
+                FROM guru_13f_holdings GROUP BY guru_id
+            )
+            SELECT h.guru_id, upper(h.symbol) AS symbol, h.weight_pct
+              FROM guru_13f_holdings h
+              JOIN latest l ON l.guru_id=h.guru_id AND l.d=h.portdate
+             WHERE h.guru_id <> %s
+               AND upper(h.symbol) IN ({ph})
+               AND (h.action IS NULL OR h.action <> 'Sold Out')
+            """.format(ph=",".join(["%s"] * len(syms))),
+            (gid, *syms),
+        )
+        others = cur.fetchall() or []
+    by_sym: dict[str, list] = {}
+    name_of = {g["id"]: g["name"] for g in GURU_SEED}
+    for ogid, sym, wt in others:
+        by_sym.setdefault(sym, []).append({
+            "id": ogid,
+            "name": name_of.get(ogid, ogid),
+            "weight_pct": round(float(wt or 0), 1),
+        })
+    out = []
+    for r in live:
+        tk = str(r.get("symbol") or "").upper()
+        if not tk or tk not in by_sym:
+            continue
+        also = sorted(by_sym[tk], key=lambda x: -(x.get("weight_pct") or 0))
+        out.append({
+            "symbol": tk,
+            "weight_pct": r.get("weight_pct"),
+            "also": also,
+        })
+        if len(out) >= 10:
+            break
+    return out
+
+
 @router.get("/api/gurus")
 def gurus_list(request: Request):
     _gp(request)
     _ensure_tables()
-    out = []
-    with B._fund_conn() as conn, conn.cursor() as cur:
-        for g in GURU_SEED:
+    stats: dict[str, dict] = {}
+    if getattr(B, "_PSYCOPG2_OK", False):
+        with B._fund_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT max(portdate), count(*) FROM guru_13f_holdings WHERE guru_id=%s",
-                (g["id"],),
+                """
+                WITH latest AS (
+                  SELECT guru_id, max(portdate) AS d
+                    FROM guru_13f_holdings GROUP BY guru_id
+                )
+                SELECT h.guru_id, h.portdate, h.action, h.weight_pct, h.value_k
+                  FROM guru_13f_holdings h
+                  JOIN latest l ON l.guru_id=h.guru_id AND l.d=h.portdate
+                """
             )
-            d, n = cur.fetchone() or (None, 0)
-            out.append({**g, "last_13f": str(d)[:10] if d else None, "cached_rows": int(n or 0)})
+            bag: dict[str, list] = {}
+            dates: dict[str, str] = {}
+            for gid, d, action, wt, vk in cur.fetchall() or []:
+                bag.setdefault(gid, []).append({
+                    "action": action, "weight_pct": wt, "value_k": vk,
+                })
+                dates[gid] = str(d)[:10]
+            for gid, rows in bag.items():
+                stats[gid] = {**_kpis_from_rows(rows), "last_13f": dates.get(gid)}
+    out = []
+    for g in GURU_SEED:
+        st = stats.get(g["id"]) or {}
+        out.append({
+            **g,
+            "last_13f": st.get("last_13f"),
+            "cached_rows": None,
+            **{k: st.get(k) for k in (
+                "equity_k", "n", "n_new", "n_sold", "turnover_proxy", "top5_pct",
+            )},
+        })
     return {"ok": True, "gurus": out}
 
 
@@ -867,24 +987,15 @@ def gurus_summary(gid: str, request: Request):
     seed = _seed(gid)
     portdate, rows = _holdings_rows(gid)
     live = [r for r in rows if (r.get("action") or "") != "Sold Out"]
-    equity_k = sum((r.get("value_k") or 0) for r in live)
-    n_new = sum(1 for r in live if r.get("action") == "New Buy")
-    turned = sum(abs(r.get("impact") or 0) for r in rows if r.get("action") in ("New Buy", "Add", "Reduce", "Sold Out"))
-    top5 = sum((r.get("weight_pct") or 0) for r in sorted(live, key=lambda x: -(x.get("weight_pct") or 0))[:5])
-    hhi = sum(((r.get("weight_pct") or 0) / 100.0) ** 2 for r in live)
+    kpis = _kpis_from_rows(rows)
     return {
         "ok": True,
         "guru": seed,
         "portdate": portdate,
         "holdings": live,
-        "kpis": {
-            "equity_k": equity_k,
-            "n": len(live),
-            "n_new": n_new,
-            "turnover_proxy": round(turned / 2.0, 1),
-            "top5_pct": round(top5, 1),
-            "hhi": round(hhi, 4),
-        },
+        "kpis": kpis,
+        "book_hist": _book_hist(gid),
+        "overlap": _overlap_for(gid, live),
         "source": "sec_13f",
         "caveat": "13F is long-only US-listed equities, filed up to 45 days after quarter-end. Shorts and most non-US names are absent.",
     }
