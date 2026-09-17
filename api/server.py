@@ -8216,7 +8216,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui627-20260917-page-speed"
+WEB_BUILD_VERSION = "ui628-20260917-board-quotes"
 
 
 @app.get("/api/build")
@@ -12943,11 +12943,12 @@ def _builder_repair_wrong_anchors(list_id: str, quotes: dict) -> int:
 
 
 def _builder_board_quotes(tickers: list[str]) -> dict:
-    """Quotes for a board switch — cache + last-close store, no Yahoo wait.
+    """Quotes for a board switch — cache, any-age last-close, then fast fill.
 
-    ``batch_quotes`` can spend 10–14s on yfinance when switching Track boards
-    (SUP_20260909_88b93702). The desk already has last-close in Postgres and
-    an in-process cache from the tape/watchlist; that is enough to paint.
+    ``batch_quotes`` can spend 10–14s on yfinance (SUP_20260909_88b93702).
+    Store-only + 4-day max_age left DGA Scored LAST/DAY % blank
+    (SUP_20260917_4e57d833) for names not on the tape. Paint last-close of
+    any age, then ``_batch_quotes_fast`` (1.5s Yahoo wall) for true misses.
     """
     originals = [str(s).strip().upper() for s in (tickers or []) if s]
     if not originals:
@@ -12958,7 +12959,7 @@ def _builder_board_quotes(tickers: list[str]) -> dict:
     misses: list[str] = []
     for sym in originals:
         entry = _QUOTE_CACHE.get(sym)
-        if _cache_quote_usable(entry, now, live=live):
+        if _cache_quote_usable(entry, now, live=live) and entry.get("price") is not None:
             result[sym] = {
                 "price": entry["price"],
                 "pct_change": entry.get("pct_change"),
@@ -12969,20 +12970,30 @@ def _builder_board_quotes(tickers: list[str]) -> dict:
             misses.append(sym)
     if misses:
         try:
-            db = _db_quotes(misses, max_age_s=4 * 86400) or {}
+            db = _db_quotes(misses) or {}
         except Exception as e:
             print(f"[builder-lists] store quotes: {e!s:.120}", flush=True)
             db = {}
+        db_by = {(str(k).upper()): v for k, v in (db or {}).items()}
         for sym in misses:
-            dq = db.get(sym) or {}
+            dq = db_by.get(sym) or {}
             if dq.get("price") is None:
                 continue
             row = {"price": dq["price"], "pct_change": dq.get("pct_change")}
             if dq.get("as_of"):
                 row["as_of"] = dq["as_of"]
             result[sym] = row
-    # Store last-close is enough to paint. Yahoo on this path made a 10-name
-    # board 8–11s after the quotes cache was already warm.
+    still = [s for s in originals if (result.get(s) or {}).get("price") is None]
+    if still:
+        try:
+            extra = _batch_quotes_fast(still) or {}
+        except Exception as e:
+            print(f"[builder-lists] fast quotes: {e!s:.120}", flush=True)
+            extra = {}
+        for sym, q in extra.items():
+            if (q or {}).get("price") is None:
+                continue
+            result[str(sym).upper()] = q
     return result
 
 
@@ -18988,16 +18999,16 @@ def _db_quotes(symbols, max_age_s=None) -> dict:
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
             if max_age_s is not None:
-                cur.execute("""SELECT symbol, price, pct_change, updated_at FROM market_quotes
-                                WHERE symbol = ANY(%s)
+                cur.execute("""SELECT upper(symbol) AS symbol, price, pct_change, updated_at FROM market_quotes
+                                WHERE upper(symbol) = ANY(%s)
                                   AND updated_at > now() - (%s || ' seconds')::interval""",
                             (syms, str(int(max_age_s))))
             else:
-                cur.execute("SELECT symbol, price, pct_change, updated_at FROM market_quotes "
-                            "WHERE symbol = ANY(%s)", (syms,))
-            return {r["symbol"]: {"price": r["price"], "pct_change": r["pct_change"],
+                cur.execute("""SELECT upper(symbol) AS symbol, price, pct_change, updated_at
+                                 FROM market_quotes WHERE upper(symbol) = ANY(%s)""", (syms,))
+            return {str(r["symbol"]).upper(): {"price": r["price"], "pct_change": r["pct_change"],
                                   "as_of": r["updated_at"].isoformat() if r.get("updated_at") else None}
-                    for r in (cur.fetchall() or []) if r.get("price") is not None}
+                    for r in (cur.fetchall() or []) if r.get("price") is not None and r.get("symbol")}
     except Exception as e:
         print(f"[market] db_quotes failed: {e!s:.120}", flush=True)
         return {}

@@ -2846,16 +2846,16 @@ def _db_quotes(symbols, max_age_s=None) -> dict:
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
             if max_age_s is not None:
-                cur.execute("""SELECT symbol, price, pct_change, updated_at FROM market_quotes
-                                WHERE symbol = ANY(%s)
+                cur.execute("""SELECT upper(symbol) AS symbol, price, pct_change, updated_at FROM market_quotes
+                                WHERE upper(symbol) = ANY(%s)
                                   AND updated_at > now() - (%s || ' seconds')::interval""",
                             (syms, str(int(max_age_s))))
             else:
-                cur.execute("SELECT symbol, price, pct_change, updated_at FROM market_quotes "
-                            "WHERE symbol = ANY(%s)", (syms,))
-            return {r["symbol"]: {"price": r["price"], "pct_change": r["pct_change"],
+                cur.execute("""SELECT upper(symbol) AS symbol, price, pct_change, updated_at
+                                 FROM market_quotes WHERE upper(symbol) = ANY(%s)""", (syms,))
+            return {str(r["symbol"]).upper(): {"price": r["price"], "pct_change": r["pct_change"],
                                   "as_of": r["updated_at"].isoformat() if r.get("updated_at") else None}
-                    for r in (cur.fetchall() or []) if r.get("price") is not None}
+                    for r in (cur.fetchall() or []) if r.get("price") is not None and r.get("symbol")}
     except Exception as e:
         print(f"[market] db_quotes failed: {e!s:.120}", flush=True)
         return {}
