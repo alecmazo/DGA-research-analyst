@@ -28,7 +28,7 @@ _FIN_UNIVERSE_TTL_S = 24 * 3600
 _FIN_UNIVERSE_WARM_LOCK = threading.Lock()
 _FIN_UNIVERSE_WARMING = False
 _FIN_DASH_CACHE: dict = {}                         # (ticker, period) → (epoch, payload)
-_FIN_DASH_TTL_S = 90
+_FIN_DASH_TTL_S = 600                              # 10 min — mobile was 17–23s cold
 _FIN_8K_CACHE: dict = {}                           # ticker → (epoch, payload)
 _FIN_8K_TTL_S = 3600
 _FIN_8K_NEG_TTL_S = 900
@@ -4789,7 +4789,9 @@ def _build_peer_comps(tk: str, subject_metrics: dict, limit: int = 8) -> dict:
         # Warm free prices for peers that have SEC financials but no market_quotes
         # row — otherwise PE / EV / mkt cap render blank (MSFT ticket).
         quote_syms = list({*(fin_map.keys()), tk, *cand[:16]})
-        quotes = _warm_quotes_for_comps(quote_syms, cap=16)
+        # Store only on the dashboard GET. Live Yahoo/yfinance cascade was
+        # 17–23s on mobile (MSFT/AAPL). Autosync fills market_quotes.
+        quotes = _db_quotes(quote_syms) or {}
         name_by = {(p.get("symbol") or "").upper(): (p.get("name") or p.get("industry"))
                    for p in peers_meta}
 
@@ -4960,12 +4962,17 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     if hit and (time.time() - hit[0]) < _FIN_DASH_TTL_S and isinstance(hit[1], dict):
         return dict(hit[1])
 
-    rows = [r for r in _fin_rows_for_ticker(tk, pt)]
-    rows.reverse()                                   # chronological, oldest first
-    rows = rows[-(12 if pt == "annual" else 16):]    # last 12 FYs / 16 quarters
-    annuals_all = [r for r in _fin_rows_for_ticker(tk, "annual")][::-1]  # oldest→newest
+    # One store read (was 3× SELECT *). Split + annual de-dupe in process.
+    raw_all = [r for r in _fin_rows_for_ticker(tk, "all")]
+    annuals_newest = _fin_dedupe_annual_rows(
+        [r for r in raw_all if (r.get("period_type") or "") == "annual"]
+    )
+    quarters_newest = [r for r in raw_all if (r.get("period_type") or "") == "quarter"]
+    annuals_all = list(reversed(annuals_newest))
     annuals = annuals_all[-12:]
-    quarters_all = [r for r in _fin_rows_for_ticker(tk, "quarter")][::-1]
+    quarters_all = list(reversed(quarters_newest))
+    src = annuals_newest if pt == "annual" else quarters_newest
+    rows = list(reversed(src[: (12 if pt == "annual" else 16)]))
     if not rows:
         return {"ok": False, "error": f"No financials stored for {tk} — run "
                                       f"'Sync from SEC' on the Financials tab first."}
@@ -5253,8 +5260,13 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     latest_period = _fin_latest_store_period(tk)
     earnings_pending = None
     try:
-        earnings_pending = _fin_recent_earnings_8k(
-            tk, (latest_period or {}).get("period_end"))
+        # Live SEC submissions.json stays off this GET (2.5s+). Serve cache only.
+        hit8 = _FIN_8K_CACHE.get(tk)
+        if hit8:
+            ts8, val8 = hit8
+            ttl8 = _FIN_8K_TTL_S if val8 else _FIN_8K_NEG_TTL_S
+            if time.time() - ts8 < ttl8:
+                earnings_pending = val8
     except Exception:
         earnings_pending = None
 
@@ -5972,8 +5984,23 @@ def financials_price_history(ticker: str, request: Request, range: str = "YTD"):
         return {"ok": True, "ticker": tk, "range": "5D", "points": pts,
                 "stats": _price_stats(pts, "5D"), "intraday": True}
 
-    # ── Daily ranges → durable store (sync tail, then slice) ──────────────
-    _sync_price_history(tk)
+    # ── Daily ranges → durable store. Don't block the GET on Yahoo tail
+    #     (mobile YTD was ~5s). Sync in a daemon when we already have bars.
+    nstore = 0
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM price_history WHERE symbol=%s", (tk,))
+            nstore = int((cur.fetchone() or [0])[0] or 0)
+    except Exception:
+        nstore = 0
+    if nstore == 0:
+        _sync_price_history(tk)
+    else:
+        try:
+            threading.Thread(target=_sync_price_history, args=(tk,), daemon=True,
+                             name=f"px-sync-{tk}").start()
+        except Exception:
+            pass
     today = _date.today()
     if rng == "YTD":
         start_d = _date(today.year, 1, 1)

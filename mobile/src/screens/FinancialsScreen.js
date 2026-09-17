@@ -140,15 +140,17 @@ const fmtPctS  = (v) => v == null ? '' : v.toFixed(1) + '%';
 // ── grouped-bar fundamentals mini-chart (pure View — matches desktop bars) ─────
 // Bars per fiscal period, one group of side-by-side bars per series, sharing a
 // zero baseline so negative values (e.g. net income, FCF) drop below the line.
-function MiniBars({ series, width, height, t }) {
+function MiniBars({ series, width, height, t, fmt }) {
   const all = series.flatMap((s) => (s.values || [])).filter((v) => v != null);
   if (!all.length) return <View style={{ height }} />;
   const hi = Math.max(0, ...all);
   const lo = Math.min(0, ...all);
   const range = (hi - lo) || 1;
+  const axisW = 42;
+  const plotW = Math.max(48, width - axisW);
   const zeroY = height * (hi / range);                 // y of the zero baseline
   const n = Math.max(...series.map((s) => (s.values || []).length), 1);
-  const slotW = width / n;
+  const slotW = plotW / n;
   const k = series.length;
   const gap = 1;
   const barW = Math.max(2, Math.min(9, slotW / (k + 0.6)));
@@ -171,10 +173,52 @@ function MiniBars({ series, width, height, t }) {
       );
     });
   }
+  const tickN = 4;
+  const ticks = [];
+  for (let i = 0; i <= tickN; i++) ticks.push(hi - (i / tickN) * (hi - lo));
+  const label = (v) => (fmt ? fmt(v) : fmtNum(v));
   return (
-    <View style={{ width, height }}>
-      {lo < 0 && <View style={{ position: 'absolute', left: 0, right: 0, top: zeroY, height: 1, backgroundColor: t.border }} />}
-      {bars}
+    <View style={{ width, height, flexDirection: 'row' }}>
+      <View style={{ width: axisW, height }}>
+        {ticks.map((v, i) => {
+          const y = ((hi - v) / range) * height;
+          return (
+            <Text
+              key={i}
+              numberOfLines={1}
+              style={{
+                position: 'absolute',
+                right: 3,
+                top: Math.max(0, Math.min(height - 10, y - 5)),
+                fontSize: 8,
+                color: t.textDim,
+                fontVariant: ['tabular-nums'],
+              }}
+            >
+              {label(v)}
+            </Text>
+          );
+        })}
+      </View>
+      <View style={{ width: plotW, height }}>
+        {ticks.map((v, i) => (
+          <View
+            key={'g' + i}
+            style={{
+              position: 'absolute',
+              left: 0, right: 0,
+              top: ((hi - v) / range) * height,
+              height: 1,
+              backgroundColor: t.border,
+              opacity: 0.55,
+            }}
+          />
+        ))}
+        {lo < 0 && (
+          <View style={{ position: 'absolute', left: 0, right: 0, top: zeroY, height: 1, backgroundColor: t.textDim }} />
+        )}
+        {bars}
+      </View>
     </View>
   );
 }
@@ -193,7 +237,7 @@ function FundChart({ title, series, width, fmt, t }) {
           </View>
         ))}
       </View>
-      <MiniBars series={series} width={width} height={48} t={t} />
+      <MiniBars series={series} width={width} height={72} t={t} fmt={fmt} />
     </View>
   );
 }
@@ -284,6 +328,7 @@ export default function FinancialsScreen() {
     const period = pt || periodRef.current || 'annual';
     const myReq = ++reqId.current;
     setLoading(true); setError(null); setTicker(sym);
+    loadHistory(sym, rng || range);
     try {
       const d = await api.getFinancialsDashboard(sym, period);
       if (myReq !== reqId.current) return;
@@ -298,7 +343,6 @@ export default function FinancialsScreen() {
     } finally {
       if (myReq === reqId.current) setLoading(false);
     }
-    loadHistory(sym, rng || range);
   }, [range, loadHistory]);
 
   useEffect(() => {

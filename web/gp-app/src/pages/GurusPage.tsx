@@ -356,8 +356,13 @@ export function GurusPage() {
       setLoading(true)
       setErr(null)
       try {
-        const [s, a, h] = await Promise.all([
-          api<Summary>(`/api/gurus/${encodeURIComponent(id)}`),
+        const s = await api<Summary>(`/api/gurus/${encodeURIComponent(id)}`)
+        setSum(s)
+        if (!s.portdate) {
+          setErr('No 13F cached yet — click Refresh to pull SEC EDGAR.')
+        }
+        setLoading(false)
+        const [a, h] = await Promise.all([
           api<{
             trades?: Holding[]
             subsequent_filings?: Array<{
@@ -371,12 +376,8 @@ export function GurusPage() {
             `/api/gurus/${encodeURIComponent(id)}/history?freq=${freq}`,
           ).catch(() => null),
         ])
-        setSum(s)
         setActivity(a)
         setHist(h)
-        if (!s.portdate) {
-          setErr('No 13F cached yet — click Refresh to pull SEC EDGAR.')
-        }
       } catch (e) {
         setErr(e instanceof Error ? e.message : 'Could not load guru')
       } finally {

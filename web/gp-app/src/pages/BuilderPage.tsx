@@ -299,7 +299,7 @@ export function BuilderPage() {
     let alive = true
     ;(async () => {
       try {
-        const d = await fetchBoard(active, true)
+        const d = await fetchBoard(active, false)
         if (alive) setBoard(d)
       } catch (e) {
         if (alive && !cached) setErr(e instanceof Error ? e.message : 'Board failed')
@@ -309,31 +309,6 @@ export function BuilderPage() {
       alive = false
     }
   }, [active, tab, fetchBoard])
-
-  useEffect(() => {
-    if (tab !== 'boards' || !lists.length) return
-    let stop = false
-    const queue = lists.map((l) => l.id)
-    ;(async () => {
-      const workers = 3
-      await Promise.all(
-        Array.from({ length: workers }, async () => {
-          while (!stop) {
-            const id = queue.shift()
-            if (!id) return
-            try {
-              await fetchBoard(id, false)
-            } catch {
-              /* prefetch is best-effort */
-            }
-          }
-        }),
-      )
-    })()
-    return () => {
-      stop = true
-    }
-  }, [tab, lists, fetchBoard])
 
   /* ranked by EV for presets */
   const rankedByEv = useMemo(() => {

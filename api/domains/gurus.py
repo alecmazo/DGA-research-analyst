@@ -9,6 +9,10 @@ import time
 import xml.etree.ElementTree as ET
 from typing import Any, Optional
 
+_GURU_TABLES_READY = False
+_GURUS_LIST_CACHE: dict = {"ts": 0.0, "data": None}
+_GURUS_LIST_TTL_S = 30.0
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -639,11 +643,18 @@ def _openfigi_cusips(cusips: list[str]) -> dict[str, str]:
     return out
 
 
-def _fill_missing_symbols(gid: str, rows: list[dict]) -> list[dict]:
-    """Stamp a ticker on 13F rows that only have an issuer/CUSIP."""
+def _fill_missing_symbols(gid: str, rows: list[dict],
+                          allow_network: bool = False) -> list[dict]:
+    """Stamp a ticker on 13F rows that only have an issuer/CUSIP.
+
+    GET paths pass allow_network=False — OpenFIGI (0.25s sleep/10 CUSIPs) and
+    SEC company_tickers.json (30s) made /api/gurus/{id} 8–12s for 11 names.
+    Refresh may pass True.
+    """
     if not rows:
         return rows
-    _load_sec_titles()
+    if allow_network:
+        _load_sec_titles()
     _load_cusip_cache()
     found: list[tuple[str, str, str]] = []
     still: list[dict] = []
@@ -661,7 +672,7 @@ def _fill_missing_symbols(gid: str, rows: list[dict]) -> list[dict]:
                 found.append((str(r["cusip"]).upper(), tk, r.get("issuer") or ""))
         else:
             still.append(r)
-    if still:
+    if still and allow_network:
         figi = _openfigi_cusips([str(r.get("cusip") or "") for r in still])
         for r in still:
             tk = figi.get((r.get("cusip") or "").upper())
@@ -688,6 +699,9 @@ def _fill_missing_symbols(gid: str, rows: list[dict]) -> list[dict]:
 
 
 def _ensure_tables() -> None:
+    global _GURU_TABLES_READY
+    if _GURU_TABLES_READY:
+        return
     if not getattr(B, "_PSYCOPG2_OK", False):
         return
     with B._fund_conn() as conn, conn.cursor() as cur:
@@ -745,6 +759,7 @@ def _ensure_tables() -> None:
             )
         """)
         conn.commit()
+    _GURU_TABLES_READY = True
 
 
 def _list_13f(cik: str, limit: int = 12) -> list[dict]:
@@ -956,20 +971,18 @@ def _book_hist(gid: str) -> list[dict]:
         return []
     with B._fund_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """SELECT portdate, action, value_k
-                 FROM guru_13f_holdings WHERE guru_id=%s
-                 ORDER BY portdate""",
+            """SELECT portdate, COALESCE(SUM(value_k), 0), COUNT(*)
+                 FROM guru_13f_holdings
+                WHERE guru_id=%s AND (action IS NULL OR action <> 'Sold Out')
+                GROUP BY portdate
+                ORDER BY portdate""",
             (gid,),
         )
         raw = cur.fetchall() or []
-    by: dict[str, dict] = {}
-    for d, action, vk in raw:
-        key = str(d)[:10]
-        rec = by.setdefault(key, {"portdate": key, "equity_k": 0.0, "n": 0})
-        if (action or "") != "Sold Out":
-            rec["equity_k"] += float(vk or 0)
-            rec["n"] += 1
-    return [by[k] for k in sorted(by)]
+    return [
+        {"portdate": str(d)[:10], "equity_k": float(vk or 0), "n": int(n or 0)}
+        for d, vk, n in raw
+    ]
 
 
 def _overlap_for(gid: str, live: list[dict]) -> list[dict]:
@@ -1027,6 +1040,10 @@ def _overlap_for(gid: str, live: list[dict]) -> list[dict]:
 @router.get("/api/gurus")
 def gurus_list(request: Request):
     _gp(request)
+    now = time.time()
+    hit = _GURUS_LIST_CACHE.get("data")
+    if hit and (now - float(_GURUS_LIST_CACHE.get("ts") or 0)) < _GURUS_LIST_TTL_S:
+        return hit
     _ensure_tables()
     stats: dict[str, dict] = {}
     if getattr(B, "_PSYCOPG2_OK", False):
@@ -1062,7 +1079,10 @@ def gurus_list(request: Request):
                 "equity_k", "n", "n_new", "n_sold", "turnover_proxy", "top5_pct",
             )},
         })
-    return {"ok": True, "gurus": out}
+    payload = {"ok": True, "gurus": out}
+    _GURUS_LIST_CACHE["data"] = payload
+    _GURUS_LIST_CACHE["ts"] = now
+    return payload
 
 
 @router.get("/api/gurus/{gid}")
@@ -1182,6 +1202,8 @@ def gurus_refresh(gid: str, request: Request):
     _gp(request)
     _seed(gid)
     try:
+        _GURUS_LIST_CACHE["ts"] = 0
+        _GURUS_LIST_CACHE["data"] = None
         return _refresh_guru(gid)
     except HTTPException:
         raise

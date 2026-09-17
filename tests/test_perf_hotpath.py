@@ -59,3 +59,65 @@ def test_financials_settings_cached():
     body = (ROOT / "api/domains/_financials_body.py").read_text(encoding="utf-8")
     assert "_FIN_SETTINGS_CACHE" in body
     assert "_FIN_SETTINGS_TTL_S" in body
+
+
+def test_builder_lists_get_does_not_block_on_named_board_sync():
+    fn = _fn_src(ROOT / "api/server.py", "builder_lists_get")
+    assert "_kick_builder_named_board_refresh" in fn
+    assert "_builder_sync_dcf_value_board" not in fn
+    assert "_builder_sync_dga_scored_board" not in fn
+
+
+def test_builder_board_get_skips_dcf_rebuild():
+    fn = _fn_src(ROOT / "api/server.py", "builder_list_board_get")
+    assert "_builder_sync_dcf_value_board" not in fn
+    assert "_builder_list_board" in fn
+
+
+def test_builder_candidates_sql_skips_report_md():
+    fn = _fn_src(ROOT / "api/server.py", "_builder_fetch_candidates")
+    assert "SELECT ticker, report_md" not in fn
+    assert 'r.get("report_md")' not in fn
+    assert "_BUILDER_COMPS_CACHE" in fn
+
+
+def test_gurus_fill_skips_network_on_get():
+    src = (ROOT / "api/domains/gurus.py").read_text(encoding="utf-8")
+    assert "allow_network: bool = False" in src
+    assert "if still and allow_network:" in src
+    assert "_GURUS_LIST_TTL_S" in src
+    book = _fn_src(ROOT / "api/domains/gurus.py", "_book_hist")
+    assert "GROUP BY portdate" in book
+
+
+def test_fin_dashboard_hot_path_is_store_only():
+    body = (ROOT / "api/domains/_financials_body.py").read_text(encoding="utf-8")
+    assert "_FIN_DASH_TTL_S = 600" in body
+    dash = body.split("def financials_dashboard")[1].split("def _vl_f")[0]
+    assert "_fin_recent_earnings_8k(" not in dash
+    peers = body.split("def _build_peer_comps")[1].split("def financials_dashboard")[0]
+    assert "_warm_quotes_for_comps" not in peers
+    assert "_db_quotes(quote_syms)" in peers
+
+
+def test_builder_page_does_not_prefetch_all_boards():
+    src = (ROOT / "web/gp-app/src/pages/BuilderPage.tsx").read_text(encoding="utf-8")
+    assert "workers = 3" not in src
+    assert "fetchBoard(active, false)" in src
+
+
+def test_gurus_page_paints_summary_before_history():
+    src = (ROOT / "web/gp-app/src/pages/GurusPage.tsx").read_text(encoding="utf-8")
+    load = src.split("const loadGuru")[1].split("useEffect")[0]
+    assert "setSum(s)" in load
+    assert load.find("setSum(s)") < load.find("/activity")
+    assert load.find("setLoading(false)") < load.find("/history")
+
+
+def test_mobile_fund_bars_have_yaxis():
+    src = (ROOT / "mobile/src/screens/FinancialsScreen.js").read_text(encoding="utf-8")
+    mini = src.split("function MiniBars")[1].split("function FundChart")[0]
+    assert "axisW" in mini
+    assert "ticks" in mini
+    assert "fmt" in mini
+    assert "<MiniBars series={series} width={width} height={72} t={t} fmt={fmt} />" in src

@@ -8216,7 +8216,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui626-20260917-perf-root"
+WEB_BUILD_VERSION = "ui627-20260917-page-speed"
 
 
 @app.get("/api/build")
@@ -11729,6 +11729,9 @@ def research_idea_feed(request: Request, threshold: float = 4.0, limit: int = 60
 _BUILDER_CANDIDATES_CACHE: dict = {"data": None, "ts": 0}
 _BUILDER_CANDIDATES_TTL   = 600   # 10 min
 _BUILDER_CANDIDATES_DIAG: dict = {}   # last-run diagnostics, surfaced in the API
+_BUILDER_COMPS_CACHE: dict = {"ts": 0, "comps": {}}  # ticker → source-report ticker
+_BUILDER_BOARD_REFRESH_LOCK = threading.Lock()
+_BUILDER_BOARD_REFRESH_TS: dict[str, float] = {}
 
 
 def _builder_classify_sector(raw_sector: str) -> str:
@@ -12001,6 +12004,54 @@ def _builder_call_timeout(fn, timeout: float, default=None):
         ex.shutdown(wait=False)
 
 
+def _builder_extract_comps_bg() -> None:
+    """Off-request: walk recent report markdown for comp tickers.
+
+    GET /candidates used to SELECT report_md for every unarchived report
+    (same TOAST detoast that made list_reports 10–60s). Keep comps as a
+    feature — just don't block the click. Caps at 20 most-recent blobs.
+    """
+    if _BUILDER_COMPS_CACHE.get("busy"):
+        return
+    _BUILDER_COMPS_CACHE["busy"] = True
+    try:
+        if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+            return
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT ticker, report_md FROM analyst_reports
+                 WHERE archived IS NOT TRUE AND report_md IS NOT NULL
+                 ORDER BY generated_at DESC NULLS LAST
+                 LIMIT 20
+            """)
+            rows = cur.fetchall() or []
+        comps: dict[str, str] = dict(_BUILDER_COMPS_CACHE.get("comps") or {})
+        for tk, md in rows:
+            tku = (tk or "").strip().upper()
+            if not tku or not md:
+                continue
+            try:
+                for c in _extract_ticker_candidates_from_md(md)[:25]:
+                    cu = (c or "").strip().upper()
+                    if cu and cu != tku and cu not in comps:
+                        comps[cu] = tku
+                        if len(comps) >= 150:
+                            break
+            except Exception:
+                continue
+            if len(comps) >= 150:
+                break
+        _BUILDER_COMPS_CACHE["comps"] = comps
+        _BUILDER_COMPS_CACHE["ts"] = time.time()
+        # Next candidates GET (after TTL or explicit refresh) includes comps.
+        _BUILDER_CANDIDATES_CACHE["ts"] = 0
+        print(f"[builder] comps bg extracted {len(comps)}", flush=True)
+    except Exception as e:
+        print(f"[builder] comps bg: {e!s:.160}", flush=True)
+    finally:
+        _BUILDER_COMPS_CACHE["busy"] = False
+
+
 def _builder_fetch_candidates() -> list[dict]:
     """Return list of Builder candidates: saved-report subjects PLUS comp
     tickers extracted from those reports' markdown.
@@ -12030,29 +12081,17 @@ def _builder_fetch_candidates() -> list[dict]:
         _BUILDER_CANDIDATES_DIAG.update(error="DB unavailable (no DATABASE_URL / psycopg2)")
         return []
 
-    # ── 1. Pull report subjects. STRICT: explicit target + upside. If that
-    #     matches nothing, RELAX to target-only (upside is computed from the
-    #     live/stored price below) so the pool isn't empty just because a report
-    #     stored a price target but no upside_pct.
-    strict_sql = """
-        SELECT ticker, rating, price_target, upside_pct, generated_at, report_md,
-               claude_price_target, claude_upside_pct, claude_rating
-          FROM analyst_reports
-         WHERE archived IS NOT TRUE
-           AND (price_target IS NOT NULL OR claude_price_target IS NOT NULL)
-           AND (upside_pct   IS NOT NULL OR claude_upside_pct   IS NOT NULL)
-         ORDER BY COALESCE(LEAST(upside_pct, claude_upside_pct),
-                           upside_pct, claude_upside_pct) DESC NULLS LAST
-    """
+    # ── 1. Pull report subjects. Do NOT SELECT report_md — detoasting 100+
+    #     markdown blobs is the same stall as pre-ui626 list_reports (3–12s+).
     # EVERY saved report is Builder-eligible (Alec's rule) — a report whose
     # target didn't extract still names a researched stock. Targets/upside
     # stay NULL on those rows; the construct allocator median-fills for
     # EV-weighting and equal-weighting never needed them at all.
     all_sql = """
-        SELECT ticker, rating, price_target, upside_pct, generated_at, report_md,
+        SELECT ticker, rating, price_target, upside_pct, generated_at,
                claude_price_target, claude_upside_pct, claude_rating
           FROM analyst_reports
-         WHERE archived IS NOT TRUE AND report_md IS NOT NULL
+         WHERE archived IS NOT TRUE
          ORDER BY COALESCE(LEAST(upside_pct, claude_upside_pct),
                            upside_pct, claude_upside_pct) DESC NULLS LAST
     """
@@ -12060,10 +12099,13 @@ def _builder_fetch_candidates() -> list[dict]:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
             cur.execute("SELECT COUNT(*) AS n FROM analyst_reports WHERE archived IS NOT TRUE")
             total_reports = (cur.fetchone() or {}).get("n", 0)
-            cur.execute(strict_sql)
-            strict_n = len(cur.fetchall() or [])
             cur.execute(all_sql)
             rows = cur.fetchall() or []
+            strict_n = sum(
+                1 for r in rows
+                if (r.get("price_target") is not None or r.get("claude_price_target") is not None)
+                and (r.get("upside_pct") is not None or r.get("claude_upside_pct") is not None)
+            )
             _BUILDER_CANDIDATES_DIAG.update(total_unarchived=total_reports,
                                             strict_rows=strict_n, used_rows=len(rows),
                                             no_target_rows=len(rows) - strict_n)
@@ -12079,39 +12121,26 @@ def _builder_fetch_candidates() -> list[dict]:
         _BUILDER_CANDIDATES_DIAG.update(error="no non-archived saved reports")
         return []
 
-    # ── 2. Walk each report and extract comp tickers from the markdown ───
-    #     REGEX-ONLY → ZERO network. We do NOT yfinance-validate comps here:
-    #     _builder_extract_comps_for_report() called _is_real_ticker() →
-    #     yf.Ticker().fast_info, firing HUNDREDS of live calls on a cold process
-    #     (66 reports × ≤25 tickers). On the rate-limited cloud IP those stall
-    #     and blow the endpoint's 12s cap → the function is killed before it
-    #     returns → EMPTY pool. Garbage symbols are filtered downstream instead:
-    #     a comp only survives the build loop if the STORE has an analyst_target
-    #     for it (real, synced tickers), so no live validation is needed.
-    comp_universe: dict[str, str] = {}   # ticker → first-report-ticker that mentioned it
+    # ── 2. Comp tickers: from the process cache (filled off-request).
+    #     Never SELECT report_md on this path. Kick a daemon if the cache is
+    #     empty so Construct still gets comps on the next load.
     own_tickers: set[str] = set()
-    _COMP_CAP = 150                       # bound the store lookup IN-list
     for r in rows:
         tk = (r["ticker"] or "").strip().upper()
-        if not tk: continue
-        own_tickers.add(tk)
-        md = r.get("report_md") or ""
-        if not md: continue
+        if tk:
+            own_tickers.add(tk)
+    comp_universe: dict[str, str] = {
+        c: src for c, src in (_BUILDER_COMPS_CACHE.get("comps") or {}).items()
+        if c not in own_tickers
+    }
+    if not _BUILDER_COMPS_CACHE.get("ts") and not _BUILDER_COMPS_CACHE.get("busy"):
         try:
-            for c in _extract_ticker_candidates_from_md(md)[:25]:
-                if c not in comp_universe and c not in own_tickers:
-                    comp_universe[c] = tk
-                    if len(comp_universe) >= _COMP_CAP:
-                        break
-        except Exception as _e:
-            print(f"[builder] comp extract failed for {tk}: {_e!s:.120}")
-        if len(comp_universe) >= _COMP_CAP:
-            break
-    # Comps that are ALSO report subjects: drop from the comp universe
-    for tk in own_tickers:
-        comp_universe.pop(tk, None)
+            threading.Thread(target=_builder_extract_comps_bg, daemon=True,
+                             name="builder-comps").start()
+        except Exception:
+            pass
     print(f"[builder] candidate pool: {len(own_tickers)} report subjects + "
-          f"{len(comp_universe)} comp tickers (validated)")
+          f"{len(comp_universe)} comp tickers (cached)")
 
     # ── 3. Quotes + meta for the whole universe: PURELY from the persisted store.
     #     NO live calls in this request path — a live batch_quotes for 100+
@@ -12432,7 +12461,7 @@ def _builder_sync_dga_scored_board(lp_id: str, force: bool = False) -> dict:
         qmap: dict = {}
         try:
             if want:
-                raw_q = batch_quotes(",".join(want)) or {}
+                raw_q = _db_quotes(want) or {}
                 for tk in want:
                     qmap[tk] = (raw_q.get(tk) or {}).get("price")
         except Exception:
@@ -12530,7 +12559,7 @@ def _builder_collect_dcf_undervalued(limit: int = 10) -> list[dict]:
     tickers = [(r.get("ticker") or "").upper() for r in rows if r.get("ticker")]
     qmap: dict = {}
     try:
-        raw_q = batch_quotes(",".join(tickers)) or {}
+        raw_q = _db_quotes(tickers) or {}
         for tk in tickers:
             q = raw_q.get(tk) or {}
             qmap[tk] = q.get("price")
@@ -12719,7 +12748,7 @@ def _builder_close_on_or_before(ticker: str, day_iso: str) -> float | None:
     if not tku or not day:
         return None
     try:
-        target = _date.fromisoformat(day)
+        _date.fromisoformat(day)
     except Exception:
         return None
     # Cache per process on market_data style dict if available
@@ -12747,36 +12776,8 @@ def _builder_close_on_or_before(ticker: str, day_iso: str) -> float | None:
     except Exception as e:
         print(f"[builder-lists] hist db {tku} {day}: {e!s:.100}", flush=True)
         px = None
-    if px is None:
-        try:
-            # max range so 2018 TSLA (and other pre-split names) get adj closes
-            hist = _md.yahoo_history(tku, "max") or _md.yahoo_history(tku, "10y") or []
-            prev = None
-            for row in hist:
-                d = str(row.get("date") or "")[:10]
-                if not d:
-                    continue
-                try:
-                    rd = _date.fromisoformat(d)
-                except Exception:
-                    continue
-                if rd > target:
-                    break
-                c = row.get("close")
-                if c is None:
-                    continue
-                try:
-                    prev = float(c)
-                except (TypeError, ValueError):
-                    continue
-                if rd == target:
-                    px = prev
-                    break
-            if px is None:
-                px = prev
-        except Exception as e:
-            print(f"[builder-lists] hist close {tku} {day}: {e!s:.100}", flush=True)
-            px = None
+    # Yahoo max-history stays off the board GET (10s+ per missing ticker).
+    # Missing hist falls through to live quote in _builder_anchor_missing.
     if isinstance(cache, dict):
         cache[ckey] = (_time.time(), px)
     return px
@@ -13149,39 +13150,50 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
     }
 
 
+def _kick_builder_named_board_refresh(lp_id: str) -> None:
+    """Refresh DGA Scored / Top 10 Value off the GET path.
+
+    Those syncs scored the universe and quoted every DCF report on click
+    (5–12s). Boards still refresh at most every 15 minutes in a daemon.
+    """
+    now = time.time()
+    last = float(_BUILDER_BOARD_REFRESH_TS.get(lp_id) or 0)
+    if now - last < 15 * 60:
+        return
+    if not _BUILDER_BOARD_REFRESH_LOCK.acquire(blocking=False):
+        return
+
+    def _run():
+        try:
+            _BUILDER_BOARD_REFRESH_TS[lp_id] = time.time()
+            try:
+                _builder_sync_dga_scored_board(lp_id, force=False)
+            except Exception as e:
+                print(f"[builder-lists] bg dga: {e!s:.120}", flush=True)
+            try:
+                _builder_sync_dcf_value_board(lp_id, force=False)
+            except Exception as e:
+                print(f"[builder-lists] bg dcf: {e!s:.120}", flush=True)
+        finally:
+            try:
+                _BUILDER_BOARD_REFRESH_LOCK.release()
+            except Exception:
+                pass
+
+    threading.Thread(target=_run, daemon=True, name="builder-named-boards").start()
+
+
 @app.get("/api/v2/builder/lists")
 def builder_lists_get(request: Request):
     """All sector/named watchlists for the GP."""
     claims = _claims_or_401(request)
     lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
     _ensure_builder_lists_tables()
-    try:
-        stale = True
-        with _fund_conn() as conn, conn.cursor() as cur:
-            cur.execute("""
-                SELECT updated_at FROM builder_lists
-                 WHERE lp_id=%s AND lower(name)=lower(%s)
-                 LIMIT 1
-            """, (lp_id, _DGA_SCORED_BOARD_NAME))
-            row = cur.fetchone()
-            if row and row[0] is not None:
-                try:
-                    ua = row[0]
-                    if getattr(ua, "tzinfo", None) is None:
-                        ua = ua.replace(tzinfo=timezone.utc)
-                    age = (datetime.now(timezone.utc) - ua).total_seconds()
-                    stale = age > 12 * 3600
-                except Exception:
-                    stale = True
-        if stale:
-            _builder_sync_dga_scored_board(lp_id, force=False)
-    except Exception as e:
-        print(f"[builder-lists] dga scored ensure: {e!s:.160}", flush=True)
-    try:
-        _builder_sync_dcf_value_board(lp_id, force=False)
-    except Exception as e:
-        print(f"[builder-lists] dcf value ensure: {e!s:.160}", flush=True)
     lists = _builder_lists_for_user(lp_id)
+    try:
+        _kick_builder_named_board_refresh(lp_id)
+    except Exception as e:
+        print(f"[builder-lists] kick refresh: {e!s:.120}", flush=True)
     return {"ok": True, "lists": lists, "seeded": len(lists) > 0}
 
 
@@ -13883,20 +13895,6 @@ def builder_list_board_get(list_id: str, request: Request):
     claims = _claims_or_401(request)
     lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
     _ensure_builder_lists_tables()
-    try:
-        with _fund_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT source, name FROM builder_lists WHERE id=%s AND lp_id=%s",
-                (list_id, lp_id),
-            )
-            meta = cur.fetchone()
-        src = ((meta[0] if meta else "") or "").lower()
-        nm = ((meta[1] if meta else "") or "").lower()
-        if src == "dcf_value" or nm == _DCF_VALUE_BOARD_NAME.lower():
-            # Do not force a DCF rebuild on every click — Refresh DCF is explicit.
-            _builder_sync_dcf_value_board(lp_id, force=False)
-    except Exception as e:
-        print(f"[builder-lists] dcf refresh on get: {e!s:.120}", flush=True)
     return _builder_list_board(list_id, lp_id)
 
 
