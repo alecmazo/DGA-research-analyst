@@ -42,14 +42,29 @@ def test_split_perf_uses_adj_history():
     body = _fn_src("_gf_apply_split_perf")
     assert "_adj_closes_on_dates" in body
     assert "pct_since_first" in body
-    assert "ann_gain" in body
-    assert "rel_spy" in body
+    assert "free_cash_flow" in body
+    assert "revenue" in body
+    assert "ann_gain" not in body
+    assert "rel_spy" not in body
     get = _fn_src("builder_gurufocus_list(")
     assert "_gf_apply_split_perf" in get
     close = _fn_src("_builder_close_on_or_before")
     assert "price_history" in close
-    assert 'yahoo_history(tku, "max")' in close
-    assert 'yahoo_history(tku, "1y")' not in close
+    assert "yahoo_history" not in close
+
+
+def test_gf_table_drops_ann_rel_adds_rev_fcf_sort():
+    tsx = (ROOT / "web/gp-app/src/pages/builder/GuruFocusTab.tsx").read_text()
+    assert "Annualized Gain" not in tsx
+    assert "Rel. to S" not in tsx
+    assert "rel_spy" not in tsx
+    assert "ann_gain" not in tsx
+    assert ">Revenue<" in tsx
+    assert ">FCF<" in tsx
+    assert "fmtCap(r.revenue)" in tsx
+    assert "fmtCap(r.free_cash_flow)" in tsx
+    assert "toggleSort('day_pct')" in tsx
+    assert "toggleSort('pct_since_first')" in tsx
 
 
 def test_tsla_snapshot_date_is_pre_split():

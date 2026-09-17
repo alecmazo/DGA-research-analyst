@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { api } from '@/lib/api'
-import { fmtPct, fmtPx, pctClass } from '@/lib/format'
+import { fmtCap, fmtPct, fmtPx, pctClass } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import styles from './GuruFocusTab.module.css'
@@ -22,13 +22,15 @@ type GfStock = {
   date_first_added?: string | null
   cost_per_share?: number | null
   pct_since_first?: number | null
-  rel_spy?: number | null
-  ann_gain?: number | null
+  revenue?: number | null
+  free_cash_flow?: number | null
   fair_value?: number | null
   note?: string | null
   list_id?: string | null
   list_name?: string | null
 }
+
+type SortKey = 'day_pct' | 'pct_since_first'
 
 type Props = {
   onPeek: (tk: string) => void
@@ -53,6 +55,8 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
   const [confirmDel, setConfirmDel] = useState<GfList | null>(null)
   const [draftNote, setDraftNote] = useState<Record<string, string>>({})
   const [draftFv, setDraftFv] = useState<Record<string, string>>({})
+  const [sortKey, setSortKey] = useState<SortKey | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const applyLists = (d: { lists?: GfList[]; synced_at?: string; stock_count?: number }) => {
     setLists(d.lists || [])
@@ -113,14 +117,39 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
 
   const filtered = useMemo(() => {
     const s = q.trim().toUpperCase()
-    if (!s) return stocks
-    return stocks.filter(
-      (r) =>
-        r.symbol.includes(s) ||
-        (r.company || '').toUpperCase().includes(s) ||
-        (r.list_name || '').toUpperCase().includes(s),
-    )
-  }, [stocks, q])
+    let list = stocks
+    if (s) {
+      list = stocks.filter(
+        (r) =>
+          r.symbol.includes(s) ||
+          (r.company || '').toUpperCase().includes(s) ||
+          (r.list_name || '').toUpperCase().includes(s),
+      )
+    }
+    if (!sortKey) return list
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...list].sort((a, b) => {
+      const av = a[sortKey]
+      const bv = b[sortKey]
+      const an = av == null || Number.isNaN(Number(av))
+      const bn = bv == null || Number.isNaN(Number(bv))
+      if (an && bn) return 0
+      if (an) return 1
+      if (bn) return -1
+      return (Number(av) - Number(bv)) * dir
+    })
+  }, [stocks, q, sortKey, sortDir])
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
+    else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+  }
+
+  const sortMark = (key: SortKey) =>
+    sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
   const pick = async (id: string) => {
     setActive(id)
@@ -418,12 +447,29 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
                   <th>Ticker</th>
                   <th>Company</th>
                   <th className="tabular">Current Price</th>
-                  <th className="tabular">Day&apos;s Change %</th>
+                  <th className={`tabular ${styles.sortTh}`}>
+                    <button
+                      type="button"
+                      className={styles.sortBtn}
+                      onClick={() => toggleSort('day_pct')}
+                    >
+                      Day&apos;s Change %{sortMark('day_pct')}
+                    </button>
+                  </th>
                   <th>Date First Added</th>
                   <th className="tabular">Cost per Share</th>
-                  <th className="tabular">Price % Change since First Transaction</th>
-                  <th className="tabular">Rel. to S&amp;P 500</th>
-                  <th className="tabular">Annualized Gain</th>
+                  <th className={`tabular ${styles.sortTh}`}>
+                    <button
+                      type="button"
+                      className={styles.sortBtn}
+                      onClick={() => toggleSort('pct_since_first')}
+                    >
+                      Price % Change since First Transaction
+                      {sortMark('pct_since_first')}
+                    </button>
+                  </th>
+                  <th className="tabular">Revenue</th>
+                  <th className="tabular">FCF</th>
                   <th className="tabular">Fair Value</th>
                   <th>Note</th>
                 </tr>
@@ -463,8 +509,8 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
                       <td className={`tabular ${pctClass(r.pct_since_first)}`}>
                         {fmtPct(r.pct_since_first)}
                       </td>
-                      <td className={`tabular ${pctClass(r.rel_spy)}`}>{fmtPct(r.rel_spy)}</td>
-                      <td className={`tabular ${pctClass(r.ann_gain)}`}>{fmtPct(r.ann_gain)}</td>
+                      <td className="tabular">{fmtCap(r.revenue)}</td>
+                      <td className="tabular">{fmtCap(r.free_cash_flow)}</td>
                       <td
                         className="tabular"
                         onClick={(e) => e.stopPropagation()}

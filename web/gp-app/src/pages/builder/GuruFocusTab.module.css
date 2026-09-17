@@ -270,6 +270,26 @@
   vertical-align: bottom;
 }
 
+.sortTh {
+  max-width: 140px;
+}
+
+.sortBtn {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sortBtn:hover {
+  color: var(--text-primary);
+}
+
 .table td {
   padding: 3px 6px;
   border-bottom: 1px solid var(--border-subtle);

@@ -8216,7 +8216,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui628-20260917-board-quotes"
+WEB_BUILD_VERSION = "ui629-20260917-gf-cols"
 
 
 @app.get("/api/build")
@@ -13483,15 +13483,12 @@ def _adj_closes_on_dates(pairs: list[tuple[str, str]]) -> dict[tuple[str, str], 
 
 
 def _gf_apply_split_perf(out: dict) -> dict:
-    """Recompute cost / since-add % / ann gain / rel SPY on split-adjusted closes."""
+    """Recompute cost / since-add % on split-adjusted closes. Attach FY revenue/FCF."""
     lst = out.get("list") if isinstance(out, dict) else None
     stocks = list((lst or {}).get("stocks") or [])
     if not stocks:
         return out
-    today = datetime.now(timezone.utc).date()
-    today_s = today.isoformat()
     pairs: list[tuple[str, str]] = []
-    add_days: list[str] = []
     tickers: list[str] = []
     for r in stocks:
         tk = (r.get("symbol") or "").upper()
@@ -13501,22 +13498,34 @@ def _gf_apply_split_perf(out: dict) -> dict:
         tickers.append(tk)
         if day:
             pairs.append((tk, day))
-            add_days.append(day)
-            pairs.append(("SPY", day))
-    pairs.append(("SPY", today_s))
     adj = _adj_closes_on_dates(pairs)
     live: dict = {}
     try:
         live = _builder_board_quotes(list(dict.fromkeys(tickers))) or {}
     except Exception:
         live = {}
-    spy_now = adj.get(("SPY", today_s))
-    try:
-        spy_q = (_builder_board_quotes(["SPY"]) or {}).get("SPY") or {}
-        if spy_q.get("price") is not None:
-            spy_now = float(spy_q["price"])
-    except Exception:
-        pass
+    uniq = list(dict.fromkeys(tickers))
+    fin: dict[str, dict] = {}
+    if uniq and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (upper(ticker))
+                           upper(ticker), revenue, free_cash_flow
+                      FROM company_financials
+                     WHERE upper(ticker) = ANY(%s) AND period_type='annual'
+                     ORDER BY upper(ticker), period_end DESC
+                    """,
+                    (uniq,),
+                )
+                for tk, rev, fcf in cur.fetchall() or []:
+                    fin[str(tk).upper()] = {
+                        "revenue": float(rev) if rev is not None else None,
+                        "free_cash_flow": float(fcf) if fcf is not None else None,
+                    }
+        except Exception as e:
+            print(f"[gf-wl] fundamentals: {e!s:.120}", flush=True)
     for r in stocks:
         tk = (r.get("symbol") or "").upper()
         day = str(r.get("date_first_added") or "")[:10]
@@ -13532,6 +13541,9 @@ def _gf_apply_split_perf(out: dict) -> dict:
             r["price"] = px
         if q.get("pct_change") is not None:
             r["day_pct"] = q.get("pct_change")
+        m = fin.get(tk) or {}
+        r["revenue"] = m.get("revenue")
+        r["free_cash_flow"] = m.get("free_cash_flow")
         cost = adj.get((tk, day)) if day else None
         if cost is None or cost == 0:
             continue
@@ -13540,19 +13552,6 @@ def _gf_apply_split_perf(out: dict) -> dict:
             continue
         pct = (px - cost) / abs(cost) * 100.0
         r["pct_since_first"] = round(pct, 4)
-        try:
-            add = date.fromisoformat(day)
-            days = max(1, (today - add).days)
-        except Exception:
-            days = 1
-        try:
-            r["ann_gain"] = round(((px / cost) ** (365.25 / days) - 1.0) * 100.0, 4)
-        except Exception:
-            r["ann_gain"] = None
-        spy_then = adj.get(("SPY", day)) if day else None
-        if spy_then and spy_now and spy_then != 0:
-            spy_pct = (float(spy_now) - float(spy_then)) / abs(float(spy_then)) * 100.0
-            r["rel_spy"] = round(pct - spy_pct, 4)
     if lst is not None:
         lst["stocks"] = stocks
         lst["stock_count"] = len(stocks)
