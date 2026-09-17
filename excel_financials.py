@@ -161,9 +161,6 @@ CONCEPT_PRIORITIES: dict[str, list[str]] = {
         "LongTermDebtNoncurrent",
         "LongTermDebt",
         "LongTermNotesPayable",
-        "OperatingLeaseLiabilityNoncurrent",
-        "LeaseLiabilityNoncurrent",
-        "FinanceLeaseLiabilityNoncurrent",
     ]),
     "ShortTermDebt": _p([
         "ShortTermBorrowings",
@@ -171,15 +168,24 @@ CONCEPT_PRIORITIES: dict[str, list[str]] = {
         "DebtCurrent",
         "LinesOfCreditCurrent",
         "CommercialPaper",
+    ]),
+    "LeaseLiabilityNoncurrent": _p([
+        "OperatingLeaseLiabilityNoncurrent",
+        "LeaseLiabilityNoncurrent",
+        "FinanceLeaseLiabilityNoncurrent",
+    ]),
+    "LeaseLiabilityCurrent": _p([
         "OperatingLeaseLiabilityCurrent",
         "LeaseLiabilityCurrent",
         "FinanceLeaseLiabilityCurrent",
     ]),
+    "LeaseLiability": _p([
+        "OperatingLeaseLiability",
+        "LeaseLiability",
+    ]),
     "TotalDebt": _p([
         "LongTermDebtAndCapitalLeaseObligations",
         "DebtLongtermAndShorttermCombinedAmount",
-        "OperatingLeaseLiability",
-        "LeaseLiability",
     ]),
     "DilutedShares": _p(["WeightedAverageNumberOfDilutedSharesOutstanding"]),
     "SharesOutstanding": _p([
@@ -211,6 +217,7 @@ CF_METRICS = {"OperatingCashFlow", "CapEx", "Dividends", "BuybacksCash", "Deprec
 BS_METRICS = {
     "Cash", "ShortTermInvestments", "TotalAssets", "TotalLiabilities",
     "StockholdersEquity", "LongTermDebt", "ShortTermDebt", "TotalDebt",
+    "LeaseLiability", "LeaseLiabilityCurrent", "LeaseLiabilityNoncurrent",
 }
 
 
@@ -508,36 +515,54 @@ def _build_period_row(
     # Balance-sheet metrics
     if bs_df is not None and bs_col:
         for metric in BS_METRICS:
-            if metric in ("LongTermDebt", "ShortTermDebt", "TotalDebt"):
+            if metric in ("LongTermDebt", "ShortTermDebt", "TotalDebt",
+                          "LeaseLiability", "LeaseLiabilityCurrent",
+                          "LeaseLiabilityNoncurrent"):
                 continue
             v, tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES[metric], bs_col)
             if v is not None:
                 row[metric] = v
                 if tag:
                     tags[metric] = tag
-        ltd, ltd_tag = _pick_debt_combined(
-            bs_df, bs_col,
-            _p(["LongTermDebtNoncurrent", "LongTermDebt", "LongTermNotesPayable"]),
-            _p(["OperatingLeaseLiabilityNoncurrent", "LeaseLiabilityNoncurrent",
-                "FinanceLeaseLiabilityNoncurrent"]),
-        )
-        std, std_tag = _pick_debt_combined(
-            bs_df, bs_col,
-            _p(["ShortTermBorrowings", "LongTermDebtCurrent", "DebtCurrent",
-                "LinesOfCreditCurrent", "CommercialPaper"]),
-            _p(["OperatingLeaseLiabilityCurrent", "LeaseLiabilityCurrent",
-                "FinanceLeaseLiabilityCurrent"]),
-        )
+        ltd, ltd_tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES["LongTermDebt"], bs_col)
+        std, std_tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES["ShortTermDebt"], bs_col)
+        llc, llc_tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES["LeaseLiabilityCurrent"], bs_col)
+        lln, lln_tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES["LeaseLiabilityNoncurrent"], bs_col)
+        llt, llt_tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES["LeaseLiability"], bs_col)
+        notes = None
+        if ltd is not None or std is not None:
+            notes = (ltd or 0) + (std or 0)
+        leases = None
+        if llc is not None or lln is not None:
+            leases = (llc or 0) + (lln or 0)
+        elif llt is not None:
+            leases = llt
         if ltd is not None:
             row["LongTermDebt"] = ltd
             if ltd_tag:
                 tags["LongTermDebt"] = ltd_tag
+        elif leases is not None:
+            row["LongTermDebt"] = 0.0
         if std is not None:
             row["ShortTermDebt"] = std
             if std_tag:
                 tags["ShortTermDebt"] = std_tag
-        if ltd is not None or std is not None:
-            row["TotalDebt"] = (ltd or 0) + (std or 0)
+        elif leases is not None:
+            row["ShortTermDebt"] = 0.0
+        if llc is not None:
+            row["LeaseLiabilityCurrent"] = llc
+            if llc_tag:
+                tags["LeaseLiabilityCurrent"] = llc_tag
+        if lln is not None:
+            row["LeaseLiabilityNoncurrent"] = lln
+            if lln_tag:
+                tags["LeaseLiabilityNoncurrent"] = lln_tag
+        if leases is not None:
+            row["LeaseLiability"] = leases
+            if llt_tag:
+                tags["LeaseLiability"] = llt_tag
+        if notes is not None or leases is not None:
+            row["TotalDebt"] = (notes or 0) + (leases or 0)
         else:
             tot, tot_tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES["TotalDebt"], bs_col)
             if tot is not None:
@@ -989,6 +1014,9 @@ _DB_TO_METRIC = {
     "stockholders_equity": "StockholdersEquity",
     "long_term_debt": "LongTermDebt", "short_term_debt": "ShortTermDebt",
     "total_debt": "TotalDebt",
+    "lease_liability": "LeaseLiability",
+    "lease_liability_current": "LeaseLiabilityCurrent",
+    "lease_liability_noncurrent": "LeaseLiabilityNoncurrent",
     "gross_margin": "GrossMargin", "operating_margin": "OperatingMargin",
     "net_margin": "NetMargin", "ebitda_margin": "EBITDAMargin",
 }

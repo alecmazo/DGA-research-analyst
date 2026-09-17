@@ -78,6 +78,8 @@ export function SeriesPanel({ series }: { series: DashSeriesPoint[] }) {
               <th className="tabular">NM%</th>
               <th className="tabular">ROIC%</th>
               <th className="tabular">Cash</th>
+              <th className="tabular">Borrow</th>
+              <th className="tabular">Leases</th>
               <th className="tabular">Debt</th>
             </tr>
           </thead>
@@ -101,6 +103,12 @@ export function SeriesPanel({ series }: { series: DashSeriesPoint[] }) {
                 <td className="tabular">{fmtPct(r.roic_pct)}</td>
                 <td className="tabular">
                   {r.cash != null ? gfCap(r.cash) : '—'}
+                </td>
+                <td className="tabular">
+                  {r.borrowings != null ? gfCap(r.borrowings) : '—'}
+                </td>
+                <td className="tabular">
+                  {r.leases != null ? gfCap(r.leases) : '—'}
                 </td>
                 <td className="tabular">
                   {r.debt != null ? gfCap(r.debt) : '—'}

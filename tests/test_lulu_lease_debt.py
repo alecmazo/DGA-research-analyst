@@ -41,8 +41,11 @@ def test_lulu_zero_revolver_plus_leases():
         OperatingLeaseLiability=1_798_441_000,
     )
     row = _fill(facts)
-    assert row["LongTermDebt"] == 1_499_717_000
-    assert row["ShortTermDebt"] == 298_724_000
+    assert row["LongTermDebt"] == 0.0
+    assert row["ShortTermDebt"] == 0.0
+    assert row["LeaseLiabilityNoncurrent"] == 1_499_717_000
+    assert row["LeaseLiabilityCurrent"] == 298_724_000
+    assert row["LeaseLiability"] == 1_798_441_000
     assert row["TotalDebt"] == 1_798_441_000
 
 
@@ -62,14 +65,18 @@ def test_notes_plus_leases_are_summed():
         OperatingLeaseLiabilityCurrent=20_000_000,
     )
     row = _fill(facts)
-    assert row["LongTermDebt"] == 1_400_000_000
-    assert row["ShortTermDebt"] == 70_000_000
+    assert row["LongTermDebt"] == 1_000_000_000
+    assert row["ShortTermDebt"] == 50_000_000
+    assert row["LeaseLiabilityNoncurrent"] == 400_000_000
+    assert row["LeaseLiabilityCurrent"] == 20_000_000
+    assert row["LeaseLiability"] == 420_000_000
     assert row["TotalDebt"] == 1_470_000_000
 
 
-def test_tag_lists_include_operating_leases():
-    assert "OperatingLeaseLiabilityNoncurrent" in edgar.TAG_PRIORITIES["LongTermDebt"]
-    assert "OperatingLeaseLiabilityCurrent" in edgar.TAG_PRIORITIES["ShortTermDebt"]
+def test_tag_lists_keep_notes_and_leases_separate():
+    assert "OperatingLeaseLiabilityNoncurrent" not in edgar.TAG_PRIORITIES["LongTermDebt"]
+    assert "OperatingLeaseLiabilityNoncurrent" in edgar.TAG_PRIORITIES["LeaseLiabilityNoncurrent"]
+    assert "OperatingLeaseLiabilityCurrent" in edgar.TAG_PRIORITIES["LeaseLiabilityCurrent"]
     src = Path(edgar.__file__).read_text()
     assert "def _fill_debt_metrics" in src
     assert "_DEBT_LEASE_LT" in src
@@ -78,7 +85,14 @@ def test_tag_lists_include_operating_leases():
 def test_excel_maps_also_list_leases():
     import excel_financials as xf
     ltd = " ".join(xf.CONCEPT_PRIORITIES["LongTermDebt"])
-    std = " ".join(xf.CONCEPT_PRIORITIES["ShortTermDebt"])
-    assert "OperatingLeaseLiabilityNoncurrent" in ltd
-    assert "OperatingLeaseLiabilityCurrent" in std
-    assert "def _pick_debt_combined" in Path(xf.__file__).read_text()
+    leases = " ".join(xf.CONCEPT_PRIORITIES["LeaseLiabilityNoncurrent"])
+    assert "OperatingLeaseLiabilityNoncurrent" not in ltd
+    assert "OperatingLeaseLiabilityNoncurrent" in leases
+
+
+def test_sheet_payload_has_lease_row():
+    body = Path(ROOT / "api" / "domains" / "_financials_body.py").read_text()
+    assert "Operating lease liabilities *" in body
+    assert "Total Debt (borrowings + leases)" in body
+    assert "def _backfill_store_debt_leases" in body
+    assert "lease_liability_noncurrent" in body

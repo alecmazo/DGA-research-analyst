@@ -153,11 +153,6 @@ TAG_PRIORITIES: dict[str, list[str]] = {
         "LongTermDebtNoncurrent",
         "LongTermDebt",
         "LongTermNotesPayable",
-        # Retailers/restaurants (LULU, SBUX) often have $0 notes and large
-        # ASC 842 operating leases — Yahoo/GF "total debt" is the lease PV.
-        "OperatingLeaseLiabilityNoncurrent",
-        "LeaseLiabilityNoncurrent",
-        "FinanceLeaseLiabilityNoncurrent",
     ],
     "ShortTermDebt": [
         "ShortTermBorrowings",
@@ -165,16 +160,25 @@ TAG_PRIORITIES: dict[str, list[str]] = {
         "DebtCurrent",
         "LinesOfCreditCurrent",
         "CommercialPaper",
+    ],
+    "LeaseLiabilityNoncurrent": [
+        "OperatingLeaseLiabilityNoncurrent",
+        "LeaseLiabilityNoncurrent",
+        "FinanceLeaseLiabilityNoncurrent",
+    ],
+    "LeaseLiabilityCurrent": [
         "OperatingLeaseLiabilityCurrent",
         "LeaseLiabilityCurrent",
         "FinanceLeaseLiabilityCurrent",
     ],
-    "TotalDebt": [
-        # Some filers tag this directly; otherwise we derive notes + leases.
-        "LongTermDebtAndCapitalLeaseObligations",
-        "DebtLongtermAndShorttermCombinedAmount",
+    "LeaseLiability": [
         "OperatingLeaseLiability",
         "LeaseLiability",
+    ],
+    "TotalDebt": [
+        # Borrowings + leases (EV / Yahoo-GF gross debt). Notes stay on LTD/STD.
+        "LongTermDebtAndCapitalLeaseObligations",
+        "DebtLongtermAndShorttermCombinedAmount",
     ],
     "DilutedShares": [
         "WeightedAverageNumberOfDilutedSharesOutstanding",
@@ -210,6 +214,9 @@ BALANCE_SHEET_KEYS = {
     "StockholdersEquity",
     "LongTermDebt",
     "ShortTermDebt",
+    "LeaseLiability",
+    "LeaseLiabilityCurrent",
+    "LeaseLiabilityNoncurrent",
     "TotalDebt",
     "SharesOutstanding",
 }
@@ -591,9 +598,8 @@ _DEBT_LEASE_ST = (
 _DEBT_TOTAL_TAGS = (
     "LongTermDebtAndCapitalLeaseObligations",
     "DebtLongtermAndShorttermCombinedAmount",
-    "OperatingLeaseLiability",
-    "LeaseLiability",
 )
+_DEBT_LEASE_TOTAL = ("OperatingLeaseLiability", "LeaseLiability")
 
 
 def _hit_val(companyfacts: dict, tags: tuple[str, ...] | list[str], picker):
@@ -622,22 +628,43 @@ def _combine_note_and_lease(note_val, lease_val):
 
 
 def _fill_debt_metrics(row: dict, companyfacts: dict, picker) -> None:
-    """Write LongTermDebt / ShortTermDebt / TotalDebt onto row in place."""
+    """Write notes, lease liabilities, and TotalDebt (notes + leases) in place.
+
+    LongTermDebt / ShortTermDebt are interest-bearing borrowings only (a $0
+    revolver stays $0). Operating/finance lease PVs go on LeaseLiability*.
+    TotalDebt is the EV/Yahoo-GF figure: borrowings + lease liabilities.
+    """
     ltd_n, _ = _hit_val(companyfacts, _DEBT_NOTE_LT, picker)
     ltd_l, _ = _hit_val(companyfacts, _DEBT_LEASE_LT, picker)
     std_n, _ = _hit_val(companyfacts, _DEBT_NOTE_ST, picker)
     std_l, _ = _hit_val(companyfacts, _DEBT_LEASE_ST, picker)
-    tot, tot_tag = _hit_val(companyfacts, _DEBT_TOTAL_TAGS, picker)
-    ltd = _combine_note_and_lease(ltd_n, ltd_l)
-    std = _combine_note_and_lease(std_n, std_l)
-    if ltd is not None:
-        row["LongTermDebt"] = ltd
-    if std is not None:
-        row["ShortTermDebt"] = std
-    if ltd is not None or std is not None:
-        row["TotalDebt"] = (ltd or 0.0) + (std or 0.0)
-    elif tot is not None:
-        row["TotalDebt"] = tot
+    tot_tag_val, tot_tag = _hit_val(companyfacts, _DEBT_TOTAL_TAGS, picker)
+    lease_tot, _ = _hit_val(companyfacts, _DEBT_LEASE_TOTAL, picker)
+    notes = _combine_note_and_lease(ltd_n, std_n)
+    leases = _combine_note_and_lease(ltd_l, std_l)
+    if leases is None and lease_tot is not None:
+        leases = lease_tot
+    # Notes columns: keep an explicit $0 when leases exist so the sheet does
+    # not look like debt is "missing" — it is borrowings of zero.
+    if ltd_n is not None:
+        row["LongTermDebt"] = ltd_n
+    elif leases is not None:
+        row["LongTermDebt"] = 0.0
+    if std_n is not None:
+        row["ShortTermDebt"] = std_n
+    elif leases is not None:
+        row["ShortTermDebt"] = 0.0
+    if ltd_l is not None:
+        row["LeaseLiabilityNoncurrent"] = ltd_l
+    if std_l is not None:
+        row["LeaseLiabilityCurrent"] = std_l
+    if leases is not None:
+        row["LeaseLiability"] = leases
+    if notes is not None or leases is not None:
+        row["TotalDebt"] = (notes or 0.0) + (leases or 0.0)
+        row.setdefault("_tags", {})["TotalDebt"] = "notes+leases"
+    elif tot_tag_val is not None:
+        row["TotalDebt"] = tot_tag_val
         if tot_tag:
             row.setdefault("_tags", {})["TotalDebt"] = tot_tag
 

@@ -375,7 +375,8 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
       labels,
       series: [
         { name: 'Cash + STI', color: COLORS.green, values: col(series, 'cash') },
-        { name: 'Total Debt', color: COLORS.red, values: col(series, 'debt') },
+        { name: 'Borrowings', color: COLORS.orange, values: col(series, 'borrowings') },
+        { name: 'Lease liabilities *', color: COLORS.purple, values: col(series, 'leases') },
       ],
     },
     {

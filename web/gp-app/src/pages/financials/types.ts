@@ -25,6 +25,8 @@ export type DashSeriesPoint = {
   ebitda?: number | null
   cash?: number | null
   debt?: number | null
+  leases?: number | null
+  borrowings?: number | null
   ocf?: number | null
   fcf?: number | null
   dividends?: number | null
@@ -195,6 +197,7 @@ export type SheetData = {
   capital?: Record<string, number | string | null | undefined>
   annual?: SheetBlock
   quarterly?: SheetBlock
+  footnotes?: string[]
   source?: string
   cost?: string
 }

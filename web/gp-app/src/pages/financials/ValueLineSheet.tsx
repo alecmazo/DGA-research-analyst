@@ -232,7 +232,9 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
                 ['EV/EBITDA', vlMoney(cap.ev_ebitda as number | null, 'x')],
                 ['FCF yield', vlMoney(cap.fcf_yield_pct as number | null, '%')],
                 ['Cash', vlMoney(cap.cash as number | null)],
-                ['Total debt', vlMoney(cap.total_debt as number | null)],
+                ['Borrowings', vlMoney(cap.borrowings as number | null)],
+                ['Lease liab. *', vlMoney(cap.lease_liability as number | null)],
+                ['Total debt *', vlMoney(cap.total_debt as number | null)],
                 ['Book / sh', vlMoney(cap.book_value_ps as number | null, '$/sh')],
                 ['Shares', vlMoney(cap.shares as number | null, 'sh')],
                 [
@@ -263,6 +265,9 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
             </>
           )}
           <div className={styles.mutedSm}>
+            {(sheet.footnotes || []).map((fn) => (
+              <div key={fn} style={{ marginBottom: 6 }}>{fn}</div>
+            ))}
             Source: {sheet.source || 'company_financials'}. Print / Save PDF uses
             your browser. Download PDF is generated on click only.
             Not investment advice.

@@ -61,6 +61,9 @@ _FIN_COLMAP = {
     "ShortTermInvestments": "short_term_investments", "TotalAssets": "total_assets",
     "TotalLiabilities": "total_liabilities", "StockholdersEquity": "stockholders_equity",
     "LongTermDebt": "long_term_debt", "ShortTermDebt": "short_term_debt", "TotalDebt": "total_debt",
+    "LeaseLiability": "lease_liability",
+    "LeaseLiabilityCurrent": "lease_liability_current",
+    "LeaseLiabilityNoncurrent": "lease_liability_noncurrent",
     "GrossMargin": "gross_margin", "OperatingMargin": "operating_margin",
     "NetMargin": "net_margin", "EBITDAMargin": "ebitda_margin",
 }
@@ -675,6 +678,10 @@ def _ensure_financials_table() -> None:
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS company_fin_ticker_idx ON company_financials(ticker, period_end DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS company_fin_period_idx ON company_financials(period_type, period_end DESC)")
+            for col in ("lease_liability", "lease_liability_current",
+                        "lease_liability_noncurrent"):
+                cur.execute(
+                    f"ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS {col} NUMERIC")
             conn.commit()
     except Exception as e:
         print(f"❌ _ensure_financials_table failed: {e!s:.300}", flush=True)
@@ -726,39 +733,88 @@ def _store_financials_rows(ticker: str, cik, entity_name, rows: list,
 
 
 def _upgrade_debt_columns(cur, ticker: str, r: dict, num_fn) -> None:
-    """Fill stored debt when it is NULL/0 and the new extract has a real figure.
+    """Write notes vs lease split from a fresh extract.
 
-    LULU et al. stored ShortTermBorrowings=0 and NULL long-term notes while
-    ASC 842 lease liabilities (~$1.8B) sat unmapped. Never clobber a non-zero
-    notes balance already in the store.
+    Always overwrite the six debt/lease columns when the extract has them so a
+    prior combine (leases stuffed into long_term_debt) is corrected. 0 is a
+    real value (undrawn revolver).
     """
     ltd = num_fn(r.get("LongTermDebt"))
     std = num_fn(r.get("ShortTermDebt"))
     td = num_fn(r.get("TotalDebt"))
+    llc = num_fn(r.get("LeaseLiabilityCurrent"))
+    lln = num_fn(r.get("LeaseLiabilityNoncurrent"))
+    ll = num_fn(r.get("LeaseLiability"))
     end = r.get("end")
     ptype = r.get("period_type")
     if not end or not ptype:
         return
-    if ltd is None and std is None and td is None:
+    if all(v is None for v in (ltd, std, td, llc, lln, ll)):
         return
     cur.execute(
         """
         UPDATE company_financials SET
-          long_term_debt = CASE
-            WHEN (long_term_debt IS NULL OR long_term_debt = 0) AND %s IS NOT NULL
-            THEN %s ELSE long_term_debt END,
-          short_term_debt = CASE
-            WHEN (short_term_debt IS NULL OR short_term_debt = 0)
-                 AND %s IS NOT NULL AND %s <> 0
-            THEN %s ELSE short_term_debt END,
-          total_debt = CASE
-            WHEN (total_debt IS NULL OR total_debt = 0) AND %s IS NOT NULL
-            THEN %s ELSE total_debt END,
+          long_term_debt = COALESCE(%s, long_term_debt),
+          short_term_debt = COALESCE(%s, short_term_debt),
+          total_debt = COALESCE(%s, total_debt),
+          lease_liability_current = COALESCE(%s, lease_liability_current),
+          lease_liability_noncurrent = COALESCE(%s, lease_liability_noncurrent),
+          lease_liability = COALESCE(%s, lease_liability),
           updated_at = now()
         WHERE ticker=%s AND period_type=%s AND period_end=%s
         """,
-        (ltd, ltd, std, std, std, td, td, ticker.upper(), ptype, end),
+        (ltd, std, td, llc, lln, ll, ticker.upper(), ptype, end),
     )
+
+
+def _backfill_store_debt_leases(tickers=None, sleep_s: float = 0.12):
+    """Re-map notes vs ASC 842 leases for every stored ticker from companyfacts.
+
+    One SEC GET per name; updates existing period_end rows only.
+    """
+    import sec_edgar_xbrl as _edgar
+    _ensure_financials_table()
+    try:
+        ua = analyst.get_sec_user_agent()
+    except Exception as e:
+        return {"ok": False, "error": f"SEC_USER_AGENT: {e!s:.80}"}
+    with _fund_conn() as conn, conn.cursor() as cur:
+        if tickers:
+            tks = [str(t).upper().strip() for t in tickers if t]
+        else:
+            cur.execute("SELECT DISTINCT ticker FROM company_financials ORDER BY 1")
+            tks = [r[0] for r in (cur.fetchall() or []) if r and r[0]]
+    n_ok = 0
+    n_rows = 0
+    errors: list[str] = []
+    for tk in tks:
+        try:
+            cik = _edgar.resolve_cik(tk, user_agent=ua)
+            facts = _edgar.fetch_company_facts(cik, user_agent=ua)
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT period_type, period_end FROM company_financials WHERE ticker=%s",
+                    (tk,))
+                periods = cur.fetchall() or []
+                for ptype, pend in periods:
+                    end = (pend.isoformat()[:10] if hasattr(pend, "isoformat")
+                           else str(pend or "")[:10])
+                    row = {"period_type": ptype, "end": end}
+                    _edgar._fill_debt_metrics(
+                        row, facts,
+                        lambda f, e=end: _edgar._pick_instant_near(f, e))
+                    _upgrade_debt_columns(
+                        cur, tk, row,
+                        lambda v: float(v) if isinstance(v, (int, float)) else None)
+                    n_rows += 1
+                conn.commit()
+            n_ok += 1
+        except Exception as e:
+            errors.append(f"{tk}: {e!s:.100}")
+        if sleep_s:
+            time.sleep(max(0.0, float(sleep_s)))
+    return {"ok": True, "tickers": n_ok, "periods": n_rows,
+            "n_err": len(errors), "errors": errors[:25]}
 
 
 def _fin_ticker_already_stored(ticker: str) -> bool:
@@ -3535,24 +3591,40 @@ def _build_rank_cards(annuals, price, anchor_map, growth_pct, ticker=None):
 _CASH_TO_DEBT_CAP = 10.0  # fortress ceiling when debt is 0 (÷0 would be inf)
 
 
-def _dash_debt_of(r) -> float | None:
-    """Total debt if any debt field is present; None when debt is unreported
-    (do NOT coerce missing → 0 for *charts* — that flattens cash/debt to fake zeros).
+def _dash_leases_of(r) -> float | None:
+    """ASC 842 operating/finance lease PV. None when untagged."""
+    ll = _dash_f((r or {}).get("lease_liability"))
+    cur = _dash_f((r or {}).get("lease_liability_current"))
+    ncur = _dash_f((r or {}).get("lease_liability_noncurrent"))
+    if cur is not None or ncur is not None:
+        return (cur or 0.0) + (ncur or 0.0)
+    return ll
 
-    If total_debt is 0/null but LTD/STD are tagged, use the component sum
-    (CPRT quarters tagged total_debt=0 while notes/leases still exist).
-    """
-    td = _dash_f((r or {}).get("total_debt"))
+
+def _dash_borrowings_of(r) -> float | None:
+    """Interest-bearing notes/revolver only (not leases)."""
     ltd = _dash_f((r or {}).get("long_term_debt"))
     std = _dash_f((r or {}).get("short_term_debt"))
-    parts = [x for x in (ltd, std) if x is not None]
-    summed = sum(parts) if parts else None
-    if summed is not None and summed > 0 and (td is None or td == 0):
-        return summed
+    if ltd is None and std is None:
+        return None
+    return (ltd or 0.0) + (std or 0.0)
+
+
+def _dash_debt_of(r) -> float | None:
+    """Gross debt for EV: borrowings + lease liabilities.
+
+    Prefer stored total_debt (notes+leases). Do not treat missing as 0 on charts.
+    """
+    td = _dash_f((r or {}).get("total_debt"))
+    notes = _dash_borrowings_of(r)
+    leases = _dash_leases_of(r)
+    if notes is not None or leases is not None:
+        summed = (notes or 0.0) + (leases or 0.0)
+        if td is None or td == 0:
+            return summed
+        return td
     if td is not None:
         return td
-    if summed is not None:
-        return summed
     return None
 
 
@@ -4396,6 +4468,8 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
         ebitda = _dash_f(r.get("ebitda"));            opin = _dash_f(r.get("operating_income"))
         cash  = _dash_cash_of(r)
         debt  = _dash_debt_of(r)
+        leases = _dash_leases_of(r)
+        borrowings = _dash_borrowings_of(r)
         ocf = _dash_f(r.get("operating_cash_flow")); fcf = _dash_f(r.get("free_cash_flow"))
         div = _dash_f(r.get("dividends"));           bb  = _dash_f(r.get("buybacks"))
         # Buybacks stored as positive outflow magnitude — chart as positive spend.
@@ -4435,7 +4509,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "label": label, "period_end": (r["period_end"].isoformat()
                                            if r.get("period_end") else None),
             "revenue": rev, "net_income": ni, "ebitda": ebitda,
-            "cash": cash, "debt": debt,
+            "cash": cash, "debt": debt, "leases": leases, "borrowings": borrowings,
             "ocf": ocf, "fcf": fcf, "dividends": div, "buybacks": bb, "sbc": sbc,
             "shares": shares, "buyback_ratio_pct": (round(bb_ratio, 3)
                                                     if bb_ratio is not None else None),
@@ -4683,6 +4757,12 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
                        f"10-Q not yet in store."
                        if earnings_pending else "")
                 ),
+                "debt": (
+                    "Borrowings = interest-bearing notes/revolver (can be $0). "
+                    "Lease liabilities = ASC 842 present value of store/office/"
+                    "equipment leases, not bank debt. Total debt on the cash/debt "
+                    "chart and EV is borrowings + leases (Yahoo/GuruFocus convention)."
+                ),
             }}
     try:
         _FIN_DASH_CACHE[dash_ck] = (time.time(), payload)
@@ -4771,6 +4851,8 @@ def _vl_series_from_annuals(annuals: list) -> dict:
             eps[i] = ni[i] / shares[i]
     cash = [_vl_cash(r) for r in annuals]
     debt = [_vl_debt(r) for r in annuals]
+    leases = [_dash_leases_of(r) for r in annuals]
+    std_notes = col("short_term_debt")
     equity = col("stockholders_equity")
     assets = col("total_assets")
     liab = col("total_liabilities")
@@ -4852,8 +4934,10 @@ def _vl_series_from_annuals(annuals: list) -> dict:
         {"id": "fcf", "label": "Free Cash Flow", "unit": "$", "values": fcf},
         {"id": "buybacks", "label": "Share Buybacks (cash)", "unit": "$", "values": [abs(x) if x is not None else None for x in bb]},
         {"id": "cash", "label": "Cash & ST Investments", "unit": "$", "values": cash},
-        {"id": "total_debt", "label": "Total Debt", "unit": "$", "values": debt},
-        {"id": "long_term_debt", "label": "Long-Term Debt", "unit": "$", "values": ltd},
+        {"id": "short_term_debt", "label": "Short-Term Debt (borrowings)", "unit": "$", "values": std_notes},
+        {"id": "long_term_debt", "label": "Long-Term Debt (notes)", "unit": "$", "values": ltd},
+        {"id": "lease_liability", "label": "Operating lease liabilities *", "unit": "$", "values": leases},
+        {"id": "total_debt", "label": "Total Debt (borrowings + leases) *", "unit": "$", "values": debt},
         {"id": "equity", "label": "Shareholders' Equity", "unit": "$", "values": equity},
         {"id": "assets", "label": "Total Assets", "unit": "$", "values": assets},
         {"id": "liabilities", "label": "Total Liabilities", "unit": "$", "values": liab},
@@ -4877,7 +4961,17 @@ def _vl_series_from_annuals(annuals: list) -> dict:
         {"id": "ni_yoy", "label": "Net Income Growth", "unit": "%", "values": yoy(ni)},
         {"id": "fcf_yoy", "label": "FCF Growth", "unit": "%", "values": yoy(fcf)},
     ]
-    return {"labels": labels, "rows": rows, "n_years": len(annuals)}
+    footnotes = []
+    if any((x or 0) > 0 for x in leases):
+        footnotes.append(
+            "* Operating lease liabilities are the present value of store, office, "
+            "and equipment leases (ASC 842) — not bank debt. Total debt = "
+            "interest-bearing borrowings + lease liabilities (Yahoo Finance / "
+            "GuruFocus EV convention). A name like LULU can have $0 of notes "
+            "and still show lease PV here."
+        )
+    return {"labels": labels, "rows": rows, "n_years": len(annuals),
+            "footnotes": footnotes}
 
 
 def _build_fin_sheet(ticker: str) -> dict:
@@ -4979,6 +5073,8 @@ def _build_fin_sheet(ticker: str) -> dict:
             "ev_ebitda": ev_eb,
             "fcf_yield_pct": fcf_y,
             "cash": cash if cash else _vl_cash(L),
+            "borrowings": _dash_borrowings_of(L),
+            "lease_liability": _dash_leases_of(L),
             "total_debt": debt,
             "equity": equity,
             "shares": shares,
@@ -4992,6 +5088,7 @@ def _build_fin_sheet(ticker: str) -> dict:
         },
         "annual": annual_block,
         "quarterly": quarterly,
+        "footnotes": list(annual_block.get("footnotes") or []),
         "source": "Postgres company_financials + market_quotes (SEC XBRL pull)",
         "cost": "DB read only · zero LLM · zero SEC on view",
     }

@@ -593,7 +593,17 @@ export function CompanyDashboard({
 
           {/* Pre-React multi-card fundamentals charts */}
           {Array.isArray(dash.series) && dash.series.length > 0 && (
-            <FundCharts series={dash.series} />
+            <>
+              <FundCharts series={dash.series} />
+              {typeof dash.notes === 'object' &&
+                dash.notes &&
+                !Array.isArray(dash.notes) &&
+                dash.notes.debt && (
+                <p className={styles.help} style={{ marginTop: 4 }}>
+                  {dash.notes.debt}
+                </p>
+              )}
+            </>
           )}
 
           {/* Compact series table under charts */}

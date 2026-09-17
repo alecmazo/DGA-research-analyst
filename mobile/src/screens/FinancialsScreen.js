@@ -564,7 +564,8 @@ export default function FinancialsScreen() {
                 <FundChart title="Cash vs Debt" fmt={fmtMoney} width={chartW} t={t}
                   series={[
                     { name: 'Cash', color: t.green, values: col('cash') },
-                    { name: 'Debt', color: t.red, values: col('debt') },
+                    { name: 'Borrowings', color: t.amber, values: col('borrowings') },
+                    { name: 'Leases *', color: CHART_PURPLE, values: col('leases') },
                   ]} />
                 <FundChart title="Cash flow" fmt={fmtMoney} width={chartW} t={t}
                   series={[
