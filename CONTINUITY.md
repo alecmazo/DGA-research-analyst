@@ -205,6 +205,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Lease vs notes split** | **`ui622-20260917-lease-rows`** | All names: Long-term/short-term debt = borrowings only; new Operating lease liabilities row; Total debt = notes + leases with asterisk. Backfill every stored ticker from SEC companyfacts. |
 | **Compact financials + speed** | **`ui623-20260917-fin-compact-speed`** | Financials cards ~50% denser (GuruFocus). Quotes DB-first + 1.5s Yahoo wall; reports 12s cache; watchlist 2.5s paint. Report tables: cell suffix / WACC row labels beat generic "Value" so 7A-1 rates stay %, 7A-5 grid stays $. |
 | **SEC overnight window** | **`ui624-20260917-sec-overnight`** | Nightly = EDGAR daily index of new 10-K/10-Q only, 11pm–6am PT, pause/resume. Full store rematerialize is manual (Settings). Desk desktop popup lists companies. $0 SEC. No whole-DB backfill unless launched. |
+| **Reports list lock** | **`ui625-20260917-reports-lock`** | One list_reports recut at a time after deploy; extra polls get stale/empty so the threadpool does not starve /health. |
 
 ### One-click handoff (preferred)
 
@@ -392,4 +393,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-17 · Agent: Grok Build · Live: `ui624-20260917-sec-overnight` · Next: `ui625-YYYYMMDD-slug`*
+*Last updated: 2026-09-17 · Agent: Grok Build · Live: `ui625-20260917-reports-lock` · Next: `ui626-YYYYMMDD-slug`*

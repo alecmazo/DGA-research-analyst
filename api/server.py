@@ -8213,7 +8213,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui624-20260917-sec-overnight"
+WEB_BUILD_VERSION = "ui625-20260917-reports-lock"
 
 
 @app.get("/api/build")
@@ -10723,7 +10723,8 @@ _STOCK_INFO_CACHE: dict[str, tuple[float, dict]] = {}
 # list_reports orphan hydration / date backfill — once per process only
 _REPORTS_HYDRATE_ONCE: bool = False
 _REPORTS_LIST_CACHE: dict = {"ts": 0.0, "rows": None}
-_REPORTS_LIST_TTL_S = 12.0
+_REPORTS_LIST_TTL_S = 20.0
+_REPORTS_LIST_LOCK = threading.Lock()
 
 
 @app.get("/api/stock-info/{ticker}")
@@ -16308,321 +16309,336 @@ def list_reports(request: Request = None):
         print(f"[list_reports] cache n={len(cached)} {cache_age*1000:.0f}ms-old",
               flush=True)
         return cached
-
-    # Schema only — never Dropbox/disk scan here
+    if not _REPORTS_LIST_LOCK.acquire(blocking=False):
+        if cached is not None:
+            print("[list_reports] stale-while-rebuild", flush=True)
+            return cached
+        print("[list_reports] rebuild in flight — empty", flush=True)
+        return []
     try:
-        _ensure_analyst_reports_table_schema()
-    except Exception:
-        pass
-
-    # Kick one-shot hydrate off the request thread (never await it)
-    global _REPORTS_HYDRATE_ONCE  # noqa: PLW0603
-    if not _REPORTS_HYDRATE_ONCE:
-        _REPORTS_HYDRATE_ONCE = True
-
-        def _bg_hydrate():
-            try:
-                _hydrate_orphaned_grok_reports()
-            except Exception as e:
-                print(f"[reports] bg grok hydrate: {e!s:.120}", flush=True)
-            try:
-                _hydrate_orphaned_claude_reports()
-            except Exception as e:
-                print(f"[reports] bg claude hydrate: {e!s:.120}", flush=True)
-            try:
-                _backfill_report_dates()
-            except Exception as e:
-                print(f"[reports] bg date backfill: {e!s:.120}", flush=True)
-            try:
-                _backfill_stock_styles()
-            except Exception as e:
-                print(f"[reports] bg stock-style backfill: {e!s:.120}", flush=True)
-
-        threading.Thread(target=_bg_hydrate, daemon=True, name="reports-hydrate").start()
-
-    # ── Primary: PostgreSQL ──────────────────────────────────────────────────
-    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        cached = _REPORTS_LIST_CACHE.get("rows")
+        cache_age = time.time() - float(_REPORTS_LIST_CACHE.get("ts") or 0)
+        if cached is not None and cache_age < _REPORTS_LIST_TTL_S:
+            return cached
+        # Schema only — never Dropbox/disk scan here
         try:
-            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-                # NEVER length(report_md) here — detoasts multi-MB bodies and
-                # can hold locks for minutes under concurrent hydrate/ALTER.
-                # Provider pills use timestamps (stamped on every real Analyze).
-                cur.execute("""
-                    SELECT ticker, generated_at, has_docx, has_pptx,
-                           rating, price_target, upside_pct, gamma_url,
-                           COALESCE(pptx_stale, FALSE) AS pptx_stale,
-                           last_attempt_at, last_attempt_status, last_attempt_error,
-                           claude_generated_at, claude_rating,
-                           claude_price_target, claude_upside_pct,
-                           report_date, claude_report_date,
-                           kimi_generated_at, deepseek_generated_at,
-                           kimi_rating, kimi_price_target, kimi_upside_pct,
-                           deepseek_rating, deepseek_price_target, deepseek_upside_pct,
-                           COALESCE(version_count, 1) AS version_count,
-                           delta_from_prior,
-                           stock_style, stock_style_note, dcf_value,
-                           fwd_rev_growth, fwd_eps_growth,
-                           valuation_approaches,
-                           dcf_user_multiple, dcf_user_value, dcf_user_fcf
-                    FROM analyst_reports
-                    WHERE archived IS NOT TRUE
-                    ORDER BY GREATEST(
-                      COALESCE(generated_at, TIMESTAMP '1970-01-01'),
-                      COALESCE(claude_generated_at, TIMESTAMP '1970-01-01'),
-                      COALESCE(kimi_generated_at, TIMESTAMP '1970-01-01'),
-                      COALESCE(deepseek_generated_at, TIMESTAMP '1970-01-01'),
-                      COALESCE(last_attempt_at, TIMESTAMP '1970-01-01')
-                    ) DESC NULLS LAST
-                """)
-                rows = cur.fetchall()
-            if rows:
-                out = []
-                for r in rows:
-                    # generated_at is NOT NULL DEFAULT NOW(), and Claude/Kimi/
-                    # DeepSeek first-inserts stamp it with an empty report_md.
-                    # Treat Grok as present only when a real Grok Analyze
-                    # left rating / PT / as-of / docs — otherwise the GROK
-                    # pill opens a blank report.
-                    has_grok = bool(
-                        r.get("report_date")
-                        or r.get("rating")
-                        or r.get("price_target") is not None
-                        or r.get("has_docx")
-                        or r.get("has_pptx")
-                        or r.get("gamma_url")
-                    )
-                    has_claude = bool(r.get("claude_generated_at"))
-                    has_kimi   = bool(r.get("kimi_generated_at"))
-                    has_ds     = bool(r.get("deepseek_generated_at"))
-                    providers = []
-                    if has_grok:   providers.append("grok")
-                    if has_claude: providers.append("claude")
-                    if has_kimi:   providers.append("kimi")
-                    if has_ds:     providers.append("deepseek")
-                    if len(providers) > 1:
-                        provider_badge = "MULTI"
-                    elif providers:
-                        provider_badge = providers[0].upper()
-                    else:
-                        provider_badge = "—"
+            _ensure_analyst_reports_table_schema()
+        except Exception:
+            pass
 
-                    _vc = int(r.get("version_count") or 1)
-                    # List card shows the most relevant engine delta (prefer grok)
-                    _delta = _parse_delta_blob(r.get("delta_from_prior"), None)
+        # Kick one-shot hydrate off the request thread (never await it)
+        global _REPORTS_HYDRATE_ONCE  # noqa: PLW0603
+        if not _REPORTS_HYDRATE_ONCE:
+            _REPORTS_HYDRATE_ONCE = True
 
-                    # Effective (less aggressive) price target / upside for
-                    # downstream EV math (Builder, rebalance, etc.). When both
-                    # providers have a target, take the LOWER of the two —
-                    # that's the conservative read. When only one has data,
-                    # use it directly.
-                    pt_g  = float(r["price_target"])         if r["price_target"]         is not None else None
-                    pt_c  = float(r["claude_price_target"])  if r["claude_price_target"]  is not None else None
-                    pt_k  = float(r["kimi_price_target"])    if r.get("kimi_price_target") is not None else None
-                    pt_ds = float(r["deepseek_price_target"]) if r.get("deepseek_price_target") is not None else None
-                    up_g  = float(r["upside_pct"])           if r["upside_pct"]           is not None else None
-                    up_c  = float(r["claude_upside_pct"])    if r["claude_upside_pct"]    is not None else None
-                    up_k  = float(r["kimi_upside_pct"])      if r.get("kimi_upside_pct")  is not None else None
-                    up_ds = float(r["deepseek_upside_pct"])  if r.get("deepseek_upside_pct") is not None else None
-                    pts = [p for p in (pt_g, pt_c, pt_k, pt_ds) if p is not None]
-                    ups = [u for u in (up_g, up_c, up_k, up_ds) if u is not None]
-                    eff_pt = min(pts) if pts else None
-                    eff_up = min(ups) if ups else None
-
-                    out.append({
-                        "ticker":              r["ticker"],
-                        "version_count":       _vc,
-                        "delta_from_prior":    _delta,
-                        "generated_at":        r["generated_at"].isoformat() if r["generated_at"] else None,
-                        "has_docx":            r["has_docx"],
-                        "has_pptx":            r["has_pptx"],
-                        "pptx_stale":          bool(r["pptx_stale"]),
-                        "gamma_url":           r["gamma_url"],
-                        "rating":              r["rating"],
-                        # Backward-compat: price_target / upside_pct EXPOSE the
-                        # effective (conservative) values now. Existing UI
-                        # using these fields gets the safer number for free.
-                        "price_target":        eff_pt,
-                        "upside_pct":          eff_up,
-                        "grok_price_target":   pt_g,
-                        "grok_upside_pct":     up_g,
-                        "claude_price_target": pt_c,
-                        "claude_upside_pct":   up_c,
-                        "kimi_price_target":   pt_k,
-                        "kimi_upside_pct":     up_k,
-                        "deepseek_price_target": pt_ds,
-                        "deepseek_upside_pct": up_ds,
-                        "claude_generated_at": r["claude_generated_at"].isoformat() if r["claude_generated_at"] else None,
-                        "kimi_generated_at": (
-                            r["kimi_generated_at"].isoformat()
-                            if r.get("kimi_generated_at") else None
-                        ),
-                        "deepseek_generated_at": (
-                            r["deepseek_generated_at"].isoformat()
-                            if r.get("deepseek_generated_at") else None
-                        ),
-                        "claude_rating":       r["claude_rating"],
-                        "kimi_rating":         r.get("kimi_rating"),
-                        "deepseek_rating":     r.get("deepseek_rating"),
-                        "providers":           providers,
-                        "provider_badge":      provider_badge,
-                        # As-of dates pulled from each LLM's report header
-                        # ('DGA CAPITAL RESEARCH | May 22, 2026'). Display only —
-                        # sort order uses analysis run timestamps above.
-                        "report_date":         r.get("report_date"),
-                        "claude_report_date":  r.get("claude_report_date"),
-                        "current_price":       None,
-                        "pct_change":          None,
-                        "last_attempt_at":     r["last_attempt_at"].isoformat() if r.get("last_attempt_at") else None,
-                        "last_attempt_status": r.get("last_attempt_status"),
-                        "last_attempt_error":  r.get("last_attempt_error"),
-                        "stock_style":         r.get("stock_style"),
-                        "stock_style_note":    r.get("stock_style_note"),
-                        "dcf_value":           float(r["dcf_value"]) if r.get("dcf_value") is not None else None,
-                        "fwd_rev_growth":      float(r["fwd_rev_growth"]) if r.get("fwd_rev_growth") is not None else None,
-                        "fwd_eps_growth":      float(r["fwd_eps_growth"]) if r.get("fwd_eps_growth") is not None else None,
-                        "valuation_approaches": r.get("valuation_approaches") or [],
-                        "dcf_user_multiple":   float(r["dcf_user_multiple"]) if r.get("dcf_user_multiple") is not None else None,
-                        "dcf_user_value":      float(r["dcf_user_value"]) if r.get("dcf_user_value") is not None else None,
-                        "dcf_user_fcf":        float(r["dcf_user_fcf"]) if r.get("dcf_user_fcf") is not None else None,
-                    })
-                # Prices from process cache + market_quotes store ONLY.
-                # Full-book Yahoo here blocked the Saved Reports panel for
-                # 10–60s (98 tickers × chart fan-out). Client can refresh
-                # day-% via /api/quotes after paint.
+            def _bg_hydrate():
                 try:
-                    tks = [row["ticker"] for row in out if row.get("ticker")]
-                    if tks:
-                        qmap: dict = {}
-                        now = time.time()
-                        need = []
-                        for tk in tks:
-                            ent = _QUOTE_CACHE.get(tk)
-                            if (ent and (now - float(ent.get("_ts") or 0)) < _QUOTE_TTL
-                                    and ent.get("price") is not None):
-                                qmap[tk] = {
-                                    "price": ent.get("price"),
-                                    "pct_change": ent.get("pct_change"),
-                                }
-                            else:
-                                need.append(tk)
-                        if need:
-                            try:
-                                store = _db_quotes(need, max_age_s=None) or {}
-                                qmap.update(store)
-                            except Exception as _se:
-                                print(f"[reports] store quotes: {_se!s:.100}", flush=True)
-                        for row in out:
-                            q = qmap.get(row["ticker"]) or {}
-                            px = q.get("price")
-                            if px is not None:
+                    _hydrate_orphaned_grok_reports()
+                except Exception as e:
+                    print(f"[reports] bg grok hydrate: {e!s:.120}", flush=True)
+                try:
+                    _hydrate_orphaned_claude_reports()
+                except Exception as e:
+                    print(f"[reports] bg claude hydrate: {e!s:.120}", flush=True)
+                try:
+                    _backfill_report_dates()
+                except Exception as e:
+                    print(f"[reports] bg date backfill: {e!s:.120}", flush=True)
+                try:
+                    _backfill_stock_styles()
+                except Exception as e:
+                    print(f"[reports] bg stock-style backfill: {e!s:.120}", flush=True)
+
+            threading.Thread(target=_bg_hydrate, daemon=True, name="reports-hydrate").start()
+
+        # ── Primary: PostgreSQL ──────────────────────────────────────────────────
+        if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            try:
+                with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                    # NEVER length(report_md) here — detoasts multi-MB bodies and
+                    # can hold locks for minutes under concurrent hydrate/ALTER.
+                    # Provider pills use timestamps (stamped on every real Analyze).
+                    cur.execute("""
+                        SELECT ticker, generated_at, has_docx, has_pptx,
+                               rating, price_target, upside_pct, gamma_url,
+                               COALESCE(pptx_stale, FALSE) AS pptx_stale,
+                               last_attempt_at, last_attempt_status, last_attempt_error,
+                               claude_generated_at, claude_rating,
+                               claude_price_target, claude_upside_pct,
+                               report_date, claude_report_date,
+                               kimi_generated_at, deepseek_generated_at,
+                               kimi_rating, kimi_price_target, kimi_upside_pct,
+                               deepseek_rating, deepseek_price_target, deepseek_upside_pct,
+                               COALESCE(version_count, 1) AS version_count,
+                               delta_from_prior,
+                               stock_style, stock_style_note, dcf_value,
+                               fwd_rev_growth, fwd_eps_growth,
+                               valuation_approaches,
+                               dcf_user_multiple, dcf_user_value, dcf_user_fcf
+                        FROM analyst_reports
+                        WHERE archived IS NOT TRUE
+                        ORDER BY GREATEST(
+                          COALESCE(generated_at, TIMESTAMP '1970-01-01'),
+                          COALESCE(claude_generated_at, TIMESTAMP '1970-01-01'),
+                          COALESCE(kimi_generated_at, TIMESTAMP '1970-01-01'),
+                          COALESCE(deepseek_generated_at, TIMESTAMP '1970-01-01'),
+                          COALESCE(last_attempt_at, TIMESTAMP '1970-01-01')
+                        ) DESC NULLS LAST
+                    """)
+                    rows = cur.fetchall()
+                if rows:
+                    out = []
+                    for r in rows:
+                        # generated_at is NOT NULL DEFAULT NOW(), and Claude/Kimi/
+                        # DeepSeek first-inserts stamp it with an empty report_md.
+                        # Treat Grok as present only when a real Grok Analyze
+                        # left rating / PT / as-of / docs — otherwise the GROK
+                        # pill opens a blank report.
+                        has_grok = bool(
+                            r.get("report_date")
+                            or r.get("rating")
+                            or r.get("price_target") is not None
+                            or r.get("has_docx")
+                            or r.get("has_pptx")
+                            or r.get("gamma_url")
+                        )
+                        has_claude = bool(r.get("claude_generated_at"))
+                        has_kimi   = bool(r.get("kimi_generated_at"))
+                        has_ds     = bool(r.get("deepseek_generated_at"))
+                        providers = []
+                        if has_grok:   providers.append("grok")
+                        if has_claude: providers.append("claude")
+                        if has_kimi:   providers.append("kimi")
+                        if has_ds:     providers.append("deepseek")
+                        if len(providers) > 1:
+                            provider_badge = "MULTI"
+                        elif providers:
+                            provider_badge = providers[0].upper()
+                        else:
+                            provider_badge = "—"
+
+                        _vc = int(r.get("version_count") or 1)
+                        # List card shows the most relevant engine delta (prefer grok)
+                        _delta = _parse_delta_blob(r.get("delta_from_prior"), None)
+
+                        # Effective (less aggressive) price target / upside for
+                        # downstream EV math (Builder, rebalance, etc.). When both
+                        # providers have a target, take the LOWER of the two —
+                        # that's the conservative read. When only one has data,
+                        # use it directly.
+                        pt_g  = float(r["price_target"])         if r["price_target"]         is not None else None
+                        pt_c  = float(r["claude_price_target"])  if r["claude_price_target"]  is not None else None
+                        pt_k  = float(r["kimi_price_target"])    if r.get("kimi_price_target") is not None else None
+                        pt_ds = float(r["deepseek_price_target"]) if r.get("deepseek_price_target") is not None else None
+                        up_g  = float(r["upside_pct"])           if r["upside_pct"]           is not None else None
+                        up_c  = float(r["claude_upside_pct"])    if r["claude_upside_pct"]    is not None else None
+                        up_k  = float(r["kimi_upside_pct"])      if r.get("kimi_upside_pct")  is not None else None
+                        up_ds = float(r["deepseek_upside_pct"])  if r.get("deepseek_upside_pct") is not None else None
+                        pts = [p for p in (pt_g, pt_c, pt_k, pt_ds) if p is not None]
+                        ups = [u for u in (up_g, up_c, up_k, up_ds) if u is not None]
+                        eff_pt = min(pts) if pts else None
+                        eff_up = min(ups) if ups else None
+
+                        out.append({
+                            "ticker":              r["ticker"],
+                            "version_count":       _vc,
+                            "delta_from_prior":    _delta,
+                            "generated_at":        r["generated_at"].isoformat() if r["generated_at"] else None,
+                            "has_docx":            r["has_docx"],
+                            "has_pptx":            r["has_pptx"],
+                            "pptx_stale":          bool(r["pptx_stale"]),
+                            "gamma_url":           r["gamma_url"],
+                            "rating":              r["rating"],
+                            # Backward-compat: price_target / upside_pct EXPOSE the
+                            # effective (conservative) values now. Existing UI
+                            # using these fields gets the safer number for free.
+                            "price_target":        eff_pt,
+                            "upside_pct":          eff_up,
+                            "grok_price_target":   pt_g,
+                            "grok_upside_pct":     up_g,
+                            "claude_price_target": pt_c,
+                            "claude_upside_pct":   up_c,
+                            "kimi_price_target":   pt_k,
+                            "kimi_upside_pct":     up_k,
+                            "deepseek_price_target": pt_ds,
+                            "deepseek_upside_pct": up_ds,
+                            "claude_generated_at": r["claude_generated_at"].isoformat() if r["claude_generated_at"] else None,
+                            "kimi_generated_at": (
+                                r["kimi_generated_at"].isoformat()
+                                if r.get("kimi_generated_at") else None
+                            ),
+                            "deepseek_generated_at": (
+                                r["deepseek_generated_at"].isoformat()
+                                if r.get("deepseek_generated_at") else None
+                            ),
+                            "claude_rating":       r["claude_rating"],
+                            "kimi_rating":         r.get("kimi_rating"),
+                            "deepseek_rating":     r.get("deepseek_rating"),
+                            "providers":           providers,
+                            "provider_badge":      provider_badge,
+                            # As-of dates pulled from each LLM's report header
+                            # ('DGA CAPITAL RESEARCH | May 22, 2026'). Display only —
+                            # sort order uses analysis run timestamps above.
+                            "report_date":         r.get("report_date"),
+                            "claude_report_date":  r.get("claude_report_date"),
+                            "current_price":       None,
+                            "pct_change":          None,
+                            "last_attempt_at":     r["last_attempt_at"].isoformat() if r.get("last_attempt_at") else None,
+                            "last_attempt_status": r.get("last_attempt_status"),
+                            "last_attempt_error":  r.get("last_attempt_error"),
+                            "stock_style":         r.get("stock_style"),
+                            "stock_style_note":    r.get("stock_style_note"),
+                            "dcf_value":           float(r["dcf_value"]) if r.get("dcf_value") is not None else None,
+                            "fwd_rev_growth":      float(r["fwd_rev_growth"]) if r.get("fwd_rev_growth") is not None else None,
+                            "fwd_eps_growth":      float(r["fwd_eps_growth"]) if r.get("fwd_eps_growth") is not None else None,
+                            "valuation_approaches": r.get("valuation_approaches") or [],
+                            "dcf_user_multiple":   float(r["dcf_user_multiple"]) if r.get("dcf_user_multiple") is not None else None,
+                            "dcf_user_value":      float(r["dcf_user_value"]) if r.get("dcf_user_value") is not None else None,
+                            "dcf_user_fcf":        float(r["dcf_user_fcf"]) if r.get("dcf_user_fcf") is not None else None,
+                        })
+                    # Prices from process cache + market_quotes store ONLY.
+                    # Full-book Yahoo here blocked the Saved Reports panel for
+                    # 10–60s (98 tickers × chart fan-out). Client can refresh
+                    # day-% via /api/quotes after paint.
+                    try:
+                        tks = [row["ticker"] for row in out if row.get("ticker")]
+                        if tks:
+                            qmap: dict = {}
+                            now = time.time()
+                            need = []
+                            for tk in tks:
+                                ent = _QUOTE_CACHE.get(tk)
+                                if (ent and (now - float(ent.get("_ts") or 0)) < _QUOTE_TTL
+                                        and ent.get("price") is not None):
+                                    qmap[tk] = {
+                                        "price": ent.get("price"),
+                                        "pct_change": ent.get("pct_change"),
+                                    }
+                                else:
+                                    need.append(tk)
+                            if need:
                                 try:
-                                    px = float(px)
-                                except (TypeError, ValueError):
-                                    px = None
-                            row["current_price"] = px
-                            row["pct_change"] = q.get("pct_change")
-                            if px and px > 0 and row.get("price_target") is not None:
+                                    store = _db_quotes(need, max_age_s=None) or {}
+                                    qmap.update(store)
+                                except Exception as _se:
+                                    print(f"[reports] store quotes: {_se!s:.100}", flush=True)
+                            for row in out:
+                                q = qmap.get(row["ticker"]) or {}
+                                px = q.get("price")
+                                if px is not None:
+                                    try:
+                                        px = float(px)
+                                    except (TypeError, ValueError):
+                                        px = None
+                                row["current_price"] = px
+                                row["pct_change"] = q.get("pct_change")
+                                if px and px > 0 and row.get("price_target") is not None:
+                                    try:
+                                        row["upside_pct"] = round(
+                                            (float(row["price_target"]) - px) / px * 100.0, 2)
+                                    except Exception:
+                                        pass
+                                # Re-cut VALUE/GROWTH vs live last (DCF $ stored at persist).
                                 try:
-                                    row["upside_pct"] = round(
-                                        (float(row["price_target"]) - px) / px * 100.0, 2)
+                                    import excel_model as _em
+                                    if row.get("dcf_value") is not None:
+                                        live = _em.style_from_metrics(
+                                            row.get("dcf_value"),
+                                            px,
+                                            row.get("fwd_rev_growth"),
+                                            row.get("fwd_eps_growth"),
+                                        )
+                                        if live.get("style"):
+                                            row["stock_style"] = live["style"]
+                                            row["stock_style_note"] = live.get("note")
+                                    apps = row.get("valuation_approaches")
+                                    if isinstance(apps, str):
+                                        import json as _json
+                                        apps = _json.loads(apps)
+                                    if apps:
+                                        row["valuation_approaches"] = _em.recut_approaches_vs_last(apps, px)
+                                    elif row.get("dcf_value") or row.get("price_target"):
+                                        row["valuation_approaches"] = _em.approaches_from_scalars(
+                                            dcf=row.get("dcf_value"),
+                                            pt=row.get("price_target"),
+                                            last=px,
+                                        )
+                                    if row.get("dcf_user_value") is not None:
+                                        stored_v = row.get("dcf_user_value")
+                                        user = _em.compute_dcf_user(
+                                            row.get("dcf_user_fcf"),
+                                            row.get("dcf_user_multiple"),
+                                            None,
+                                            None,
+                                            px,
+                                        )
+                                        if user is None and _em.dcf_user_value_plausible(stored_v, px):
+                                            vd = _em.valuation_verdict(stored_v, px)
+                                            user = {
+                                                "id": "dcf_user",
+                                                "name": "DCF User",
+                                                "value": stored_v,
+                                                "multiple": row.get("dcf_user_multiple"),
+                                                "note": (
+                                                    f"FCF × {row['dcf_user_multiple']:.0f}x"
+                                                    if row.get("dcf_user_multiple")
+                                                    else "User FCF multiple"
+                                                ),
+                                                **vd,
+                                            }
+                                        elif user is None:
+                                            user = None
+                                        if user:
+                                            row["valuation_approaches"] = _em.overlay_dcf_user(
+                                                row.get("valuation_approaches") or [], user,
+                                            )
                                 except Exception:
                                     pass
-                            # Re-cut VALUE/GROWTH vs live last (DCF $ stored at persist).
-                            try:
-                                import excel_model as _em
-                                if row.get("dcf_value") is not None:
-                                    live = _em.style_from_metrics(
-                                        row.get("dcf_value"),
-                                        px,
-                                        row.get("fwd_rev_growth"),
-                                        row.get("fwd_eps_growth"),
-                                    )
-                                    if live.get("style"):
-                                        row["stock_style"] = live["style"]
-                                        row["stock_style_note"] = live.get("note")
-                                apps = row.get("valuation_approaches")
-                                if isinstance(apps, str):
-                                    import json as _json
-                                    apps = _json.loads(apps)
-                                if apps:
-                                    row["valuation_approaches"] = _em.recut_approaches_vs_last(apps, px)
-                                elif row.get("dcf_value") or row.get("price_target"):
-                                    row["valuation_approaches"] = _em.approaches_from_scalars(
-                                        dcf=row.get("dcf_value"),
-                                        pt=row.get("price_target"),
-                                        last=px,
-                                    )
-                                if row.get("dcf_user_value") is not None:
-                                    stored_v = row.get("dcf_user_value")
-                                    user = _em.compute_dcf_user(
-                                        row.get("dcf_user_fcf"),
-                                        row.get("dcf_user_multiple"),
-                                        None,
-                                        None,
-                                        px,
-                                    )
-                                    if user is None and _em.dcf_user_value_plausible(stored_v, px):
-                                        vd = _em.valuation_verdict(stored_v, px)
-                                        user = {
-                                            "id": "dcf_user",
-                                            "name": "DCF User",
-                                            "value": stored_v,
-                                            "multiple": row.get("dcf_user_multiple"),
-                                            "note": (
-                                                f"FCF × {row['dcf_user_multiple']:.0f}x"
-                                                if row.get("dcf_user_multiple")
-                                                else "User FCF multiple"
-                                            ),
-                                            **vd,
-                                        }
-                                    elif user is None:
-                                        user = None
-                                    if user:
-                                        row["valuation_approaches"] = _em.overlay_dcf_user(
-                                            row.get("valuation_approaches") or [], user,
-                                        )
-                            except Exception:
-                                pass
-                except Exception as e:
-                    print(f"[list_reports] quote enrich failed: {e!s:.140}", flush=True)
-                out.sort(key=_report_freshness_key, reverse=True)
-                _REPORTS_LIST_CACHE["rows"] = out
-                _REPORTS_LIST_CACHE["ts"] = time.time()
-                print(f"[list_reports] ok n={len(out)} {(time.time()-t0)*1000:.0f}ms",
-                      flush=True)
-                return out
-        except Exception as _e:
-            print(f"[analyst_reports] list_reports DB query failed (falling back): {_e!s:.200}")
+                    except Exception as e:
+                        print(f"[list_reports] quote enrich failed: {e!s:.140}", flush=True)
+                    out.sort(key=_report_freshness_key, reverse=True)
+                    _REPORTS_LIST_CACHE["rows"] = out
+                    _REPORTS_LIST_CACHE["ts"] = time.time()
+                    print(f"[list_reports] ok n={len(out)} {(time.time()-t0)*1000:.0f}ms",
+                          flush=True)
+                    return out
+            except Exception as _e:
+                print(f"[analyst_reports] list_reports DB query failed (falling back): {_e!s:.200}")
 
-    # ── Fallback: filesystem glob ────────────────────────────────────────────
-    folder = analyst.STOCKS_FOLDER
-    try:
-        gamma_idx = analyst._load_gamma_index()
-    except Exception:
-        gamma_idx = {}
-    reports = []
-    for md_file in sorted(folder.glob("*_DGA_Report.md"), key=lambda p: p.stat().st_mtime, reverse=True):
-        ticker = md_file.name.replace("_DGA_Report.md", "")
-        has_docx = (folder / f"{ticker}_DGA_Report.docx").exists()
-        has_pptx = (folder / f"{ticker}_DGA_Presentation.pptx").exists()
-        gamma_entry = gamma_idx.get(ticker) or {}
-        summary = _extract_summary_cached(md_file)
-        reports.append({
-            "ticker": ticker,
-            "generated_at": datetime.utcfromtimestamp(md_file.stat().st_mtime).isoformat(),
-            "has_docx": has_docx,
-            "has_pptx": has_pptx,
-            "gamma_url": gamma_entry.get("gamma_url"),
-            # Extracted summary fields (may be None for older reports without
-            # the standard header).
-            "rating":        summary.get("rating"),
-            "price_target":  summary.get("price_target"),
-            "current_price": summary.get("current_price"),
-            "upside_pct":    summary.get("upside_pct"),
-            "report_date":   summary.get("report_date") or summary.get("as_of"),
-        })
-    reports.sort(key=_report_freshness_key, reverse=True)
-    return reports
+        # ── Fallback: filesystem glob ────────────────────────────────────────────
+        folder = analyst.STOCKS_FOLDER
+        try:
+            gamma_idx = analyst._load_gamma_index()
+        except Exception:
+            gamma_idx = {}
+        reports = []
+        for md_file in sorted(folder.glob("*_DGA_Report.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+            ticker = md_file.name.replace("_DGA_Report.md", "")
+            has_docx = (folder / f"{ticker}_DGA_Report.docx").exists()
+            has_pptx = (folder / f"{ticker}_DGA_Presentation.pptx").exists()
+            gamma_entry = gamma_idx.get(ticker) or {}
+            summary = _extract_summary_cached(md_file)
+            reports.append({
+                "ticker": ticker,
+                "generated_at": datetime.utcfromtimestamp(md_file.stat().st_mtime).isoformat(),
+                "has_docx": has_docx,
+                "has_pptx": has_pptx,
+                "gamma_url": gamma_entry.get("gamma_url"),
+                # Extracted summary fields (may be None for older reports without
+                # the standard header).
+                "rating":        summary.get("rating"),
+                "price_target":  summary.get("price_target"),
+                "current_price": summary.get("current_price"),
+                "upside_pct":    summary.get("upside_pct"),
+                "report_date":   summary.get("report_date") or summary.get("as_of"),
+            })
+        reports.sort(key=_report_freshness_key, reverse=True)
+        return reports
+    finally:
+        try:
+            _REPORTS_LIST_LOCK.release()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
