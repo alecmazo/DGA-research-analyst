@@ -8213,7 +8213,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui623-20260917-fin-compact-speed"
+WEB_BUILD_VERSION = "ui624-20260917-sec-overnight"
 
 
 @app.get("/api/build")
@@ -18518,14 +18518,16 @@ _DEFAULT_AUTOMATION: dict = {
     # hands-off replacement for the manual CSV imports. On by default; a saved
     # automation.settings override (the UI toggle) still wins.
     "snaptrade_sync": {"enabled": True, "hour": 6, "minute": 0},
-    # Nightly: SEC refresh for FOLLOWED names only (saved reports + watchlist).
-    # Insert-only new periods — does not overwrite. Free, tiny set, low Railway cost.
-    "fin_nightly": {"enabled": True, "hour": 2, "minute": 30},
-    # Monthly: light refresh of the REST of company_financials (oldest first).
-    # day = day-of-month (1–28). Insert-only. Off-hours, small budget.
-    "fin_monthly": {"enabled": True, "hour": 3, "minute": 15, "day": 1},
+    # Nightly: EDGAR daily index → only names that filed a 10-K/10-Q.
+    # Window 11:00pm–6:00am PT. $0 SEC. Does NOT walk the full store.
+    "fin_nightly": {
+        "enabled": True, "hour": 23, "minute": 0,
+        "window_start_hour": 23, "window_end_hour": 6,
+    },
+    # Monthly: optional oldest-store refresh. Off by default — not a backfill.
+    "fin_monthly": {"enabled": False, "hour": 3, "minute": 15, "day": 1},
     # Legacy key — maps to fin_nightly for older clients; prefer fin_nightly.
-    "fin_overnight": {"enabled": True, "hour": 2, "minute": 30},
+    "fin_overnight": {"enabled": True, "hour": 23, "minute": 0},
     # Continuous full-US backfill supervisor — OFF by default (expensive / noisy).
     "fin_us_backfill": {"enabled": False},
 }
@@ -18625,11 +18627,24 @@ def get_automation_settings_endpoint():
     now_pac = _now_pacific()
     # Annotate each job with seconds_until_next so the UI can show "next in Xh"
     for job, cfg in settings.items():
-        if cfg["enabled"]:
-            secs = _secs_until(cfg["hour"], cfg["minute"])
-            cfg["next_run_secs"] = round(secs)
-        else:
+        if not cfg.get("enabled"):
             cfg["next_run_secs"] = None
+            continue
+        if job in ("fin_nightly", "fin_overnight"):
+            try:
+                cfg["next_run_secs"] = round(_fin_secs_until_window_open())
+            except Exception:
+                cfg["next_run_secs"] = round(_secs_until(int(cfg.get("hour") or 23),
+                                                        int(cfg.get("minute") or 0)))
+            cfg["window"] = "11:00pm–6:00am PT"
+            cfg["cost"] = {
+                "sec_usd": 0, "llm_usd": 0, "label": "$0 SEC · $0 LLM",
+            }
+        else:
+            if "hour" in cfg and "minute" in cfg:
+                cfg["next_run_secs"] = round(_secs_until(cfg["hour"], cfg["minute"]))
+            else:
+                cfg["next_run_secs"] = None
         try:
             cfg["last_run"] = _kv_get(f"automation.last_run.{job}") or None
         except Exception:
@@ -18652,6 +18667,10 @@ def save_automation_settings_endpoint(request: Request):
                 current[job]["minute"] = max(0, min(59, int(patch["minute"])))
             if "day" in patch and job == "fin_monthly":
                 current[job]["day"] = max(1, min(28, int(patch["day"])))
+            if "window_start_hour" in patch:
+                current[job]["window_start_hour"] = max(0, min(23, int(patch["window_start_hour"])))
+            if "window_end_hour" in patch:
+                current[job]["window_end_hour"] = max(0, min(23, int(patch["window_end_hour"])))
             # Keep legacy fin_overnight aligned with fin_nightly when either is patched
             if job == "fin_nightly":
                 lo = dict(current.get("fin_overnight") or {})

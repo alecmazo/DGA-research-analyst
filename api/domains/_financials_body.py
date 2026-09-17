@@ -339,7 +339,7 @@ def _fin_monthly_enabled() -> bool:
     if env in ("1", "true", "on", "yes"):
         return True
     try:
-        return bool(_get_automation_settings().get("fin_monthly", {}).get("enabled", True))
+        return bool(_get_automation_settings().get("fin_monthly", {}).get("enabled", False))
     except Exception:
         return True
 
@@ -409,44 +409,471 @@ def _fin_store_oldest_tickers(limit: int = 200, exclude: set[str] | None = None)
         return []
 
 
-def _run_fin_nightly_followed(job_id: str | None = None) -> dict:
-    """Nightly: refresh SEC for followed names only. Insert new periods; never
-    overwrite existing period rows. Tiny universe → low Railway cost."""
-    years = _FIN_OVERNIGHT_YEARS
-    tickers = _fin_followed_tickers()
-    jid = job_id or ("FINNIGHT_" + datetime.utcnow().strftime("%Y%m%d"))
-    _fin_job_set(jid, stage="queued", status="running",
-                 label=f"Nightly my-universe refresh ({len(tickers)} names)…",
-                 started_at=time.time(), total=len(tickers), done=0, stored=0,
-                 universe="followed")
-    if not tickers:
-        _fin_job_set(jid, stage="done", status="done",
-                     label="✓ Nightly: no saved reports or watchlist tickers",
-                     result={"periods_stored": 0, "names": 0})
-        return _fin_sync_jobs[jid]
-    # skip_if_stored=False → re-hit SEC so NEW quarter/FY period_end can insert
-    _run_financials_sync(jid, tickers, years, skip_if_stored=False)
-    job = _fin_sync_jobs.get(jid) or {}
-    result = job.get("result") or {}
+def _fin_pt_now() -> datetime:
+    """US/Pacific now (DST-aware when zoneinfo is present)."""
     try:
-        updated = result.get("updated") or []
-        _kv_put("fin_nightly.last", {
-            "ts": datetime.utcnow().isoformat() + "Z",
-            "count": len(tickers),
-            "job_id": jid,
-            "label": job.get("label"),
-            "periods_stored": result.get("periods_stored") or 0,
-            "names_ok": result.get("names") or 0,
-            "names_fail": result.get("names_fail") or 0,
-            "names_skip": result.get("names_skip") or 0,
-            # Tickers that received new period rows and/or a fresh Excel 10-Q/10-K
-            "updated": updated[:80],
-            "updated_count": len(updated),
-            "updated_tickers": [u.get("ticker") for u in updated if u.get("ticker")][:80],
-        })
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Los_Angeles"))
     except Exception:
-        pass
-    return job
+        return _now_pacific()
+
+
+def _fin_window_hours() -> tuple[int, int]:
+    cfg = {}
+    try:
+        cfg = (_get_automation_settings().get("fin_nightly") or {})
+    except Exception:
+        cfg = {}
+    start = int(cfg.get("window_start_hour", 23) or 23)
+    end = int(cfg.get("window_end_hour", 6) or 6)
+    start = max(0, min(23, start))
+    end = max(0, min(23, end))
+    return start, end
+
+
+def _fin_in_overnight_window(now: datetime | None = None) -> bool:
+    """True inside 11:00pm–6:00am PT (wraps midnight)."""
+    t = (now or _fin_pt_now()).time()
+    start, end = _fin_window_hours()
+    if start == end:
+        return True
+    if start > end:
+        return t.hour >= start or t.hour < end
+    return start <= t.hour < end
+
+
+def _fin_secs_until_window_open() -> float:
+    now = _fin_pt_now()
+    if _fin_in_overnight_window(now):
+        return 0.0
+    start, _end = _fin_window_hours()
+    target = now.replace(hour=start, minute=0, second=0, microsecond=0)
+    if now >= target:
+        target += timedelta(days=1)
+    return max(1.0, (target - now).total_seconds())
+
+
+def _fin_secs_until_window_close() -> float:
+    now = _fin_pt_now()
+    if not _fin_in_overnight_window(now):
+        return 0.0
+    _start, end = _fin_window_hours()
+    close = now.replace(hour=end, minute=0, second=0, microsecond=0)
+    if now.hour >= 12 and end < 12:
+        close += timedelta(days=1)
+    return max(0.0, (close - now).total_seconds())
+
+
+def _fin_cost_card() -> dict:
+    """User-facing cost — SEC is free; no LLM. Railway CPU only in-window."""
+    return {
+        "sec_usd": 0,
+        "llm_usd": 0,
+        "label": "$0 SEC · $0 LLM",
+        "note": (
+            "Public EDGAR only. Typical nightly: 1 daily-index file + companyfacts "
+            "for names that filed a 10-K/10-Q that day (often 5–40). A few minutes "
+            "of Railway CPU inside 11:00pm–6:00am PT. Rematerialize of the existing "
+            "store is also $0 SEC, ~1–2s/name, pauses at 6:00am PT and resumes the "
+            "next night. Full US listed fill is off unless you launch it."
+        ),
+    }
+
+
+def _fin_stored_ticker_set() -> set[str]:
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT ticker FROM company_financials")
+            return {str(r[0]).upper() for r in (cur.fetchall() or []) if r and r[0]}
+    except Exception as e:
+        print(f"[fin] stored ticker set: {e!s:.120}", flush=True)
+        return set()
+
+
+def _fin_publish_notice(**kw) -> dict:
+    """Desktop Desk popup payload. Overwrites the previous notice."""
+    rec = {
+        "id": kw.get("id") or ("FINN_" + datetime.utcnow().strftime("%Y%m%d%H%M%S")),
+        "kind": kw.get("kind") or "nightly",
+        "status": kw.get("status") or "done",
+        "title": kw.get("title") or "SEC financials",
+        "body": kw.get("body") or "",
+        "updated": list(kw.get("updated") or [])[:120],
+        "updated_count": int(kw.get("updated_count") or len(kw.get("updated") or [])),
+        "scanned": int(kw.get("scanned") or 0),
+        "done": kw.get("done"),
+        "total": kw.get("total"),
+        "window": kw.get("window") or "11:00pm–6:00am PT",
+        "cost": kw.get("cost") or _fin_cost_card(),
+        "ts": datetime.utcnow().isoformat() + "Z",
+        "job_id": kw.get("job_id"),
+    }
+    rec["updated_tickers"] = [
+        u.get("ticker") if isinstance(u, dict) else str(u)
+        for u in rec["updated"] if u
+    ][:120]
+    try:
+        _kv_put("fin.desk_notice", rec)
+    except Exception as e:
+        print(f"[fin] notice persist: {e!s:.100}", flush=True)
+    return rec
+
+
+def _fin_new_filing_tickers(days: int = 2, user_agent: str | None = None) -> list[dict]:
+    """Tickers in our store (or followed) that filed 10-K/10-Q in the last N days.
+
+    One HTTP GET per calendar day (daily master index). Never walks the
+    whole 5,043-name warehouse.
+    """
+    import sec_edgar_xbrl as _edgar
+    now = _fin_pt_now()
+    want: dict[str, dict] = {}
+    try:
+        ua = user_agent or analyst.get_sec_user_agent()
+    except Exception:
+        ua = user_agent
+    for i in range(max(1, int(days))):
+        d = (now - timedelta(days=i)).date()
+        try:
+            rows = _edgar.fetch_daily_master_index(d, user_agent=ua) or []
+        except Exception as e:
+            print(f"[fin] daily index {d}: {e!s:.120}", flush=True)
+            rows = []
+        for row in rows:
+            cik = row.get("cik")
+            tk = _edgar.resolve_ticker_for_cik(cik, user_agent=ua)
+            if not tk:
+                continue
+            tk = tk.upper()
+            prev = want.get(tk)
+            if not prev or str(row.get("filed") or "") >= str(prev.get("filed") or ""):
+                want[tk] = {
+                    "ticker": tk,
+                    "cik": cik,
+                    "form": row.get("form"),
+                    "filed": row.get("filed"),
+                    "company": row.get("company"),
+                }
+    if not want:
+        return []
+    allow = _fin_stored_ticker_set() | set(_fin_followed_tickers())
+    return [want[t] for t in sorted(want) if t in allow]
+
+
+def _run_fin_nightly_followed(job_id: str | None = None) -> dict:
+    """Nightly: refresh ONLY names that filed a 10-K/10-Q recently.
+
+    Does not walk the full store. Pauses at 6:00am PT if still running.
+    """
+    years = _FIN_OVERNIGHT_YEARS
+    jid = job_id or ("FINNIGHT_" + _fin_pt_now().strftime("%Y%m%d"))
+    try:
+        ua = analyst.get_sec_user_agent()
+    except Exception as e:
+        _fin_job_set(jid, stage="error", status="error",
+                     label=f"SEC_USER_AGENT missing: {e!s:.80}")
+        return _fin_sync_jobs.get(jid) or {}
+    hits = _fin_new_filing_tickers(days=2, user_agent=ua)
+    tickers = [h["ticker"] for h in hits]
+    state = _kv_get("fin_nightly.scan_state") or {}
+    already = list(state.get("done_tickers") or [])
+    if state.get("job_id") == jid and already:
+        done_set = {str(t).upper() for t in already}
+        tickers = [t for t in tickers if t not in done_set]
+        updated = list(state.get("updated") or [])
+    else:
+        updated = []
+        already = []
+    _fin_job_set(jid, stage="syncing", status="running",
+                 label=(f"Nightly new filings ({len(hits)} in index, "
+                        f"{len(tickers)} still to pull)…"),
+                 started_at=time.time(), total=len(hits) or len(tickers),
+                 done=len(already), stored=0, universe="new_filings")
+    if not hits:
+        _fin_job_set(jid, stage="done", status="done",
+                     label="✓ Nightly: no new 10-K/10-Q in the last 2 days",
+                     result={"periods_stored": 0, "names": 0, "updated": []})
+        last = {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "job_id": jid,
+            "count": 0,
+            "scanned": 0,
+            "updated": [],
+            "updated_count": 0,
+            "updated_tickers": [],
+            "label": "no new 10-K/10-Q",
+            "kind": "nightly",
+        }
+        _kv_put("fin_nightly.last", last)
+        _kv_put("fin_nightly.scan_state", {})
+        _fin_publish_notice(
+            id=jid, kind="nightly", status="done", job_id=jid,
+            title="SEC nightly · no new filings",
+            body="Checked EDGAR daily index for the last 2 days. No 10-K/10-Q "
+                 "from names already in the store.",
+            updated=[], scanned=0,
+        )
+        return _fin_sync_jobs[jid]
+
+    stored_n = 0
+    names_ok = 0
+    names_fail = 0
+    paused = False
+    for i, tk in enumerate(tickers):
+        if not _fin_in_overnight_window():
+            paused = True
+            break
+        try:
+            r = _sync_one_ticker_financials(
+                tk, years_back=years, skip_if_stored=False, excel=False)
+            stored_n += int(r.get("stored") or 0)
+            already.append(tk)
+            if r.get("new_filing"):
+                names_ok += 1
+                store_latest = r.get("latest_store") or {}
+                updated.append({
+                    "ticker": tk,
+                    "form": next((h.get("form") for h in hits if h["ticker"] == tk), None),
+                    "filed": next((h.get("filed") for h in hits if h["ticker"] == tk), None),
+                    "latest_period_end": (store_latest.get("period_end") or "")[:10],
+                    "fp": store_latest.get("fp"),
+                    "prior_period_end": ((r.get("latest_before") or {}).get("period_end") or "")[:10] or None,
+                })
+            elif not r.get("errors"):
+                names_ok += 1
+            else:
+                names_fail += 1
+        except Exception as e:
+            names_fail += 1
+            print(f"[fin-nightly] {tk}: {e!s:.120}", flush=True)
+        _fin_job_set(
+            jid, done=len(already), stored=stored_n,
+            label=f"Nightly {tk} ({len(already)}/{len(hits)}) · {len(updated)} updated",
+            updated=updated)
+        time.sleep(0.15)
+
+    result = {
+        "periods_stored": stored_n,
+        "names": names_ok,
+        "names_fail": names_fail,
+        "updated": updated,
+        "paused": paused,
+        "scanned": len(hits),
+    }
+    if paused:
+        _kv_put("fin_nightly.scan_state", {
+            "job_id": jid, "done_tickers": already, "updated": updated,
+        })
+        label = (f"⏸ Nightly paused at 6:00am PT · {len(updated)} updated, "
+                 f"{len(tickers) - (len(already) - len(state.get('done_tickers') or []))} remain — resumes tonight")
+        _fin_job_set(jid, stage="paused", status="paused", label=label, result=result)
+        status = "paused"
+        title = "SEC nightly paused · resumes tonight"
+        body = (f"Overnight window closed. {len(updated)} companies updated so far. "
+                f"Remaining names resume at 11:00pm PT.")
+    else:
+        _kv_put("fin_nightly.scan_state", {})
+        label = (f"✓ Nightly new filings · {len(updated)} updated / {len(hits)} in index "
+                 f"({names_fail} err)")
+        _fin_job_set(jid, stage="done", status="done", label=label, result=result)
+        status = "done"
+        title = (
+            f"SEC nightly · {len(updated)} compan{'y' if len(updated)==1 else 'ies'} updated"
+            if updated else "SEC nightly · no new periods"
+        )
+        if updated:
+            names = ", ".join(u.get("ticker") or "" for u in updated[:12])
+            extra = f" +{len(updated)-12} more" if len(updated) > 12 else ""
+            body = f"New 10-K/10-Q periods landed for {names}{extra}."
+        else:
+            body = (f"EDGAR listed {len(hits)} 10-K/10-Q filers already in the store; "
+                    f"periods were already current.")
+    last = {
+        "ts": datetime.utcnow().isoformat() + "Z",
+        "job_id": jid,
+        "count": len(hits),
+        "scanned": len(hits),
+        "updated": updated[:80],
+        "updated_count": len(updated),
+        "updated_tickers": [u.get("ticker") for u in updated if u.get("ticker")][:80],
+        "label": label,
+        "kind": "nightly",
+        "paused": paused,
+    }
+    _kv_put("fin_nightly.last", last)
+    _fin_publish_notice(
+        id=jid, kind="nightly", status=status, job_id=jid,
+        title=title, body=body, updated=updated, scanned=len(hits),
+        done=len(already), total=len(hits),
+    )
+    return _fin_sync_jobs.get(jid) or {}
+
+
+def _fin_remap_state() -> dict:
+    return _kv_get("fin_remap.state") or {"status": "idle"}
+
+
+def _fin_remap_save(state: dict) -> dict:
+    _kv_put("fin_remap.state", state)
+    return state
+
+
+def _fin_queue_rematerialize(reason: str = "mapper / new line items") -> dict:
+    """Queue a store rematerialize for the overnight window. Does not start now
+    if the window is closed. Never fills missing US-listed names."""
+    st = _fin_remap_state()
+    if (st.get("status") or "") in ("queued", "running", "paused"):
+        return st
+    total = len(_fin_stored_ticker_set())
+    jid = "FINREMAP_" + _fin_pt_now().strftime("%Y%m%d")
+    st = {
+        "status": "queued",
+        "job_id": jid,
+        "reason": reason,
+        "queued_at": datetime.utcnow().isoformat() + "Z",
+        "cursor": "",
+        "done": 0,
+        "total": total,
+        "updated": [],
+        "updated_count": 0,
+        "names_ok": 0,
+        "names_fail": 0,
+    }
+    _fin_remap_save(st)
+    when = "now (window open)" if _fin_in_overnight_window() else "tonight at 11:00pm PT"
+    _fin_publish_notice(
+        id=jid, kind="remap", status="scheduled", job_id=jid,
+        title="SEC rematerialize scheduled",
+        body=(f"Queued for {when}. Existing store only ({total} names) — not a "
+              f"full US listed backfill. $0 SEC. Pauses at 6:00am PT if still running."),
+        updated=[], scanned=0, done=0, total=total,
+    )
+    return st
+
+
+def _fin_cancel_rematerialize() -> dict:
+    st = _fin_remap_state()
+    st["status"] = "cancelled"
+    st["cancelled_at"] = datetime.utcnow().isoformat() + "Z"
+    _fin_remap_save(st)
+    _fin_publish_notice(
+        id=(st.get("job_id") or "FINREMAP_CANCEL") + "_x",
+        kind="remap", status="cancelled", job_id=st.get("job_id"),
+        title="SEC rematerialize cancelled",
+        body="The overnight rematerialize will not run.",
+        updated=st.get("updated") or [], done=st.get("done"), total=st.get("total"),
+    )
+    return st
+
+
+def _run_fin_rematerialize_window(job_id: str | None = None) -> dict:
+    """Overwrite existing store rows from current extractor. Overnight only.
+
+    Pauses at 6:00am PT and resumes the next night from cursor.
+    """
+    st = _fin_remap_state()
+    if (st.get("status") or "") not in ("queued", "paused", "running"):
+        return st
+    years = _FIN_OVERNIGHT_YEARS
+    jid = job_id or st.get("job_id") or ("FINREMAP_" + _fin_pt_now().strftime("%Y%m%d"))
+    tickers = sorted(_fin_stored_ticker_set())
+    cursor = (st.get("cursor") or "").upper()
+    if cursor:
+        try:
+            idx = tickers.index(cursor) + 1
+        except ValueError:
+            idx = int(st.get("done") or 0)
+        tickers = tickers[max(0, idx):]
+    st["status"] = "running"
+    st["job_id"] = jid
+    st["total"] = int(st.get("done") or 0) + len(tickers)
+    _fin_remap_save(st)
+    _fin_job_set(jid, stage="syncing", status="running",
+                 label=f"Rematerialize {st.get('done') or 0}/{st.get('total')}…",
+                 started_at=time.time(), total=st.get("total"),
+                 done=st.get("done") or 0, universe="remap_store")
+    import sec_edgar_xbrl as _edgar
+    try:
+        ua = analyst.get_sec_user_agent()
+    except Exception as e:
+        st["status"] = "paused"
+        st["error"] = str(e)[:120]
+        _fin_remap_save(st)
+        return st
+    updated = list(st.get("updated") or [])
+    names_ok = int(st.get("names_ok") or 0)
+    names_fail = int(st.get("names_fail") or 0)
+    done = int(st.get("done") or 0)
+    paused = False
+    for tk in tickers:
+        if not _fin_in_overnight_window():
+            paused = True
+            st["cursor"] = tk
+            break
+        try:
+            res = _edgar.extract_financials_history(
+                tk, years_back=years, user_agent=ua)
+            rows = res.get("rows") or []
+            n = int(_store_financials_rows(
+                tk, res.get("cik"), res.get("entity_name"), rows,
+                overwrite=True) or 0)
+            names_ok += 1
+            done += 1
+            if n:
+                updated.append({"ticker": tk, "rows_written": n})
+                if len(updated) > 120:
+                    updated = updated[-120:]
+            st["cursor"] = tk
+            st["done"] = done
+            st["names_ok"] = names_ok
+            st["updated"] = updated
+            st["updated_count"] = len(updated)
+            _fin_remap_save(st)
+            _fin_job_set(jid, done=done, stored=len(updated),
+                         label=f"Rematerialize {tk} ({done}/{st.get('total')})")
+        except Exception as e:
+            names_fail += 1
+            done += 1
+            st["cursor"] = tk
+            st["done"] = done
+            st["names_fail"] = names_fail
+            _fin_remap_save(st)
+            print(f"[fin-remap] {tk}: {e!s:.120}", flush=True)
+        time.sleep(0.12)
+    st["names_ok"] = names_ok
+    st["names_fail"] = names_fail
+    st["done"] = done
+    st["updated"] = updated
+    st["updated_count"] = len(updated)
+    if paused:
+        st["status"] = "paused"
+        _fin_remap_save(st)
+        _fin_job_set(jid, stage="paused", status="paused",
+                     label=f"⏸ Rematerialize paused {done}/{st.get('total')} — resumes 11:00pm PT")
+        _fin_publish_notice(
+            id=jid + f"_p{done}", kind="remap", status="paused", job_id=jid,
+            title=f"SEC rematerialize paused · {done}/{st.get('total')}",
+            body=(f"6:00am PT window closed. {len(updated)} names wrote new/updated "
+                  f"rows. Continues tonight at 11:00pm PT."),
+            updated=updated, done=done, total=st.get("total"),
+        )
+    else:
+        st["status"] = "done"
+        st["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        _fin_remap_save(st)
+        _fin_job_set(jid, stage="done", status="done",
+                     label=f"✓ Rematerialize done {done} names · {len(updated)} wrote rows")
+        names = ", ".join((u.get("ticker") or "") for u in updated[:12])
+        extra = f" +{len(updated)-12} more" if len(updated) > 12 else ""
+        _fin_publish_notice(
+            id=jid + "_done", kind="remap", status="done", job_id=jid,
+            title=f"SEC rematerialize complete · {done} names",
+            body=(f"Existing store rewritten with current line items. "
+                  f"{len(updated)} names had row updates"
+                  + (f": {names}{extra}." if names else ".")),
+            updated=updated, done=done, total=st.get("total"),
+        )
+    return st
 
 
 def _run_fin_monthly_store(job_id: str | None = None) -> dict:
@@ -465,7 +892,7 @@ def _run_fin_monthly_store(job_id: str | None = None) -> dict:
                      label="✓ Monthly: nothing to refresh",
                      result={"periods_stored": 0, "names": 0})
         return _fin_sync_jobs[jid]
-    _run_financials_sync(jid, tickers, years, skip_if_stored=False)
+    _run_financials_sync(jid, tickers, years, skip_if_stored=False, excel=False)
     try:
         ok, info = _dropbox_backup_financials()
         note = f" · ☁️ {info}" if ok else f" · backup skipped ({str(info)[:60]})"
@@ -1050,7 +1477,8 @@ def _fin_excel_latest_upsert(ticker: str, budget_s: float = 45.0) -> dict:
 
 def _sync_one_ticker_financials(ticker: str, years_back: int = 10,
                                 max_rate_retries: int = 3,
-                                skip_if_stored: bool = True) -> dict:
+                                skip_if_stored: bool = True,
+                                excel: bool = True) -> dict:
     """Pull SEC data for one ticker and persist to company_financials.
 
     Two sources (both free SEC):
@@ -1108,8 +1536,10 @@ def _sync_one_ticker_financials(ticker: str, years_back: int = 10,
             break
 
     excel_q = None
-    # Latest Excel pull on refresh paths only (nightly / monthly / manual)
-    if not skip_if_stored:
+    # Latest Excel pull on refresh paths only (manual pull). Nightly new-filing
+    # scans skip Excel — companyfacts is enough and 50s/name would blow the
+    # overnight window.
+    if excel and not skip_if_stored:
         time.sleep(0.6)
         xl = _fin_excel_latest_upsert(ticker, budget_s=50.0)
         excel_upserted = int(xl.get("upserted") or 0)
@@ -1130,7 +1560,7 @@ def _sync_one_ticker_financials(ticker: str, years_back: int = 10,
         or (excel_q and not before_end)
     )
     pend = None
-    if not skip_if_stored:
+    if excel and not skip_if_stored:
         pend = _fin_recent_earnings_8k(ticker, after_end or before_end)
         if pend:
             print(f"[fin sync] {ticker}: earnings 8-K {pend.get('filed')} but "
@@ -1191,7 +1621,8 @@ def _fin_job_set(job_id: str, **kw) -> None:
 
 
 def _run_financials_sync(job_id: str, tickers: list, years_back: int,
-                         skip_if_stored: bool = True) -> None:
+                         skip_if_stored: bool = True,
+                         excel: bool = True) -> None:
     """Background worker: build/refresh the structured financials store.
     Polite to SEC; pauses longer after rate-limit hits then continues.
     Never depends on the browser staying open — progress is server-side.
@@ -1238,7 +1669,8 @@ def _run_financials_sync(job_id: str, tickers: list, years_back: int,
             advance_cursor = True  # set False only if we want to hard-retry same tk
             try:
                 r = _sync_one_ticker_financials(tk, years_back=years_back,
-                                                skip_if_stored=skip_if_stored)
+                                                skip_if_stored=skip_if_stored,
+                                                excel=excel)
                 if r.get("skipped"):
                     names_skip += 1
                     consecutive_rl = 0
@@ -1666,6 +2098,12 @@ def _auto_fin_supervisor_worker() -> None:
             if not _fin_us_backfill_enabled():
                 _time.sleep(600)  # check toggle every 10 min
                 continue
+            if not _fin_in_overnight_window():
+                wait = min(1800.0, _fin_secs_until_window_open())
+                print(f"[fin-supervisor] US fill waits for 23:00–06:00 PT "
+                      f"({wait/60:.0f}m)", flush=True)
+                _time.sleep(max(60.0, wait))
+                continue
             if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
                 _time.sleep(300)
                 continue
@@ -1753,8 +2191,10 @@ def financials_universes(request: Request):
         "nightly": {
             "enabled": _fin_nightly_enabled(),
             "years_back": _FIN_OVERNIGHT_YEARS,
-            "note": "Nightly SEC refresh of followed names only. Insert new periods; never overwrite.",
+            "window": "11:00pm–6:00am PT",
+            "note": "Nightly: EDGAR daily index → only names that filed a 10-K/10-Q. Not a full-store backfill.",
             "last": _kv_get("fin_nightly.last") or _kv_get("automation.last_run.fin_nightly"),
+            "cost": _fin_cost_card(),
         },
         "monthly": {
             "enabled": _fin_monthly_enabled(),
@@ -1953,10 +2393,12 @@ def financials_sync_status(job_id: str, request: Request):
 def financials_overnight_now(request: Request, background_tasks: BackgroundTasks):
     """Manual financials jobs (GP only). Free SEC — no LLM.
 
-    Body: { mode?: "nightly"|"monthly"|"us_chunk", years_back?: int }
-      nightly  (default) — refresh followed names (reports + watchlist)
-      monthly            — light refresh of oldest non-followed store names
-      us_chunk           — one optional full-US missing chunk (opt-in backfill)
+    Body: { mode?: "nightly"|"monthly"|"us_chunk"|"remap"|"remap_cancel", years_back?: int }
+      nightly       (default) — new 10-K/10-Q filings only (daily index)
+      remap         — queue rematerialize of EXISTING store (overnight window)
+      remap_cancel  — cancel a queued/paused rematerialize
+      monthly       — oldest non-followed store names (optional)
+      us_chunk      — one missing US-listed chunk (not default; still windowed)
     """
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
@@ -1980,14 +2422,27 @@ def financials_overnight_now(request: Request, background_tasks: BackgroundTasks
     years = max(3, min(years, 12))
     import uuid as _uuid
 
+    if mode in ("remap", "rematerialize", "full_refresh"):
+        st = _fin_queue_rematerialize()
+        if _fin_in_overnight_window() and (st.get("status") == "queued"):
+            threading.Thread(target=_run_fin_rematerialize_window,
+                             daemon=True, name="fin-remap-now").start()
+        return {"ok": True, "mode": "remap", **st,
+                "cost": _fin_cost_card(),
+                "note": "Existing store only. Runs 11:00pm–6:00am PT; pauses at 6am."}
+
+    if mode in ("remap_cancel", "cancel_remap"):
+        st = _fin_cancel_rematerialize()
+        return {"ok": True, "mode": "remap_cancel", **st}
+
     if mode in ("nightly", "followed", "mine"):
         job_id = "FINNIGHT_M_" + _uuid.uuid4().hex[:8]
         threading.Thread(target=_run_fin_nightly_followed, args=(job_id,),
                          daemon=True, name=f"fin-night-{job_id[-6:]}").start()
-        n = len(_fin_followed_tickers())
-        return {"ok": True, "job_id": job_id, "mode": "nightly", "count": n,
-                "note": f"Refreshing {n} followed names (reports+watchlist). "
-                        f"Insert-only new periods — no overwrite."}
+        return {"ok": True, "job_id": job_id, "mode": "nightly",
+                "cost": _fin_cost_card(),
+                "note": "New 10-K/10-Q filings only (EDGAR daily index). "
+                        "Does not walk the full store."}
 
     if mode in ("monthly", "store"):
         job_id = "FINMONTH_M_" + _uuid.uuid4().hex[:8]
@@ -2028,9 +2483,16 @@ def financials_settings_get(request: Request):
         "followed_sample": followed[:12],
         "fin_nightly": {
             "enabled": _fin_nightly_enabled(),
-            "hour": s.get("fin_nightly", {}).get("hour", 2),
-            "minute": s.get("fin_nightly", {}).get("minute", 30),
+            "hour": s.get("fin_nightly", {}).get("hour", 23),
+            "minute": s.get("fin_nightly", {}).get("minute", 0),
+            "window_start_hour": s.get("fin_nightly", {}).get("window_start_hour", 23),
+            "window_end_hour": s.get("fin_nightly", {}).get("window_end_hour", 6),
+            "window": "11:00pm–6:00am PT",
+            "in_window": _fin_in_overnight_window(),
+            "next_window_secs": round(_fin_secs_until_window_open()),
             "last": _kv_get("fin_nightly.last"),
+            "cost": _fin_cost_card(),
+            "remap": _fin_remap_state(),
         },
         "fin_monthly": {
             "enabled": _fin_monthly_enabled(),
@@ -2061,7 +2523,8 @@ def financials_settings_post(request: Request):
         if key in body and isinstance(body[key], dict):
             prev = dict(current.get(key) or {})
             prev.update({k: body[key][k] for k in body[key]
-                         if k in ("enabled", "hour", "minute", "day")})
+                         if k in ("enabled", "hour", "minute", "day",
+                                  "window_start_hour", "window_end_hour")})
             if "enabled" in body[key]:
                 prev["enabled"] = bool(body[key]["enabled"])
             current[key] = prev
@@ -2078,6 +2541,49 @@ def financials_settings_post(request: Request):
     return financials_settings_get(request)
 
 
+@app.get("/api/financials/desk-notice")
+def financials_desk_notice(request: Request):
+    """Desktop Desk popup: last scheduled/completed SEC overnight run."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    notice = _kv_get("fin.desk_notice") or None
+    dismissed = _kv_get("fin.desk_notice.dismissed_id")
+    if notice and dismissed and notice.get("id") == dismissed:
+        return {"ok": True, "notice": None, "dismissed": True,
+                "cost": _fin_cost_card(),
+                "in_window": _fin_in_overnight_window(),
+                "remap": _fin_remap_state()}
+    return {
+        "ok": True,
+        "notice": notice,
+        "cost": _fin_cost_card(),
+        "in_window": _fin_in_overnight_window(),
+        "window": "11:00pm–6:00am PT",
+        "remap": _fin_remap_state(),
+        "nightly_enabled": _fin_nightly_enabled(),
+        "last": _kv_get("fin_nightly.last"),
+    }
+
+
+@app.post("/api/financials/desk-notice/dismiss")
+def financials_desk_notice_dismiss(request: Request):
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    try:
+        body = _request_json_sync(request) or {}
+    except Exception:
+        body = {}
+    nid = str(body.get("id") or "").strip()
+    if not nid:
+        n = _kv_get("fin.desk_notice") or {}
+        nid = str(n.get("id") or "")
+    if nid:
+        _kv_put("fin.desk_notice.dismissed_id", nid)
+    return {"ok": True, "id": nid}
+
+
 @app.post("/api/financials/backup")
 def financials_backup_now(request: Request):
     """Push a slim gzip JSONL of company_financials to Dropbox now. GP only."""
@@ -2092,50 +2598,56 @@ def financials_backup_now(request: Request):
 
 # ── Low-cost financials schedulers (followed nightly + store monthly) ────────
 def _auto_fin_nightly_worker() -> None:
-    """Daemon: each night refresh SEC filings for FOLLOWED names only
-    (saved reports ∪ watchlist). Insert new periods; never overwrite.
+    """11:00pm–6:00am PT: (1) queued rematerialize, else (2) new-filings scan.
 
-    Tiny universe → negligible Railway cost. Viewing dashboards stays free/DB.
-    Kill: FIN_NIGHTLY=0 or automation.fin_nightly.enabled=false.
+    Never walks the full US listed universe. Kill: FIN_NIGHTLY=0.
     """
     import time as _time
-    _time.sleep(75)  # let DB pool / hydrate finish
-    print("[fin-nightly] scheduler online (followed names only)", flush=True)
+    _time.sleep(75)
+    print("[fin-nightly] scheduler online (new filings · 23:00–06:00 PT)", flush=True)
+    last_scan_date = ""
     while True:
         try:
             if not _fin_nightly_enabled():
-                print("[fin-nightly] disabled — sleeping 1h", flush=True)
-                _time.sleep(3600)
-                continue
-            cfg = _get_automation_settings().get(
-                "fin_nightly", _DEFAULT_AUTOMATION["fin_nightly"])
-            h, m = int(cfg.get("hour", 2)), int(cfg.get("minute", 30))
-            wait_secs = _secs_until(h, m)
-            print(f"[fin-nightly] next at {h:02d}:{m:02d} PT — "
-                  f"sleep {wait_secs/3600:.1f}h", flush=True)
-            _time.sleep(wait_secs)
-            if not _fin_nightly_enabled():
+                _time.sleep(1800)
                 continue
             if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
-                print("[fin-nightly] no database — skip", flush=True)
-                _time.sleep(3600)
+                _time.sleep(1800)
+                continue
+            if not _fin_in_overnight_window():
+                wait = min(1800.0, _fin_secs_until_window_open())
+                print(f"[fin-nightly] window closed — sleep {wait/60:.0f}m", flush=True)
+                _time.sleep(max(30.0, wait))
                 continue
             try:
                 if not analyst.get_sec_user_agent():
-                    print("[fin-nightly] SEC_USER_AGENT missing — skip", flush=True)
-                    _time.sleep(3600)
+                    _time.sleep(1800)
                     continue
             except Exception:
-                print("[fin-nightly] SEC_USER_AGENT missing — skip", flush=True)
-                _time.sleep(3600)
+                _time.sleep(1800)
                 continue
-            n = len(_fin_followed_tickers())
-            print(f"[fin-nightly] starting followed refresh n={n}", flush=True)
+
+            remap = _fin_remap_state()
+            if (remap.get("status") or "") in ("queued", "paused", "running"):
+                print(f"[fin-nightly] rematerialize {remap.get('status')} "
+                      f"{remap.get('done')}/{remap.get('total')}", flush=True)
+                st = _run_fin_rematerialize_window()
+                _automation_record_run(
+                    "fin_nightly", st.get("status") == "done",
+                    (st.get("status") or "") + f" {st.get('done')}/{st.get('total')}")
+                _time.sleep(20)
+                continue
+
+            today = _fin_pt_now().date().isoformat()
+            if last_scan_date == today and (_fin_nightly_scan_complete_today()):
+                _time.sleep(min(900.0, max(60.0, _fin_secs_until_window_close() or 900)))
+                continue
+            print("[fin-nightly] starting new-filings scan", flush=True)
             job = _run_fin_nightly_followed()
             detail = (job.get("label") or "ok")[:400]
-            ok = job.get("status") == "done"
+            ok = (job.get("status") or "") in ("done", "paused")
+            last_scan_date = today
             _automation_record_run("fin_nightly", ok, detail)
-            # Keep legacy key for older health UIs
             try:
                 _automation_record_run("fin_overnight", ok, detail)
             except Exception:
@@ -2143,12 +2655,26 @@ def _auto_fin_nightly_worker() -> None:
             print(f"[fin-nightly] finished: {detail}", flush=True)
             _time.sleep(60)
         except Exception as _e:
-            print(f"[fin-nightly] error (retry 1h): {_e!s:.200}", flush=True)
+            print(f"[fin-nightly] error (retry 15m): {_e!s:.200}", flush=True)
             try:
                 _automation_record_run("fin_nightly", False, str(_e)[:400])
             except Exception:
                 pass
-            _time.sleep(3600)
+            _time.sleep(900)
+
+
+def _fin_nightly_scan_complete_today() -> bool:
+    last = _kv_get("fin_nightly.last") or {}
+    ts = str(last.get("ts") or "")
+    if not ts:
+        return False
+    if last.get("paused"):
+        return False
+    try:
+        day = ts[:10]
+        return day == datetime.utcnow().strftime("%Y-%m-%d")
+    except Exception:
+        return False
 
 
 def _auto_fin_monthly_worker() -> None:

@@ -40,6 +40,11 @@ type AutoSettings = {
   daily_brief?: JobCfg
   market_pulse?: JobCfg
   snaptrade_sync?: JobCfg
+  fin_nightly?: JobCfg & {
+    window?: string
+    cost?: { label?: string; note?: string; sec_usd?: number; llm_usd?: number }
+    last_run?: { ts?: string; ok?: boolean; detail?: string }
+  }
 }
 
 /** Task ids that can run on a Pacific schedule. */
@@ -52,6 +57,7 @@ const CLOCK_DEFAULTS: Record<keyof AutoSettings, { hour: number; minute: number 
   daily_brief: { hour: 8, minute: 0 },
   market_pulse: { hour: 8, minute: 15 },
   snaptrade_sync: { hour: 6, minute: 0 },
+  fin_nightly: { hour: 23, minute: 0 },
 }
 
 function fmtClock(h?: number, m?: number) {
@@ -131,6 +137,112 @@ const PROV_COLORS: Record<string, { bg: string; fg: string; border: string }> = 
 }
 
 const ORDER = ['grok', 'claude', 'kimi', 'deepseek'] as const
+
+function SecFinancialsRow({
+  cfg,
+  busy,
+  onEnabled,
+  onErr,
+  onBusy,
+  onRefresh,
+}: {
+  cfg?: AutoSettings['fin_nightly']
+  busy: boolean
+  onEnabled: (on: boolean) => void
+  onErr: (msg: string | null) => void
+  onBusy: (v: boolean) => void
+  onRefresh: () => void
+}) {
+  const [remapBusy, setRemapBusy] = useState(false)
+  const cost = cfg?.cost
+  const next = fmtNext(cfg)
+  const launch = async (mode: 'remap' | 'remap_cancel') => {
+    setRemapBusy(true)
+    onBusy(true)
+    onErr(null)
+    try {
+      await api('/api/financials/overnight', {
+        method: 'POST',
+        body: JSON.stringify({ mode }),
+      })
+      onRefresh()
+    } catch (e) {
+      onErr(e instanceof Error ? e.message : 'SEC job failed')
+    } finally {
+      setRemapBusy(false)
+      onBusy(false)
+    }
+  }
+  return (
+    <>
+      <div className={styles.routeGroup}>SEC financials · overnight</div>
+      <div className={`${styles.routeRow} ${styles.routeRowSched}`}>
+        <div>
+          <div className={styles.routeTitle}>New filings scan</div>
+          <div className={styles.routeNote}>
+            EDGAR daily index → only names that filed a 10-K/10-Q. Window{' '}
+            <strong>11:00pm–6:00am PT</strong> (pauses at 6am, resumes the next
+            night). Not a full-database backfill.
+            <div style={{ marginTop: 4, color: '#166534', fontWeight: 700 }}>
+              {cost?.label || '$0 SEC · $0 LLM'}
+            </div>
+            <div style={{ marginTop: 2, maxWidth: 520 }}>
+              {cost?.note ||
+                'Public EDGAR. Typical night: 1 index file + a handful of companyfacts. Railway CPU only while the window is open.'}
+            </div>
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <span style={{ fontSize: 11.5, fontWeight: 800 }}>—</span>
+          <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 6 }}>
+            no LLM
+          </span>
+        </div>
+        <div className={styles.routeSched}>
+          <label className={styles.routeAuto}>
+            <input
+              type="checkbox"
+              checked={!!cfg?.enabled}
+              disabled={busy}
+              onChange={(e) => onEnabled(e.target.checked)}
+            />
+            Auto
+          </label>
+          <span className={styles.autoNext}>{cfg?.enabled ? next : 'Off'}</span>
+        </div>
+      </div>
+      <div className={styles.routeRow}>
+        <div>
+          <div className={styles.routeTitle}>Rematerialize existing store</div>
+          <div className={styles.routeNote}>
+            Manual only — when we add line items or change how financials are
+            mapped. Rewrites names already in Postgres overnight; does{' '}
+            <strong>not</strong> fill the whole US listed universe. Same $0 SEC
+            cost. Desk shows a popup when it is scheduled and when it finishes.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy || remapBusy}
+            onClick={() => void launch('remap')}
+          >
+            {remapBusy ? 'Queuing…' : 'Schedule tonight'}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy || remapBusy}
+            onClick={() => void launch('remap_cancel')}
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </>
+  )
+}
 
 function rateLine(rates?: Rates): string {
   if (!rates || rates.input == null) return '—'
@@ -297,7 +409,8 @@ export function ModelsSection() {
       <p className={styles.hint}>
         Assign a model to each task. For Daily Pulse, tick <strong>Auto</strong> and
         set a Pacific time — that is the schedule (no separate Automation card). Market Pulse
-        on the Desk is free public headlines (no model). Idea Generator is
+        on the Desk is free public headlines (no model). SEC financials run in the
+        11:00pm–6:00am PT window ($0 SEC / $0 LLM). Idea Generator is
         retired. Full reports + Agents: Grok · Claude · DeepSeek.
       </p>
 
@@ -486,6 +599,14 @@ export function ModelsSection() {
             onClock={(v) => onClock('snaptrade_sync', v)}
           />
         </div>
+        <SecFinancialsRow
+          cfg={auto.fin_nightly}
+          busy={busy}
+          onEnabled={(on) => void patchAuto('fin_nightly', { enabled: on })}
+          onErr={setErr}
+          onBusy={setBusy}
+          onRefresh={() => void refresh()}
+        />
       </div>
 
       <div className={styles.help}>

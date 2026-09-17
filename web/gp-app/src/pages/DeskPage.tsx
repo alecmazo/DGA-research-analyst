@@ -11,6 +11,7 @@ import { StockPeek } from '@/components/layout/StockPeek'
 import { MarketWire } from '@/components/desk/MarketWire'
 import { MarketPulse } from '@/components/desk/MarketPulse'
 import { TopMovers } from '@/components/desk/TopMovers'
+import { SecUpdatePopup } from '@/components/desk/SecUpdatePopup'
 import {
   api,
   ApiError,
@@ -665,6 +666,11 @@ export function DeskPage() {
           onClose={() => setEarningsTk(null)}
         />
       )}
+      <SecUpdatePopup
+        onOpenTicker={(tk) => {
+          setPeekTk(tk)
+        }}
+      />
     </div>
   )
 }

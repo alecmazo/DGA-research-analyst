@@ -374,18 +374,18 @@ export function FinancialsStore({
             periods.
           </li>
           <li>
-            <strong>Nightly auto</strong> re-checks only{' '}
-            <em>your companies</em> — saved reports + watchlist — for new
-            10-Q/10-K periods.
+            <strong>Nightly auto</strong> (11:00pm–6:00am PT) reads the EDGAR
+            daily index and refreshes only names that filed a 10-K/10-Q.
+            Schedule + cost live under Settings → Wired models. $0 SEC.
           </li>
           <li>
-            <strong>Monthly auto</strong> lightly refreshes the oldest names
-            already in the store (not the whole US list). Insert-only.
+            Full-store rematerialize (new line items / mapper change) is
+            <em> manual</em> from Settings and runs in that same overnight
+            window — it does not fill the US listed universe.
           </li>
           <li>
-            New filings are <em>not</em> live the second they drop; they land on
-            the next nightly (followed) or monthly (store) pass, or when you pull
-            manually.
+            New filings are not live the second they drop; they land on the
+            next overnight pass, or when you pull manually.
           </li>
         </ol>
       </div>
@@ -479,7 +479,7 @@ export function FinancialsStore({
             }}
           />
           <span>
-            <strong>Nightly auto</strong> · my companies only
+            <strong>Nightly auto</strong> · new 10-K/10-Q only · 11pm–6am PT
           </span>
         </label>
         <label className={styles.checkLbl}>

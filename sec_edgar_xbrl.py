@@ -280,6 +280,30 @@ def _get_json(sess: requests.Session, url: str, *, retries: int = 8) -> dict:
     raise RuntimeError(f"SEC request failed after {retries} retries: {url} ({last_err})")
 
 
+def _get_text(sess: requests.Session, url: str, *, retries: int = 4) -> str | None:
+    """GET text from SEC. 404 → None (weekend/holiday daily index)."""
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            resp = sess.get(url, timeout=30, headers={"Accept": "text/plain"})
+            if resp.status_code == 200:
+                return resp.text or ""
+            if resp.status_code == 404:
+                return None
+            if resp.status_code == 429:
+                time.sleep(min(20, 5 * (attempt + 1)))
+                continue
+            if resp.status_code in (500, 502, 503, 504):
+                time.sleep(min(15, 2 ** attempt))
+                continue
+            resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            time.sleep(min(10, 1.5 * (attempt + 1)))
+    print(f"[sec] text GET failed {url[-70:]}: {last_err!s:.100}", flush=True)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Ticker -> CIK resolver
 # ---------------------------------------------------------------------------
@@ -287,10 +311,14 @@ def _get_json(sess: requests.Session, url: str, *, retries: int = 8) -> dict:
 # company_tickers.json once *per uncached ticker*, stampeding SEC into 429s
 # (each retry sleeps 5–20s × 8). One process-wide map load fills the cache.
 _TICKER_CACHE: dict[str, str] = {}
+_CIK_CACHE: dict[str, str] = {}  # zero-padded CIK → ticker
 _TICKER_MAP_LOADED_AT: float = 0.0
 _TICKER_MAP_LOCK = __import__("threading").Lock()
 _TICKER_MAP_TTL_S = 6 * 3600  # refresh every 6h
 _TICKER_NEGATIVE = object()  # sentinel: known-unknown (don't re-fetch map)
+_EDGAR_FORMS_FIN = frozenset({
+    "10-K", "10-Q", "10-K/A", "10-Q/A", "20-F", "20-F/A",
+})
 
 
 def _ensure_ticker_map(user_agent: str | None = None) -> None:
@@ -319,9 +347,79 @@ def _ensure_ticker_map(user_agent: str | None = None) -> None:
             except Exception:
                 continue
             _TICKER_CACHE[tk] = cik
+            _CIK_CACHE.setdefault(cik, tk)
             n += 1
         _TICKER_MAP_LOADED_AT = _time.time()
         print(f"[sec] ticker map loaded: {n} symbols", flush=True)
+
+
+def resolve_ticker_for_cik(cik, user_agent: str | None = None) -> str | None:
+    """Map a CIK (int/str) to its primary ticker, or None."""
+    try:
+        key = f"{int(str(cik).strip()):010d}"
+    except (TypeError, ValueError):
+        return None
+    hit = _CIK_CACHE.get(key)
+    if isinstance(hit, str) and hit:
+        return hit
+    _ensure_ticker_map(user_agent)
+    hit = _CIK_CACHE.get(key)
+    return hit if isinstance(hit, str) and hit else None
+
+
+def parse_daily_master_index(text: str) -> list[dict]:
+    """Parse an EDGAR daily master.idx body into {cik, company, form, filed}."""
+    out: list[dict] = []
+    if not text:
+        return out
+    started = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not started:
+            if line.lower().startswith("cik|company") or line.startswith("CIK|"):
+                started = True
+            continue
+        parts = line.split("|")
+        if len(parts) < 4:
+            continue
+        form = (parts[2] or "").strip()
+        if form not in _EDGAR_FORMS_FIN:
+            continue
+        try:
+            cik = f"{int(parts[0].strip()):010d}"
+        except (TypeError, ValueError):
+            continue
+        out.append({
+            "cik": cik,
+            "company": (parts[1] or "").strip(),
+            "form": form,
+            "filed": (parts[3] or "").strip(),
+        })
+    return out
+
+
+def fetch_daily_master_index(day, user_agent: str | None = None) -> list[dict]:
+    """Filings from EDGAR daily master index for one calendar day (YYYYMMDD/date).
+
+    Weekends/holidays 404 → empty list. One HTTP GET. Free public EDGAR.
+    """
+    import datetime as _dt
+    if isinstance(day, str):
+        d = _dt.datetime.strptime(day.replace("-", "")[:8], "%Y%m%d").date()
+    elif isinstance(day, _dt.datetime):
+        d = day.date()
+    else:
+        d = day
+    qtr = (d.month - 1) // 3 + 1
+    url = (
+        f"https://www.sec.gov/Archives/edgar/daily-index/{d.year}/QTR{qtr}/"
+        f"master.{d.strftime('%Y%m%d')}.idx"
+    )
+    sess = _session(user_agent)
+    body = _get_text(sess, url)
+    if not body:
+        return []
+    return parse_daily_master_index(body)
 
 
 def resolve_cik(ticker: str, user_agent: str | None = None) -> str:
