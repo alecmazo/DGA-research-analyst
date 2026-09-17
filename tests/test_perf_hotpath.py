@@ -74,6 +74,12 @@ def test_builder_board_get_skips_dcf_rebuild():
     assert "_builder_list_board" in fn
 
 
+def test_builder_board_quotes_are_store_only():
+    fn = _fn_src(ROOT / "api/server.py", "_builder_board_quotes")
+    assert "_batch_quotes_fast" not in fn
+    assert "_db_quotes" in fn
+
+
 def test_builder_candidates_sql_skips_report_md():
     fn = _fn_src(ROOT / "api/server.py", "_builder_fetch_candidates")
     assert "SELECT ticker, report_md" not in fn

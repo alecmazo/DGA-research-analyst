@@ -12339,7 +12339,13 @@ _BUILDER_SEED_LISTS: list[dict] = [
 ]
 
 
+_BUILDER_TABLES_READY = False
+
+
 def _ensure_builder_lists_tables(conn=None) -> None:
+    global _BUILDER_TABLES_READY
+    if _BUILDER_TABLES_READY and conn is None:
+        return
     own = conn is None
     if own:
         if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
@@ -12390,6 +12396,7 @@ def _ensure_builder_lists_tables(conn=None) -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS builder_lists_lp_idx ON builder_lists(lp_id, sort_order)")
             if own:
                 conn.commit()
+        _BUILDER_TABLES_READY = True
     except Exception as e:
         print(f"[builder-lists] ensure tables: {e!s:.160}", flush=True)
         if own:
@@ -12974,17 +12981,8 @@ def _builder_board_quotes(tickers: list[str]) -> dict:
             if dq.get("as_of"):
                 row["as_of"] = dq["as_of"]
             result[sym] = row
-    still = [s for s in originals if (result.get(s) or {}).get("price") is None]
-    if still:
-        try:
-            extra = _batch_quotes_fast(still) or {}
-        except Exception as e:
-            print(f"[builder-lists] fast quotes: {e!s:.120}", flush=True)
-            extra = {}
-        for sym, q in extra.items():
-            if (q or {}).get("price") is None:
-                continue
-            result[sym] = q
+    # Store last-close is enough to paint. Yahoo on this path made a 10-name
+    # board 8–11s after the quotes cache was already warm.
     return result
 
 
@@ -13007,11 +13005,10 @@ def _builder_list_board(list_id: str, lp_id: str) -> dict:
                 "pct": q.get("pct_change"),
                 "as_of": q.get("as_of"),
             }
-        # Stamp missing anchors from initiation-day close (not live)
-        _builder_anchor_missing(list_id, quotes)
-        # Re-read after anchor so response has stamped values
-        rows_meta = _builder_list_ticker_rows(list_id, lp_id)
-        tickers = [r["ticker"] for r in rows_meta]
+        if any(r.get("entry_price") is None or not r.get("entry_date") for r in rows_meta):
+            _builder_anchor_missing(list_id, quotes)
+            rows_meta = _builder_list_ticker_rows(list_id, lp_id)
+            tickers = [r["ticker"] for r in rows_meta]
 
     # Company names (free DB — security_meta)
     names: dict = {}
