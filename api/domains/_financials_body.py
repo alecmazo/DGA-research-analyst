@@ -1074,17 +1074,11 @@ def _run_fin_overnight(job_id: str | None = None) -> dict:
 
 
 @_ddl_once
-_FIN_TABLES_READY = False
-
-
 def _ensure_financials_table() -> None:
     """Create the company_financials store. Idempotent. PK is (ticker,
     period_type, period_end) — robust to non-calendar filers whose fiscal-year
     end coincides with a calendar-quarter end (the annual and the Q row share an
     end date but differ in period_type)."""
-    global _FIN_TABLES_READY
-    if _FIN_TABLES_READY:
-        return
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return
     num_cols = ",\n                    ".join(f"{c} NUMERIC" for c in _FIN_COLMAP.values())
@@ -1116,7 +1110,6 @@ def _ensure_financials_table() -> None:
                 cur.execute(
                     f"ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS {col} NUMERIC")
             conn.commit()
-        _FIN_TABLES_READY = True
     except Exception as e:
         print(f"❌ _ensure_financials_table failed: {e!s:.300}", flush=True)
 
