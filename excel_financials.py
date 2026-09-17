@@ -160,15 +160,26 @@ CONCEPT_PRIORITIES: dict[str, list[str]] = {
     "LongTermDebt": _p([
         "LongTermDebtNoncurrent",
         "LongTermDebt",
+        "LongTermNotesPayable",
+        "OperatingLeaseLiabilityNoncurrent",
+        "LeaseLiabilityNoncurrent",
+        "FinanceLeaseLiabilityNoncurrent",
     ]),
     "ShortTermDebt": _p([
         "ShortTermBorrowings",
         "LongTermDebtCurrent",
         "DebtCurrent",
+        "LinesOfCreditCurrent",
+        "CommercialPaper",
+        "OperatingLeaseLiabilityCurrent",
+        "LeaseLiabilityCurrent",
+        "FinanceLeaseLiabilityCurrent",
     ]),
     "TotalDebt": _p([
         "LongTermDebtAndCapitalLeaseObligations",
         "DebtLongtermAndShorttermCombinedAmount",
+        "OperatingLeaseLiability",
+        "LeaseLiability",
     ]),
     "DilutedShares": _p(["WeightedAverageNumberOfDilutedSharesOutstanding"]),
     "SharesOutstanding": _p([
@@ -358,6 +369,20 @@ def _pick_value_with_tag(
     return None, None
 
 
+def _pick_debt_combined(df, column, note_concepts, lease_concepts):
+    """Notes (incl. explicit $0 revolver) + ASC 842 leases."""
+    n, nt = _pick_value_with_tag(df, note_concepts, column)
+    l, lt = _pick_value_with_tag(df, lease_concepts, column)
+    if n is None and l is None:
+        return None, None
+    if n is None:
+        return l, lt
+    if l is None:
+        return n, nt
+    tag = "+".join(t for t in (nt, lt) if t)
+    return float(n) + float(l), tag or None
+
+
 # ---------------------------------------------------------------------------
 # Metadata sheet helper
 # ---------------------------------------------------------------------------
@@ -483,17 +508,42 @@ def _build_period_row(
     # Balance-sheet metrics
     if bs_df is not None and bs_col:
         for metric in BS_METRICS:
+            if metric in ("LongTermDebt", "ShortTermDebt", "TotalDebt"):
+                continue
             v, tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES[metric], bs_col)
             if v is not None:
                 row[metric] = v
                 if tag:
                     tags[metric] = tag
-        # Derive TotalDebt if absent
-        if "TotalDebt" not in row:
-            ltd = row.get("LongTermDebt", 0) or 0
-            std = row.get("ShortTermDebt", 0) or 0
-            if ltd or std:
-                row["TotalDebt"] = ltd + std
+        ltd, ltd_tag = _pick_debt_combined(
+            bs_df, bs_col,
+            _p(["LongTermDebtNoncurrent", "LongTermDebt", "LongTermNotesPayable"]),
+            _p(["OperatingLeaseLiabilityNoncurrent", "LeaseLiabilityNoncurrent",
+                "FinanceLeaseLiabilityNoncurrent"]),
+        )
+        std, std_tag = _pick_debt_combined(
+            bs_df, bs_col,
+            _p(["ShortTermBorrowings", "LongTermDebtCurrent", "DebtCurrent",
+                "LinesOfCreditCurrent", "CommercialPaper"]),
+            _p(["OperatingLeaseLiabilityCurrent", "LeaseLiabilityCurrent",
+                "FinanceLeaseLiabilityCurrent"]),
+        )
+        if ltd is not None:
+            row["LongTermDebt"] = ltd
+            if ltd_tag:
+                tags["LongTermDebt"] = ltd_tag
+        if std is not None:
+            row["ShortTermDebt"] = std
+            if std_tag:
+                tags["ShortTermDebt"] = std_tag
+        if ltd is not None or std is not None:
+            row["TotalDebt"] = (ltd or 0) + (std or 0)
+        else:
+            tot, tot_tag = _pick_value_with_tag(bs_df, CONCEPT_PRIORITIES["TotalDebt"], bs_col)
+            if tot is not None:
+                row["TotalDebt"] = tot
+                if tot_tag:
+                    tags["TotalDebt"] = tot_tag
 
     # ── Bank / thrift revenue fix ──────────────────────────────────────────
     # InterestAndDividendIncomeOperating is total interest income (bank top line).

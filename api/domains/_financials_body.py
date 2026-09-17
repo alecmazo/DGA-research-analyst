@@ -720,8 +720,45 @@ def _store_financials_rows(ticker: str, cik, entity_name, rows: list,
             vals.append(None)
             cur.execute(sql, vals)
             n += max(0, cur.rowcount or 0)
+            _upgrade_debt_columns(cur, ticker, r, _num)
         conn.commit()
     return n
+
+
+def _upgrade_debt_columns(cur, ticker: str, r: dict, num_fn) -> None:
+    """Fill stored debt when it is NULL/0 and the new extract has a real figure.
+
+    LULU et al. stored ShortTermBorrowings=0 and NULL long-term notes while
+    ASC 842 lease liabilities (~$1.8B) sat unmapped. Never clobber a non-zero
+    notes balance already in the store.
+    """
+    ltd = num_fn(r.get("LongTermDebt"))
+    std = num_fn(r.get("ShortTermDebt"))
+    td = num_fn(r.get("TotalDebt"))
+    end = r.get("end")
+    ptype = r.get("period_type")
+    if not end or not ptype:
+        return
+    if ltd is None and std is None and td is None:
+        return
+    cur.execute(
+        """
+        UPDATE company_financials SET
+          long_term_debt = CASE
+            WHEN (long_term_debt IS NULL OR long_term_debt = 0) AND %s IS NOT NULL
+            THEN %s ELSE long_term_debt END,
+          short_term_debt = CASE
+            WHEN (short_term_debt IS NULL OR short_term_debt = 0)
+                 AND %s IS NOT NULL AND %s <> 0
+            THEN %s ELSE short_term_debt END,
+          total_debt = CASE
+            WHEN (total_debt IS NULL OR total_debt = 0) AND %s IS NOT NULL
+            THEN %s ELSE total_debt END,
+          updated_at = now()
+        WHERE ticker=%s AND period_type=%s AND period_end=%s
+        """,
+        (ltd, ltd, std, std, std, td, td, ticker.upper(), ptype, end),
+    )
 
 
 def _fin_ticker_already_stored(ticker: str) -> bool:

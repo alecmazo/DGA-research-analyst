@@ -152,16 +152,29 @@ TAG_PRIORITIES: dict[str, list[str]] = {
     "LongTermDebt": [
         "LongTermDebtNoncurrent",
         "LongTermDebt",
+        "LongTermNotesPayable",
+        # Retailers/restaurants (LULU, SBUX) often have $0 notes and large
+        # ASC 842 operating leases — Yahoo/GF "total debt" is the lease PV.
+        "OperatingLeaseLiabilityNoncurrent",
+        "LeaseLiabilityNoncurrent",
+        "FinanceLeaseLiabilityNoncurrent",
     ],
     "ShortTermDebt": [
         "ShortTermBorrowings",
         "LongTermDebtCurrent",
         "DebtCurrent",
+        "LinesOfCreditCurrent",
+        "CommercialPaper",
+        "OperatingLeaseLiabilityCurrent",
+        "LeaseLiabilityCurrent",
+        "FinanceLeaseLiabilityCurrent",
     ],
     "TotalDebt": [
-        # Some filers tag this directly; otherwise we derive it.
+        # Some filers tag this directly; otherwise we derive notes + leases.
         "LongTermDebtAndCapitalLeaseObligations",
         "DebtLongtermAndShorttermCombinedAmount",
+        "OperatingLeaseLiability",
+        "LeaseLiability",
     ],
     "DilutedShares": [
         "WeightedAverageNumberOfDilutedSharesOutstanding",
@@ -560,6 +573,75 @@ def _first_hit(
     return None, None
 
 
+# Traditional interest-bearing debt vs ASC 842 lease liabilities. A $0 revolver
+# (LULU ShortTermBorrowings) must not hide current operating-lease liabilities.
+_DEBT_NOTE_LT = ("LongTermDebtNoncurrent", "LongTermDebt", "LongTermNotesPayable")
+_DEBT_NOTE_ST = (
+    "ShortTermBorrowings", "LongTermDebtCurrent", "DebtCurrent",
+    "LinesOfCreditCurrent", "CommercialPaper",
+)
+_DEBT_LEASE_LT = (
+    "OperatingLeaseLiabilityNoncurrent", "LeaseLiabilityNoncurrent",
+    "FinanceLeaseLiabilityNoncurrent",
+)
+_DEBT_LEASE_ST = (
+    "OperatingLeaseLiabilityCurrent", "LeaseLiabilityCurrent",
+    "FinanceLeaseLiabilityCurrent",
+)
+_DEBT_TOTAL_TAGS = (
+    "LongTermDebtAndCapitalLeaseObligations",
+    "DebtLongtermAndShorttermCombinedAmount",
+    "OperatingLeaseLiability",
+    "LeaseLiability",
+)
+
+
+def _hit_val(companyfacts: dict, tags: tuple[str, ...] | list[str], picker):
+    hit, tag = _first_hit(companyfacts, list(tags), picker)
+    if hit is None:
+        return None, None
+    try:
+        return float(hit["val"]), tag
+    except (TypeError, ValueError, KeyError):
+        return None, None
+
+
+def _combine_note_and_lease(note_val, lease_val):
+    """Notes (including an explicit $0 revolver) + operating/finance leases.
+
+    Yahoo/GuruFocus "total debt" for lease-heavy names is the lease PV when
+    there are no borrowings. When both exist, sum them (EV-style gross debt).
+    """
+    if note_val is None and lease_val is None:
+        return None
+    if note_val is None:
+        return float(lease_val)
+    if lease_val is None:
+        return float(note_val)
+    return float(note_val) + float(lease_val)
+
+
+def _fill_debt_metrics(row: dict, companyfacts: dict, picker) -> None:
+    """Write LongTermDebt / ShortTermDebt / TotalDebt onto row in place."""
+    ltd_n, _ = _hit_val(companyfacts, _DEBT_NOTE_LT, picker)
+    ltd_l, _ = _hit_val(companyfacts, _DEBT_LEASE_LT, picker)
+    std_n, _ = _hit_val(companyfacts, _DEBT_NOTE_ST, picker)
+    std_l, _ = _hit_val(companyfacts, _DEBT_LEASE_ST, picker)
+    tot, tot_tag = _hit_val(companyfacts, _DEBT_TOTAL_TAGS, picker)
+    ltd = _combine_note_and_lease(ltd_n, ltd_l)
+    std = _combine_note_and_lease(std_n, std_l)
+    if ltd is not None:
+        row["LongTermDebt"] = ltd
+    if std is not None:
+        row["ShortTermDebt"] = std
+    if ltd is not None or std is not None:
+        row["TotalDebt"] = (ltd or 0.0) + (std or 0.0)
+    elif tot is not None:
+        row["TotalDebt"] = tot
+        if tot_tag:
+            row.setdefault("_tags", {})["TotalDebt"] = tot_tag
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -714,9 +796,6 @@ def extract_financials(
             "TotalAssets",
             "TotalLiabilities",
             "StockholdersEquity",
-            "LongTermDebt",
-            "ShortTermDebt",
-            "TotalDebt",
         ):
             hit, tag = _first_hit(
                 facts,
@@ -726,12 +805,11 @@ def extract_financials(
             if hit:
                 row[metric] = hit["val"]
                 row.setdefault("_tags", {})[metric] = tag
-        # Derive Total Debt if missing.
-        if "TotalDebt" not in row:
-            ltd = row.get("LongTermDebt", 0) or 0
-            std = row.get("ShortTermDebt", 0) or 0
-            if ltd or std:
-                row["TotalDebt"] = ltd + std
+        if target_end:
+            _fill_debt_metrics(
+                row, facts,
+                lambda f: _pick_instant_near(f, target_end),
+            )
         # FCF = OCF - CapEx
         if "OperatingCashFlow" in row and "CapEx" in row:
             row["FreeCashFlow"] = row["OperatingCashFlow"] - row["CapEx"]
@@ -878,8 +956,7 @@ def _build_quarter_row(facts: dict, fy: int, fp: str, *, is_ytd: bool) -> dict[s
     # Balance-sheet at period end (quarter-end)
     if row.get("end"):
         target_end = row["end"]
-        for metric in ("Cash", "LongTermDebt", "ShortTermDebt", "TotalDebt",
-                       "TotalAssets", "TotalLiabilities", "StockholdersEquity"):
+        for metric in ("Cash", "TotalAssets", "TotalLiabilities", "StockholdersEquity"):
             hit, tag = _first_hit(
                 facts,
                 TAG_PRIORITIES[metric],
@@ -887,11 +964,10 @@ def _build_quarter_row(facts: dict, fy: int, fp: str, *, is_ytd: bool) -> dict[s
             )
             if hit:
                 row[metric] = hit["val"]
-        if "TotalDebt" not in row:
-            ltd = row.get("LongTermDebt", 0) or 0
-            std = row.get("ShortTermDebt", 0) or 0
-            if ltd or std:
-                row["TotalDebt"] = ltd + std
+        _fill_debt_metrics(
+            row, facts,
+            lambda f: _pick_instant_near(f, target_end),
+        )
     if "OperatingCashFlow" in row and "CapEx" in row:
         row["FreeCashFlow"] = row["OperatingCashFlow"] - row["CapEx"]
     rev = row.get("Revenue")
@@ -939,8 +1015,9 @@ def _derive_margins(row: dict) -> None:
         row["GrossProfit"] = row["Revenue"] - row["CostOfRevenue"]
     if "FreeCashFlow" not in row and "OperatingCashFlow" in row and "CapEx" in row:
         row["FreeCashFlow"] = row["OperatingCashFlow"] - row["CapEx"]
-    if "TotalDebt" not in row and (row.get("LongTermDebt") or row.get("ShortTermDebt")):
-        row["TotalDebt"] = (row.get("LongTermDebt", 0) or 0) + (row.get("ShortTermDebt", 0) or 0)
+    if "TotalDebt" not in row and (
+            row.get("LongTermDebt") is not None or row.get("ShortTermDebt") is not None):
+        row["TotalDebt"] = (row.get("LongTermDebt") or 0) + (row.get("ShortTermDebt") or 0)
     if rev and row.get("GrossProfit") is not None:
         row["GrossMargin"] = row["GrossProfit"] / rev
     if rev and row.get("OperatingIncome") is not None:
@@ -1009,10 +1086,13 @@ def _build_period_by_end(facts: dict, end: str, start: str, *, annual: bool,
     if ds_val is not None:
         row["DilutedShares"] = ds_val
     for metric in _INSTANT_METRICS:
+        if metric in ("LongTermDebt", "ShortTermDebt", "TotalDebt"):
+            continue
         hit, _tag = _first_hit(facts, TAG_PRIORITIES[metric],
                                lambda f: _pick_instant_near(f, end))
         if hit:
             row[metric] = hit["val"]
+    _fill_debt_metrics(row, facts, lambda f: _pick_instant_near(f, end))
     _derive_margins(row)
     return row
 

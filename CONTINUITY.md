@@ -201,6 +201,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Concentrated $10B+ gurus** | **`ui618-20260915-gurus-10b`** | Add 13 managers with latest 13F ≥ $10B and ≤ 50 names (TCI, Gates, Tiger, Elliott, Lone Pine, Fundsmith, …). Screened on SEC EDGAR, not GuruFocus. |
 | **Weight chart colors** | **`ui619-20260915-weight-chart`** | SUP_20260915_210f2f13 — line color = ticker label; no P&L green/red on the chart; drop unlabeled equity spark; series keyed by ticker |
 | **Load times** | **`ui620-20260916-load-times`** | Desktop+mobile stall: earnings N+1 / SEC 8-K / universe HTTP pinned the 1 uvicorn worker (p95 ~15s). Card cache + batch API, short Nasdaq/SEC timeouts, dashboard cache, universe counts from cache. No features removed. |
+| **LULU lease debt** | **`ui621-20260916-lulu-debt`** | Financials debt/LTD blank for names with $0 notes (LULU). Map ASC 842 operating-lease liabilities; a $0 revolver no longer hides current leases. Backfill stored NULL/0 debt. |
 
 ### One-click handoff (preferred)
 
@@ -388,4 +389,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-16 · Agent: Grok Build · Live: `ui620-20260916-load-times` · Next: `ui621-YYYYMMDD-slug`*
+*Last updated: 2026-09-16 · Agent: Grok Build · Live: `ui621-20260916-lulu-debt` · Next: `ui622-YYYYMMDD-slug`*
