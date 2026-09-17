@@ -8216,7 +8216,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui629-20260917-gf-cols"
+WEB_BUILD_VERSION = "ui630-20260917-gf-mcap"
 
 
 @app.get("/api/build")
@@ -13512,17 +13512,20 @@ def _gf_apply_split_perf(out: dict) -> dict:
                 cur.execute(
                     """
                     SELECT DISTINCT ON (upper(ticker))
-                           upper(ticker), revenue, free_cash_flow
+                           upper(ticker), revenue, free_cash_flow,
+                           shares_outstanding, diluted_shares
                       FROM company_financials
                      WHERE upper(ticker) = ANY(%s) AND period_type='annual'
                      ORDER BY upper(ticker), period_end DESC
                     """,
                     (uniq,),
                 )
-                for tk, rev, fcf in cur.fetchall() or []:
+                for tk, rev, fcf, sh, dsh in cur.fetchall() or []:
+                    shares = sh if sh is not None else dsh
                     fin[str(tk).upper()] = {
                         "revenue": float(rev) if rev is not None else None,
                         "free_cash_flow": float(fcf) if fcf is not None else None,
+                        "shares": float(shares) if shares is not None else None,
                     }
         except Exception as e:
             print(f"[gf-wl] fundamentals: {e!s:.120}", flush=True)
@@ -13544,6 +13547,17 @@ def _gf_apply_split_perf(out: dict) -> dict:
         m = fin.get(tk) or {}
         r["revenue"] = m.get("revenue")
         r["free_cash_flow"] = m.get("free_cash_flow")
+        r["market_cap"] = None
+        sh = m.get("shares")
+        if px is not None and sh not in (None, 0):
+            try:
+                sf = float(sh)
+                if abs(sf) >= 100_000:
+                    r["market_cap"] = round(px * sf, 0)
+                else:
+                    r["market_cap"] = round(px * sf * 1_000_000.0, 0)
+            except (TypeError, ValueError):
+                r["market_cap"] = None
         cost = adj.get((tk, day)) if day else None
         if cost is None or cost == 0:
             continue

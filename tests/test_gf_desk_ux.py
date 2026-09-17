@@ -44,6 +44,7 @@ def test_split_perf_uses_adj_history():
     assert "pct_since_first" in body
     assert "free_cash_flow" in body
     assert "revenue" in body
+    assert "market_cap" in body
     assert "ann_gain" not in body
     assert "rel_spy" not in body
     get = _fn_src("builder_gurufocus_list(")
@@ -61,8 +62,10 @@ def test_gf_table_drops_ann_rel_adds_rev_fcf_sort():
     assert "ann_gain" not in tsx
     assert ">Revenue<" in tsx
     assert ">FCF<" in tsx
+    assert ">Market Cap<" in tsx
     assert "fmtCap(r.revenue)" in tsx
     assert "fmtCap(r.free_cash_flow)" in tsx
+    assert "fmtCap(r.market_cap)" in tsx
     assert "toggleSort('day_pct')" in tsx
     assert "toggleSort('pct_since_first')" in tsx
 

@@ -24,6 +24,7 @@ type GfStock = {
   pct_since_first?: number | null
   revenue?: number | null
   free_cash_flow?: number | null
+  market_cap?: number | null
   fair_value?: number | null
   note?: string | null
   list_id?: string | null
@@ -447,6 +448,7 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
                   <th>Ticker</th>
                   <th>Company</th>
                   <th className="tabular">Current Price</th>
+                  <th className="tabular">Market Cap</th>
                   <th className={`tabular ${styles.sortTh}`}>
                     <button
                       type="button"
@@ -503,6 +505,7 @@ export function GuruFocusTab({ onPeek, onLeave, onOpen }: Props) {
                       </td>
                       <td className={styles.co}>{r.company || '—'}</td>
                       <td className="tabular">{fmtPx(r.price)}</td>
+                      <td className="tabular">{fmtCap(r.market_cap)}</td>
                       <td className={`tabular ${pctClass(r.day_pct)}`}>{fmtPct(r.day_pct)}</td>
                       <td className={styles.date}>{r.date_first_added || '—'}</td>
                       <td className="tabular">{fmtPx(r.cost_per_share)}</td>

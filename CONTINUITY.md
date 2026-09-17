@@ -210,6 +210,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Page speed** | **`ui627-20260917-page-speed`** | Builder lists/boards no DCF/DGA/Yahoo on GET; candidates skip report_md. Gurus skip OpenFIGI/SEC titles on GET. Financials dashboard store-only + 10min cache; mobile fund bars get a Y-axis. |
 | **Board quotes** | **`ui628-20260917-board-quotes`** | SUP_20260917_4e57d833 — Track boards LAST/DAY % blank. Any-age last-close then 1.5s fast quotes for misses. |
 | **GF columns** | **`ui629-20260917-gf-cols`** | GuruFocus watchlists: drop Annualized + Rel S&P; add FY Revenue/FCF; sort Day's Change % and since-first. |
+| **GF mcap** | **`ui630-20260917-gf-mcap`** | GuruFocus watchlists: Market Cap column (last × shares, same scale as Pulse). |
 
 ### One-click handoff (preferred)
 
@@ -397,4 +398,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-17 · Agent: Grok Build · Live: `ui629-20260917-gf-cols` · Next: `ui630-YYYYMMDD-slug`*
+*Last updated: 2026-09-17 · Agent: Grok Build · Live: `ui630-20260917-gf-mcap` · Next: `ui631-YYYYMMDD-slug`*
