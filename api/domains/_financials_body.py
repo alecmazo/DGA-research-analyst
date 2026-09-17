@@ -2469,15 +2469,23 @@ def financials_overnight_now(request: Request, background_tasks: BackgroundTasks
                     f"Enable fin_us_backfill for continuous fill. No overwrite."}
 
 
+_FIN_SETTINGS_CACHE: dict = {"ts": 0.0, "payload": None}
+_FIN_SETTINGS_TTL_S = 30.0
+
+
 @app.get("/api/financials/settings")
 def financials_settings_get(request: Request):
     """Nightly / monthly / US-backfill toggles for the Financials store UI."""
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
+    now = time.time()
+    hit = _FIN_SETTINGS_CACHE.get("payload")
+    if hit is not None and (now - float(_FIN_SETTINGS_CACHE.get("ts") or 0)) < _FIN_SETTINGS_TTL_S:
+        return hit
     s = _get_automation_settings()
     followed = _fin_followed_tickers()
-    return {
+    out = {
         "ok": True,
         "followed_count": len(followed),
         "followed_sample": followed[:12],
@@ -2506,6 +2514,9 @@ def financials_settings_get(request: Request):
             "note": "Off by default. Continuous full-US gap fill — higher CPU.",
         },
     }
+    _FIN_SETTINGS_CACHE["payload"] = out
+    _FIN_SETTINGS_CACHE["ts"] = time.time()
+    return out
 
 
 @app.post("/api/financials/settings")
@@ -2538,6 +2549,8 @@ def financials_settings_post(request: Request):
                     lo["minute"] = prev["minute"]
                 current["fin_overnight"] = lo
     _kv_put("automation.settings", current)
+    _FIN_SETTINGS_CACHE["ts"] = 0.0
+    _FIN_SETTINGS_CACHE["payload"] = None
     return financials_settings_get(request)
 
 

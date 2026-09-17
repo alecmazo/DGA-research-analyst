@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import styles from './TicketStatusDot.module.css'
 
-const POLL_MS = 20_000
+const POLL_MS = 60_000
 
 function labelFor(n: number): string {
   if (n === 1) return '1 open ticket'

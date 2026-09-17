@@ -234,21 +234,6 @@ export function MarketPulse({
   }, [tickers])
 
   useEffect(() => {
-    void api<SavedReport[]>('/api/reports')
-      .then((list) => {
-        const m: Record<string, SavedReport> = {}
-        for (const r of Array.isArray(list) ? list : []) {
-          const tk = String(r?.ticker || '').toUpperCase()
-          if (tk) m[tk] = r
-        }
-        setReports(m)
-      })
-      .catch(() => {
-        /* valuation chips are optional */
-      })
-  }, [])
-
-  useEffect(() => {
     void load(false)
     const id = window.setInterval(() => {
       if (document.hidden) return

@@ -111,31 +111,8 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
       const list = await api<SavedReport[]>('/api/reports')
       const arr = Array.isArray(list) ? list : []
       setReports(arr)
-      const tickers = arr.map((r) => r.ticker).filter(Boolean)
-      if (tickers.length) {
-        try {
-          const q: Record<string, Quote> = {}
-          const chunk = 80
-          for (let i = 0; i < tickers.length; i += chunk) {
-            const part = tickers.slice(i, i + chunk)
-            const got = await api<Record<string, Quote>>(
-              `/api/quotes?tickers=${encodeURIComponent(part.join(','))}`,
-            )
-            for (const [tk, row] of Object.entries(got || {})) {
-              if (row && row.price != null) q[tk] = row
-            }
-          }
-          setQuotes((prev) => {
-            const merged: Record<string, Quote> = { ...prev }
-            for (const [tk, row] of Object.entries(q)) {
-              if (row && row.price != null) merged[tk] = row
-            }
-            return merged
-          })
-        } catch {
-          /* keep seed prices on reports */
-        }
-      }
+      // Day-% comes from the shared quote clock / list seed prices.
+      // Fan-out of 104 /api/quotes here used to pin the one uvicorn worker.
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not load reports')
     } finally {
@@ -153,7 +130,7 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
       r.last_attempt_status === 'in_progress',
   )
   useEffect(() => {
-    const ms = anyRunning ? 4000 : 25000
+    const ms = anyRunning ? 8000 : 60_000
     const id = window.setInterval(() => void load(), ms)
     return () => window.clearInterval(id)
   }, [load, anyRunning])

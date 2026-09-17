@@ -4612,19 +4612,22 @@ def watchlist_get(request: Request, fresh: bool = False):
                 except Exception as e:
                     print(f"[watchlist] store quotes failed: {e!s:.120}", flush=True)
 
-            # YTD is a cheap DB read (jan close vs last). Do it BEFORE Yahoo so a
-            # 4.5s quote wall cannot leave the YTD column as dashes (ytd=0).
-            try:
-                _watchlist_fill_ytd(tickers, quotes, budget_s=2.0)
-            except Exception as e:
-                print(f"[watchlist] ytd fill failed: {e!s:.160}", flush=True)
+            # Hard paint deadline. YTD/Yahoo/earnings used to stack to 8–13s
+            # even with "budgets" because they ran sequentially after each other.
+            _WL_PAINT_S = 1.2
+            def _wl_left() -> float:
+                return _WL_PAINT_S - (time.time() - t0)
 
-            # Live Yahoo — MUST use shutdown(wait=False). A `with ThreadPoolExecutor`
-            # after result(timeout=…) still waits for the hung worker on exit and
-            # freezes GET /api/watchlist forever (ui390–ui391 hang).
-            # Skip Yahoo if we already spent most of the 2.5s paint budget.
-            left = max(0.0, 2.5 - (time.time() - t0))
-            if need and left >= 0.4:
+            if _wl_left() > 0.25:
+                try:
+                    _watchlist_fill_ytd(
+                        tickers, quotes, budget_s=min(0.4, max(0.15, _wl_left())))
+                except Exception as e:
+                    print(f"[watchlist] ytd fill failed: {e!s:.160}", flush=True)
+
+            # Live Yahoo — MUST use shutdown(wait=False).
+            left = max(0.0, _wl_left())
+            if need and left >= 0.35:
                 raw: dict = {}
                 try:
                     raw = _run_with_timeout(
@@ -4651,7 +4654,7 @@ def watchlist_get(request: Request, fresh: bool = False):
                 tk for tk in tickers
                 if (quotes.get(tk) or {}).get("price") is None
             ]
-            if still_blank and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            if still_blank and _wl_left() > 0.15 and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
                     older = _db_quotes(still_blank, max_age_s=4 * 86400) or {}
                     for tk in still_blank:
@@ -4664,8 +4667,8 @@ def watchlist_get(request: Request, fresh: bool = False):
                 except Exception as e:
                     print(f"[watchlist] last-close store failed: {e!s:.120}", flush=True)
 
-            # Report flags (cheap) — never fail the list
-            if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            # Report flags (cheap) — skip if we already blew the paint budget.
+            if _wl_left() > 0.1 and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
                     with _fund_conn() as conn, conn.cursor() as cur:
                         cur.execute("""
@@ -4680,10 +4683,10 @@ def watchlist_get(request: Request, fresh: bool = False):
                 except Exception as e:
                     print(f"[watchlist] report lookup failed: {e!s:.120}", flush=True)
 
-        # Earnings chips (best-effort, hard-capped). 8s used to stall the desk.
+        # Earnings chips — cache hit is free; otherwise leftover paint budget.
         if tickers:
             try:
-                earn_budget = min(1.2, max(0.3, 2.5 - (time.time() - t0)))
+                earn_budget = min(0.35, max(0.05, 1.2 - (time.time() - t0)))
                 earnings_map = _watchlist_earnings_for(tickers, budget_s=earn_budget) or {}
                 for tk in list(earnings_map.keys()):
                     earnings_map[tk]["has_report"] = bool(reports_map.get(tk))
@@ -8213,13 +8216,14 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui625-20260917-reports-lock"
+WEB_BUILD_VERSION = "ui626-20260917-perf-root"
 
 
 @app.get("/api/build")
-def build_version():
+async def build_version():
     """Return the current web UI build identifier.
 
+    Event-loop (async) so a wedged FastAPI threadpool cannot hide deploys.
     The web client compares this to its embedded BUILD constant; on mismatch
     it forces a `location.reload(true)` with a cache-bust query param so even
     home-screen PWAs see the latest UI without manual cache clearing.
@@ -8496,9 +8500,12 @@ def continuity_version_log(request: Request):
 
 @app.get("/health")
 @app.get("/healthz")
-def health():
-    """Liveness only — never touch DB/Dropbox/migrations. Railway healthcheck
-    must get 200 as soon as uvicorn is listening."""
+async def health():
+    """Liveness on the event loop — never the threadpool, never DB.
+
+    Sync ``def health`` sat behind 60s list_reports workers and Railway
+    marked the replica dead while CPU was idle.
+    """
     return {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
@@ -16373,8 +16380,7 @@ def list_reports(request: Request = None):
                                delta_from_prior,
                                stock_style, stock_style_note, dcf_value,
                                fwd_rev_growth, fwd_eps_growth,
-                               valuation_approaches,
-                               dcf_user_multiple, dcf_user_value, dcf_user_fcf
+                               dcf_user_multiple, dcf_user_value
                         FROM analyst_reports
                         WHERE archived IS NOT TRUE
                         ORDER BY GREATEST(
@@ -16491,107 +16497,30 @@ def list_reports(request: Request = None):
                             "dcf_value":           float(r["dcf_value"]) if r.get("dcf_value") is not None else None,
                             "fwd_rev_growth":      float(r["fwd_rev_growth"]) if r.get("fwd_rev_growth") is not None else None,
                             "fwd_eps_growth":      float(r["fwd_eps_growth"]) if r.get("fwd_eps_growth") is not None else None,
-                            "valuation_approaches": r.get("valuation_approaches") or [],
                             "dcf_user_multiple":   float(r["dcf_user_multiple"]) if r.get("dcf_user_multiple") is not None else None,
                             "dcf_user_value":      float(r["dcf_user_value"]) if r.get("dcf_user_value") is not None else None,
-                            "dcf_user_fcf":        float(r["dcf_user_fcf"]) if r.get("dcf_user_fcf") is not None else None,
+                            "valuation_approaches": [],
                         })
-                    # Prices from process cache + market_quotes store ONLY.
-                    # Full-book Yahoo here blocked the Saved Reports panel for
-                    # 10–60s (98 tickers × chart fan-out). Client can refresh
-                    # day-% via /api/quotes after paint.
+                    # Process-cache prices only. Detoasting valuation_approaches
+                    # JSON + excel_model recut + _db_quotes(104) was 10–60s and
+                    # starved the one worker. Client /api/quotes fills day-%.
                     try:
-                        tks = [row["ticker"] for row in out if row.get("ticker")]
-                        if tks:
-                            qmap: dict = {}
-                            now = time.time()
-                            need = []
-                            for tk in tks:
-                                ent = _QUOTE_CACHE.get(tk)
-                                if (ent and (now - float(ent.get("_ts") or 0)) < _QUOTE_TTL
-                                        and ent.get("price") is not None):
-                                    qmap[tk] = {
-                                        "price": ent.get("price"),
-                                        "pct_change": ent.get("pct_change"),
-                                    }
-                                else:
-                                    need.append(tk)
-                            if need:
+                        now = time.time()
+                        for row in out:
+                            tk = row.get("ticker")
+                            ent = _QUOTE_CACHE.get(tk) if tk else None
+                            px = None
+                            if ent and ent.get("price") is not None:
                                 try:
-                                    store = _db_quotes(need, max_age_s=None) or {}
-                                    qmap.update(store)
-                                except Exception as _se:
-                                    print(f"[reports] store quotes: {_se!s:.100}", flush=True)
-                            for row in out:
-                                q = qmap.get(row["ticker"]) or {}
-                                px = q.get("price")
-                                if px is not None:
-                                    try:
-                                        px = float(px)
-                                    except (TypeError, ValueError):
-                                        px = None
+                                    px = float(ent["price"])
+                                except (TypeError, ValueError):
+                                    px = None
                                 row["current_price"] = px
-                                row["pct_change"] = q.get("pct_change")
-                                if px and px > 0 and row.get("price_target") is not None:
-                                    try:
-                                        row["upside_pct"] = round(
-                                            (float(row["price_target"]) - px) / px * 100.0, 2)
-                                    except Exception:
-                                        pass
-                                # Re-cut VALUE/GROWTH vs live last (DCF $ stored at persist).
+                                row["pct_change"] = ent.get("pct_change")
+                            if px and px > 0 and row.get("price_target") is not None:
                                 try:
-                                    import excel_model as _em
-                                    if row.get("dcf_value") is not None:
-                                        live = _em.style_from_metrics(
-                                            row.get("dcf_value"),
-                                            px,
-                                            row.get("fwd_rev_growth"),
-                                            row.get("fwd_eps_growth"),
-                                        )
-                                        if live.get("style"):
-                                            row["stock_style"] = live["style"]
-                                            row["stock_style_note"] = live.get("note")
-                                    apps = row.get("valuation_approaches")
-                                    if isinstance(apps, str):
-                                        import json as _json
-                                        apps = _json.loads(apps)
-                                    if apps:
-                                        row["valuation_approaches"] = _em.recut_approaches_vs_last(apps, px)
-                                    elif row.get("dcf_value") or row.get("price_target"):
-                                        row["valuation_approaches"] = _em.approaches_from_scalars(
-                                            dcf=row.get("dcf_value"),
-                                            pt=row.get("price_target"),
-                                            last=px,
-                                        )
-                                    if row.get("dcf_user_value") is not None:
-                                        stored_v = row.get("dcf_user_value")
-                                        user = _em.compute_dcf_user(
-                                            row.get("dcf_user_fcf"),
-                                            row.get("dcf_user_multiple"),
-                                            None,
-                                            None,
-                                            px,
-                                        )
-                                        if user is None and _em.dcf_user_value_plausible(stored_v, px):
-                                            vd = _em.valuation_verdict(stored_v, px)
-                                            user = {
-                                                "id": "dcf_user",
-                                                "name": "DCF User",
-                                                "value": stored_v,
-                                                "multiple": row.get("dcf_user_multiple"),
-                                                "note": (
-                                                    f"FCF × {row['dcf_user_multiple']:.0f}x"
-                                                    if row.get("dcf_user_multiple")
-                                                    else "User FCF multiple"
-                                                ),
-                                                **vd,
-                                            }
-                                        elif user is None:
-                                            user = None
-                                        if user:
-                                            row["valuation_approaches"] = _em.overlay_dcf_user(
-                                                row.get("valuation_approaches") or [], user,
-                                            )
+                                    row["upside_pct"] = round(
+                                        (float(row["price_target"]) - px) / px * 100.0, 2)
                                 except Exception:
                                     pass
                     except Exception as e:
