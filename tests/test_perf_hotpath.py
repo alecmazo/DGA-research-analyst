@@ -63,7 +63,7 @@ def test_financials_settings_cached():
 
 def test_builder_lists_get_does_not_block_on_named_board_sync():
     fn = _fn_src(ROOT / "api/server.py", "builder_lists_get")
-    assert "_kick_builder_named_board_refresh" in fn
+    assert "_kick_builder_named_board_refresh" not in fn
     assert "_builder_sync_dcf_value_board" not in fn
     assert "_builder_sync_dga_scored_board" not in fn
 

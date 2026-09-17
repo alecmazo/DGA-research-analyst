@@ -12015,6 +12015,7 @@ def _builder_extract_comps_bg() -> None:
         return
     _BUILDER_COMPS_CACHE["busy"] = True
     try:
+        time.sleep(2.5)  # let the click's GET finish before we detoast markdown
         if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
             return
         with _fund_conn() as conn, conn.cursor() as cur:
@@ -13194,15 +13195,16 @@ def _kick_builder_named_board_refresh(lp_id: str) -> None:
 
 @app.get("/api/v2/builder/lists")
 def builder_lists_get(request: Request):
-    """All sector/named watchlists for the GP."""
+    """All sector/named watchlists for the GP.
+
+    Named DGA/DCF boards refresh only on the explicit POST buttons. Kicking
+    `_dga_score_universe` from GET starved the one worker (Financials 25s,
+    Gurus 6s) on a cold process.
+    """
     claims = _claims_or_401(request)
     lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
     _ensure_builder_lists_tables()
     lists = _builder_lists_for_user(lp_id)
-    try:
-        _kick_builder_named_board_refresh(lp_id)
-    except Exception as e:
-        print(f"[builder-lists] kick refresh: {e!s:.120}", flush=True)
     return {"ok": True, "lists": lists, "seeded": len(lists) > 0}
 
 
