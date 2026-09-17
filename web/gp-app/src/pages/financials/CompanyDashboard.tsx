@@ -274,6 +274,7 @@ export function CompanyDashboard({
       title="📊 Company Dashboard"
       action={action}
       defaultOpen
+      compact
     >
       {err && <div className={styles.inlineErr}>{err}</div>}
       {loading && <Spinner label={`Loading ${ticker || input}…`} />}

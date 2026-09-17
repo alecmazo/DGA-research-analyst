@@ -82,12 +82,12 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
   }, [])
   const hideTip = useCallback(() => setTip(null), [])
   const W = 560
-  const H = 268
-  const padL = 72
+  const H = 148
+  const padL = 52
   const hasR = cfg.series.some((s) => s.axis === 'R')
-  const padR = hasR ? 64 : 14
-  const padT = 12
-  const padB = 40
+  const padR = hasR ? 48 : 10
+  const padT = 6
+  const padB = 24
   const n = cfg.labels.length
   const plotW = W - padL - padR
   const plotH = H - padT - padB

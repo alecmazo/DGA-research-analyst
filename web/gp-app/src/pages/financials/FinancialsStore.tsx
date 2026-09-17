@@ -359,6 +359,7 @@ export function FinancialsStore({
       title="📊 Financials store"
       badge={<span className={styles.badgeInfo}>{badge}</span>}
       defaultOpen={false}
+      compact
     >
       <div className={styles.howto}>
         <div className={styles.howtoTitle}>How this works (cheap by design)</div>

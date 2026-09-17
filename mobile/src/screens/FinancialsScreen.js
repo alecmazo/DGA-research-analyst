@@ -183,7 +183,7 @@ function FundChart({ title, series, width, fmt, t }) {
   if (!series.some((s) => (s.values || []).some((v) => v != null))) return null;
   const last = (vals) => { const f = (vals || []).filter((v) => v != null); return f.length ? f[f.length - 1] : null; };
   return (
-    <View style={{ marginBottom: 14 }}>
+    <View style={{ marginBottom: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
         <Text style={{ fontSize: fontSize.caption, fontWeight: '800', color: t.textPrimary }}>{title}</Text>
         {series.map((ser, i) => (
@@ -193,7 +193,7 @@ function FundChart({ title, series, width, fmt, t }) {
           </View>
         ))}
       </View>
-      <MiniBars series={series} width={width} height={62} t={t} />
+      <MiniBars series={series} width={width} height={48} t={t} />
     </View>
   );
 }
@@ -405,7 +405,7 @@ export default function FinancialsScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 28 }}
+        contentContainerStyle={{ padding: spacing.md, paddingBottom: insets.bottom + 20 }}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => ticker && loadTicker(ticker, range, periodType)} tintColor={t.primary} />}
       >
@@ -458,7 +458,7 @@ export default function FinancialsScreen() {
             <View style={s.card} onLayout={(e) => setChartW(Math.round(e.nativeEvent.layout.width - spacing.lg * 2))}>
               {histLoading
                 ? <View style={{ height: 120, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={t.primary} /></View>
-                : <MiniLine points={hist?.points} width={chartW} height={120} color={lineColor} dimColor={t.textDim} />}
+                : <MiniLine points={hist?.points} width={chartW} height={80} color={lineColor} dimColor={t.textDim} />}
               <View style={s.rangeRow}>
                 {RANGES.map((r) => {
                   const on = r === range;
@@ -713,21 +713,21 @@ function makeStyles(t) {
       fontSize: fontSize.micro, color: t.textDim, marginBottom: 10,
     },
     ttmGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-    ttmCell: { width: '33.33%', paddingVertical: 6, paddingRight: 6 },
+    ttmCell: { width: '33.33%', paddingVertical: 3, paddingRight: 6 },
     ttmLbl: {
       fontSize: fontSize.micro, fontWeight: '700', letterSpacing: 0.4,
       textTransform: 'uppercase', color: t.textDim,
     },
     ttmVal: {
-      fontSize: fontSize.bodyLg, fontWeight: '800', color: t.textPrimary,
-      fontVariant: ['tabular-nums'], marginTop: 2,
+      fontSize: fontSize.body, fontWeight: '800', color: t.textPrimary,
+      fontVariant: ['tabular-nums'], marginTop: 0,
     },
     peerHead: {
       flexDirection: 'row', alignItems: 'center', paddingBottom: 4,
       borderBottomWidth: 1, borderBottomColor: t.borderSubtle,
     },
     peerRow: {
-      flexDirection: 'row', alignItems: 'center', paddingVertical: 7,
+      flexDirection: 'row', alignItems: 'center', paddingVertical: 4,
       borderBottomWidth: 1, borderBottomColor: t.borderSubtle,
       borderRadius: radius.sm, marginHorizontal: -4, paddingHorizontal: 4,
     },
@@ -746,18 +746,18 @@ function makeStyles(t) {
     hint: { color: t.textSecondary, fontSize: fontSize.body, lineHeight: 20, paddingTop: 20, textAlign: 'center' },
 
     card: {
-      backgroundColor: t.surface, borderRadius: radius.xl, padding: spacing.lg,
-      borderWidth: 1, borderColor: t.border, marginBottom: spacing.md,
-      shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: t.cardShadowOpacity, shadowRadius: 8, elevation: 3,
+      backgroundColor: t.surface, borderRadius: radius.lg, padding: spacing.md,
+      borderWidth: 1, borderColor: t.border, marginBottom: spacing.sm,
+      shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: t.cardShadowOpacity, shadowRadius: 4, elevation: 2,
     },
-    entity: { fontSize: fontSize.lg, fontWeight: '800', color: t.textPrimary },
+    entity: { fontSize: fontSize.bodyLg, fontWeight: '800', color: t.textPrimary },
     symbol: { fontSize: fontSize.caption, color: t.textDim, marginTop: 1, letterSpacing: 1 },
     ratingPill: { backgroundColor: t.ratingBg, borderRadius: radius.md, paddingHorizontal: 8, paddingVertical: 3 },
     ratingTxt: { color: t.ratingFg, fontSize: fontSize.micro, fontWeight: '800', letterSpacing: 0.5 },
-    price: { fontSize: 26, fontWeight: '800', color: t.textPrimary },
+    price: { fontSize: 20, fontWeight: '800', color: t.textPrimary },
 
-    kmGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: t.borderSubtle },
-    kmCell: { width: '50%', flexDirection: 'row', justifyContent: 'space-between', paddingRight: spacing.lg, paddingVertical: 3 },
+    kmGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: t.borderSubtle },
+    kmCell: { width: '50%', flexDirection: 'row', justifyContent: 'space-between', paddingRight: spacing.md, paddingVertical: 1 },
     kmLabel: { fontSize: fontSize.caption, color: t.textDim },
     kmVal: { fontSize: fontSize.small, fontWeight: '700', color: t.textPrimary },
 
@@ -773,7 +773,7 @@ function makeStyles(t) {
     cardTitle: { fontSize: fontSize.bodyLg, fontWeight: '800', color: t.textPrimary },
     rankNum: { fontSize: fontSize.lg, fontWeight: '800' },
     rankDen: { fontSize: fontSize.caption, color: t.textDim, fontWeight: '600' },
-    rankRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: t.borderSubtle },
+    rankRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3, borderBottomWidth: 1, borderBottomColor: t.borderSubtle },
     rankName: { flex: 1.5, fontSize: fontSize.caption, color: t.textSecondary },
     rankVal: { width: 56, textAlign: 'right', fontSize: fontSize.small, fontWeight: '700', color: t.textPrimary, fontVariant: ['tabular-nums'] },
     rankBar: { flex: 1, marginLeft: 8 },

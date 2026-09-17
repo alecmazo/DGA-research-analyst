@@ -19,6 +19,28 @@
   background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-subtle) 100%);
 }
 
+.compact .head {
+  min-height: 28px;
+}
+
+.compact .toggle {
+  min-height: 28px;
+  padding: 4px 8px 4px 10px;
+  gap: 6px;
+}
+
+.compact .title {
+  font-size: 13px;
+}
+
+.compact .body {
+  padding: 8px 10px 10px;
+}
+
+.compact .action {
+  padding-right: 8px;
+}
+
 .open .head {
   border-bottom-color: var(--border-subtle);
 }
@@ -96,4 +118,23 @@
   color: var(--brand-300);
   background: rgba(91, 184, 212, 0.12);
   border-color: rgba(91, 184, 212, 0.22);
+}
+
+/* Compact density (Financials GuruFocus packing) — after base rules so it wins. */
+.compact .head,
+.compact .toggle {
+  min-height: 28px;
+}
+.compact .toggle {
+  padding: 4px 8px 4px 10px;
+  gap: 6px;
+}
+.compact .title {
+  font-size: 13px;
+}
+.compact .body {
+  padding: 8px 10px 10px;
+}
+.compact .action {
+  padding-right: 8px;
 }

@@ -103,7 +103,7 @@ export function HistoryScreen({ ticker, onSelectTicker }: Props) {
 
   return (
     <div className={styles.split}>
-      <Panel title="📈 Company history">
+      <Panel title="📈 Company history" collapsible defaultOpen={false}>
         <div className={styles.storeRow}>
           <input
             className={styles.search}
@@ -209,7 +209,7 @@ export function HistoryScreen({ ticker, onSelectTicker }: Props) {
         )}
       </Panel>
 
-      <Panel title="🔎 Screen">
+      <Panel title="🔎 Screen" collapsible defaultOpen={false}>
         <div className={styles.storeRow}>
           <select
             className={styles.select}

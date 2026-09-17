@@ -1,5 +1,15 @@
 .shell {
   max-width: 1300px;
+  gap: 8px;
+}
+
+.heroTight {
+  margin-bottom: 0;
+}
+
+.heroTight :global(h1) {
+  font-size: 22px;
+  line-height: 1.15;
 }
 
 /* ── Shared controls ── */
@@ -79,10 +89,10 @@
 }
 
 .help {
-  margin: 0 0 10px;
-  font-size: 11.5px;
+  margin: 0 0 6px;
+  font-size: 10.5px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.35;
 }
 
 .muted {
@@ -116,7 +126,7 @@
 .headGrid {
   display: grid;
   grid-template-columns: 1.1fr 1fr 1.4fr;
-  gap: 14px;
+  gap: 8px;
   align-items: stretch;
 }
 
@@ -128,13 +138,13 @@
 
 .card {
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-radius: 6px;
+  padding: 8px 10px;
   background: var(--bg-elevated, var(--bg-surface));
 }
 
 .entityLine {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-primary);
 }
@@ -146,10 +156,10 @@
 }
 
 .priceBig {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 800;
   color: var(--text-primary);
-  margin-top: 4px;
+  margin-top: 2px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -168,9 +178,9 @@
 .kmGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px 16px;
-  margin-top: 8px;
-  padding-top: 8px;
+  gap: 1px 12px;
+  margin-top: 4px;
+  padding-top: 4px;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -182,27 +192,27 @@
 }
 
 .kmLbl {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-tertiary);
 }
 
 .kmVal {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .targetsLine {
-  font-size: 11.5px;
+  font-size: 10.5px;
   color: var(--text-tertiary);
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .secMeta {
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--text-tertiary);
-  margin-top: 8px;
-  line-height: 1.45;
+  margin-top: 4px;
+  line-height: 1.3;
 }
 
 .pendingBanner {
@@ -224,7 +234,7 @@
 }
 
 .scoreBig {
-  font-size: 30px;
+  font-size: 22px;
   font-weight: 800;
   line-height: 1.1;
 }
@@ -239,7 +249,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 4px 0;
+  margin: 1px 0;
   cursor: help;
 }
 
@@ -281,15 +291,15 @@
 }
 
 .compName {
-  font-size: 11.5px;
+  font-size: 10.5px;
   color: var(--text-secondary);
-  width: 104px;
+  width: 92px;
   flex-shrink: 0;
 }
 
 .compTrack {
   flex: 1;
-  height: 6px;
+  height: 5px;
   border-radius: 99px;
   background: var(--gray-100, #f1f5f9);
   overflow: hidden;
@@ -315,7 +325,7 @@
 }
 
 .valuePx {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-primary);
 }
@@ -330,14 +340,14 @@
 }
 
 .anchors {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .anchorRow {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 3px 0;
+  margin: 1px 0;
 }
 
 .anchorLbl {
@@ -386,10 +396,10 @@
 /* TTM */
 .ttmStrip {
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 6px;
+  padding: 6px 10px;
   background: var(--bg-elevated, var(--bg-surface));
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .ttmHead {
@@ -420,25 +430,25 @@
 }
 
 .ttmVal {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-primary);
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 /* Fundamentals multi-chart grid (pre-React parity) */
 .chartGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .chartCard {
   position: relative;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 6px;
+  padding: 6px 8px;
   background: var(--bg-elevated, var(--bg-surface));
   min-height: 0;
 }
@@ -494,7 +504,7 @@
 
 /* Series / tables */
 .seriesPanel {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .sparkRow {
@@ -506,10 +516,10 @@
 
 .sparkCard {
   flex: 1;
-  min-width: 128px;
+  min-width: 110px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 6px;
+  padding: 5px 8px;
   background: var(--bg-elevated, var(--bg-surface));
 }
 
@@ -543,8 +553,8 @@
 
 .table th {
   text-align: left;
-  padding: 8px 10px;
-  font-size: 10px;
+  padding: 4px 6px;
+  font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -553,7 +563,7 @@
 }
 
 .table td {
-  padding: 8px 10px;
+  padding: 4px 6px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -623,19 +633,19 @@
 }
 
 .notesBlock {
-  margin-top: 12px;
-  font-size: 10.5px;
+  margin-top: 6px;
+  font-size: 9.5px;
   color: var(--text-tertiary);
-  line-height: 1.45;
+  line-height: 1.3;
 }
 
 /* Rank cards */
 .rankGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 8px;
   align-items: start;
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 @media (max-width: 800px) {
@@ -653,8 +663,8 @@
 
 .rankCard {
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-radius: 6px;
+  padding: 8px 10px;
   background: var(--bg-elevated, var(--bg-surface));
 }
 
@@ -666,7 +676,7 @@
 }
 
 .rankTitle {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-primary);
 }
@@ -700,10 +710,7 @@
 }
 
 .rankHint {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  margin-bottom: 8px;
-  line-height: 1.35;
+  display: none;
 }
 
 .rankColHead {
@@ -727,7 +734,7 @@
   grid-template-columns: 1.4fr 0.7fr 1fr 1fr;
   gap: 8px;
   align-items: center;
-  padding: 5px 0;
+  padding: 2px 0;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -807,10 +814,10 @@
 
 /* Price chart */
 .pricePanel {
-  margin-top: 12px;
+  margin-top: 8px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-radius: 6px;
+  padding: 8px 10px;
   background: var(--bg-elevated, var(--bg-surface));
 }
 
@@ -845,7 +852,7 @@
 .priceSvg {
   display: block;
   width: 100%;
-  max-height: 300px;
+  max-height: 160px;
   overflow: visible;
   cursor: crosshair;
 }
@@ -954,12 +961,12 @@
 
 .vlCap {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 6px 12px;
-  margin: 10px 0 12px;
-  padding: 10px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 4px 10px;
+  margin: 6px 0 8px;
+  padding: 6px 8px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--bg-elevated, var(--bg-surface));
 }
 
@@ -1047,14 +1054,14 @@
 
 /* Store */
 .howto {
-  font-size: 11.5px;
+  font-size: 10.5px;
   color: var(--text-secondary);
-  line-height: 1.55;
-  margin-bottom: 12px;
-  padding: 10px 12px;
+  line-height: 1.4;
+  margin-bottom: 8px;
+  padding: 6px 8px;
   background: var(--gray-50, #f8fafc);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .howtoTitle {

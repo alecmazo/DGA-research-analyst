@@ -4540,7 +4540,7 @@ def watchlist_get(request: Request, fresh: bool = False):
 
     Always returns the ticker list even if quotes fail. Quote path:
     process cache → market_quotes store (current session while live) →
-    Yahoo chart (hard 6s wall) → last-close store (≤4d) so a Yahoo miss
+    Yahoo chart (hard 1.5s wall) → last-close store (≤4d) so a Yahoo miss
     still paints a price. Weekend/closed still paints last close.
     ``fresh=1`` skips the process cache.
     Earnings chips: process-cached Nasdaq calendar, ≤8s budget, never hangs
@@ -4622,14 +4622,14 @@ def watchlist_get(request: Request, fresh: bool = False):
             # Live Yahoo — MUST use shutdown(wait=False). A `with ThreadPoolExecutor`
             # after result(timeout=…) still waits for the hung worker on exit and
             # freezes GET /api/watchlist forever (ui390–ui391 hang).
-            # Skip Yahoo if we already spent most of the 4.5s paint budget.
-            left = max(0.0, 4.5 - (time.time() - t0))
-            if need and left >= 0.8:
+            # Skip Yahoo if we already spent most of the 2.5s paint budget.
+            left = max(0.0, 2.5 - (time.time() - t0))
+            if need and left >= 0.4:
                 raw: dict = {}
                 try:
                     raw = _run_with_timeout(
                         lambda: _batch_quotes_fast(need) or {},
-                        min(4.0, left),
+                        min(1.5, left),
                         default={},
                     ) or {}
                 except Exception as e:
@@ -4683,7 +4683,7 @@ def watchlist_get(request: Request, fresh: bool = False):
         # Earnings chips (best-effort, hard-capped). 8s used to stall the desk.
         if tickers:
             try:
-                earn_budget = min(2.0, max(0.4, 4.5 - (time.time() - t0)))
+                earn_budget = min(1.2, max(0.3, 2.5 - (time.time() - t0)))
                 earnings_map = _watchlist_earnings_for(tickers, budget_s=earn_budget) or {}
                 for tk in list(earnings_map.keys()):
                     earnings_map[tk]["has_report"] = bool(reports_map.get(tk))
@@ -8213,7 +8213,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui622-20260917-lease-rows"
+WEB_BUILD_VERSION = "ui623-20260917-fin-compact-speed"
 
 
 @app.get("/api/build")
@@ -10722,6 +10722,8 @@ _TICKER_META_TTL = 900                     # 15 min — same as price/SPY caches
 _STOCK_INFO_CACHE: dict[str, tuple[float, dict]] = {}
 # list_reports orphan hydration / date backfill — once per process only
 _REPORTS_HYDRATE_ONCE: bool = False
+_REPORTS_LIST_CACHE: dict = {"ts": 0.0, "rows": None}
+_REPORTS_LIST_TTL_S = 12.0
 
 
 @app.get("/api/stock-info/{ticker}")
@@ -16300,6 +16302,13 @@ def list_reports(request: Request = None):
         demo.sort(key=_report_freshness_key, reverse=True)
         return demo
 
+    cached = _REPORTS_LIST_CACHE.get("rows")
+    cache_age = t0 - float(_REPORTS_LIST_CACHE.get("ts") or 0)
+    if cached is not None and cache_age < _REPORTS_LIST_TTL_S:
+        print(f"[list_reports] cache n={len(cached)} {cache_age*1000:.0f}ms-old",
+              flush=True)
+        return cached
+
     # Schema only — never Dropbox/disk scan here
     try:
         _ensure_analyst_reports_table_schema()
@@ -16577,6 +16586,8 @@ def list_reports(request: Request = None):
                 except Exception as e:
                     print(f"[list_reports] quote enrich failed: {e!s:.140}", flush=True)
                 out.sort(key=_report_freshness_key, reverse=True)
+                _REPORTS_LIST_CACHE["rows"] = out
+                _REPORTS_LIST_CACHE["ts"] = time.time()
                 print(f"[list_reports] ok n={len(out)} {(time.time()-t0)*1000:.0f}ms",
                       flush=True)
                 return out
@@ -17418,55 +17429,54 @@ def _batch_quotes_fast(symbols: list[str]) -> dict:
         r = result.get(sym) or {}
         return r.get("price") is None
 
-    # Yahoo chart only (parallel in market_data.get_quotes)
-    try:
-        import market_data as _md
-        ymap = {orig: _resolve_ticker_alias(orig) for orig in misses}
-        rev: dict = {}
-        for orig, ysym in ymap.items():
-            rev.setdefault(ysym, []).append(orig)
-        mdq = _md.get_quotes(list(rev.keys())) or {}
-        for ysym, q in mdq.items():
-            px = q.get("price")
-            prev = q.get("prev_close")
-            pct = q.get("pct_change")
-            if pct is None:
-                pct = _pct_from(px, prev)
-            for orig in rev.get(ysym, [ysym]):
-                if orig in misses:
-                    _accept(
-                        orig, px, pct, prev,
-                        source=q.get("price_source") or q.get("source") or "yahoo-chart",
-                        as_of=q.get("as_of"),
-                    )
-    except Exception as e:
-        print(f"[batch_quotes_fast] market_data failed: {e!s:.140}", flush=True)
+    def _fill_store(syms: list, max_age_s, source: str) -> None:
+        if not syms:
+            return
+        try:
+            db_fn = globals().get("_db_quotes")
+            store = db_fn(syms, max_age_s=max_age_s) if callable(db_fn) else {}
+        except Exception as e:
+            print(f"[batch_quotes_fast] {source} failed: {e!s:.120}", flush=True)
+            store = {}
+        for sym, dq in (store or {}).items():
+            if dq and dq.get("price") is not None:
+                _accept(sym, dq["price"], dq.get("pct_change"),
+                        source=source, as_of=dq.get("as_of"))
+
+    # Store first (no HTTP). Yahoo-first used to pin the one uvicorn worker
+    # for 6s+ on every desk /quotes poll, so /health and inbox sat in queue.
+    _fill_store([s for s in originals if _still_need(s)], 90, "store-fresh")
 
     still = [s for s in originals if _still_need(s)]
     if still:
         try:
-            db_fn = globals().get("_db_quotes")
-            db_fresh = db_fn(still, max_age_s=90) if callable(db_fn) else {}
+            import market_data as _md
+            ymap = {orig: _resolve_ticker_alias(orig) for orig in still}
+            rev: dict = {}
+            for orig, ysym in ymap.items():
+                rev.setdefault(ysym, []).append(orig)
+            mdq = _run_with_timeout(
+                lambda: _md.get_quotes(list(rev.keys())) or {},
+                1.5,
+                default={},
+            ) or {}
+            for ysym, q in mdq.items():
+                px = q.get("price")
+                prev = q.get("prev_close")
+                pct = q.get("pct_change")
+                if pct is None:
+                    pct = _pct_from(px, prev)
+                for orig in rev.get(ysym, [ysym]):
+                    if orig in still:
+                        _accept(
+                            orig, px, pct, prev,
+                            source=q.get("price_source") or q.get("source") or "yahoo-chart",
+                            as_of=q.get("as_of"),
+                        )
         except Exception as e:
-            print(f"[batch_quotes_fast] db_quotes fresh failed: {e!s:.120}", flush=True)
-            db_fresh = {}
-        for sym, dq in (db_fresh or {}).items():
-            if dq and dq.get("price") is not None:
-                _accept(sym, dq["price"], dq.get("pct_change"),
-                        source="store-fresh", as_of=dq.get("as_of"))
-        still = [s for s in originals if _still_need(s)]
+            print(f"[batch_quotes_fast] market_data failed: {e!s:.140}", flush=True)
 
-    if still:
-        try:
-            db_fn = globals().get("_db_quotes")
-            db_sess = db_fn(still, max_age_s=4 * 86400) if callable(db_fn) else {}
-        except Exception as e:
-            print(f"[batch_quotes_fast] db_quotes session-age failed: {e!s:.120}", flush=True)
-            db_sess = {}
-        for sym, dq in (db_sess or {}).items():
-            if dq and dq.get("price") is not None:
-                _accept(sym, dq["price"], dq.get("pct_change"),
-                        source="store", as_of=dq.get("as_of"))
+    _fill_store([s for s in originals if _still_need(s)], 4 * 86400, "store")
 
     return result
 

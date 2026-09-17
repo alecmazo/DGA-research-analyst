@@ -19,6 +19,7 @@ option row: {strike, option_type('call'|'put'), bid, ask, last, iv, delta,
 from __future__ import annotations
 
 import os
+import time
 
 
 def _bounded(fn, timeout_s: float, default=None):
@@ -618,7 +619,7 @@ def _tiingo_quotes(symbols: list) -> dict:
         r = requests.get(
             "https://api.tiingo.com/iex",
             params={"tickers": ",".join(symbols), "token": key},
-            timeout=10,
+            timeout=1.5,
             headers={"Content-Type": "application/json"},
         )
         if r.status_code != 200:
@@ -704,11 +705,12 @@ def get_quotes(symbols: list) -> dict:
     if not symbols:
         return {}
     out = {}
+    t0 = time.time()
     # Parallel Yahoo chart. NEVER use `with ThreadPoolExecutor` + timeout —
     # executor.__exit__ calls shutdown(wait=True) and hangs the request while
     # Yahoo workers finish (watchlist / idea-feed freeze).
     workers = min(12, max(1, len(symbols)))
-    wall_s = float(os.environ.get("QUOTE_FANOUT_TIMEOUT_S", "6") or 6)
+    wall_s = float(os.environ.get("QUOTE_FANOUT_TIMEOUT_S", "1.5") or 1.5)
     ex = ThreadPoolExecutor(max_workers=workers)
     try:
         futs = {ex.submit(_yahoo_chart_quote, sym): sym for sym in symbols}
@@ -730,7 +732,9 @@ def get_quotes(symbols: list) -> dict:
         except TypeError:
             ex.shutdown(wait=False)
     missing = [s for s in symbols if s not in out or out[s].get("price") is None]
-    if missing:
+    # Tiingo is extra HTTP; skip it once the Yahoo wall is spent so the
+    # single uvicorn worker can return.
+    if missing and (time.time() - t0) < wall_s:
         try:
             tq = _tiingo_quotes(missing)
             out.update(tq or {})
@@ -767,8 +771,8 @@ def _yahoo_chart_raw(symbol: str, rng: str, interval: str):
             r = requests.get(
                 f"https://{host}.finance.yahoo.com/v8/finance/chart/{symbol}",
                 params={"range": rng, "interval": interval, "includePrePost": "false"},
-                # 5s — 15s per host × N tickers was a major watchlist hang
-                timeout=5, headers={"User-Agent": "Mozilla/5.0"})
+                # 2s — 5s/host × N tickers starved the one uvicorn worker
+                timeout=2, headers={"User-Agent": "Mozilla/5.0"})
             if r.status_code != 200:
                 continue
             res = (((r.json().get("chart") or {}).get("result")) or [None])[0]

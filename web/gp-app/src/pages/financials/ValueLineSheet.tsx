@@ -142,13 +142,11 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
       title="📈 Financials"
       badge="VALUE LINE"
       action={action}
-      defaultOpen
+      defaultOpen={false}
+      compact
     >
       <p className={styles.help}>
-        <strong>Value Line–style statistical array</strong> — same ticker as
-        Company Dashboard above (auto-fills when you View a name). Full income /
-        cash flow / balance sheet / margins from the store.{' '}
-        Reads the SEC store already on file.
+        Value Line array — same ticker as the dashboard. SEC store, $ millions.
       </p>
 
       <div className={styles.chipRow}>

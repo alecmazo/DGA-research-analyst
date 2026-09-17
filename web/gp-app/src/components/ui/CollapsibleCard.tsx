@@ -9,6 +9,7 @@ type Props = {
   defaultOpen?: boolean
   className?: string
   flush?: boolean
+  compact?: boolean
   id?: string
 }
 
@@ -20,6 +21,7 @@ export function CollapsibleCard({
   defaultOpen = true,
   className,
   flush,
+  compact,
   id,
 }: Props) {
   const [open, setOpen] = useState(defaultOpen)
@@ -28,9 +30,10 @@ export function CollapsibleCard({
   return (
     <section
       id={id}
-      className={`${styles.card} ${open ? styles.open : styles.closed} ${className || ''}`}
+      className={`${styles.card} ${open ? styles.open : styles.closed} ${compact ? styles.compact : ''} ${className || ''}`}
       data-collapsible="1"
       data-expanded={open ? '1' : '0'}
+      data-compact={compact ? '1' : undefined}
     >
       <header className={styles.head}>
         <button

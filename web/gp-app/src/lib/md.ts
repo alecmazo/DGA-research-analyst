@@ -50,7 +50,7 @@ function ibColKind(header: string, colIndex: number): IbKind {
   const low = h.toLowerCase()
   if (
     colIndex === 0 &&
-    /^(metric|line item|item|step|method|scenario|firm|company|ticker|symbol|year|fiscal|segment|date|rating|action|notes?|formula|assumption|comment|rationale)$/i.test(
+    /^(metric|line item|item|step|method|scenario|firm|company|ticker|symbol|year|fiscal|segment|date|rating|action|notes?|formula|assumption|comment|rationale|component)$/i.test(
       h,
     )
   ) {
@@ -60,11 +60,12 @@ function ibColKind(header: string, colIndex: number): IbKind {
     if (!/\$(|m|b)|price|value|revenue|upside|%|p\/e|ev\//i.test(low)) return 'text'
   }
   if (/diluted eps|basic eps|\beps\b/i.test(low)) return 'eps'
+  if (/\bbeta\b/i.test(low) && !/%|\$|price|value/i.test(low)) return 'multiple'
   if (
-    /%|margin|growth|upside|downside|weight|probability|cagr|yield|\byoy\b|return\b|ppt|implied return/i.test(
+    /%|margin|growth|upside|downside|weight|probability|cagr|yield|\byoy\b|return\b|ppt|implied return|\bwacc\b|cost of (equity|debt|capital)|risk-?free|\brate\b|tax|premium|\berp\b|\bke\b|\bkd\b/i.test(
       low,
     ) &&
-    !/price target|implied value/i.test(low)
+    !/price target|implied value|terminal value|equity value|enterprise value/i.test(low)
   ) {
     return 'pct'
   }
@@ -82,6 +83,44 @@ function ibColKind(header: string, colIndex: number): IbKind {
     return 'money'
   }
   return 'text'
+}
+
+/** Cell text wins over the column header: "4.3%" is never $, "$47" is never %. */
+function ibCellKind(plain: string): IbKind | null {
+  const t = stripMdMarks(plain)
+  if (!t) return null
+  if (/%/.test(t) && !/\$/.test(t)) return 'pct'
+  if (/\$/.test(t)) {
+    if (/\$\s*m\b|\$m\b|\(\s*\$?m\s*\)/i.test(t)) return 'money_m'
+    if (/\$\s*b\b|\(\s*\$?b/i.test(t)) return 'money_bn'
+    return 'money'
+  }
+  if (/\d(?:\.\d+)?x\b/i.test(t) && !/%|\$/.test(t)) return 'multiple'
+  return null
+}
+
+function isGenericValueHeader(header: string): boolean {
+  const low = stripMdMarks(header).toLowerCase()
+  return /^(value|amount|input|assumption|result|figure|number|level|build)$/i.test(low)
+}
+
+/** Row labels for WACC / rates / beta when the column is a generic "Value". */
+function ibRowKind(rowLabel: string): IbKind | null {
+  const low = stripMdMarks(rowLabel).toLowerCase()
+  if (!low) return null
+  if (/\bbeta\b/.test(low)) return 'multiple'
+  if (/discount factor/.test(low)) return null
+  if (/shares|share count/.test(low) && !/price|value|\$/.test(low)) return 'shares'
+  if (
+    /\bwacc\b|cost of (equity|debt|capital)|risk-?free|equity risk premium|\berp\b|\bke\b|\bkd\b|tax rate|pre-?tax|after-?tax|\brate\b|premium|weight|e\s*\/\s*\(d\s*\+\s*e\)|d\s*\/\s*\(d\s*\+\s*e\)|terminal growth|\bg\b|margin|yield|cagr|upside|downside|probability|growth/.test(
+      low,
+    ) &&
+    !/terminal value|equity value|enterprise value|price target/.test(low)
+  ) {
+    return 'pct'
+  }
+  const inherited = ibColKind(rowLabel, 1)
+  return inherited === 'text' ? null : inherited
 }
 
 function parseIbNum(plain: string): {
@@ -133,9 +172,38 @@ export function formatIbTableCell(
 ): string {
   const raw = cell ?? ''
   let kind = ibColKind(header, colIndex)
-  if (kind === 'text' && colIndex > 0 && rowLabel.trim()) {
-    const inherited = ibColKind(rowLabel, 1)
-    if (inherited !== 'text') kind = inherited
+  const fromCell = ibCellKind(raw)
+  if (fromCell) {
+    kind = fromCell
+  } else {
+    const fromRow = colIndex > 0 ? ibRowKind(rowLabel) : null
+    if (fromRow) {
+      if (kind === 'text' || isGenericValueHeader(header)) kind = fromRow
+      else if (fromRow === 'pct' && (kind === 'money' || kind === 'money_m' || kind === 'money_bn')) {
+        kind = 'pct'
+      } else if (fromRow === 'multiple' && (kind === 'money' || kind === 'money_m')) {
+        kind = 'multiple'
+      } else if (fromRow === 'shares' && (kind === 'money' || kind === 'money_m')) {
+        kind = 'shares'
+      } else if (
+        (fromRow === 'money' || fromRow === 'money_m' || fromRow === 'money_bn') &&
+        kind === 'pct'
+      ) {
+        kind = fromRow
+      }
+    } else if (kind === 'text' && colIndex > 0 && rowLabel.trim()) {
+      const inherited = ibColKind(rowLabel, 1)
+      if (inherited !== 'text') kind = inherited
+    }
+  }
+  // 7A-5 WACC × TGR grid is $/share even when headers are "TGR: 2.5%".
+  if (
+    !fromCell &&
+    colIndex > 0 &&
+    /\bwacc\s*:/i.test(rowLabel) &&
+    /tgr\s*:|terminal growth/i.test(header)
+  ) {
+    kind = 'money'
   }
   if (kind === 'text') return raw
   const core = stripMdMarks(raw)

@@ -6,7 +6,7 @@ import { HoverTip } from './HoverTip'
 import styles from '../FinancialsPage.module.css'
 
 const W = 920
-const H = 280
+const H = 150
 const PAD_L = 8
 const PAD_R = 64
 const PAD_T = 14

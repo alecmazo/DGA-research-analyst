@@ -51,7 +51,10 @@ function RankCardView({
     : 'Vs Industry blank — no industry/sector peers with financials in the store yet.'
 
   return (
-    <div className={styles.rankCard}>
+    <div
+      className={styles.rankCard}
+      title={`Rating = vs this company's own history · Vs Industry = vs store peers · ${peerNote}`}
+    >
       <div className={styles.rankHead}>
         <span className={styles.rankTitle}>{c.title}</span>
         <span className={styles.rankHeadSpacer} />
@@ -69,7 +72,10 @@ function RankCardView({
           <span className={styles.rankOf}>/10</span>
         </span>
       </div>
-      <div className={styles.rankHint}>
+      <div
+        className={styles.rankHint}
+        title={`Rating = vs this company's own history · Vs Industry = vs store peers · ${peerNote}`}
+      >
         Rating = vs this company&apos;s own history · Vs Industry = vs store peers ·{' '}
         {peerNote}
       </div>

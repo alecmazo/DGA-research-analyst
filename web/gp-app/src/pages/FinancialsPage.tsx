@@ -69,7 +69,7 @@ export function FinancialsPage() {
 
   return (
     <div className={`${page.page} ${styles.shell}`}>
-      <header className={page.hero}>
+      <header className={`${page.hero} ${styles.heroTight}`}>
         <div>
           <p className={page.kicker}>Research · SEC store</p>
           <h1 className={page.h1}>Financials</h1>
