@@ -12067,8 +12067,17 @@ def _builder_fetch_candidates() -> list[dict]:
                    yfinance analyst targetMeanPrice when available
     """
     now = time.time()
+    cand_ts = float(_BUILDER_CANDIDATES_CACHE.get("ts") or 0)
+    comps_ts = float(_BUILDER_COMPS_CACHE.get("ts") or 0)
     if (_BUILDER_CANDIDATES_CACHE["data"] is not None
-            and (now - _BUILDER_CANDIDATES_CACHE["ts"]) < _BUILDER_CANDIDATES_TTL):
+            and (now - cand_ts) < _BUILDER_CANDIDATES_TTL
+            and comps_ts <= cand_ts):
+        if not comps_ts and not _BUILDER_COMPS_CACHE.get("busy"):
+            try:
+                threading.Thread(target=_builder_extract_comps_bg, daemon=True,
+                                 name="builder-comps").start()
+            except Exception:
+                pass
         _BUILDER_CANDIDATES_DIAG.update(cache_hit=True, returned=len(_BUILDER_CANDIDATES_CACHE["data"]))
         return _BUILDER_CANDIDATES_CACHE["data"]
 
