@@ -144,39 +144,35 @@ export default function HomeScreen({ navigation, route }) {
         .filter(Boolean)
         .slice(0, 14);
       if (!tickers.length) { setEarnItems([]); return; }
-      const results = await Promise.all(
-        tickers.map(async (tk) => {
-          try {
-            const d = await api.getEarnings(tk);
-            if (!d || d.ok === false) return null;
-            const ev = d.event || {};
-            const res = d.result || {};
-            const status = d.status || 'unknown';
-            // Only surface names with a schedule or print in the ±14d window
-            if (!ev.date && res.eps_actual == null && res.revenue_actual == null) return null;
-            return {
-              ticker: tk,
-              status,
-              date: ev.date || null,
-              days_until: ev.days_until,
-              session: ev.session || null,
-              fiscal_quarter: ev.fiscal_quarter || null,
-              name: ev.name || null,
-              eps_actual: res.eps_actual,
-              eps_estimate: res.eps_estimate,
-              surprise_pct: res.surprise_pct,
-              beat: res.beat || null,
-              revenue_actual: res.revenue_actual,
-              revenue_estimate: res.revenue_estimate,
-              revenue_surprise_pct: res.revenue_surprise_pct,
-              revenue_beat: res.revenue_beat || null,
-              raw: d,
-            };
-          } catch {
-            return null;
-          }
-        }),
-      );
+      const batch = await api.getEarningsBatch(tickers).catch(() => null);
+      const cards = (batch && batch.cards) || {};
+      const results = tickers.map((tk) => {
+        const d = cards[tk];
+        if (!d || d.ok === false) return null;
+        const ev = d.event || {};
+        const res = d.result || {};
+        const status = d.status || 'unknown';
+        // Only surface names with a schedule or print in the ±14d window
+        if (!ev.date && res.eps_actual == null && res.revenue_actual == null) return null;
+        return {
+          ticker: tk,
+          status,
+          date: ev.date || null,
+          days_until: ev.days_until,
+          session: ev.session || null,
+          fiscal_quarter: ev.fiscal_quarter || null,
+          name: ev.name || null,
+          eps_actual: res.eps_actual,
+          eps_estimate: res.eps_estimate,
+          surprise_pct: res.surprise_pct,
+          beat: res.beat || null,
+          revenue_actual: res.revenue_actual,
+          revenue_estimate: res.revenue_estimate,
+          revenue_surprise_pct: res.revenue_surprise_pct,
+          revenue_beat: res.revenue_beat || null,
+          raw: d,
+        };
+      });
       const items = results.filter(Boolean);
       // Sort: most recent/upcoming first (reported yesterday → today → soon)
       items.sort((a, b) => {

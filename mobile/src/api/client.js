@@ -357,6 +357,14 @@ export const api = {
   // Free earnings card (EPS + revenue actual/consensus) — zero LLM
   getEarnings: (ticker) =>
     request(`/api/earnings/${encodeURIComponent(String(ticker || '').toUpperCase())}`),
+  getEarningsBatch: (tickers) => {
+    const tks = (tickers || [])
+      .map((t) => String(t || '').toUpperCase().trim())
+      .filter(Boolean)
+      .slice(0, 20);
+    if (!tks.length) return Promise.resolve({ ok: true, cards: {}, tickers: [] });
+    return request(`/api/earnings/batch?tickers=${encodeURIComponent(tks.join(','))}`);
+  },
 
   // Email a DGA-branded PDF of an analysis (same endpoint as the web desk)
   emailResearchPdf: ({ title, question, answerHtml, stamp, to, subject } = {}) =>

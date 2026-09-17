@@ -25,6 +25,13 @@ _fin_sync_jobs: dict[str, dict] = {}             # financials sync jobs
 _FIN_SYNC_CAP = 800
 _FIN_UNIVERSE_CACHE: dict[str, tuple] = {}        # key → (epoch, rows)
 _FIN_UNIVERSE_TTL_S = 24 * 3600
+_FIN_UNIVERSE_WARM_LOCK = threading.Lock()
+_FIN_UNIVERSE_WARMING = False
+_FIN_DASH_CACHE: dict = {}                         # (ticker, period) → (epoch, payload)
+_FIN_DASH_TTL_S = 90
+_FIN_8K_CACHE: dict = {}                           # ticker → (epoch, payload)
+_FIN_8K_TTL_S = 3600
+_FIN_8K_NEG_TTL_S = 900
 # Overnight: sequential SEC pulls (1 ticker at a time) → same RAM footprint as
 # interactive use. No LLM tokens. Postgres growth is slim numerics only
 # (~tens of MB at full US-listed scale). Safe on Railway hobby/pro without
@@ -59,7 +66,7 @@ _FIN_COLMAP = {
 }
 
 
-def _http_get_text(url: str, timeout: float = 25.0) -> str:
+def _http_get_text(url: str, timeout: float = 8.0) -> str:
     """Free HTTP GET with a real User-Agent. Falls back to an unverified SSL
     context when the local cert store is broken (common on some macOS Python
     installs); Railway/production normally uses the verified path."""
@@ -818,18 +825,28 @@ def _fin_recent_earnings_8k(ticker: str, after_period_end: str | None = None) ->
     Returns filing meta so the UI can show 'earnings out, 10-Q not yet in XBRL store'.
     Does not invent financial numbers.
     """
+    tk = (ticker or "").upper().strip()
+    now = time.time()
+    hit = _FIN_8K_CACHE.get(tk)
+    if hit:
+        ts, val = hit
+        ttl = _FIN_8K_TTL_S if val else _FIN_8K_NEG_TTL_S
+        if now - ts < ttl:
+            return val
     try:
         import sec_edgar_xbrl as _edgar
         import requests as _req
         ua = analyst.get_sec_user_agent()
         cik = _edgar.resolve_cik(ticker, user_agent=ua)
         if not cik:
+            _FIN_8K_CACHE[tk] = (now, None)
             return None
         cik10 = str(cik).zfill(10)
         url = f"https://data.sec.gov/submissions/CIK{cik10}.json"
         r = _req.get(url, headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
-                     timeout=25)
+                     timeout=2.5)
         if r.status_code != 200:
+            _FIN_8K_CACHE[tk] = (now, None)
             return None
         recent = (r.json().get("filings") or {}).get("recent") or {}
         forms = recent.get("form") or []
@@ -848,15 +865,19 @@ def _fin_recent_earnings_8k(ticker: str, after_period_end: str | None = None) ->
                 continue
             if after and filed <= after:
                 continue
-            return {
+            found = {
                 "filed": filed,
                 "accession": accs[i] if i < len(accs) else None,
                 "items": it,
                 "note": "Earnings 8-K (Item 2.02) on file; full 10-Q/XBRL may not be filed yet",
             }
+            _FIN_8K_CACHE[tk] = (now, found)
+            return found
+        _FIN_8K_CACHE[tk] = (now, None)
         return None
     except Exception as e:
         print(f"[fin] 8-K probe {ticker}: {e!s:.100}", flush=True)
+        _FIN_8K_CACHE[tk] = (now, None)
         return None
 
 
@@ -1667,10 +1688,31 @@ def financials_universes(request: Request):
         },
     }
     for key in ("sp500", "nasdaq100", "sp500_nasdaq100", "us_listed"):
+        cached = _FIN_UNIVERSE_CACHE.get(key)
+        if cached and cached[1] is not None:
+            out[key]["count"] = len(cached[1])
+        else:
+            out[key]["count"] = out[key].get("count")
+    global _FIN_UNIVERSE_WARMING
+    if _FIN_UNIVERSE_WARM_LOCK.acquire(blocking=False):
         try:
-            out[key]["count"] = len(_fin_universe_rows(key))
-        except Exception as e:
-            out[key]["error"] = str(e)[:120]
+            if not _FIN_UNIVERSE_WARMING:
+                _FIN_UNIVERSE_WARMING = True
+
+                def _warm_universes():
+                    global _FIN_UNIVERSE_WARMING
+                    try:
+                        for key in ("sp500", "nasdaq100", "us_listed"):
+                            try:
+                                _fin_universe_rows(key)
+                            except Exception as e:
+                                print(f"[fin-universe] warm {key}: {e!s:.120}", flush=True)
+                    finally:
+                        _FIN_UNIVERSE_WARMING = False
+                threading.Thread(target=_warm_universes, daemon=True,
+                                 name="fin-universe-warm").start()
+        finally:
+            _FIN_UNIVERSE_WARM_LOCK.release()
     try:
         with _fund_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT COUNT(DISTINCT ticker) FROM company_financials")
@@ -4265,6 +4307,10 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     _ensure_financials_table()
     tk = ticker.upper().strip()
     pt = period_type if period_type in ("annual", "quarter") else "annual"
+    dash_ck = (tk, pt)
+    hit = _FIN_DASH_CACHE.get(dash_ck)
+    if hit and (time.time() - hit[0]) < _FIN_DASH_TTL_S and isinstance(hit[1], dict):
+        return dict(hit[1])
 
     rows = [r for r in _fin_rows_for_ticker(tk, pt)]
     rows.reverse()                                   # chronological, oldest first
@@ -4562,7 +4608,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     except Exception:
         earnings_pending = None
 
-    return {"ok": True, "ticker": tk,
+    payload = {"ok": True, "ticker": tk,
             "entity_name": rows[-1].get("entity_name") or tk,
             "sector": meta.get("sector") or peers.get("sector"),
             "industry": meta.get("industry") or peers.get("industry"),
@@ -4601,6 +4647,11 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
                        if earnings_pending else "")
                 ),
             }}
+    try:
+        _FIN_DASH_CACHE[dash_ck] = (time.time(), payload)
+    except Exception:
+        pass
+    return payload
 
 
 # ── Value Line–style financial sheet (pure store, zero LLM, zero continuous cost) ─

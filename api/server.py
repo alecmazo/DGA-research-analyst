@@ -3983,24 +3983,11 @@ def _claims_or_401(request: Request) -> dict:
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
-@app.get("/api/earnings/{ticker}")
-def earnings_detail(ticker: str, request: Request):
-    """Earnings card for watchlist chip: schedule + actual vs estimate beat/miss.
+_EARNINGS_INFLIGHT = threading.Semaphore(3)
 
-    Free Nasdaq sources only — zero LLM tokens.
-    """
-    _claims_or_401(request)
-    tk = (ticker or "").strip().upper()
-    if not tk or len(tk) > 12 or not re.fullmatch(r"[A-Z0-9.\-]+", tk):
-        raise HTTPException(status_code=422, detail="Invalid ticker")
-    try:
-        from market_data import earnings_card
-        card = earnings_card(tk, horizon_days=14, include_past_days=14)
-    except Exception as e:
-        print(f"[earnings] card failed {tk}: {e!s:.160}", flush=True)
-        return JSONResponse({"ok": False, "ticker": tk, "error": str(e)[:200]},
-                            status_code=500)
-    # Attach saved-report pointer so the card can link to DGA report
+
+def _earnings_attach_extras(tk: str, card: dict) -> dict:
+    """DB extras for an earnings card. No Yahoo on this path (quote store only)."""
     has_report = False
     report_meta = None
     try:
@@ -4027,9 +4014,13 @@ def earnings_detail(ticker: str, request: Request):
         pass
     card["has_report"] = has_report
     card["report"] = report_meta
-    # Live quote (optional, free store/batch)
     try:
-        q = (batch_quotes(tk) or {}).get(tk) or {}
+        q = {}
+        entry = _QUOTE_CACHE.get(tk) if isinstance(_QUOTE_CACHE, dict) else None
+        if entry and entry.get("price") is not None:
+            q = {"price": entry.get("price"), "pct_change": entry.get("pct_change")}
+        elif _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            q = (_db_quotes([tk]) or {}).get(tk) or {}
         if q.get("price") is not None:
             card["quote"] = {
                 "price": q.get("price"),
@@ -4037,7 +4028,6 @@ def earnings_detail(ticker: str, request: Request):
             }
     except Exception:
         pass
-    # Enrich free notes with DGA report rating/PT when we have one
     try:
         notes = card.get("notes") if isinstance(card.get("notes"), dict) else {}
         bullets = list(notes.get("bullets") or [])
@@ -4056,7 +4046,6 @@ def earnings_detail(ticker: str, request: Request):
                 card["notes"] = notes
     except Exception:
         pass
-    # Stock-moving Q&A highlights from indexed earnings-call chunks (free, no LLM)
     try:
         ev_date = None
         try:
@@ -4072,6 +4061,84 @@ def earnings_detail(ticker: str, request: Request):
         }
     return card
 
+
+def _earnings_card_payload(tk: str) -> dict:
+    """Build one earnings card under a process-wide concurrency cap."""
+    from market_data import earnings_card
+    with _EARNINGS_INFLIGHT:
+        card = earnings_card(tk, horizon_days=14, include_past_days=14)
+    if not isinstance(card, dict):
+        card = {"ok": False, "ticker": tk, "error": "empty card"}
+    return _earnings_attach_extras(tk, card)
+
+
+@app.get("/api/earnings/batch")
+def earnings_batch(request: Request, tickers: str = ""):
+    """Watchlist earnings strip — one round-trip, shared calendar, cap 20 names.
+
+    Same payload as GET /api/earnings/{ticker} per name. Does not drop fields.
+    """
+    _claims_or_401(request)
+    tks = []
+    seen = set()
+    for raw in (tickers or "").split(","):
+        tk = (raw or "").strip().upper()
+        if not tk or tk in seen or len(tk) > 12 or not re.fullmatch(r"[A-Z0-9.\-]+", tk):
+            continue
+        seen.add(tk)
+        tks.append(tk)
+        if len(tks) >= 20:
+            break
+    if not tks:
+        return {"ok": True, "cards": {}, "tickers": []}
+    # Warm the Nasdaq day calendar once so N cards don't each fan out 28 HTTP days.
+    try:
+        from market_data import earnings_upcoming
+        earnings_upcoming(None, horizon_days=14, include_past_days=14)
+    except Exception as e:
+        print(f"[earnings] batch calendar warm: {e!s:.120}", flush=True)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    cards: dict = {}
+    pool = ThreadPoolExecutor(max_workers=3)
+    try:
+        futs = {pool.submit(_earnings_card_payload, tk): tk for tk in tks}
+        try:
+            for fut in as_completed(futs, timeout=8):
+                tk = futs[fut]
+                try:
+                    cards[tk] = fut.result(timeout=0.1)
+                except Exception as e:
+                    print(f"[earnings] batch {tk}: {e!s:.140}", flush=True)
+                    cards[tk] = {"ok": False, "ticker": tk, "error": str(e)[:200]}
+        except Exception:
+            pass
+    finally:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=False)
+    for tk in tks:
+        cards.setdefault(tk, {"ok": False, "ticker": tk, "error": "timeout"})
+    return {"ok": True, "cards": cards, "tickers": tks}
+
+
+@app.get("/api/earnings/{ticker}")
+def earnings_detail(ticker: str, request: Request):
+    """Earnings card for watchlist chip: schedule + actual vs estimate beat/miss.
+
+    Free Nasdaq sources only — zero LLM tokens.
+    """
+    _claims_or_401(request)
+    tk = (ticker or "").strip().upper()
+    if not tk or len(tk) > 12 or not re.fullmatch(r"[A-Z0-9.\-]+", tk):
+        raise HTTPException(status_code=422, detail="Invalid ticker")
+    try:
+        card = _earnings_card_payload(tk)
+    except Exception as e:
+        print(f"[earnings] card failed {tk}: {e!s:.160}", flush=True)
+        return JSONResponse({"ok": False, "ticker": tk, "error": str(e)[:200]},
+                            status_code=500)
+    return card
 
 
 # Process-level earnings calendar cache (day window, not per-user). Nasdaq
@@ -8146,7 +8213,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui619-20260915-weight-chart"
+WEB_BUILD_VERSION = "ui620-20260916-load-times"
 
 
 @app.get("/api/build")
@@ -33755,7 +33822,7 @@ def _earnings_call_highlights(ticker: str, limit: int = 5,
                 SELECT quarter, call_date, chunk_text
                   FROM call_chunks
                  WHERE ticker = %s
-                 LIMIT 400
+                 LIMIT 80
             """, (tk,))
             rows = cur.fetchall() or []
     except Exception as e:

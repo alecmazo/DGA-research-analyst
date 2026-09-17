@@ -21,6 +21,22 @@ from __future__ import annotations
 import os
 
 
+def _bounded(fn, timeout_s: float, default=None):
+    """Run fn() with a hard timeout. Never wait on hung worker shutdown."""
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = pool.submit(fn)
+        return fut.result(timeout=max(0.1, float(timeout_s)))
+    except Exception:
+        return default
+    finally:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=False)
+
+
 # ── Legacy Tradier stubs (disabled — always unavailable) ─────────────────────
 def _tradier_cfg():
     return "", ""
@@ -1057,7 +1073,7 @@ def nasdaq_earnings_for_day(day_iso: str) -> list[dict]:
                 "Origin": "https://www.nasdaq.com",
                 "Referer": "https://www.nasdaq.com/market-activity/earnings",
             },
-            timeout=8,
+            timeout=3.5,
         )
         if r.status_code == 200:
             data = (r.json() or {}).get("data") or {}
@@ -1179,6 +1195,9 @@ def earnings_upcoming(symbols: list[str] | None = None,
 
 _EARNINGS_DETAIL_CACHE: dict = {}  # symbol -> (epoch, payload)
 _EARNINGS_DETAIL_TTL_S = 30 * 60
+_EARNINGS_CARD_CACHE: dict = {}  # (sym, horizon, past) -> (epoch, payload)
+_EARNINGS_CARD_TTL_S = 10 * 60
+_EARNINGS_CARD_BUDGET_S = float(os.environ.get("EARNINGS_CARD_BUDGET_S") or "3.2")
 
 
 def company_ir_links(symbol: str) -> dict:
@@ -1322,7 +1341,7 @@ def nasdaq_earnings_surprise(symbol: str) -> dict:
                 "User-Agent": "Mozilla/5.0 (compatible; DGA-Capital/1.0)",
                 "Accept": "application/json",
             },
-            timeout=12,
+            timeout=3.5,
         )
         if r.status_code == 200:
             data = (r.json() or {}).get("data") or {}
@@ -1374,7 +1393,7 @@ def yfinance_earnings_surprise(symbol: str) -> dict:
         t = yf.Ticker(sym)
         df = None
         try:
-            df = t.get_earnings_dates(limit=12)
+            df = _bounded(lambda: t.get_earnings_dates(limit=12), 2.2, default=None)
         except Exception:
             df = getattr(t, "earnings_dates", None)
         if df is not None and len(df) > 0:
@@ -1487,9 +1506,21 @@ def earnings_card(symbol: str, horizon_days: int = 5,
     when Nasdaq lags same-day BMO/AMC prints. No LLM.
     """
     from datetime import date, datetime, timedelta
+    import time as _time
     sym = (symbol or "").strip().upper()
     if not sym:
         return {"ok": False, "error": "invalid ticker"}
+    ck = (sym, int(horizon_days), int(include_past_days))
+    hit = _EARNINGS_CARD_CACHE.get(ck)
+    if hit and _time.time() - hit[0] < _EARNINGS_CARD_TTL_S:
+        cached = hit[1]
+        if isinstance(cached, dict):
+            return dict(cached)
+    t0 = _time.time()
+    budget = _EARNINGS_CARD_BUDGET_S
+
+    def _left() -> float:
+        return budget - (_time.time() - t0)
 
     upcoming = earnings_upcoming([sym], horizon_days=horizon_days,
                                  include_past_days=include_past_days).get(sym)
@@ -1537,7 +1568,7 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         result_source = latest.get("source") or "nasdaq"
 
     # Nasdaq lag: yfinance often has Reported EPS same morning for BMO
-    if status != "reported" or (result and result.get("eps_actual") is None):
+    if _left() > 0.8 and (status != "reported" or (result and result.get("eps_actual") is None)):
         yf_s = yfinance_earnings_surprise(sym)
         yf_latest = yf_s.get("latest")
         if yf_latest and yf_latest.get("eps_actual") is not None and _match_event(yf_latest):
@@ -1602,10 +1633,11 @@ def earnings_card(symbol: str, horizon_days: int = 5,
 
     # Street range / revenue consensus from Yahoo calendar (free, no LLM)
     street_range: dict = {}
-    try:
-        street_range = yfinance_earnings_calendar_context(sym) or {}
-    except Exception as e:
-        print(f"[market_data] calendar context {sym}: {e!s:.100}", flush=True)
+    if _left() > 0.7:
+        try:
+            street_range = yfinance_earnings_calendar_context(sym) or {}
+        except Exception as e:
+            print(f"[market_data] calendar context {sym}: {e!s:.100}", flush=True)
 
     # Actual quarterly revenue (+ EPS fallback) from Yahoo income stmt (free).
     # CRITICAL: never treat a prior filed quarter's statement as "this" print
@@ -1632,7 +1664,7 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         )
         # Only pull statement actuals when print window is open/past —
         # never for pure future events.
-        if not event_still_future:
+        if not event_still_future and _left() > 0.7:
             actuals = yfinance_quarterly_actuals(sym, fiscal_quarter_hint=fq_hint) or {}
             if actuals and fq_hint and not _fiscal_quarter_labels_match(
                     fq_hint, actuals.get("period_label") or ""):
@@ -1682,10 +1714,10 @@ def earnings_card(symbol: str, horizon_days: int = 5,
             except Exception:
                 pass
             # Only hit SEC when print window is open/past (not pure future).
-            if status in ("reported", "pending_update") or (
+            if _left() > 0.7 and (status in ("reported", "pending_update") or (
                 upcoming and (upcoming.get("days_until") is not None)
                 and int(upcoming.get("days_until") or 0) <= 0
-            ):
+            )):
                 k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
                 press_release_url = k8.get("press_release_url") or None
                 filing_url = k8.get("filing_url") or None
@@ -1716,10 +1748,11 @@ def earnings_card(symbol: str, horizon_days: int = 5,
 
     # Company IR site (Yahoo free profile) — always try for the earnings card link.
     ir_links: dict = {}
-    try:
-        ir_links = company_ir_links(sym) or {}
-    except Exception as e:
-        print(f"[market_data] ir_links card {sym}: {e!s:.100}", flush=True)
+    if _left() > 0.5:
+        try:
+            ir_links = company_ir_links(sym) or {}
+        except Exception as e:
+            print(f"[market_data] ir_links card {sym}: {e!s:.100}", flush=True)
 
     rev_estimate = street_range.get("revenue_avg")
     rev_surprise_pct = None
@@ -1775,7 +1808,7 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         revenue_beat=rev_beat,
     )
 
-    return {
+    out = {
         "ok": True,
         "ticker": sym,
         "status": status,  # scheduled | reported | pending_update
@@ -1821,6 +1854,11 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         "filing_url": filing_url or None,
         "cost": "free · no LLM",
     }
+    try:
+        _EARNINGS_CARD_CACHE[ck] = (_time.time(), out)
+    except Exception:
+        pass
+    return dict(out)
 
 
 def _fiscal_quarter_labels_match(hint: str, label: str) -> bool:
@@ -2189,7 +2227,7 @@ def sec_8k_earnings_release_actuals(
             r = _req.get(
                 f"https://data.sec.gov/submissions/CIK{cik10}.json",
                 headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
-                timeout=25,
+                timeout=3.5,
             )
             if r.status_code != 200:
                 out = {}
@@ -2248,7 +2286,7 @@ def sec_8k_earnings_release_actuals(
             idx = _req.get(
                 idx_url,
                 headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
-                timeout=20,
+                timeout=3.5,
             )
             docs: list[str] = []
             if idx.status_code == 200:
@@ -2309,7 +2347,7 @@ def sec_8k_earnings_release_actuals(
                     pr = _req.get(
                         url,
                         headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
-                        timeout=25,
+                        timeout=3.5,
                     )
                 except Exception:
                     continue
