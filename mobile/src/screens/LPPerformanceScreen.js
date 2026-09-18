@@ -15,6 +15,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppResume } from '../hooks/useAppResume';
 import { v2Fetch, getV2User, logoutV2 } from '../api/client';
+import { readScreenCache, writeScreenCache, screenCacheFresh } from '../api/screenCache';
 import AppHeader from '../components/AppHeader';
 import { haptics, useTheme } from '../design';
 
@@ -428,9 +429,15 @@ export default function LPPerformanceScreen({ onLogout, isDemo, onSwitchToAdmin 
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError]           = useState(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setError(null);
     try {
+      const cached = await readScreenCache('lp_overview');
+      if (cached) {
+        setData(cached);
+        setLoading(false);
+        if (!force && screenCacheFresh('lp_overview', 60_000)) return;
+      }
       const [user, resp] = await Promise.all([
         getV2User(),
         v2Fetch('/api/v2/lp/me/overview'),
@@ -439,6 +446,7 @@ export default function LPPerformanceScreen({ onLogout, isDemo, onSwitchToAdmin 
       if (!resp.ok) throw new Error('overview ' + resp.status);
       const json = await resp.json();
       setData(json);
+      writeScreenCache('lp_overview', json);
     } catch (err) {
       setError(err?.message || 'Could not load your portfolio.');
     } finally {
@@ -452,7 +460,7 @@ export default function LPPerformanceScreen({ onLogout, isDemo, onSwitchToAdmin 
   const onRefresh = async () => {
     haptics.onPressTab?.();
     setRefreshing(true);
-    await load();
+    await load(true);
     setRefreshing(false);
   };
 

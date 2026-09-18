@@ -425,6 +425,7 @@ export const api = {
   // ---------- Markets dashboard (mobile home tab) ----------
   // Live index ribbon (S&P, Nasdaq, Dow, VIX, …)
   getMarketIndices: () => request('/api/market/indices'),
+  getMobileHome: () => request('/api/mobile/home'),
   // Desk Market Wire — free macro RSS (no LLM). Used on Research tab.
   // Server path is public; still send tokens when present. Multiple
   // fallbacks so a single auth mode never blanks the card.

@@ -5,7 +5,7 @@
  * Each account section is collapsible — tap the header to toggle.
  *
  * Data source: GET /api/v2/lp/me/positions
- * Auto-refreshes every 30 seconds. Pull-to-refresh supported.
+ * Auto-refreshes every 60 seconds. Pull-to-refresh supported.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -31,8 +31,9 @@ import { useTheme } from '../design';
 
 const VIEW_CONFIG_KEY = 'positions_view_config_v1';
 const BLOTTER_CONFIG_KEY = 'positions_blotter_config_v1';
+const POS_DATA_KEY = '@dga_pos_payload_v1';
 
-const AUTO_REFRESH_MS = 30_000;
+const AUTO_REFRESH_MS = 60_000;
 const NAVY     = '#0A1628';
 const NAVY2    = '#0d1c2e';
 const NAVY3    = '#132040';
@@ -230,6 +231,7 @@ export default function WatchlistScreen({ navigation }) {
   const [impersonated, setImpersonated] = useState(false);
   const [impName,      setImpName]      = useState('');
   const timerRef                        = useRef(null);
+  const paintedRef                      = useRef(false);
 
   // Computed ordered group list
   const groups = orderedKeys.map(k => groupMap[k]).filter(Boolean);
@@ -279,9 +281,88 @@ export default function WatchlistScreen({ navigation }) {
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
 
+  const commitPositions = useCallback((data, savedConfig) => {
+    const pos  = (data.positions || []).sort((a, b) =>
+      (b.market_weight_pct || 0) - (a.market_weight_pct || 0)
+    );
+
+    setTotalValue(data.total_market_value ?? null);
+    setUpdatedAt(fmtTime());
+
+    let totalAbs = 0, totalPrev = 0;
+    pos.forEach(p => {
+      const qty = Number(p.total_qty) || 0;
+      const chg = Number(p.day_change_abs) || 0;
+      const mv  = Number(p.market_value)   || 0;
+      totalAbs  += chg * qty;
+      totalPrev += mv - chg * qty;
+    });
+    setDayChange({ abs: totalAbs, pct: totalPrev ? (totalAbs / totalPrev) * 100 : 0 });
+
+    const map = {};
+    const defaultOrder = [];
+    pos.forEach(p => {
+      const key = p.fund_id || p.account_name || 'My Account';
+      if (!map[key]) {
+        map[key] = {
+          key,
+          title:      p.account_name || 'My Account',
+          sourceType: p.source_type  || 'managed_account',
+          stakePct:   p.stake_pct    ?? 100,
+          positions:  [],
+          navSum:     0,
+          daySum:     0,
+          dayValid:   false,
+        };
+        defaultOrder.push(key);
+      }
+      map[key].positions.push(p);
+      if (p.market_value)   map[key].navSum += p.market_value;
+      if (p.day_change_abs != null && p.total_qty != null) {
+        map[key].daySum  += p.day_change_abs * p.total_qty;
+        map[key].dayValid = true;
+      }
+    });
+
+    const savedKeys = savedConfig?.orderedKeys || [];
+    const knownKeys = new Set(Object.keys(map));
+    const ordered = [
+      ...savedKeys.filter(k => knownKeys.has(k)),
+      ...defaultOrder.filter(k => !savedKeys.includes(k)),
+    ];
+
+    const savedOpen = savedConfig?.openMap || {};
+    const opens = {};
+    ordered.forEach(k => {
+      opens[k] = k in savedOpen ? savedOpen[k] : true;
+    });
+
+    Object.values(map).forEach(grp => {
+      const groupTotal = grp.navSum;
+      grp.positions = grp.positions.map(p => ({
+        ...p,
+        _acct_weight_pct: groupTotal > 0 && p.market_value != null
+          ? (p.market_value / groupTotal) * 100
+          : null,
+      }));
+    });
+
+    let fundTotal = 0, acctTotal = 0;
+    Object.values(map).forEach(grp => {
+      if (grp.sourceType === 'lp_fund') fundTotal += grp.navSum;
+      else                              acctTotal += grp.navSum;
+    });
+    setFundStakes(fundTotal > 0 ? fundTotal : null);
+    setManagedNav(acctTotal > 0 ? acctTotal : null);
+    setGroupMap(map);
+    setOrderedKeys(ordered);
+    setOpenMap(prev => ({ ...opens, ...prev }));
+    paintedRef.current = true;
+  }, []);
+
   const fetchPositions = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-    else if (!orderedKeys.length) setLoading(true);
+    else if (!paintedRef.current) setLoading(true);
     setError(null);
 
     try {
@@ -291,97 +372,32 @@ export default function WatchlistScreen({ navigation }) {
       ]);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      const pos  = (data.positions || []).sort((a, b) =>
-        (b.market_weight_pct || 0) - (a.market_weight_pct || 0)
-      );
-
-      setTotalValue(data.total_market_value ?? null);
-      setUpdatedAt(fmtTime());
-
-      // Aggregate day change
-      let totalAbs = 0, totalPrev = 0;
-      pos.forEach(p => {
-        const qty = Number(p.total_qty) || 0;
-        const chg = Number(p.day_change_abs) || 0;
-        const mv  = Number(p.market_value)   || 0;
-        totalAbs  += chg * qty;
-        totalPrev += mv - chg * qty;
-      });
-      setDayChange({ abs: totalAbs, pct: totalPrev ? (totalAbs / totalPrev) * 100 : 0 });
-
-      // Build group map keyed by fund_id / account_name
-      const map = {};
-      const defaultOrder = [];
-      pos.forEach(p => {
-        const key = p.fund_id || p.account_name || 'My Account';
-        if (!map[key]) {
-          map[key] = {
-            key,
-            title:      p.account_name || 'My Account',
-            sourceType: p.source_type  || 'managed_account',
-            stakePct:   p.stake_pct    ?? 100,
-            positions:  [],
-            navSum:     0,
-            daySum:     0,
-            dayValid:   false,
-          };
-          defaultOrder.push(key);
-        }
-        map[key].positions.push(p);
-        if (p.market_value)   map[key].navSum += p.market_value;
-        if (p.day_change_abs != null && p.total_qty != null) {
-          map[key].daySum  += p.day_change_abs * p.total_qty;
-          map[key].dayValid = true;
-        }
-      });
-
-      // Apply saved order: saved keys first (if still present), new keys appended
-      const savedKeys = savedConfig?.orderedKeys || [];
-      const knownKeys = new Set(Object.keys(map));
-      const ordered = [
-        ...savedKeys.filter(k => knownKeys.has(k)),
-        ...defaultOrder.filter(k => !savedKeys.includes(k)),
-      ];
-
-      // Apply saved open/close state; default = open for any unsaved key
-      const savedOpen = savedConfig?.openMap || {};
-      const opens = {};
-      ordered.forEach(k => {
-        opens[k] = k in savedOpen ? savedOpen[k] : true;
-      });
-
-      // Recompute each position's weight relative to its own account (not global AUM)
-      Object.values(map).forEach(grp => {
-        const groupTotal = grp.navSum;
-        grp.positions = grp.positions.map(p => ({
-          ...p,
-          _acct_weight_pct: groupTotal > 0 && p.market_value != null
-            ? (p.market_value / groupTotal) * 100
-            : null,
-        }));
-      });
-
-      // Compute breakdown totals
-      let fundTotal = 0, acctTotal = 0;
-      Object.values(map).forEach(grp => {
-        if (grp.sourceType === 'lp_fund') fundTotal += grp.navSum;
-        else                              acctTotal += grp.navSum;
-      });
-      setFundStakes(fundTotal > 0 ? fundTotal : null);
-      setManagedNav(acctTotal > 0 ? acctTotal : null);
-      setGroupMap(map);
-      setOrderedKeys(ordered);
-      setOpenMap(prev => ({ ...opens, ...prev })); // keep any in-session toggles
-
+      AsyncStorage.setItem(POS_DATA_KEY, JSON.stringify(data)).catch(() => {});
+      commitPositions(data, savedConfig);
     } catch (e) {
       setError(e.message || 'Failed to load positions');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [loadViewConfig, orderedKeys.length]);
+  }, [loadViewConfig, commitPositions]);
 
   // ── Auto-refresh ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(POS_DATA_KEY);
+        if (!raw || paintedRef.current) return;
+        const data = JSON.parse(raw);
+        if (data && Array.isArray(data.positions) && data.positions.length) {
+          const savedConfig = await loadViewConfig();
+          commitPositions(data, savedConfig);
+          setLoading(false);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [loadViewConfig, commitPositions]);
 
   useFocusEffect(
     useCallback(() => {

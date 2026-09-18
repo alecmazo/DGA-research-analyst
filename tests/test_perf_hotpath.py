@@ -121,6 +121,28 @@ def test_gurus_page_paints_summary_before_history():
     assert load.find("setLoading(false)") < load.find("/history")
 
 
+def test_market_indices_never_loops_yfinance_tickers():
+    fn = _fn_src(ROOT / "api/server.py", "market_indices")
+    assert "yf.Ticker" not in fn
+    assert "_db_quotes" in fn
+    assert "_batch_quotes_fast" in fn
+    assert "_INDICES_TTL" in fn
+    assert "_INDEX_ALIASES" in fn
+
+
+def test_mobile_home_is_cheap_bootstrap():
+    fn = _fn_src(ROOT / "api/server.py", "mobile_home")
+    body = fn.split('"""', 2)[-1]
+    assert "market_indices()" in body
+    assert "watchlist_get(" in body
+    assert "fresh=False" in body
+    assert "get_idea" not in body.lower()
+    assert "daily_brief" not in body.lower()
+    assert "latest_scan" not in body.lower()
+    src = (ROOT / "api/server.py").read_text(encoding="utf-8")
+    assert 'WEB_BUILD_VERSION = "ui631-20260918-mobile-fast"' in src
+
+
 def test_mobile_fund_bars_have_yaxis():
     src = (ROOT / "mobile/src/screens/FinancialsScreen.js").read_text(encoding="utf-8")
     mini = src.split("function MiniBars")[1].split("function FundChart")[0]

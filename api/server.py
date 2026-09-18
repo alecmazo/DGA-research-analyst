@@ -2380,8 +2380,18 @@ _INDEX_TICKERS = [
     ("Bitcoin",       "BTC-USD"),
     ("Ethereum",      "ETH-USD"),
 ]
+# ETF stand-ins when Yahoo index symbols are missing from market_quotes.
+_INDEX_ALIASES = {
+    "^GSPC": "SPY",
+    "^DJI": "DIA",
+    "^IXIC": "QQQ",
+    "^RUT": "IWM",
+    "GC=F": "GLD",
+    "CL=F": "USO",
+    "DX-Y.NYB": "UUP",
+}
 _INDICES_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
-_INDICES_TTL = 15  # seconds
+_INDICES_TTL = 60  # seconds — mobile polls this; Yahoo-per-name was 6s×11
 
 # ─── Per-ticker news cache (15-min TTL) ────────────────────────────────
 # Powers the inline headline strip under each saved-report row. Pure
@@ -3636,39 +3646,53 @@ def news_desk_feeds(request: Request, market_limit: int = 12, filings_limit: int
 
 @app.get("/api/market/indices")
 def market_indices():
-    """Return live quotes for the 11 instruments shown in the GP index ribbon.
-    Cached server-side for 15s to stay well under yfinance rate limits even
-    if every GP browser polls aggressively."""
+    """Index ribbon. Store + 1.5s batch quotes — never 11 sequential yfinance
+    fast_info calls (that froze mobile Markets for tens of seconds)."""
     now = time.time()
     if _INDICES_CACHE["data"] and (now - _INDICES_CACHE["ts"]) < _INDICES_TTL:
         return _INDICES_CACHE["data"]
 
-    if yf is None:
-        raise HTTPException(status_code=503, detail="yfinance not installed")
+    symbols = [sym for _, sym in _INDEX_TICKERS]
+    aliases = [_INDEX_ALIASES[s] for s in symbols if s in _INDEX_ALIASES]
+    want = list(dict.fromkeys([*symbols, *aliases]))
+    qmap: dict = {}
+    try:
+        qmap = _db_quotes(want) or {}
+    except Exception as e:
+        print(f"[indices] store: {e!s:.120}", flush=True)
+    still = [s for s in want if (qmap.get(s) or {}).get("price") is None]
+    if still:
+        try:
+            extra = _batch_quotes_fast(still) or {}
+            for s, q in extra.items():
+                if (q or {}).get("price") is not None:
+                    qmap[s] = q
+        except Exception as e:
+            print(f"[indices] fast: {e!s:.120}", flush=True)
 
     out = []
     for label, sym in _INDEX_TICKERS:
+        q = qmap.get(sym) or qmap.get(_INDEX_ALIASES.get(sym) or "") or {}
+        last = q.get("price")
+        pct = q.get("pct_change")
         try:
-            # fast_info is lazy — property ACCESS does the network fetch, so it
-            # must happen inside the timeout thread, not after.
-            vals = _builder_call_timeout(
-                lambda s=sym: (lambda fi: (fi.last_price, fi.previous_close))(yf.Ticker(s).fast_info),
-                6.0, None)
-            if vals is None:
-                continue
-            last  = float(vals[0]) if vals[0] is not None else None
-            prev  = float(vals[1]) if vals[1] is not None else None
-            pct   = ((last - prev) / prev * 100.0) if (last and prev and prev > 0) else None
-            out.append({
-                "label":    label,
-                "symbol":   sym,
-                "price":    last,
-                "prev":     prev,
-                "pct":      pct,
-            })
-        except Exception as exc:
-            out.append({"label": label, "symbol": sym, "price": None, "prev": None, "pct": None, "error": str(exc)[:80]})
+            last = float(last) if last is not None else None
+        except (TypeError, ValueError):
+            last = None
+        try:
+            pct = float(pct) if pct is not None else None
+        except (TypeError, ValueError):
+            pct = None
+        out.append({
+            "label": label,
+            "symbol": sym,
+            "price": last,
+            "prev": None,
+            "pct": pct,
+        })
 
+    if not any(r.get("price") is not None for r in out) and _INDICES_CACHE.get("data"):
+        return _INDICES_CACHE["data"]
     payload = {"indices": out, "fetched_at": int(now)}
     _INDICES_CACHE.update(data=payload, ts=now)
     return payload
@@ -4725,6 +4749,29 @@ def watchlist_get(request: Request, fresh: bool = False):
         "reports": reports_map,
         "earnings_horizon_days": 14,
         "timing_ms": elapsed_ms,
+    }
+
+
+@app.get("/api/mobile/home")
+def mobile_home(request: Request):
+    """One round-trip for the Markets tab.
+
+    Indices (store) + watchlist (1.2s paint wall). No idea-feed, brief, or
+    scan — those stay off the first paint so the phone is usable.
+    """
+    _claims_or_401(request)
+    t0 = time.time()
+    try:
+        idx = market_indices() or {}
+    except Exception as e:
+        print(f"[mobile-home] indices: {e!s:.120}", flush=True)
+        idx = {"indices": []}
+    wl = watchlist_get(request, fresh=False)
+    return {
+        "ok": True,
+        "indices": (idx or {}).get("indices") or [],
+        "watchlist": wl if isinstance(wl, dict) else {},
+        "elapsed_ms": int((time.time() - t0) * 1000),
     }
 
 
@@ -8216,7 +8263,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui630-20260917-gf-mcap"
+WEB_BUILD_VERSION = "ui631-20260918-mobile-fast"
 
 
 @app.get("/api/build")

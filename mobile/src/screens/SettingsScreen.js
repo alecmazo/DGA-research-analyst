@@ -19,7 +19,7 @@ import { useTheme } from '../design';
 import AppHeader from '../components/AppHeader';
 
 // Bump on every JS / OTA push so the user can verify what's running.
-const APP_BUILD = 'mobile-ui30-support-fab-20260918';
+const APP_BUILD = 'mobile-ui31-fast-20260918';
 
 const SLIW_EMAILS = ['alecmazo1@gmail.com', 'edytasliw@gmail.com'];
 const SLIW_PORTAL = 'https://sliw.edytasliwinska.com/';
@@ -244,7 +244,7 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
       const result = await Updates.checkForUpdateAsync();
       if (!result.isAvailable) {
         setUpdateState('uptodate');
-        setUpdateMessage('You\'re on the latest version. Reopen the app anytime — pending updates apply without a force-quit.');
+        setUpdateMessage('You\'re on the latest version. Updates download in the background and apply from this screen (or after ~90s in-session).');
         return;
       }
       setUpdateState('downloading');
@@ -542,7 +542,7 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
         <View style={s.section}>
           <Text style={s.sectionTitle}>APP UPDATES</Text>
           <Text style={s.sectionHint}>
-            Production OTA (channel: {Updates.channel || 'production'}). Opening the app from the switcher now applies a downloaded update — no force-quit.
+            Production OTA (channel: {Updates.channel || 'production'}). Updates download silently. They apply here, or after the app has been open ~90s and you background it — never on cold start (that white-screened demos).
           </Text>
           {Updates.isUpdatePending ? (
             <View style={s.pendingBanner}>

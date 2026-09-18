@@ -13,11 +13,12 @@ import { useAppResume } from '../hooks/useAppResume';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import { api } from '../api/client';
+import { readScreenCache, patchScreenCache, putWatchlist } from '../api/screenCache';
 import AppHeader from '../components/AppHeader';
 import { StockSnapshotSheet } from '../components/StockInfoCard';
 import { spacing, radius, fontSize, Card, haptics, makeMdStyles, useTheme } from '../design';
 
-const QUOTE_POLL_MS = 30_000;
+const QUOTE_POLL_MS = 60_000;
 
 // ── format helpers ───────────────────────────────────────────────────────────
 function fmtPct(p) {
@@ -215,6 +216,7 @@ export default function MarketsScreen({ navigation }) {
   const pollRef = useRef(null);
   const focusedRef = useRef(false);
   const lastLiveRefreshDateRef = useRef('');
+  const lastQuotesAtRef = useRef(0);
 
   const session = useMemo(() => usEquitySession(new Date()), [sessionTick, lastQuotesAt]);
 
@@ -224,58 +226,91 @@ export default function MarketsScreen({ navigation }) {
     const firstLiveToday = live && lastLiveRefreshDateRef.current !== sdate;
     const fresh = !!opts.fresh || firstLiveToday;
     let wl = null;
-    let moversList = [];
-    await Promise.all([
-      api.getMarketIndices().then(d => setIndices(d.indices || [])).catch(() => {}),
-      api.getWatchlist(fresh).then((d) => {
-        wl = d || { tickers: [], quotes: {} };
-        setWatch(wl);
-      }).catch(() => setWatch({ tickers: [], quotes: {} })),
+    try {
+      const home = await api.getMobileHome();
+      if (Array.isArray(home?.indices)) setIndices(home.indices);
+      wl = home?.watchlist || { tickers: [], quotes: {} };
+      setWatch(wl);
+      putWatchlist(wl);
+      patchScreenCache('markets', {
+        indices: home?.indices || [],
+        watch: wl,
+        movers: moversRef.current,
+      });
+    } catch {
+      /* keep last painted board */
+    }
+    // Idea-feed is Yahoo-heavy. First paint + pull-to-refresh only — never the 60s poll.
+    if (opts.ideas !== false) {
       api.getIdeaFeed(4, 60).then((d) => {
-        moversList = d.movers || [];
+        const moversList = d.movers || [];
         moversRef.current = moversList;
         setMovers(moversList);
         setAsOf(d.as_of || '');
-      }).catch(() => {}),
-    ]);
-    // Idea-feed already has today's Yahoo movers; overlay those prices first
-    // so watchlist doesn't sit on yesterday while movers look live.
-    const moverOverlay = overlayFromMovers(moversList);
-    if (Object.keys(moverOverlay).length) {
-      setWatch((prev) => mergeWatchQuotes(prev || wl, moverOverlay));
-    }
-    const tks = ((wl && wl.tickers) || []).map((t) => String(t || '').toUpperCase()).filter(Boolean);
-    if (tks.length && (fresh || live)) {
-      try {
-        const qmap = await api.getBatchQuotes(tks);
-        setWatch((prev) => mergeWatchQuotes(prev || wl, qmap));
-      } catch {
-        /* watchlist already painted */
-      }
+        patchScreenCache('markets', { movers: moversList, asOf: d.as_of || '' });
+        const moverOverlay = overlayFromMovers(moversList);
+        if (Object.keys(moverOverlay).length) {
+          setWatch((prev) => mergeWatchQuotes(prev, moverOverlay));
+        }
+      }).catch(() => {
+        setMovers((prev) => (prev == null ? [] : prev));
+      });
     }
     if (fresh && sdate) lastLiveRefreshDateRef.current = sdate;
-    setLastQuotesAt(new Date());
+    const now = new Date();
+    lastQuotesAtRef.current = now.getTime();
+    setLastQuotesAt(now);
   }, []);
 
   const loadAll = useCallback(async () => {
     // Quotes first so the board paints. Brief/pulse markdown can be 1–5s on
     // the one worker and used to freeze the whole Markets tab.
-    await loadQuotes();
-    api.getLatestDailyBrief().then(d => setBrief(d && d.exists && d.markdown ? d : null))
-      .catch(() => setBrief(null));
-    api.getLatestScan().then(d => setPulse(d && d.exists && d.results ? d : null))
-      .catch(() => setPulse(null));
+    await loadQuotes({ ideas: true });
+    api.getLatestDailyBrief().then(d => {
+      const b = d && d.exists && d.markdown ? d : null;
+      setBrief(b);
+      patchScreenCache('markets', { brief: b });
+    }).catch(() => setBrief(null));
+    api.getLatestScan().then(d => {
+      const p = d && d.exists && d.results ? d : null;
+      setPulse(p);
+      patchScreenCache('markets', { pulse: p });
+    }).catch(() => setPulse(null));
   }, [loadQuotes]);
 
-  // Focus: load everything once, then auto-poll quotes every 30s (indices + WL + ideas).
-  // Never auto-run brief / pulse (AI cost).
+  // Focus: paint cache, then cheap /api/mobile/home. Poll quotes every 60s while
+  // live+focused. Never auto-run brief / pulse (AI cost). Idea-feed is not on the poll.
+  useEffect(() => {
+    readScreenCache('markets').then((c) => {
+      if (!c) return;
+      if (Array.isArray(c.indices)) setIndices(c.indices);
+      if (c.watch) {
+        setWatch(c.watch);
+        putWatchlist(c.watch);
+      }
+      if (Array.isArray(c.movers)) {
+        setMovers(c.movers);
+        moversRef.current = c.movers;
+      }
+      if (c.asOf) setAsOf(c.asOf);
+      if (c.brief !== undefined) setBrief(c.brief);
+      if (c.pulse !== undefined) setPulse(c.pulse);
+    }).catch(() => {});
+  }, []);
+
   useFocusEffect(useCallback(() => {
     focusedRef.current = true;
-    loadAll();
+    const age = Date.now() - (lastQuotesAtRef.current || 0);
+    if (age > 45_000) loadAll();
+    else loadQuotes({ ideas: false }).catch(() => {});
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => {
       if (!focusedRef.current) return;
-      loadQuotes().catch(() => {});
+      if (!usEquitySession().live) {
+        setSessionTick((n) => n + 1);
+        return;
+      }
+      loadQuotes({ ideas: false }).catch(() => {});
       setSessionTick((n) => n + 1);
     }, QUOTE_POLL_MS);
     return () => {
@@ -429,7 +464,7 @@ export default function MarketsScreen({ navigation }) {
   );
 
   const subtitle = session.live
-    ? `${session.label} · auto 30s`
+    ? `${session.label} · auto 60s`
     : `${session.label} · tap ↻ for quotes`;
 
   return (

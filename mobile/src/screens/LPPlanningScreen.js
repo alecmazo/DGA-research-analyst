@@ -10,6 +10,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppResume } from '../hooks/useAppResume';
 import { v2Fetch } from '../api/client';
+import { readScreenCache, writeScreenCache, screenCacheFresh } from '../api/screenCache';
 import AppHeader from '../components/AppHeader';
 import { haptics, useTheme } from '../design';
 
@@ -95,9 +96,16 @@ export default function LPPlanningScreen({ gpMode = false, embedded = false }) {
     setDirty(false);
   };
 
-  const load = useCallback(async (explicitId) => {
+  const load = useCallback(async (explicitId, force = false) => {
     setError(null);
+    const cacheKey = gpMode ? ('plan_gp_' + (explicitId || lpId || 'list')) : 'plan_lp';
     try {
+      const cached = await readScreenCache(cacheKey);
+      if (cached && cached.snapshot) {
+        applyPack(cached);
+        setLoading(false);
+        if (!force && screenCacheFresh(cacheKey, 60_000)) return;
+      }
       if (gpMode) {
         const rList = await v2Fetch('/api/v2/gp/lp-planning');
         if (!rList.ok) throw new Error('Could not load LP list (' + rList.status + ')');
@@ -113,12 +121,16 @@ export default function LPPlanningScreen({ gpMode = false, embedded = false }) {
         }
         const resp = await v2Fetch('/api/v2/gp/lp-planning/' + encodeURIComponent(pick));
         if (!resp.ok) throw new Error('Could not load planning (' + resp.status + ')');
-        applyPack(await resp.json());
+        const json = await resp.json();
+        applyPack(json);
+        writeScreenCache(cacheKey, json);
       } else {
         const resp = await v2Fetch('/api/v2/lp/planning');
         if (resp.status === 403) throw new Error('This worksheet is only on your LP login.');
         if (!resp.ok) throw new Error('Could not load planning (' + resp.status + ')');
-        applyPack(await resp.json());
+        const json = await resp.json();
+        applyPack(json);
+        writeScreenCache(cacheKey, json);
       }
     } catch (e) {
       setError(e?.message || 'Could not load your planning worksheet.');
@@ -142,7 +154,7 @@ export default function LPPlanningScreen({ gpMode = false, embedded = false }) {
     }
     haptics.onPressTab?.();
     setRefreshing(true);
-    await load();
+    await load(undefined, true);
     setRefreshing(false);
   };
 

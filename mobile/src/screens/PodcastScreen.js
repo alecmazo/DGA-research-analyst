@@ -26,6 +26,7 @@ import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-au
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { api } from '../api/client';
+import { readScreenCache, writeScreenCache, screenCacheFresh } from '../api/screenCache';
 import { spacing, radius, shadow, fontSize, letterSpacing, Card, haptics, useTheme } from '../design';
 
 function fmtAgo(iso) {
@@ -254,11 +255,19 @@ export default function PodcastScreen() {
       });
   }, []);
 
-  const loadEpisodes = useCallback(async () => {
+  const loadEpisodes = useCallback(async (force = false) => {
     try {
       setError(null);
+      const cached = await readScreenCache('podcasts');
+      if (Array.isArray(cached) && cached.length) {
+        setEpisodes(cached);
+        setLoading(false);
+        if (!force && screenCacheFresh('podcasts', 120_000)) return;
+      }
       const data = await api.listPodcastEpisodes();
-      setEpisodes(data.episodes || []);
+      const eps = data.episodes || [];
+      setEpisodes(eps);
+      writeScreenCache('podcasts', eps);
     } catch (e) {
       setError(e?.message || 'Failed to load episodes');
     } finally {
@@ -514,7 +523,7 @@ export default function PodcastScreen() {
       ) : error ? (
         <View style={s.center}>
           <Text style={s.errorText}>{error}</Text>
-          <TouchableOpacity onPress={() => { setLoading(true); loadEpisodes(); }} style={s.retryBtn}>
+          <TouchableOpacity onPress={() => { setLoading(true); loadEpisodes(true); }} style={s.retryBtn}>
             <Text style={s.retryTxt}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -535,7 +544,7 @@ export default function PodcastScreen() {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); loadEpisodes(); }}
+              onRefresh={() => { setRefreshing(true); loadEpisodes(true); }}
               tintColor={t.gold}
             />
           }

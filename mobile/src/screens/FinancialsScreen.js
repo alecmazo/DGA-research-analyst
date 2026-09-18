@@ -321,25 +321,42 @@ export default function FinancialsScreen() {
     finally { setHistLoading(false); }
   }, []);
 
+  const dashKey = (sym, period) => `@dga_fin_dash_${sym}_${period}`;
+
   const loadTicker = useCallback(async (tk, rng, pt) => {
     const sym = (tk || '').trim().toUpperCase();
     if (!sym) return;
     Keyboard.dismiss();
     const period = pt || periodRef.current || 'annual';
     const myReq = ++reqId.current;
-    setLoading(true); setError(null); setTicker(sym);
+    setError(null); setTicker(sym);
+    let hadCache = false;
+    try {
+      const raw = await AsyncStorage.getItem(dashKey(sym, period));
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (cached && cached.ok) {
+          setData(cached);
+          setLoading(false);
+          hadCache = true;
+        }
+      }
+    } catch { /* ignore bad cache */ }
+    if (!hadCache) setLoading(true);
     loadHistory(sym, rng || range);
     try {
       const d = await api.getFinancialsDashboard(sym, period);
       if (myReq !== reqId.current) return;
-      if (!d || !d.ok) { setData(null); setError(d?.error || `No financials stored for ${sym}.`); }
-      else {
+      if (!d || !d.ok) {
+        if (!hadCache) { setData(null); setError(d?.error || `No financials stored for ${sym}.`); }
+      } else {
         setData(d);
         AsyncStorage.setItem(LAST_KEY, sym).catch(() => {});
         AsyncStorage.setItem(PERIOD_KEY, period).catch(() => {});
+        AsyncStorage.setItem(dashKey(sym, period), JSON.stringify(d)).catch(() => {});
       }
     } catch (e) {
-      if (myReq === reqId.current) { setData(null); setError(String(e.message || e)); }
+      if (myReq === reqId.current && !hadCache) { setData(null); setError(String(e.message || e)); }
     } finally {
       if (myReq === reqId.current) setLoading(false);
     }

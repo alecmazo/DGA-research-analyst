@@ -30,6 +30,9 @@ import { api, getFundToken, setFundToken, clearFundToken } from '../api/client';
 import LPPlanningScreen from './LPPlanningScreen';
 
 const LAST_PORTFOLIO_KEY = '@dga_last_portfolio';
+const FUND_LIST_KEY = '@dga_fund_list_v1';
+const MANAGED_LIST_KEY = '@dga_managed_list_v1';
+const fundDetailKey = (id) => `@dga_fund_detail_${id}`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 // All dollar amounts on the fund/portfolio pages display as whole dollars (no cents).
@@ -183,11 +186,15 @@ export default function FundScreen({ navigation }) {
   }, []));
 
   // When unlocked, load fund list, managed accounts, and YTD snapshots
+  const fundLoadedAt = useRef(0);
   useFocusEffect(useCallback(() => {
     if (!locked) {
+      const stale = Date.now() - fundLoadedAt.current > 60_000;
+      if (!stale && fundLoadedAt.current) return;
       loadFundList();
       loadYtdSnapshots();
       loadManagedAccList(null);
+      fundLoadedAt.current = Date.now();
     }
   }, [locked])); // eslint-disable-line
 
@@ -232,15 +239,32 @@ export default function FundScreen({ navigation }) {
 
   // ── Fund list loading ────────────────────────────────────────────────────
   const loadFundList = useCallback(async () => {
-    setFundListLoading(true);
     setFundListError(null);
     try {
+      try {
+        const cached = await AsyncStorage.getItem(FUND_LIST_KEY);
+        if (cached) {
+          const list = JSON.parse(cached);
+          if (Array.isArray(list) && list.length) {
+            setFundList(list);
+            setFundListLoading(false);
+          } else {
+            setFundListLoading(true);
+          }
+        } else {
+          setFundListLoading(true);
+        }
+      } catch {
+        setFundListLoading(true);
+      }
       // Only load LP funds in this branch; managed accounts are under 'Managed Account'
       const list = await api.fundList('lp_fund');
       const raw = Array.isArray(list) ? list : [];
       // Deduplicate by ID (guard against rare DB duplicates)
       const seen = new Set();
-      setFundList(raw.filter(f => { if (seen.has(f.id)) return false; seen.add(f.id); return true; }));
+      const deduped = raw.filter(f => { if (seen.has(f.id)) return false; seen.add(f.id); return true; });
+      setFundList(deduped);
+      AsyncStorage.setItem(FUND_LIST_KEY, JSON.stringify(deduped)).catch(() => {});
     } catch (e) {
       if (e.message?.includes('403')) {
         await clearFundToken();
@@ -255,10 +279,33 @@ export default function FundScreen({ navigation }) {
 
   // ── LP Fund detail loading ───────────────────────────────────────────────
   const loadData = useCallback(async (isRefresh = false, fundId = null) => {
-    if (!isRefresh) setLoading(true);
+    const fid = fundId || activeFundId;
     setError(null);
     try {
-      const fid = fundId || activeFundId;
+      if (!isRefresh && fid) {
+        try {
+          const raw = await AsyncStorage.getItem(fundDetailKey(fid));
+          if (raw) {
+            const cached = JSON.parse(raw);
+            if (cached?.overview) {
+              setOverview(cached.overview);
+              setLps(Array.isArray(cached.lps) ? cached.lps : []);
+              setPositions(Array.isArray(cached.positions) ? cached.positions : []);
+              setActivity(Array.isArray(cached.activity) ? cached.activity : []);
+              setWaterfall(cached.waterfall || null);
+              setLoading(false);
+            } else {
+              setLoading(true);
+            }
+          } else {
+            setLoading(true);
+          }
+        } catch {
+          setLoading(true);
+        }
+      } else if (!isRefresh) {
+        setLoading(true);
+      }
       const [ov, lpData, posData, actData, wfall] = await Promise.all([
         api.fundOverview(fid),
         api.fundLps(fid),
@@ -267,10 +314,18 @@ export default function FundScreen({ navigation }) {
         api.fundWaterfall(fid),
       ]);
       setOverview(ov);
-      setLps(Array.isArray(lpData) ? lpData : []);
-      setPositions(Array.isArray(posData) ? posData : []);
-      setActivity(Array.isArray(actData) ? actData : []);
+      const lpsArr = Array.isArray(lpData) ? lpData : [];
+      const posArr = Array.isArray(posData) ? posData : [];
+      const actArr = Array.isArray(actData) ? actData : [];
+      setLps(lpsArr);
+      setPositions(posArr);
+      setActivity(actArr);
       setWaterfall(wfall);
+      if (fid) {
+        AsyncStorage.setItem(fundDetailKey(fid), JSON.stringify({
+          overview: ov, lps: lpsArr, positions: posArr, activity: actArr, waterfall: wfall,
+        })).catch(() => {});
+      }
     } catch (e) {
       if (e.message?.includes('403')) {
         await clearFundToken();
@@ -307,8 +362,23 @@ export default function FundScreen({ navigation }) {
 
   // ── Managed account list (for YTD cache persistence) ────────────────────
   const loadManagedAccList = useCallback(async (currentAccId) => {
-    setManagedAccLoading(true);
     try {
+      try {
+        const cached = await AsyncStorage.getItem(MANAGED_LIST_KEY);
+        if (cached) {
+          const list = JSON.parse(cached);
+          if (Array.isArray(list) && list.length) {
+            setManagedAccList(list);
+            setManagedAccLoading(false);
+          } else {
+            setManagedAccLoading(true);
+          }
+        } else {
+          setManagedAccLoading(true);
+        }
+      } catch {
+        setManagedAccLoading(true);
+      }
       const list = await api.fundList('managed_account');
       const raw = Array.isArray(list) ? list : [];
       const seen = new Set();
@@ -318,6 +388,7 @@ export default function FundScreen({ navigation }) {
         return true;
       });
       setManagedAccList(deduped);
+      AsyncStorage.setItem(MANAGED_LIST_KEY, JSON.stringify(deduped)).catch(() => {});
       // Auto-select the first account if none is selected yet
       if (deduped.length > 0 && !currentAccId) {
         const first = deduped[0];

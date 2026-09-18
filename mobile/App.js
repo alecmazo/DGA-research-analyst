@@ -128,15 +128,15 @@ function LPTabs({ onLogout, isDemo, onSwitchToAdmin }) {
   );
 }
 
-// ── Auto-OTA: cold launch + return-to-foreground ────────────────────────────
-// Native ON_LOAD + fallbackToCacheTimeout:0 downloads in the background but
-// does NOT apply until the next process start. If we only call
-// checkForUpdateAsync(), Expo returns isAvailable=false once the bundle is
-// already sitting in isUpdatePending — so a warm reopen stayed stale until
-// a force-quit. Always apply a pending update first.
+// ── Auto-OTA: download in background; never reload on cold start ────────────
+// Applying a pending update on launch white-screens a demo. Fetch on
+// cold-start; apply only after the app has been in-session 90s and then
+// backgrounds, or from Settings.
 let _otaInFlight = false;
 let _otaLastCheckMs = 0;
 const OTA_MIN_INTERVAL_MS = 45_000;
+const SESSION_START_MS = Date.now();
+const OTA_APPLY_AFTER_MS = 90_000;
 
 async function applyPendingUpdate(reason) {
   try {
@@ -151,21 +151,39 @@ async function applyPendingUpdate(reason) {
   return false;
 }
 
+async function fetchOtaOnly() {
+  try {
+    const result = await Updates.checkForUpdateAsync();
+    if (result.isAvailable) {
+      console.log('[OTA] fetching update (no reload)');
+      await Updates.fetchUpdateAsync();
+    }
+  } catch (e) {
+    console.log('[OTA] fetch skipped:', e?.message || e);
+  }
+}
+
 async function checkForOtaUpdate(reason = 'launch') {
   try {
     if (__DEV__) return;
     if (!Updates.isEnabled) return;
     if (_otaInFlight) return;
-    if (await applyPendingUpdate(reason)) return;
     const now = Date.now();
+    if (reason === 'cold-start') {
+      _otaInFlight = true;
+      _otaLastCheckMs = now;
+      try { await fetchOtaOnly(); } finally { _otaInFlight = false; }
+      return;
+    }
     if (now - _otaLastCheckMs < OTA_MIN_INTERVAL_MS) return;
     _otaInFlight = true;
     _otaLastCheckMs = now;
-    const result = await Updates.checkForUpdateAsync();
-    if (result.isAvailable) {
-      console.log('[OTA] update available (' + reason + ') — fetching…');
-      await Updates.fetchUpdateAsync();
-      await Updates.reloadAsync();
+    if (reason === 'foreground' && now - SESSION_START_MS >= OTA_APPLY_AFTER_MS) {
+      if (await applyPendingUpdate(reason)) return;
+    }
+    await fetchOtaOnly();
+    if (reason === 'settings') {
+      await applyPendingUpdate('settings');
     }
   } catch (e) {
     console.log('[OTA] update check skipped:', e?.message || e);
@@ -209,8 +227,7 @@ export default function App() {
     bootstrap();
   }, [bootstrap]);
 
-  // Warm reopen: apply a bundle already downloaded by native ON_LOAD, then
-  // check Expo for a newer one. Data screens also refresh via useAppResume.
+  // Warm reopen: after 90s in-session, apply a pending OTA. Cold start never reloads.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       const prev = appStateRef.current;

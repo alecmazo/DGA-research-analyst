@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   api, getGammaEnabled, setGammaEnabled as saveGamma, getBaseUrl,
 } from '../api/client';
+import { peekWatchlist, watchlistFresh, putWatchlist, readScreenCache, writeScreenCache, screenCacheFresh } from '../api/screenCache';
 import AppHeader from '../components/AppHeader';
 import {
   formatTime, formatDateCompact, haptics, SkeletonList, useTheme,
@@ -81,25 +82,26 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
-  const loadReports = async () => {
+  const loadReports = async (force = false) => {
     try {
+      const cached = await readScreenCache('reports');
+      if (Array.isArray(cached) && cached.length) {
+        setReports(cached);
+        setInitialLoading(false);
+      }
+      const wl = peekWatchlist();
+      if (wl?.quotes) setPrices(wl.quotes);
+      if (!force && screenCacheFresh('reports', 45_000) && Array.isArray(cached) && cached.length) {
+        setInitialLoading(false);
+        return;
+      }
       const data = await api.listReports();
       setReports(data);
+      writeScreenCache('reports', data);
       setLastLoadedAt(new Date());
-      // Batch quote fetch for all tickers at once
-      if (data.length > 0) {
-        try {
-          const tickers = data.map(r => r.ticker);
-          const result = await api.getBatchQuotes(tickers);
-          if (result?.quotes) {
-            setPrices(result.quotes);
-          }
-        } catch (err) {
-          console.warn('getBatchQuotes:', err.message);
-          // Fall back to no prices
-          setPrices({});
-        }
-      }
+      // Never Yahoo 100+ report names. Overlay Markets watchlist quotes only.
+      const freshWl = peekWatchlist();
+      if (freshWl?.quotes) setPrices(freshWl.quotes);
     } catch (err) {
       console.warn('loadReports:', err.message);
     } finally {
@@ -107,7 +109,14 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
-  const loadMarketWire = async () => {
+  const loadMarketWire = async (force = false) => {
+    const cached = await readScreenCache('wire');
+    if (cached && Array.isArray(cached.items)) {
+      setWireItems(cached.items);
+      setWireAsOf(cached.asOf || '');
+      setWireLoading(false);
+    }
+    if (!force && screenCacheFresh('wire', 60_000) && cached?.items?.length) return;
     setWireLoading(true);
     setWireError('');
     try {
@@ -117,7 +126,9 @@ export default function HomeScreen({ navigation, route }) {
         ? d.items
         : (Array.isArray(d?.market_wire?.items) ? d.market_wire.items : []);
       setWireItems(raw);
-      setWireAsOf(d?.as_of || d?.market_wire?.as_of || '');
+      const asOf = d?.as_of || d?.market_wire?.as_of || '';
+      setWireAsOf(asOf);
+      writeScreenCache('wire', { items: raw, asOf });
       if (!raw.length) {
         if (d && d.ok === false) {
           setWireError(d.error || d.detail || 'Wire unavailable');
@@ -135,10 +146,20 @@ export default function HomeScreen({ navigation, route }) {
   };
 
   // Compact earnings for watchlist names (desktop EarningsCard parity, strip form)
-  const loadEarnings = async () => {
+  const loadEarnings = async (force = false) => {
+    const cached = await readScreenCache('earnings');
+    if (Array.isArray(cached) && cached.length) {
+      setEarnItems(cached);
+      setEarnLoading(false);
+    }
+    if (!force && screenCacheFresh('earnings', 60_000) && cached?.length) return;
     setEarnLoading(true);
     try {
-      const wl = await api.getWatchlist().catch(() => null);
+      let wl = watchlistFresh() ? peekWatchlist() : null;
+      if (!wl) {
+        wl = await api.getWatchlist().catch(() => null);
+        if (wl) putWatchlist(wl);
+      }
       const tickers = (wl?.tickers || Object.keys(wl?.quotes || {}) || [])
         .map((t) => String(t || '').toUpperCase())
         .filter(Boolean)
@@ -180,7 +201,9 @@ export default function HomeScreen({ navigation, route }) {
         const db = b.days_until != null ? b.days_until : 99;
         return Math.abs(da) - Math.abs(db);
       });
-      setEarnItems(items.slice(0, 10));
+      const top = items.slice(0, 10);
+      setEarnItems(top);
+      writeScreenCache('earnings', top);
     } catch (e) {
       console.warn('loadEarnings:', e?.message || e);
     } finally {
@@ -190,10 +213,10 @@ export default function HomeScreen({ navigation, route }) {
 
   useFocusEffect(
     useCallback(() => {
-      checkServer();
       loadReports();
       loadMarketWire();
       loadEarnings();
+      checkServer();
       getGammaEnabled().then(setGammaEnabled);
       // Pre-fill ticker if navigated here from Intelligence/other screen
       const prefill = route?.params?.prefillTicker || route?.params?.ticker;
@@ -213,7 +236,7 @@ export default function HomeScreen({ navigation, route }) {
   const onRefresh = async () => {
     setRefreshing(true);
     haptics.onPressTab();
-    await Promise.all([checkServer(), loadReports(), loadMarketWire(), loadEarnings()]);
+    await Promise.all([checkServer(), loadReports(true), loadMarketWire(true), loadEarnings(true)]);
     setRefreshing(false);
   };
 
