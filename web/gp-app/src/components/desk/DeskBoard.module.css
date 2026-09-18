@@ -68,6 +68,32 @@
   color: var(--brand-700);
 }
 
+.refreshingNow {
+  display: inline-flex;
+  align-items: center;
+  min-width: 92px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--brand-700, #0b6e99);
+  font-variant-numeric: tabular-nums;
+}
+
+.refreshDots::after {
+  display: inline-block;
+  width: 1.15em;
+  text-align: left;
+  content: '';
+  animation: deskRefreshDots 1.2s steps(4, end) infinite;
+}
+
+@keyframes deskRefreshDots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
+
 .deskPull {
   height: 26px;
   min-width: 108px;
@@ -80,6 +106,12 @@
   border-radius: 6px;
   cursor: pointer;
   font-family: inherit;
+}
+
+.deskPullBusy {
+  min-width: 118px;
+  color: var(--brand-700, #0b6e99);
+  border-color: var(--brand-400, #5bb8d4);
 }
 
 .deskPull:hover:not(:disabled) {

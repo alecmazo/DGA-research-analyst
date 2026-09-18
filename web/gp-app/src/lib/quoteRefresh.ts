@@ -20,6 +20,11 @@ function tick() {
   })
 }
 
+/** Manual Desk Refresh — same subscribers as the 45s clock. */
+export function requestQuoteRefresh() {
+  tick()
+}
+
 export function subscribeQuoteRefresh(fn: Listener): () => void {
   listeners.add(fn)
   if (timer == null && typeof window !== 'undefined') {

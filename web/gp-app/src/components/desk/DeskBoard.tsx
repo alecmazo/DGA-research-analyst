@@ -364,15 +364,22 @@ export function DeskBoard({
         </div>
         <div className={styles.hintActions}>
           {extraActions}
+          {refreshBusy ? (
+            <span className={styles.refreshingNow} aria-live="polite" aria-busy="true">
+              Refreshing<span className={styles.refreshDots} />
+            </span>
+          ) : null}
           <select
-            className={styles.deskPull}
+            className={`${styles.deskPull} ${refreshBusy ? styles.deskPullBusy : ''}`}
             value=""
             disabled={refreshBusy}
             aria-label="Desk actions"
+            aria-busy={refreshBusy || undefined}
             title="Refresh, collapse, expand, or reset layout"
             onChange={(e) => {
               const v = e.target.value
               e.currentTarget.value = ''
+              if (refreshBusy) return
               if (v === 'refresh') onRefresh?.()
               else if (v === 'collapse') setAllCollapsed(true)
               else if (v === 'expand') setAllCollapsed(false)
@@ -380,7 +387,7 @@ export function DeskBoard({
             }}
           >
             <option value="" disabled>
-              {refreshBusy ? 'Desk…' : 'Desk'}
+              {refreshBusy ? 'Refreshing...' : 'Desk'}
             </option>
             <option value="refresh">Refresh</option>
             <option value="collapse">Collapse all</option>

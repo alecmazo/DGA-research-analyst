@@ -162,7 +162,15 @@ def test_desk_actions_are_one_pulldown():
     assert 'className={styles.resetBtn}' not in board
     desk = (ROOT / "web/gp-app/src/pages/DeskPage.tsx").read_text()
     assert "onRefresh" in desk
+    assert "refreshDesk" in desk
+    assert "setRefreshing(true)" in desk
+    assert "requestQuoteRefresh" in desk
     assert "extraActions" not in desk
+    assert "Refreshing" in board
+    assert "refreshDots" in board
+    css = (ROOT / "web/gp-app/src/components/desk/DeskBoard.module.css").read_text()
+    assert "deskRefreshDots" in css
+    assert "@keyframes deskRefreshDots" in css
 
 
 def test_pulse_row_shows_cap_rev_ni_fcf():

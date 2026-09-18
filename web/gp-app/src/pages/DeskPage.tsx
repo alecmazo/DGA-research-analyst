@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { LiveMarkets } from '@/components/desk/LiveMarkets'
 import { AnalyzeCard } from '@/components/desk/AnalyzeCard'
@@ -20,7 +20,7 @@ import {
   type WatchlistEarning,
   type WatchlistResponse,
 } from '@/lib/api'
-import { subscribeQuoteRefresh } from '@/lib/quoteRefresh'
+import { requestQuoteRefresh, subscribeQuoteRefresh } from '@/lib/quoteRefresh'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
 import styles from './DeskPage.module.css'
@@ -150,6 +150,7 @@ export function DeskPage() {
   const [loading, setLoading] = useState(!cached)
   const [tickerIn, setTickerIn] = useState('')
   const [busy, setBusy] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const [analyzeTk, setAnalyzeTk] = useState('')
   const [runToken, setRunToken] = useState(0)
@@ -199,6 +200,24 @@ export function DeskPage() {
 
   const load = useCallback(async () => {
     await Promise.all([loadWatchlist(), loadBrief()])
+  }, [loadWatchlist, loadBrief])
+
+  const refreshingRef = useRef(false)
+  const refreshDesk = useCallback(async () => {
+    if (refreshingRef.current) return
+    refreshingRef.current = true
+    setRefreshing(true)
+    const t0 = Date.now()
+    try {
+      await Promise.all([loadWatchlist(), loadBrief()])
+      requestQuoteRefresh()
+      setReportsKey((k) => k + 1)
+    } finally {
+      const wait = 700 - (Date.now() - t0)
+      if (wait > 0) await new Promise((r) => window.setTimeout(r, wait))
+      refreshingRef.current = false
+      setRefreshing(false)
+    }
   }, [loadWatchlist, loadBrief])
 
   useEffect(() => {
@@ -647,8 +666,8 @@ export function DeskPage() {
       <DeskBoard
         title="Desk"
         meta={`${rows.length} watch · ${Object.keys(wl?.reports || {}).length} reports`}
-        onRefresh={() => void load()}
-        refreshBusy={busy}
+        onRefresh={() => void refreshDesk()}
+        refreshBusy={refreshing}
         cards={cards}
       />
 
