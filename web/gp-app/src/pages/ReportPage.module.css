@@ -199,6 +199,30 @@
   cursor: not-allowed;
 }
 
+.exportPull {
+  height: 28px;
+  min-width: 118px;
+  border: 1px solid var(--border-default, #cbd5e1);
+  background: var(--bg-subtle, #f8fafc);
+  color: var(--text-secondary, #475569);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.exportPull:hover:not(:disabled) {
+  border-color: #38bdf8;
+  color: #0c4a6e;
+}
+
+.exportPull:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .gamma {
   font-size: 10px;
   font-weight: 800;

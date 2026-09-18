@@ -64,6 +64,7 @@ export function ReportPage() {
   const [sharing, setSharing] = useState(false)
   const [excelBusy, setExcelBusy] = useState(false)
   const [docBusy, setDocBusy] = useState(false)
+  const [pptBusy, setPptBusy] = useState(false)
 
   useEffect(() => {
     document.title = ticker
@@ -233,6 +234,46 @@ export function ReportPage() {
     }
   }
 
+  const downloadPptx = async () => {
+    if (!ticker) return
+    setPptBusy(true)
+    try {
+      await downloadAuth(
+        `/api/download/${encodeURIComponent(ticker)}/pptx`,
+        `${ticker}_DGA_Presentation.pptx`,
+      )
+    } catch (e) {
+      alert(
+        'PowerPoint download failed: ' +
+          (e instanceof Error ? e.message : e) +
+          ' — run Analyze with Presentation on if no deck is stored yet.',
+      )
+    } finally {
+      setPptBusy(false)
+    }
+  }
+
+  const exportBusy = pptBusy || docBusy || excelBusy || sharing
+  const exportLabel = pptBusy
+    ? 'PowerPoint…'
+    : docBusy
+      ? 'Word…'
+      : excelBusy
+        ? 'Excel…'
+        : sharing
+          ? 'Sending…'
+          : 'Export'
+
+  const onExportAction = (v: string) => {
+    if (v === 'gamma' && data?.gamma_url) {
+      window.open(data.gamma_url, '_blank', 'noopener,noreferrer')
+    } else if (v === 'ppt') void downloadPptx()
+    else if (v === 'word') void downloadDocx()
+    else if (v === 'excel') void downloadExcel()
+    else if (v === 'print') window.print()
+    else if (v === 'share') void sharePdf()
+  }
+
   const sharePdf = async () => {
     if (!html || !ticker) return
     const def = getCachedUser()?.email || ''
@@ -342,55 +383,36 @@ export function ReportPage() {
               </button>
             </div>
           )}
-          {data?.gamma_url && (
-            <a
-              href={data.gamma_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.gamma}
-            >
-              GAMMA
-            </a>
-          )}
-          <button
-            type="button"
-            className={styles.doc}
-            onClick={() => void downloadDocx()}
-            disabled={loading || docBusy || !ticker || data?.has_docx === false}
-            title="Download Word report"
+          <select
+            className={styles.exportPull}
+            value=""
+            disabled={loading || exportBusy || !ticker}
+            aria-label="Export and share"
+            aria-busy={exportBusy || undefined}
+            title="Gamma, PowerPoint, Word, Excel, print, or email"
+            onChange={(e) => {
+              const v = e.target.value
+              e.currentTarget.value = ''
+              if (exportBusy) return
+              onExportAction(v)
+            }}
           >
-            {docBusy ? 'Word…' : 'Word'}
-          </button>
-          <button
-            type="button"
-            className={styles.excel}
-            onClick={() => void downloadExcel()}
-            disabled={loading || excelBusy || !ticker}
-            title={`Save ${ticker}_DGA_Model.xlsx to Dropbox /Apps/DGA Research/Excel and open it`}
-          >
-            {excelBusy ? 'Excel…' : 'Excel'}
-          </button>
-          <button
-            type="button"
-            className={styles.print}
-            onClick={() => window.print()}
-            disabled={loading || !html}
-            title="Print this window as you see it"
-          >
-            Print
-          </button>
-          <button
-            type="button"
-            className={styles.share}
-            onClick={() => void sharePdf()}
-            disabled={loading || sharing || !html}
-            title="Email this report as a PDF"
-          >
-            {sharing ? 'Sending…' : 'Share'}
-          </button>
-          <button type="button" className={styles.close} onClick={() => window.close()}>
-            Close
-          </button>
+            <option value="" disabled>
+              {exportLabel}
+            </option>
+            {data?.gamma_url ? <option value="gamma">Gamma deck</option> : null}
+            <option value="ppt">PowerPoint</option>
+            <option value="word" disabled={data?.has_docx === false}>
+              Word
+            </option>
+            <option value="excel">Excel</option>
+            <option value="print" disabled={!html}>
+              Print
+            </option>
+            <option value="share" disabled={!html}>
+              Share
+            </option>
+          </select>
         </div>
       </header>
 
