@@ -19,7 +19,7 @@ import { useTheme } from '../design';
 import AppHeader from '../components/AppHeader';
 
 // Bump on every JS / OTA push so the user can verify what's running.
-const APP_BUILD = 'mobile-ui27-report-tight-20260829';
+const APP_BUILD = 'mobile-ui30-support-fab-20260918';
 
 const SLIW_EMAILS = ['alecmazo1@gmail.com', 'edytasliw@gmail.com'];
 const SLIW_PORTAL = 'https://sliw.edytasliwinska.com/';

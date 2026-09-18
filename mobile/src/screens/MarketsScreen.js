@@ -258,13 +258,13 @@ export default function MarketsScreen({ navigation }) {
   }, []);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([
-      loadQuotes(),
-      api.getLatestDailyBrief().then(d => setBrief(d && d.exists && d.markdown ? d : null))
-        .catch(() => setBrief(null)),
-      api.getLatestScan().then(d => setPulse(d && d.exists && d.results ? d : null))
-        .catch(() => setPulse(null)),
-    ]);
+    // Quotes first so the board paints. Brief/pulse markdown can be 1–5s on
+    // the one worker and used to freeze the whole Markets tab.
+    await loadQuotes();
+    api.getLatestDailyBrief().then(d => setBrief(d && d.exists && d.markdown ? d : null))
+      .catch(() => setBrief(null));
+    api.getLatestScan().then(d => setPulse(d && d.exists && d.results ? d : null))
+      .catch(() => setPulse(null));
   }, [loadQuotes]);
 
   // Focus: load everything once, then auto-poll quotes every 30s (indices + WL + ideas).

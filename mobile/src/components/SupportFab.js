@@ -1,11 +1,14 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Modal, StyleSheet,
   ActivityIndicator, Platform, KeyboardAvoidingView, ScrollView,
+  Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { api, getV2User } from '../api/client';
+import { useTheme } from '../design';
 
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
@@ -16,13 +19,17 @@ function blobToDataUrl(blob) {
   });
 }
 
-export default function SupportFab({ surface = 'mobile-lp' }) {
+export default function SupportFab({ surface = 'mobile-gp' }) {
+  const insets = useSafeAreaInsets();
+  const { theme: t } = useTheme();
+  const styles = useMemo(() => makeStyles(t), [t]);
   const [open, setOpen] = useState(false);
   const [desc, setDesc] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [shotMeta, setShotMeta] = useState('Optional: attach a screenshot');
   const [shot, setShot] = useState(null);
+  const isGp = String(surface || '').includes('gp');
 
   const attach = async () => {
     try {
@@ -52,20 +59,22 @@ export default function SupportFab({ surface = 'mobile-lp' }) {
     setStatus('Uploading ticket…');
     try {
       const me = (await getV2User()) || {};
+      const { width, height, scale } = Dimensions.get('window');
       const j = await api.fileSupportTicket({
         description: text,
         page_url: `dga-mobile://${surface}`,
         page_path: `/${surface}`,
         active_tab: surface,
         user_agent: `DGA-mobile ${Platform.OS} ${Platform.Version}`,
-        viewport: { w: 0, h: 0, dpr: 1, os: Platform.OS },
+        viewport: { w: Math.round(width), h: Math.round(height), dpr: scale || 1, os: Platform.OS },
         console_errors: [],
         context: {
           theme: 'mobile',
           title: 'DGA Capital mobile',
-          role: me.role || 'lp',
+          role: me.role || (isGp ? 'gp' : 'lp'),
           user: me.email || me.lp_id || null,
           name: me.name || '',
+          demo_mode: !!me.demo_mode,
         },
         screenshot_b64: shot || null,
         screenshot_mime: 'image/jpeg',
@@ -86,10 +95,11 @@ export default function SupportFab({ surface = 'mobile-lp' }) {
   return (
     <>
       <TouchableOpacity
-        style={styles.fab}
+        style={[styles.fab, { bottom: Math.max(88, insets.bottom + 64) }]}
         onPress={() => { setStatus(''); setOpen(true); }}
         accessibilityLabel="File support ticket"
       >
+        <Ionicons name="help-buoy" size={16} color={t.primary} />
         <Text style={styles.fabLabel}>SUPPORT</Text>
       </TouchableOpacity>
       <Modal visible={open} animationType="fade" transparent onRequestClose={() => setOpen(false)}>
@@ -100,8 +110,9 @@ export default function SupportFab({ surface = 'mobile-lp' }) {
           <View style={styles.card}>
             <Text style={styles.h}>Report a problem</Text>
             <Text style={styles.sub}>
-              Describe what broke. Optionally attach a screenshot. The GP desk
-              receives the ticket — you will not see a ticket list.
+              {isGp
+                ? 'Describe what is slow or broken. Attach a screenshot if you can. It lands in Settings → Support on the desk.'
+                : 'Describe what broke. Optionally attach a screenshot. The GP desk receives the ticket — you will not see a ticket list.'}
             </Text>
             <ScrollView keyboardShouldPersistTaps="handled">
               <TextInput
@@ -137,70 +148,78 @@ export default function SupportFab({ surface = 'mobile-lp' }) {
   );
 }
 
-const styles = StyleSheet.create({
-  fab: {
-    position: 'absolute',
-    right: 16,
-    bottom: 88,
-    zIndex: 50,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    backgroundColor: '#0A1628',
-    borderWidth: 1,
-    borderColor: 'rgba(91,184,212,0.42)',
-    borderRadius: 2,
-    elevation: 0,
-  },
-  fabLabel: {
-    color: '#8ec9db',
-    fontWeight: '600',
-    fontSize: 10,
-    letterSpacing: 2.8,
-    textTransform: 'uppercase',
-  },
-  bd: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.45)',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 18,
-    maxHeight: '88%',
-  },
-  h: { fontSize: 16, fontWeight: '800', color: '#0A1628', marginBottom: 6 },
-  sub: { fontSize: 12, color: '#6a7890', lineHeight: 18, marginBottom: 10 },
-  ta: {
-    minHeight: 110,
-    borderWidth: 1,
-    borderColor: '#E8ECF2',
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 14,
-    backgroundColor: '#F5F7FA',
-    color: '#0A1628',
-    textAlignVertical: 'top',
-  },
-  attach: {
-    marginTop: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  attachTxt: { fontSize: 13, fontWeight: '700', color: '#0A1628' },
-  meta: { fontSize: 11, color: '#8A95A8', marginTop: 4 },
-  row: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 14 },
-  cancel: {
-    height: 36, paddingHorizontal: 14, borderRadius: 8,
-    borderWidth: 1, borderColor: '#E8ECF2', justifyContent: 'center',
-  },
-  cancelTxt: { fontWeight: '700', color: '#6a7890' },
-  go: {
-    height: 36, paddingHorizontal: 16, borderRadius: 8,
-    backgroundColor: '#0A1628', justifyContent: 'center', minWidth: 120, alignItems: 'center',
-  },
-  goTxt: { color: '#fff', fontWeight: '800' },
-  status: { marginTop: 10, fontSize: 12, color: '#3D4A5C' },
-});
+function makeStyles(t) {
+  return StyleSheet.create({
+    fab: {
+      position: 'absolute',
+      right: 16,
+      zIndex: 50,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      backgroundColor: t.surface,
+      borderWidth: 1,
+      borderColor: t.primary,
+      borderRadius: 20,
+      elevation: 4,
+      shadowColor: '#000',
+      shadowOpacity: 0.18,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+    },
+    fabLabel: {
+      color: t.primary,
+      fontWeight: '700',
+      fontSize: 10,
+      letterSpacing: 1.6,
+      textTransform: 'uppercase',
+    },
+    bd: {
+      flex: 1,
+      backgroundColor: 'rgba(15,23,42,0.45)',
+      justifyContent: 'center',
+      padding: 16,
+    },
+    card: {
+      backgroundColor: t.surface,
+      borderRadius: 14,
+      padding: 18,
+      maxHeight: '88%',
+    },
+    h: { fontSize: 16, fontWeight: '800', color: t.textPrimary, marginBottom: 6 },
+    sub: { fontSize: 12, color: t.textSecondary, lineHeight: 18, marginBottom: 10 },
+    ta: {
+      minHeight: 110,
+      borderWidth: 1,
+      borderColor: t.border,
+      borderRadius: 8,
+      padding: 10,
+      fontSize: 14,
+      backgroundColor: t.bg,
+      color: t.textPrimary,
+      textAlignVertical: 'top',
+    },
+    attach: {
+      marginTop: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    attachTxt: { fontSize: 13, fontWeight: '700', color: t.textPrimary },
+    meta: { fontSize: 11, color: t.textDim, marginTop: 4 },
+    row: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 14 },
+    cancel: {
+      height: 36, paddingHorizontal: 14, borderRadius: 8,
+      borderWidth: 1, borderColor: t.border, justifyContent: 'center',
+    },
+    cancelTxt: { fontWeight: '700', color: t.textSecondary },
+    go: {
+      height: 36, paddingHorizontal: 16, borderRadius: 8,
+      backgroundColor: t.primary, justifyContent: 'center', minWidth: 120, alignItems: 'center',
+    },
+    goTxt: { color: t.onAccent || '#fff', fontWeight: '800' },
+    status: { marginTop: 10, fontSize: 12, color: t.textSecondary },
+  });
+}

@@ -77,20 +77,31 @@ function MoreStack({ onLogout, isDemo, onSwitchToLP }) {
 
 // ── GP navigator: five primary tabs + a More hub (Podcast, Settings) ─────────
 function GPTabs({ onLogout, isDemo, onSwitchToLP }) {
+  const [tab, setTab] = useState('Markets');
   return (
-    <Tab.Navigator
-      tabBar={(props) => <CustomTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
-    >
-      <Tab.Screen name="Markets"    component={MarketsScreen} />
-      <Tab.Screen name="Research"   component={HomeStack} />
-      <Tab.Screen name="Financials" component={FinancialsScreen} />
-      <Tab.Screen name="Positions"  component={WatchlistScreen} />
-      <Tab.Screen name="Fund"       component={FundStack} />
-      <Tab.Screen name="More">
-        {() => <MoreStack onLogout={onLogout} isDemo={isDemo} onSwitchToLP={onSwitchToLP} />}
-      </Tab.Screen>
-    </Tab.Navigator>
+    <View style={{ flex: 1 }}>
+      <Tab.Navigator
+        tabBar={(props) => <CustomTabBar {...props} />}
+        screenOptions={{ headerShown: false }}
+        screenListeners={{
+          state: (e) => {
+            const s = e.data?.state;
+            const name = s?.routes?.[s.index]?.name;
+            if (name) setTab(name);
+          },
+        }}
+      >
+        <Tab.Screen name="Markets"    component={MarketsScreen} />
+        <Tab.Screen name="Research"   component={HomeStack} />
+        <Tab.Screen name="Financials" component={FinancialsScreen} />
+        <Tab.Screen name="Positions"  component={WatchlistScreen} />
+        <Tab.Screen name="Fund"       component={FundStack} />
+        <Tab.Screen name="More">
+          {() => <MoreStack onLogout={onLogout} isDemo={isDemo} onSwitchToLP={onSwitchToLP} />}
+        </Tab.Screen>
+      </Tab.Navigator>
+      <SupportFab surface={`mobile-gp/${tab}`} />
+    </View>
   );
 }
 
@@ -112,7 +123,7 @@ function LPTabs({ onLogout, isDemo, onSwitchToAdmin }) {
           {() => <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={null} isLpMode={true} onSwitchToAdmin={onSwitchToAdmin} />}
         </Tab.Screen>
       </Tab.Navigator>
-      <SupportFab surface="mobile-lp" />
+      <SupportFab surface="mobile-lp/Positions" />
     </View>
   );
 }
