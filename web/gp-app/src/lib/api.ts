@@ -602,8 +602,11 @@ export type ValuationApproach = {
 
 export type JobStatus = {
   job_id?: string
+  ticker?: string
   status?: string
   llm_provider?: string
+  providers?: Record<string, string> | null
+  created_at?: string
   progress?: { pct?: number | null; label?: string | null; step?: string | null }
   result?: {
     cost_usd?: number

@@ -212,6 +212,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **GF columns** | **`ui629-20260917-gf-cols`** | GuruFocus watchlists: drop Annualized + Rel S&P; add FY Revenue/FCF; sort Day's Change % and since-first. |
 | **GF mcap** | **`ui630-20260917-gf-mcap`** | GuruFocus watchlists: Market Cap column (last × shares, same scale as Pulse). |
 | **Mobile fast** | **`ui631-20260918-mobile-fast`** | Store-only index ribbon + `/api/mobile/home`. Cache-first Markets/Research/Positions/Financials. No 104-quote fan-out. OTA download without launch reload. |
+| **Analyze resume** | **`ui632-20260918-analyze-resume`** | Leaving Desk no longer hides a running Analyze Ticker. Re-attach from session + GET /api/jobs and keep the progress bar. Mobile OTA rolled back to the TestFlight embedded bundle after ui31 crash loop. |
 
 ### One-click handoff (preferred)
 
@@ -399,4 +400,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-18 · Agent: Grok Build · Live: `ui631-20260918-mobile-fast` · Next: `ui632-YYYYMMDD-slug`*
+*Last updated: 2026-09-18 · Agent: Grok Build · Live: `ui632-20260918-analyze-resume` · Next: `ui633-YYYYMMDD-slug`*

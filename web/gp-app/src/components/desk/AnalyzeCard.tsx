@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { api, type JobStatus, type LlmProvider } from '@/lib/api'
@@ -21,6 +21,64 @@ const ENGINES: { id: LlmProvider; label: string }[] = [
 ]
 
 const STORAGE_KEY = 'dga.hero.engines.v3'
+const ACTIVE_JOB_KEY = 'dga.analyze.active.v1'
+
+const ENGINE_ORDER: LlmProvider[] = ['grok', 'claude', 'kimi', 'deepseek']
+
+type StoredActive = {
+  jobId: string
+  ticker: string
+  engines: LlmProvider[]
+}
+
+function loadActiveJob(): StoredActive | null {
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_JOB_KEY)
+    if (!raw) return null
+    const d = JSON.parse(raw) as StoredActive
+    if (!d?.jobId || !d?.ticker) return null
+    return d
+  } catch {
+    return null
+  }
+}
+
+function saveActiveJob(d: StoredActive) {
+  try {
+    sessionStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(d))
+  } catch {
+    /* quota */
+  }
+}
+
+function clearActiveJob() {
+  try {
+    sessionStorage.removeItem(ACTIVE_JOB_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+function isLiveAnalyze(j: JobStatus | null | undefined): boolean {
+  if (!j?.job_id) return false
+  const st = String(j.status || '')
+  if (st !== 'queued' && st !== 'running') return false
+  if (!j.ticker) return false
+  if (!j.llm_provider) return false
+  return true
+}
+
+function enginesFromJob(j: JobStatus, fallback: LlmProvider[]): LlmProvider[] {
+  const fromMap = Object.keys(j.providers || {}).filter((e): e is LlmProvider =>
+    ENGINE_ORDER.includes(e as LlmProvider),
+  )
+  if (fromMap.length) return ENGINE_ORDER.filter((e) => fromMap.includes(e))
+  const parts = String(j.llm_provider || '')
+    .split('+')
+    .map((s) => s.trim().toLowerCase())
+    .filter((e): e is LlmProvider => ENGINE_ORDER.includes(e as LlmProvider))
+  return parts.length ? parts : fallback
+}
 
 function loadEngines(): LlmProvider[] {
   try {
@@ -81,6 +139,8 @@ export function AnalyzeCard({
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [canceling, setCanceling] = useState(false)
   const [sceneEngine, setSceneEngine] = useState<SceneEngine>('grok')
+  const pollAbort = useRef<AbortController | null>(null)
+  const following = useRef(false)
 
   useAnalysisScene(
     'analyze',
@@ -138,6 +198,103 @@ export function AnalyzeCard({
     )
   }, [engines, costMap, gamma])
 
+  const followJob = useCallback(
+    async (jobId: string, tk: string, ordered: LlmProvider[], resumed: boolean) => {
+      pollAbort.current?.abort()
+      const ac = new AbortController()
+      pollAbort.current = ac
+      following.current = true
+      saveActiveJob({ jobId, ticker: tk, engines: ordered })
+      setActiveJobId(jobId)
+      setRunning(true)
+      setShowProg(true)
+      setSceneEngine(ordered[0] || 'grok')
+      setHintTone('mid')
+      setHint(
+        resumed
+          ? `Still running ${tk} · ${ordered.join(' + ')} — left the desk, picked up where it left off.`
+          : `Running ${ordered.length} engine${ordered.length > 1 ? 's' : ''} · ${ordered.join(' + ')}${
+              gamma ? ' · Gamma on Grok' : ''
+            } · one job, each engine saved`,
+      )
+
+      try {
+        const outcome = await pollJob(
+          jobId,
+          {
+            onProgress: (pctInt, lbl, job) => {
+              setProgPct(pctInt == null ? null : Math.min(99, pctInt))
+              setProgLbl(lbl || '…')
+              setSceneEngine(
+                inferSceneEngine(
+                  job?.progress?.step || job?.llm_provider || lbl,
+                  ordered[0] || 'grok',
+                ),
+              )
+            },
+          },
+          1500,
+          ac.signal,
+        )
+        if (outcome.status === 'aborted' || ac.signal.aborted) return
+
+        clearActiveJob()
+        setActiveJobId(null)
+        onComplete?.()
+
+        setProgPct(100)
+        setProgLbl('Complete')
+        setTimeout(() => setShowProg(false), 650)
+
+        if (outcome.status === 'canceled' || outcome.status === 'cancelled') {
+          setHintTone('mid')
+          setHint('Canceled — any finished engines were saved to Saved Reports.')
+        } else if (outcome.status === 'failed') {
+          setHintTone('err')
+          setHint(`Error: ${outcome.error || outcome.detail || 'analysis failed'}`)
+        } else {
+          const provs = (outcome.result?.providers || {}) as Record<string, string>
+          const names = Object.keys(provs)
+          const okN = names.length
+            ? names.filter((k) => provs[k] === 'done').length
+            : outcome.status === 'done'
+              ? ordered.length
+              : 0
+          const failN = names.length
+            ? names.filter((k) => provs[k] !== 'done').length
+            : outcome.status === 'done'
+              ? 0
+              : ordered.length
+          const failNames = names.filter((k) => provs[k] !== 'done')
+          const c = outcome.result?.cost_usd
+          const warn = outcome.warning || outcome.error || outcome.detail
+          setHintTone(failN && !okN ? 'err' : failN ? 'mid' : 'ok')
+          setHint(
+            `${okN ? `✅ ${okN} report${okN > 1 ? 's' : ''} saved` : '❌ none saved'}${
+              failN ? ` · ${failN} failed${failNames.length ? ` (${failNames.join(', ')})` : ''}` : ''
+            }${c != null && !Number.isNaN(Number(c)) ? ` · $${Number(c).toFixed(2)}` : ''} — see Saved Reports${
+              warn && failN ? ` · ${String(warn).slice(0, 140)}` : ''
+            }`,
+          )
+        }
+      } catch (e) {
+        if (ac.signal.aborted) return
+        clearActiveJob()
+        setShowProg(false)
+        setActiveJobId(null)
+        setHintTone('err')
+        setHint(`Error: ${e instanceof Error ? e.message : 'unknown'}`)
+      } finally {
+        following.current = false
+        if (!ac.signal.aborted) {
+          setRunning(false)
+          setCanceling(false)
+        }
+      }
+    },
+    [gamma, onComplete],
+  )
+
   const runAnalysis = useCallback(async () => {
     const tk = ticker.trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
     if (!tk) {
@@ -150,28 +307,21 @@ export function AnalyzeCard({
       setHint('Select at least one engine.')
       return
     }
+    if (following.current) return
 
+    const ordered = [...engines].sort(
+      (a, b) => ENGINE_ORDER.indexOf(a) - ENGINE_ORDER.indexOf(b),
+    )
+    setProgPct(null)
+    setProgLbl(
+      ordered.length > 1
+        ? `${ordered[0]} · 1/${ordered.length} queued…`
+        : `${ordered[0]} queued…`,
+    )
     setRunning(true)
     setShowProg(true)
-    setProgPct(null)
-    setProgLbl(`${engines[0]} · 1/${engines.length} queued…`)
-    setHintTone('mid')
-    setHint(
-      `Running ${engines.length} engine${engines.length > 1 ? 's' : ''} · ${engines.join(' + ')}${
-        gamma ? ' · Gamma on Grok' : ''
-      } · one job, each engine saved`,
-    )
 
     try {
-      setProgLbl(
-        engines.length > 1
-          ? `${engines[0]} · 1/${engines.length} queued…`
-          : `${engines[0]} queued…`,
-      )
-      const order: LlmProvider[] = ['grok', 'claude', 'kimi', 'deepseek']
-      const ordered = [...engines].sort(
-        (a, b) => order.indexOf(a) - order.indexOf(b),
-      )
       setSceneEngine(ordered[0] || 'grok')
       const job = await api<JobStatus>('/api/analyze', {
         method: 'POST',
@@ -184,66 +334,67 @@ export function AnalyzeCard({
       })
       const jobId = job.job_id
       if (!jobId) throw new Error('No job_id from analyze')
-      setActiveJobId(jobId)
       onStart?.()
-
-      const outcome = await pollJob(jobId, {
-        onProgress: (pctInt, lbl, job) => {
-          setProgPct(pctInt == null ? null : Math.min(99, pctInt))
-          setProgLbl(lbl || '…')
-          setSceneEngine(
-            inferSceneEngine(
-              job?.progress?.step || job?.llm_provider || lbl,
-              ordered[0] || 'grok',
-            ),
-          )
-        },
-      })
-      setActiveJobId(null)
-      onComplete?.()
-
-      setProgPct(100)
-      setProgLbl('Complete')
-      setTimeout(() => setShowProg(false), 650)
-
-      if (outcome.status === 'canceled' || outcome.status === 'cancelled') {
-        setHintTone('mid')
-        setHint('Canceled — any finished engines were saved to Saved Reports.')
-      } else {
-        const provs = (outcome.result?.providers || {}) as Record<string, string>
-        const names = Object.keys(provs)
-        const okN = names.length
-          ? names.filter((k) => provs[k] === 'done').length
-          : outcome.status === 'done'
-            ? engines.length
-            : 0
-        const failN = names.length
-          ? names.filter((k) => provs[k] !== 'done').length
-          : outcome.status === 'done'
-            ? 0
-            : engines.length
-        const failNames = names.filter((k) => provs[k] !== 'done')
-        const c = outcome.result?.cost_usd
-        const warn = outcome.warning || outcome.error || outcome.detail
-        setHintTone(failN && !okN ? 'err' : failN ? 'mid' : 'ok')
-        setHint(
-          `${okN ? `✅ ${okN} report${okN > 1 ? 's' : ''} saved` : '❌ none saved'}${
-            failN ? ` · ${failN} failed${failNames.length ? ` (${failNames.join(', ')})` : ''}` : ''
-          }${c != null && !Number.isNaN(Number(c)) ? ` · $${Number(c).toFixed(2)}` : ''} — see Saved Reports${
-            warn && failN ? ` · ${String(warn).slice(0, 140)}` : ''
-          }`,
-        )
-      }
+      await followJob(jobId, tk, ordered, false)
     } catch (e) {
+      following.current = false
+      clearActiveJob()
       setShowProg(false)
       setActiveJobId(null)
+      setRunning(false)
       setHintTone('err')
       setHint(`Error: ${e instanceof Error ? e.message : 'unknown'}`)
-    } finally {
-      setRunning(false)
-      setCanceling(false)
     }
-  }, [ticker, engines, gamma, onComplete, onStart])
+  }, [ticker, engines, gamma, onStart, followJob])
+
+  // Re-attach a job that kept running after we left Desk (other tabs unmount this card).
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (following.current) return
+      const stored = loadActiveJob()
+      let job: JobStatus | null = null
+      if (stored?.jobId) {
+        try {
+          job = await api<JobStatus>(`/api/jobs/${encodeURIComponent(stored.jobId)}`)
+        } catch {
+          job = null
+        }
+      }
+      if (!isLiveAnalyze(job)) {
+        try {
+          const all = await api<JobStatus[]>('/api/jobs')
+          job =
+            (Array.isArray(all) ? all : []).find((j) => isLiveAnalyze(j)) || null
+        } catch {
+          job = null
+        }
+      }
+      if (cancelled || !isLiveAnalyze(job) || !job?.job_id || !job.ticker) {
+        if (stored && !isLiveAnalyze(job)) clearActiveJob()
+        return
+      }
+      const tk = job.ticker
+      const ordered = enginesFromJob(job, stored?.engines || engines)
+      onTickerChange?.(tk)
+      setLocalTicker(tk)
+      const pctRaw = job.progress?.pct
+      setProgPct(
+        pctRaw != null && !Number.isNaN(Number(pctRaw))
+          ? Math.min(99, Math.round(Number(pctRaw) * 100))
+          : null,
+      )
+      setProgLbl(job.progress?.label || `${tk} still running…`)
+      onStart?.()
+      await followJob(job.job_id, tk, ordered, true)
+    })()
+    return () => {
+      cancelled = true
+      pollAbort.current?.abort()
+    }
+    // Mount-only: re-attach whatever is live on the server / session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // External run trigger (Desk board / parent → Report)
   useEffect(() => {
