@@ -75,6 +75,11 @@
   color: #0c4a6e;
 }
 
+.chipNew {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;

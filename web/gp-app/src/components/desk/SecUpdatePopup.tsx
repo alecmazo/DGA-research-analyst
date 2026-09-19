@@ -9,6 +9,8 @@ type Updated = {
   filed?: string
   latest_period_end?: string
   fp?: string
+  status?: string
+  company?: string
   rows_written?: number
 }
 
@@ -108,23 +110,28 @@ export function SecUpdatePopup({
         )}
         {rows.length > 0 && (
           <div className={styles.chips}>
-            {rows.slice(0, 40).map((u, i) => (
+            {rows.slice(0, 40).map((u, i) => {
+              const filed = String(u.filed || '').slice(0, 10)
+              const fresh = u.status === 'new_period'
+              return (
               <button
                 key={`${u.ticker}-${i}`}
                 type="button"
-                className={styles.chip}
+                className={`${styles.chip} ${fresh ? styles.chipNew : ''}`}
+                title={u.company || u.ticker}
                 onClick={() => u.ticker && onOpenTicker?.(u.ticker)}
               >
                 {u.ticker}
-                {u.fp || u.form ? (
-                  <span>
-                    {' '}
-                    · {u.fp || u.form}
-                    {u.latest_period_end ? ` ${String(u.latest_period_end).slice(0, 10)}` : ''}
-                  </span>
-                ) : null}
+                <span>
+                  {' '}
+                  · {u.form || u.fp || '10-K/10-Q'}
+                  {filed ? ` ${filed}` : ''}
+                  {u.latest_period_end ? ` · ${String(u.latest_period_end).slice(0, 10)}` : ''}
+                  {fresh ? ' · new' : ' · in store'}
+                </span>
               </button>
-            ))}
+              )
+            })}
           </div>
         )}
         <div className={styles.actions}>

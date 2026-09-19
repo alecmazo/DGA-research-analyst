@@ -560,6 +560,82 @@ def _fin_new_filing_tickers(days: int = 2, user_agent: str | None = None) -> lis
     return [want[t] for t in sorted(want) if t in allow]
 
 
+def _fin_merge_overnight_rows(hits: list, updated: list) -> list[dict]:
+    """Every overnight 10-K/10-Q in coverage, tagged new-period vs already current."""
+    by = {
+        str(u.get("ticker") or "").upper(): u
+        for u in (updated or [])
+        if isinstance(u, dict) and u.get("ticker")
+    }
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for h in hits or []:
+        if not isinstance(h, dict):
+            continue
+        tk = str(h.get("ticker") or "").upper()
+        if not tk or tk in seen:
+            continue
+        seen.add(tk)
+        u = by.get(tk) or {}
+        new_p = tk in by
+        rows.append({
+            "ticker": tk,
+            "form": u.get("form") or h.get("form"),
+            "filed": u.get("filed") or h.get("filed"),
+            "company": h.get("company") or u.get("company"),
+            "latest_period_end": u.get("latest_period_end"),
+            "fp": u.get("fp"),
+            "status": "new_period" if new_p else "already_current",
+        })
+    for tk, u in by.items():
+        if tk in seen:
+            continue
+        rows.append({
+            **u,
+            "ticker": tk,
+            "status": u.get("status") or "new_period",
+        })
+    return rows
+
+
+def _fin_nightly_notice_text(rows: list[dict], *, paused: bool = False) -> tuple[str, str]:
+    """Title + body that always names the overnight filings (never only a count)."""
+    n = len(rows or [])
+    n_new = sum(1 for r in (rows or []) if (r or {}).get("status") == "new_period")
+    if paused:
+        title = f"SEC nightly paused · {n_new} updated, resumes tonight"
+        remain = "Remaining names resume at 11:00pm PT."
+    elif not n:
+        return (
+            "SEC nightly · no new filings",
+            "Checked EDGAR daily index for the last 2 days. No 10-K/10-Q "
+            "from names already in the store.",
+        )
+    else:
+        title = f"SEC nightly · {n} overnight filing{'s' if n != 1 else ''}"
+        if n_new:
+            title += f" · {n_new} new period{'s' if n_new != 1 else ''}"
+        else:
+            title += " · already current"
+        remain = ""
+    bits = []
+    for r in (rows or [])[:24]:
+        tk = r.get("ticker") or ""
+        form = r.get("form") or "10-K/10-Q"
+        filed = str(r.get("filed") or "")[:10]
+        st = "new period" if r.get("status") == "new_period" else "already in store"
+        bit = f"{tk} {form}"
+        if filed:
+            bit += f" {filed}"
+        bit += f" · {st}"
+        bits.append(bit)
+    extra = f" (+{n - 24} more)" if n > 24 else ""
+    body = "Overnight 10-K/10-Q in coverage: " + "; ".join(bits) + extra + "."
+    if remain:
+        body += " " + remain
+    return title, body
+
+
 def _run_fin_nightly_followed(job_id: str | None = None) -> dict:
     """Nightly: refresh ONLY names that filed a 10-K/10-Q recently.
 
@@ -668,34 +744,23 @@ def _run_fin_nightly_followed(job_id: str | None = None) -> dict:
                  f"{len(tickers) - (len(already) - len(state.get('done_tickers') or []))} remain — resumes tonight")
         _fin_job_set(jid, stage="paused", status="paused", label=label, result=result)
         status = "paused"
-        title = "SEC nightly paused · resumes tonight"
-        body = (f"Overnight window closed. {len(updated)} companies updated so far. "
-                f"Remaining names resume at 11:00pm PT.")
     else:
         _kv_put("fin_nightly.scan_state", {})
         label = (f"✓ Nightly new filings · {len(updated)} updated / {len(hits)} in index "
                  f"({names_fail} err)")
         _fin_job_set(jid, stage="done", status="done", label=label, result=result)
         status = "done"
-        title = (
-            f"SEC nightly · {len(updated)} compan{'y' if len(updated)==1 else 'ies'} updated"
-            if updated else "SEC nightly · no new periods"
-        )
-        if updated:
-            names = ", ".join(u.get("ticker") or "" for u in updated[:12])
-            extra = f" +{len(updated)-12} more" if len(updated) > 12 else ""
-            body = f"New 10-K/10-Q periods landed for {names}{extra}."
-        else:
-            body = (f"EDGAR listed {len(hits)} 10-K/10-Q filers already in the store; "
-                    f"periods were already current.")
+    rows = _fin_merge_overnight_rows(hits, updated)
+    title, body = _fin_nightly_notice_text(rows, paused=paused)
     last = {
         "ts": datetime.utcnow().isoformat() + "Z",
         "job_id": jid,
         "count": len(hits),
         "scanned": len(hits),
-        "updated": updated[:80],
-        "updated_count": len(updated),
-        "updated_tickers": [u.get("ticker") for u in updated if u.get("ticker")][:80],
+        "filings": hits[:80],
+        "updated": rows[:80],
+        "updated_count": sum(1 for u in rows if u.get("status") == "new_period"),
+        "updated_tickers": [u.get("ticker") for u in rows if u.get("ticker")][:80],
         "label": label,
         "kind": "nightly",
         "paused": paused,
@@ -703,7 +768,7 @@ def _run_fin_nightly_followed(job_id: str | None = None) -> dict:
     _kv_put("fin_nightly.last", last)
     _fin_publish_notice(
         id=jid, kind="nightly", status=status, job_id=jid,
-        title=title, body=body, updated=updated, scanned=len(hits),
+        title=title, body=body, updated=rows, scanned=len(hits),
         done=len(already), total=len(hits),
     )
     return _fin_sync_jobs.get(jid) or {}
@@ -2561,6 +2626,22 @@ def financials_desk_notice(request: Request):
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
     notice = _kv_get("fin.desk_notice") or None
+    last = _kv_get("fin_nightly.last") or {}
+    if (
+        isinstance(notice, dict)
+        and not (notice.get("updated") or [])
+        and (last.get("filings") or last.get("updated"))
+    ):
+        rows = _fin_merge_overnight_rows(
+            last.get("filings") or [], last.get("updated") or [])
+        if rows:
+            title, body = _fin_nightly_notice_text(
+                rows, paused=str(notice.get("status") or "") == "paused")
+            notice = {**notice, "title": title, "body": body, "updated": rows}
+            try:
+                _kv_put("fin.desk_notice", notice)
+            except Exception:
+                pass
     dismissed = _kv_get("fin.desk_notice.dismissed_id")
     if notice and dismissed and notice.get("id") == dismissed:
         return {"ok": True, "notice": None, "dismissed": True,

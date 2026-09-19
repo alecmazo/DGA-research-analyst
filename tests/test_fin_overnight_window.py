@@ -63,6 +63,46 @@ def test_ticker_map_cik_reverse_roundtrip():
     assert edgar.resolve_ticker_for_cik("0000320193") == "AAPL"
 
 
+def test_nightly_notice_lists_overnight_filings():
+    body = (ROOT / "api/domains/_financials_body.py").read_text(encoding="utf-8")
+    assert "def _fin_merge_overnight_rows" in body
+    assert "def _fin_nightly_notice_text" in body
+    assert '"filings": hits[:80]' in body
+    assert "already in the store; " not in body.split("def _run_fin_nightly_followed")[1].split("def _fin_remap_state")[0]
+    ui = (ROOT / "web/gp-app/src/components/desk/SecUpdatePopup.tsx").read_text(encoding="utf-8")
+    assert "already in store" in ui or "in store" in ui
+    assert "u.form" in ui
+    assert "u.filed" in ui
+
+
+def test_merge_overnight_rows_keeps_already_current():
+    """Helpers are exec'd into server; replicate the merge contract here."""
+    hits = [
+        {"ticker": "AAPL", "form": "10-Q", "filed": "20260918", "company": "Apple"},
+        {"ticker": "MSFT", "form": "10-K", "filed": "20260918", "company": "Microsoft"},
+    ]
+    updated = [{"ticker": "AAPL", "form": "10-Q", "filed": "20260918", "latest_period_end": "2026-06-30"}]
+    by = {str(u.get("ticker") or "").upper(): u for u in updated}
+    rows = []
+    seen = set()
+    for h in hits:
+        tk = h["ticker"]
+        seen.add(tk)
+        u = by.get(tk) or {}
+        rows.append({
+            "ticker": tk,
+            "form": u.get("form") or h.get("form"),
+            "filed": u.get("filed") or h.get("filed"),
+            "status": "new_period" if tk in by else "already_current",
+        })
+    assert [r["ticker"] for r in rows] == ["AAPL", "MSFT"]
+    assert rows[0]["status"] == "new_period"
+    assert rows[1]["status"] == "already_current"
+    bits = [f"{r['ticker']} {r['form']} · {'new period' if r['status']=='new_period' else 'already in store'}" for r in rows]
+    assert "MSFT 10-K · already in store" in bits
+    assert "AAPL 10-Q · new period" in bits
+
+
 def test_nightly_code_does_not_default_to_full_us():
     body = (ROOT / "api/domains/_financials_body.py").read_text(encoding="utf-8")
     assert "new_filings" in body

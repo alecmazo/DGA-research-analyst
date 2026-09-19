@@ -27,4 +27,4 @@ def test_list_jobs_route_exists():
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
     assert '@app.get("/api/jobs")' in src
     assert "def list_jobs" in src
-    assert 'WEB_BUILD_VERSION = "ui634-20260918-report-export"' in src
+    assert 'WEB_BUILD_VERSION = "ui635-20260919-sec-filings-list"' in src
