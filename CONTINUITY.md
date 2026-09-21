@@ -216,6 +216,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Desk Refresh** | **`ui633-20260918-desk-refresh`** | SUP_20260917_2563dba3 — Desk dropdown Refresh shows animated Refreshing…, disables the control, awaits watchlist/brief, min 700ms so the click is visible. |
 | **Report export menu** | **`ui634-20260918-report-export`** | SUP_20260918_472dae47 — Report window: Gamma/PPT/Word/Excel/Print/Share in one Export pulldown; PowerPoint download wired; Grok/Claude stay buttons; in-page Close removed. |
 | **SEC nightly list** | **`ui635-20260919-sec-filings-list`** | SUP_20260919_29f3af01 — Desk SEC popup lists overnight 10-K/10-Q (ticker, form, filed) even when periods were already current. |
+| **Grok 4.7** | **`ui636-20260921-grok-4-7`** | Default `GROK_MODEL` / `GROK_SCREEN_MODEL` → `grok-4.7` (same $2/$6 list as 4.6). |
 
 ### One-click handoff (preferred)
 
@@ -403,4 +404,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-19 · Agent: Grok Build · Live: `ui635-20260919-sec-filings-list` · Next: `ui636-YYYYMMDD-slug`*
+*Last updated: 2026-09-21 · Agent: Grok Build · Live: `ui636-20260921-grok-4-7` · Next: `ui637-YYYYMMDD-slug`*

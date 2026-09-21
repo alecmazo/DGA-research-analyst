@@ -8263,7 +8263,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui635-20260919-sec-filings-list"
+WEB_BUILD_VERSION = "ui636-20260921-grok-4-7"
 
 
 @app.get("/api/build")
@@ -11239,7 +11239,7 @@ def research_prioritize(request: Request, top_n: int = 5):
     "what to refresh / what to react to" list.
 
     Cost: small structured JSON call (no live search). Override model via
-    GROK_SCREEN_MODEL env (default grok-4.6).
+    GROK_SCREEN_MODEL env (default grok-4.7).
     """
     claims = _claims_or_401(request)
     lp_id = claims.get("lp_id") or claims.get("email") or "anon"
@@ -11333,7 +11333,7 @@ def research_prioritize(request: Request, top_n: int = 5):
     bucket_counts = {b: sum(1 for c in candidates if c["bucket"] == b)
                      for b in ("active", "stale", "fresh")}
 
-    _screen_model = getattr(analyst, "GROK_SCREEN_MODEL", None) or "grok-4.6"
+    _screen_model = getattr(analyst, "GROK_SCREEN_MODEL", None) or "grok-4.7"
     print(f"🎯 [prioritize {lp_id}] {len(candidates)} candidates "
           f"(active={bucket_counts['active']} stale={bucket_counts['stale']} fresh={bucket_counts['fresh']}) → {_screen_model}", flush=True)
 
@@ -33224,7 +33224,7 @@ def _estimate_call_sync_cost(n_names: int, max_quarters: int, n_already: int = 0
     Already-indexed quarters are free (skipped). Worst case ≈ max_quarters
     live searches per name that still needs data; typical is 1–2 new quarters.
     """
-    # Live search $0.025 + ~8k in / 3k out tokens on grok-4.6 ≈ $0.03–0.06/call
+    # Live search $0.025 + ~8k in / 3k out tokens on grok-4.7 ≈ $0.03–0.06/call
     per_search_lo, per_search_hi = 0.03, 0.08
     # Names that need work
     need = max(0, int(n_names) - int(n_already or 0))

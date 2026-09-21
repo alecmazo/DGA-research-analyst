@@ -62,7 +62,7 @@ is the safe-to-share template.
 
 | Name | Default | Purpose |
 |---|---|---|
-| `GROK_MODEL` | `grok-4.6` | Override to try newer models |
+| `GROK_MODEL` | `grok-4.7` | Override to try newer models |
 | `GAMMA_FOLDER_ID` | *(none)* | Target Gamma folder for generated decks |
 | `STOCK_FINANCIALS_DIR` | `stock-financials` | Where per-ticker 10-K / 10-Q Excel workbooks are saved & read. Relative paths are resolved against this project root. |
 
