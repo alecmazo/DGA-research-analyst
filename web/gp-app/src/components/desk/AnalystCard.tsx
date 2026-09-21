@@ -28,7 +28,7 @@ import {
 } from '@/pages/ResearchAnswerPage'
 import styles from './deskWidgets.module.css'
 
-const ENGINE_KEY = 'dga.agentic.engine.v1'
+const ENGINE_KEY = 'dga.agentic.engine.v2'
 
 const EXAMPLES = [
   'Which of my covered names moved most today and why?',
@@ -56,7 +56,7 @@ type ReviewRow = {
 type Props = { bare?: boolean }
 
 export function AnalystCard({ bare = false }: Props) {
-  const [engine, setEngine] = useState<AgentEngine>(() => loadEngine(ENGINE_KEY, 'claude'))
+  const [engine, setEngine] = useState<AgentEngine>(() => loadEngine(ENGINE_KEY, 'grok'))
   const costs = useCostCatalog()
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)

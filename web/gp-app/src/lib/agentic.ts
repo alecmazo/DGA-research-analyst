@@ -31,11 +31,11 @@ export type AgenticJob = {
 
 export const AGENT_ENGINES: { id: AgentEngine; label: string; title: string }[] = [
   { id: 'claude', label: 'Claude', title: 'Claude Opus 5 · tool-use default' },
-  { id: 'grok', label: 'Grok', title: 'Grok 4.6 · live/current markets' },
+  { id: 'grok', label: 'Grok', title: 'Grok 4.7 · reasoning on, live markets' },
   { id: 'deepseek', label: 'DeepSeek', title: 'DeepSeek · cheapest agent path' },
 ]
 
-export function loadEngine(key: string, fallback: AgentEngine = 'claude'): AgentEngine {
+export function loadEngine(key: string, fallback: AgentEngine = 'grok'): AgentEngine {
   try {
     const v = (localStorage.getItem(key) || '').toLowerCase()
     if (v === 'claude' || v === 'grok' || v === 'deepseek') return v

@@ -27,7 +27,7 @@ import {
 } from '@/pages/ResearchAnswerPage'
 import styles from './deskWidgets.module.css'
 
-const ENGINE_KEY = 'dga.strategist.engine.v1'
+const ENGINE_KEY = 'dga.strategist.engine.v2'
 
 type FundOpt = { id: string; name?: string; short_name?: string }
 
@@ -46,7 +46,7 @@ type Props = { bare?: boolean }
 
 export function StrategistCard({ bare = false }: Props) {
   const navigate = useNavigate()
-  const [engine, setEngine] = useState<AgentEngine>(() => loadEngine(ENGINE_KEY, 'claude'))
+  const [engine, setEngine] = useState<AgentEngine>(() => loadEngine(ENGINE_KEY, 'grok'))
   const costs = useCostCatalog()
   const [funds, setFunds] = useState<FundOpt[]>([])
   const [selected, setSelected] = useState<string[]>([])

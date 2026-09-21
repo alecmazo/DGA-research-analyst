@@ -8263,7 +8263,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui636-20260921-grok-4-7"
+WEB_BUILD_VERSION = "ui637-20260921-agents-grok47"
 
 
 @app.get("/api/build")
@@ -28928,7 +28928,7 @@ def _agentic_non_claude_system_addon(mode: str, max_steps: int, model: str) -> s
     Without this, Grok often burns 1 tool/round and hits wall-clock with a thin
     forced wrap-up instead of a competitive Grok 4.6 conclusion.
     """
-    eng = "Grok 4.6" if "grok" in (model or "").lower() else "this engine"
+    eng = "Grok 4.7" if "grok" in (model or "").lower() else "this engine"
     if mode == "strategist":
         return (
             f"\n\nENGINE: {eng} with the IDENTICAL tool set and evidence rules as Claude. "
@@ -28958,7 +28958,7 @@ def _agentic_non_claude_system_addon(mode: str, max_steps: int, model: str) -> s
 
 def _agentic_final_write_prompt(mode: str, model: str, *, reason: str = "budget") -> str:
     """High-quality no-tools final prompt — Grok must still produce its own full conclusion."""
-    eng = "Grok 4.6" if "grok" in (model or "").lower() else "your model"
+    eng = "Grok 4.7" if "grok" in (model or "").lower() else "your model"
     why = {
         "budget": "You have used (or nearly used) your tool budget.",
         "timeout": "A model call timed out mid-loop; do not wait for more tools.",
@@ -29171,6 +29171,10 @@ def _run_agentic_analysis(job_id: str, question: str,
                 model=model, messages=messages,
                 temperature=_oai_temp, max_tokens=_max_out,
             )
+            if provider == "grok":
+                # grok-4.7 reasons by default; pin high so rebalance write-ups
+                # keep a real thread (Chat Completions: extra_body).
+                create_kw["extra_body"] = {"reasoning_effort": "high"}
             if last_round and tool_log:
                 create_kw["messages"] = messages + [{
                     "role": "user",
@@ -29233,6 +29237,23 @@ def _run_agentic_analysis(job_id: str, question: str,
             msg = resp.choices[0].message if resp.choices else None
             if msg is None:
                 raise RuntimeError(f"{provider} returned empty message")
+            if provider == "grok":
+                rc = getattr(msg, "reasoning_content", None)
+                if not rc:
+                    extra = getattr(msg, "model_extra", None) or {}
+                    if isinstance(extra, dict):
+                        rc = extra.get("reasoning_content") or extra.get("reasoning")
+                rc_txt = str(rc or "").strip()
+                if rc_txt:
+                    tool_log.append({
+                        "tool": "reasoning",
+                        "input": {"text": rc_txt[:900]},
+                    })
+                    _set(stage="thinking",
+                         label=f"reasoning · {rc_txt[:140]}",
+                         steps=step, tool_calls=tool_log[:],
+                         cost_usd=round(total_cost, 4),
+                         provider=provider, model=model)
             tcalls = getattr(msg, "tool_calls", None) or []
             if not tcalls or last_round:
                 final = (msg.content or "").strip()

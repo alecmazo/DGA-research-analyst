@@ -298,7 +298,7 @@ export function ResearchAnswerPage() {
   )
   const verification = asVerification(review?.verification)
   const secs = Math.round(elapsed / 1000)
-  const tools = (job?.tool_calls || []).slice(-10)
+  const tools = (job?.tool_calls || []).slice(-16)
   const waiting = Boolean((pending && !id) || (id && loading && !answer))
   const printStamp = review?.generated_at
     ? new Date(review.generated_at).toLocaleString()
@@ -481,8 +481,12 @@ export function ResearchAnswerPage() {
         >
           {tools.map((tc, i) => (
             <div key={i}>
-              🔧 <strong>{tc.tool}</strong>{' '}
-              <code>{tc.input ? JSON.stringify(tc.input).slice(0, 60) : ''}</code>
+              {tc.tool === 'reasoning' ? '💭' : '🔧'} <strong>{tc.tool}</strong>{' '}
+              <code>
+                {tc.tool === 'reasoning'
+                  ? String((tc.input as { text?: string } | undefined)?.text || '').slice(0, 280)
+                  : (tc.input ? JSON.stringify(tc.input).slice(0, 80) : '')}
+              </code>
             </div>
           ))}
         </AnalysisScene>

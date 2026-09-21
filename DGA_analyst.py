@@ -352,15 +352,15 @@ MODEL_TASKS: dict[str, dict] = {
         "label": "DGA Capital Analyst (agentic Q&A)",
         "group": "Agents",
         "allowed": ("claude", "grok", "deepseek"),
-        "default": "claude",
-        "note": "Tool-use agent. Pick Grok 4.6, Claude Opus 5, or DeepSeek. Kimi not available for agents.",
+        "default": "grok",
+        "note": "Tool-use agent. Default Grok 4.7 (reasoning on, live search). Claude Opus 5 or DeepSeek still selectable.",
     },
     "strategist": {
         "label": "Portfolio Strategist",
         "group": "Agents",
         "allowed": ("claude", "grok", "deepseek"),
-        "default": "claude",
-        "note": "Same tool-use loop as Analyst — Grok / Claude / DeepSeek only.",
+        "default": "grok",
+        "note": "Whole-book IC review and rebalance suggestions. Default Grok 4.7.",
     },
 }
 # task_id → provider override from Settings (persisted in kv)
@@ -625,7 +625,7 @@ def providers_catalog() -> dict[str, dict]:
     return {
         "grok": {
             "id": "grok",
-            "label": "Grok 4.6 (xAI)",
+            "label": "Grok 4.7 (xAI)",
             "model": g_model,
             "configured": _provider_key_set(("XAI_API_KEY",)),
             "key_env": "XAI_API_KEY",
