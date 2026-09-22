@@ -21,6 +21,7 @@ import {
   type WatchlistResponse,
 } from '@/lib/api'
 import { requestQuoteRefresh, subscribeQuoteRefresh } from '@/lib/quoteRefresh'
+import { publishQuotes } from '@/lib/quoteBook'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
 import styles from './DeskPage.module.css'
@@ -219,6 +220,10 @@ export function DeskPage() {
       setRefreshing(false)
     }
   }, [loadWatchlist, loadBrief])
+
+  useEffect(() => {
+    if (wl?.quotes) publishQuotes(wl.quotes as Record<string, { price?: number | null; pct?: number | null }>)
+  }, [wl])
 
   useEffect(() => {
     void loadWatchlist()

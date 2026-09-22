@@ -11,6 +11,7 @@ import {
   type ReportHistoryVersion,
 } from '@/lib/api'
 import { getCachedUser } from '@/lib/auth'
+import { readQuote } from '@/lib/quoteBook'
 import { fmtPct, fmtPx, pctClass, printEngineName, relativeTime, scrubPrintEngineNames } from '@/lib/format'
 import { renderMd, reportMarkdown } from '@/lib/md'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
@@ -86,20 +87,25 @@ export function ReportPage() {
       setViewMd(null)
       setViewSnap(null)
       try {
-        const [r, q, h] = await Promise.all([
+        const known = readQuote(ticker)
+        if (known?.price != null) setQuote(known as Quote)
+        const [r, h] = await Promise.all([
           api<ReportDetail>(
-            `/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}`,
+            `/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}&as_stored=1`,
           ),
-          api<Quote>(`/api/quote/${encodeURIComponent(ticker)}`).catch(() => null),
           api<ReportHistory>(
             `/api/report/${encodeURIComponent(ticker)}/history?provider=${encodeURIComponent(provider)}`,
           ).catch(() => null),
         ])
         if (!alive) return
         setData(r)
-        setQuote(q)
         setHistory(h)
         if (h?.current) setViewSnap(h.current)
+        if (known?.price == null) {
+          api<Quote>(`/api/quote/${encodeURIComponent(ticker)}`)
+            .then((q) => { if (alive) setQuote(q) })
+            .catch(() => {})
+        }
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : 'Failed to load report')
       } finally {

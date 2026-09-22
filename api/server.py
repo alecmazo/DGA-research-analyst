@@ -8290,7 +8290,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui639-20260922-stored-open"
+WEB_BUILD_VERSION = "ui640-20260922-one-price"
 
 
 @app.get("/api/build")
@@ -10217,6 +10217,29 @@ def get_quote(ticker: str):
     (snapshot first) could stall report open for several seconds.
     """
     original  = ticker.strip().upper().rstrip("*")
+    now = time.time()
+    cached = _QUOTE_CACHE.get(original)
+    if (cached and cached.get("price") is not None
+            and (now - float(cached.get("_ts") or 0)) < _QUOTE_TTL):
+        return {
+            "ticker": original,
+            "price": cached.get("price"),
+            "pct_change": cached.get("pct_change"),
+            "as_of": cached.get("as_of"),
+            "source": "cache",
+        }
+    try:
+        stored = (_db_quotes([original], max_age_s=None) or {}).get(original) or {}
+        if stored.get("price") is not None:
+            return {
+                "ticker": original,
+                "price": stored.get("price"),
+                "pct_change": stored.get("pct_change"),
+                "as_of": stored.get("as_of"),
+                "source": "store",
+            }
+    except Exception as e:
+        print(f"[quote] {original}: store: {e!s:.80}", flush=True)
     # Skip Yahoo/Tiingo entirely for tickers in the exclusion list —
     # they're preferred stocks or ETFs that generate 404/delisted spam.
     if original in _SCAN_EXCLUDE or _is_agency_preferred(original):
@@ -10273,6 +10296,9 @@ def get_quote(ticker: str):
         if t.get("price") is not None:
             snapshot = {**snapshot, "price": t["price"], "pct_change": t.get("pct_change")}
             print(f"[quote] {original}: Yahoo miss → Tiingo hit")
+    for k in list(snapshot.keys()):
+        if str(k).startswith("debug_"):
+            snapshot.pop(k, None)
     return {"ticker": original, **snapshot}
 
 
@@ -17621,6 +17647,22 @@ def batch_quotes(tickers: str = ""):
     def _still_need(sym: str) -> bool:
         r = result.get(sym) or {}
         return r.get("price") is None or r.get("pct_change") is None
+
+    # Store before any outside source. Watchlist just wrote these prices.
+    if misses:
+        try:
+            stored = _db_quotes(misses, max_age_s=None) or {}
+            for sym in list(misses):
+                q = stored.get(sym) or {}
+                if q.get("price") is None:
+                    continue
+                _accept(
+                    sym, q.get("price"), q.get("pct_change"),
+                    source="store", as_of=q.get("as_of"),
+                )
+            misses = [s for s in misses if _still_need(s)]
+        except Exception as e:
+            print(f"[batch_quotes] store: {e!s:.120}", flush=True)
 
     # ── 1) market_data Yahoo chart (bar-based prev close — authoritative day %) ─
     # Prefer this over raw fast_info alone: Yahoo chart meta often omits

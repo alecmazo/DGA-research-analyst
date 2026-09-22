@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { api, type Quote, type ReportDetail } from '@/lib/api'
+import { readQuote } from '@/lib/quoteBook'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { renderMd, reportMarkdown } from '@/lib/md'
 import styles from './deskWidgets.module.css'
@@ -23,15 +24,18 @@ export function ReportModal({ ticker, provider = 'grok', onClose }: Props) {
       setLoading(true)
       setErr(null)
       try {
-        const [r, q] = await Promise.all([
-          api<ReportDetail>(
-            `/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}`,
-          ),
-          api<Quote>(`/api/quote/${encodeURIComponent(ticker)}`).catch(() => null),
-        ])
+        const known = readQuote(ticker)
+        if (known?.price != null) setQuote(known as Quote)
+        const r = await api<ReportDetail>(
+          `/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}&as_stored=1`,
+        )
         if (!alive) return
         setData(r)
-        setQuote(q)
+        if (known?.price == null) {
+          api<Quote>(`/api/quote/${encodeURIComponent(ticker)}`)
+            .then((q) => { if (alive) setQuote(q) })
+            .catch(() => {})
+        }
       } catch (e) {
         if (!alive) return
         setErr(e instanceof Error ? e.message : 'Failed to load report')

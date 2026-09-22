@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'reac
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { api, type Quote, type SavedReport } from '@/lib/api'
+import { readQuote, subscribeQuoteBook } from '@/lib/quoteBook'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
 import { openValuationWindow } from '@/pages/ValuationBridgePage'
@@ -124,6 +125,19 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
     const id = window.setTimeout(() => void load(), refreshKey ? 0 : 800)
     return () => window.clearTimeout(id)
   }, [load, refreshKey])
+
+  useEffect(() => {
+    const pull = () => {
+      const next: Record<string, Quote> = {}
+      for (const r of reports) {
+        const q = readQuote(r.ticker)
+        if (q && q.price != null) next[r.ticker] = q
+      }
+      if (Object.keys(next).length) setQuotes((prev) => ({ ...prev, ...next }))
+    }
+    pull()
+    return subscribeQuoteBook(pull)
+  }, [reports])
 
   const anyRunning = reports.some(
     (r) =>
