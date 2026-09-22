@@ -31,10 +31,12 @@ def test_markets_does_not_block_on_brief():
         encoding="utf-8"
     )
     fn = src.split("const loadAll")[1].split("useFocusEffect")[0]
-    assert "await loadQuotes({ ideas: true })" in fn
+    assert "await loadQuotes({ ideas: false })" in fn
+    assert "12000" in fn
+    assert "loadBriefAndPulse" in fn
     assert "await Promise.all" not in fn
-    assert "getLatestDailyBrief" in fn
-    assert "getLatestScan" in fn
+    assert "getLatestDailyBrief" in src
+    assert "getLatestScan" in src
 
 
 def test_markets_uses_mobile_home_and_skips_idea_feed_on_poll():

@@ -4559,7 +4559,7 @@ def _watchlist_fill_ytd(tickers: list[str], quotes: dict, budget_s: float = 2.0)
 
 
 @app.get("/api/watchlist")
-def watchlist_get(request: Request, fresh: bool = False):
+def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
     """Fast watchlist for login / desk paint.
 
     Always returns the ticker list even if quotes fail. Quote path:
@@ -4642,7 +4642,7 @@ def watchlist_get(request: Request, fresh: bool = False):
             def _wl_left() -> float:
                 return _WL_PAINT_S - (time.time() - t0)
 
-            if _wl_left() > 0.25:
+            if (not lite) and _wl_left() > 0.25:
                 try:
                     _watchlist_fill_ytd(
                         tickers, quotes, budget_s=min(0.4, max(0.15, _wl_left())))
@@ -4708,7 +4708,7 @@ def watchlist_get(request: Request, fresh: bool = False):
                     print(f"[watchlist] report lookup failed: {e!s:.120}", flush=True)
 
         # Earnings chips — cache hit is free; otherwise leftover paint budget.
-        if tickers:
+        if tickers and not lite:
             try:
                 earn_budget = min(0.35, max(0.05, 1.2 - (time.time() - t0)))
                 earnings_map = _watchlist_earnings_for(tickers, budget_s=earn_budget) or {}
@@ -4766,7 +4766,7 @@ def mobile_home(request: Request):
     except Exception as e:
         print(f"[mobile-home] indices: {e!s:.120}", flush=True)
         idx = {"indices": []}
-    wl = watchlist_get(request, fresh=False)
+    wl = watchlist_get(request, fresh=False, lite=True)
     return {
         "ok": True,
         "indices": (idx or {}).get("indices") or [],
@@ -8263,7 +8263,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui637-20260921-agents-grok47"
+WEB_BUILD_VERSION = "ui638-20260922-load-times"
 
 
 @app.get("/api/build")

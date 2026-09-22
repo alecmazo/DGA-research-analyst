@@ -25,6 +25,9 @@ export function LiveMarkets({ bare = false }: { bare?: boolean }) {
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
+    let cancelled = false
+    const start = window.setTimeout(() => {
+      if (cancelled || !hostRef.current) return
     host.innerHTML = ''
 
     const wrap = document.createElement('div')
@@ -85,8 +88,11 @@ export function LiveMarkets({ bare = false }: { bare?: boolean }) {
       ],
     })
     wrap.appendChild(s)
+    }, 1600)
 
     return () => {
+      cancelled = true
+      window.clearTimeout(start)
       host.innerHTML = ''
     }
   }, [theme])

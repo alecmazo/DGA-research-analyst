@@ -219,6 +219,7 @@ export function MarketPulse({
       return
     }
     let alive = true
+    const wait = window.setTimeout(() => {
     void api<{ metrics?: Record<string, PulseMetrics> }>(
       `/api/financials/metrics?tickers=${encodeURIComponent(tickers.join(','))}`,
     )
@@ -228,13 +229,15 @@ export function MarketPulse({
       .catch(() => {
         if (alive) setMetrics({})
       })
+    }, 1400)
     return () => {
       alive = false
+      window.clearTimeout(wait)
     }
   }, [tickers])
 
   useEffect(() => {
-    void load(false)
+    const first = window.setTimeout(() => void load(false), 1200)
     const id = window.setInterval(() => {
       if (document.hidden) return
       void load(false)
@@ -244,6 +247,7 @@ export function MarketPulse({
     }
     document.addEventListener('visibilitychange', onVis)
     return () => {
+      window.clearTimeout(first)
       window.clearInterval(id)
       document.removeEventListener('visibilitychange', onVis)
     }

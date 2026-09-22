@@ -136,11 +136,12 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "market_indices()" in body
     assert "watchlist_get(" in body
     assert "fresh=False" in body
+    assert "lite=True" in body
     assert "get_idea" not in body.lower()
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui631-20260918-mobile-fast"' in src
+    assert 'WEB_BUILD_VERSION = "ui638-20260922-load-times"' in src
 
 
 def test_mobile_fund_bars_have_yaxis():

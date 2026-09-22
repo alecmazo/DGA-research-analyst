@@ -262,10 +262,8 @@ export default function MarketsScreen({ navigation }) {
     setLastQuotesAt(now);
   }, []);
 
-  const loadAll = useCallback(async () => {
-    // Quotes first so the board paints. Brief/pulse markdown can be 1–5s on
-    // the one worker and used to freeze the whole Markets tab.
-    await loadQuotes({ ideas: true });
+  const extrasTimer = useRef(null);
+  const loadBriefAndPulse = useCallback(() => {
     api.getLatestDailyBrief().then(d => {
       const b = d && d.exists && d.markdown ? d : null;
       setBrief(b);
@@ -276,7 +274,18 @@ export default function MarketsScreen({ navigation }) {
       setPulse(p);
       patchScreenCache('markets', { pulse: p });
     }).catch(() => setPulse(null));
-  }, [loadQuotes]);
+  }, []);
+  const loadAll = useCallback(async () => {
+    // Board only. Idea-feed / brief / pulse share the one API worker and
+    // used to stall the indices. They load after the board, or on pull-to-refresh.
+    await loadQuotes({ ideas: false });
+    setMovers((prev) => (prev == null ? [] : prev));
+    if (extrasTimer.current) clearTimeout(extrasTimer.current);
+    extrasTimer.current = setTimeout(() => {
+      extrasTimer.current = null;
+      loadBriefAndPulse();
+    }, 12000);
+  }, [loadQuotes, loadBriefAndPulse]);
 
   // Focus: paint cache, then cheap /api/mobile/home. Poll quotes every 60s while
   // live+focused. Never auto-run brief / pulse (AI cost). Idea-feed is not on the poll.
@@ -315,6 +324,10 @@ export default function MarketsScreen({ navigation }) {
     }, QUOTE_POLL_MS);
     return () => {
       focusedRef.current = false;
+      if (extrasTimer.current) {
+        clearTimeout(extrasTimer.current);
+        extrasTimer.current = null;
+      }
       if (pollRef.current) {
         clearInterval(pollRef.current);
         pollRef.current = null;
@@ -334,15 +347,22 @@ export default function MarketsScreen({ navigation }) {
   }, []);
 
   const onRefresh = useCallback(async () => {
-    setRefreshing(true); await loadAll(); setRefreshing(false);
-  }, [loadAll]);
+    setRefreshing(true);
+    if (extrasTimer.current) {
+      clearTimeout(extrasTimer.current);
+      extrasTimer.current = null;
+    }
+    await loadQuotes({ ideas: true });
+    loadBriefAndPulse();
+    setRefreshing(false);
+  }, [loadQuotes, loadBriefAndPulse]);
 
   const onRefreshQuotes = useCallback(async () => {
     if (quotesBusy) return;
     setQuotesBusy(true);
     haptics.onPressPrimary?.();
     try {
-      await loadQuotes();
+      await loadQuotes({ ideas: false });
     } finally {
       setQuotesBusy(false);
     }

@@ -53,17 +53,18 @@ export function TopMovers({
   }, [])
 
   useEffect(() => {
-    void load(true)
+    const first = window.setTimeout(() => void load(false), 900)
     const id = window.setInterval(() => {
       if (document.hidden) return
       void load(false)
     }, 90_000)
     const onVis = () => {
       if (document.hidden) return
-      void load(true)
+      void load(false)
     }
     document.addEventListener('visibilitychange', onVis)
     return () => {
+      window.clearTimeout(first)
       window.clearInterval(id)
       document.removeEventListener('visibilitychange', onVis)
     }

@@ -63,9 +63,12 @@ export function SecUpdatePopup({
   }, [])
 
   useEffect(() => {
-    void load()
+    const first = window.setTimeout(() => void load(), 1500)
     const t = window.setInterval(() => void load(), 120000)
-    return () => window.clearInterval(t)
+    return () => {
+      window.clearTimeout(first)
+      window.clearInterval(t)
+    }
   }, [load])
 
   if (!notice) return null

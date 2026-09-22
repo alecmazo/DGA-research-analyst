@@ -222,10 +222,15 @@ export function DeskPage() {
 
   useEffect(() => {
     void loadWatchlist()
-    void loadBrief()
-    return subscribeQuoteRefresh(() => {
+    // Brief is optional. Let the watchlist own the one worker first.
+    const briefTimer = window.setTimeout(() => void loadBrief(), 600)
+    const unsub = subscribeQuoteRefresh(() => {
       void loadWatchlist()
     })
+    return () => {
+      window.clearTimeout(briefTimer)
+      unsub()
+    }
   }, [loadWatchlist, loadBrief])
 
   const rows = useMemo(() => {

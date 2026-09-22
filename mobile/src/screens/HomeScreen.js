@@ -214,9 +214,13 @@ export default function HomeScreen({ navigation, route }) {
   useFocusEffect(
     useCallback(() => {
       loadReports();
-      loadMarketWire();
-      loadEarnings();
-      checkServer();
+      // Wire + earnings calendar hit the same one-worker API. Reports paint
+      // first; the rest follows so opening Research does not stall Markets.
+      const later = setTimeout(() => {
+        loadMarketWire();
+        loadEarnings();
+        checkServer();
+      }, 2500);
       getGammaEnabled().then(setGammaEnabled);
       // Pre-fill ticker if navigated here from Intelligence/other screen
       const prefill = route?.params?.prefillTicker || route?.params?.ticker;
@@ -224,6 +228,7 @@ export default function HomeScreen({ navigation, route }) {
         setTicker(prefill.toUpperCase());
         navigation.setParams({ prefillTicker: undefined, ticker: undefined });
       }
+      return () => clearTimeout(later);
     }, [route?.params?.prefillTicker, route?.params?.ticker])
   );
 

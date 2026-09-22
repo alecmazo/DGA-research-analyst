@@ -103,8 +103,11 @@ export function StrategistCard({ bare = false }: Props) {
   }, [])
 
   useEffect(() => {
-    void loadFunds()
-    void loadArchive()
+    const id = window.setTimeout(() => {
+      void loadFunds()
+      void loadArchive()
+    }, 1100)
+    return () => window.clearTimeout(id)
   }, [loadFunds, loadArchive])
 
   const start = async (

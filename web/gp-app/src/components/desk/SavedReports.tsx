@@ -121,7 +121,8 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
   }, [])
 
   useEffect(() => {
-    void load()
+    const id = window.setTimeout(() => void load(), refreshKey ? 0 : 800)
+    return () => window.clearTimeout(id)
   }, [load, refreshKey])
 
   const anyRunning = reports.some(

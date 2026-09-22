@@ -49,9 +49,12 @@ export function MarketWire({ bare = false }: { bare?: boolean }) {
   }, [])
 
   useEffect(() => {
-    void load(false)
+    const first = window.setTimeout(() => void load(false), 1000)
     const id = window.setInterval(() => void load(false), 5 * 60_000)
-    return () => window.clearInterval(id)
+    return () => {
+      window.clearTimeout(first)
+      window.clearInterval(id)
+    }
   }, [load])
 
   const items = data?.items || []

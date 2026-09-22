@@ -102,7 +102,8 @@ export function AnalystCard({ bare = false }: Props) {
   }, [])
 
   useEffect(() => {
-    void loadReviews()
+    const id = window.setTimeout(() => void loadReviews(), 1100)
+    return () => window.clearTimeout(id)
   }, [loadReviews])
 
   const run = async () => {

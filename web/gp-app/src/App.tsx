@@ -31,9 +31,14 @@ function AuthBoot({
 }: {
   children: (user: GpUser, build?: string) => ReactNode
 }) {
-  const [user, setUser] = useState<GpUser | null>(getCachedUser())
+  const cached = getCachedUser()
+  const cachedOk =
+    !!cached && (cached.role === 'gp' || cached.role === 'admin')
+  const [user, setUser] = useState<GpUser | null>(cachedOk ? cached : null)
   const [build, setBuild] = useState<string>()
-  const [state, setState] = useState<'loading' | 'ok' | 'fail'>('loading')
+  const [state, setState] = useState<'loading' | 'ok' | 'fail'>(
+    cachedOk ? 'ok' : 'loading',
+  )
 
   useEffect(() => {
     const token = getToken()
