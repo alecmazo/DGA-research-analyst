@@ -16,7 +16,6 @@ export type CardId =
   | 'reports'
   | 'analyst'
   | 'strategist'
-  | 'markets'
   | 'wire'
   | 'mpulse'
   | 'movers'
@@ -52,10 +51,9 @@ const DEFAULT_LAYOUT: DeskLayoutMap = {
   reports: { x: 356, y: 0, w: 400, h: 420 },
   analyst: { x: 356, y: 436, w: 400, h: 420 },
   strategist: { x: 356, y: 872, w: 400, h: 380 },
-  markets: { x: 772, y: 0, w: 400, h: 280 },
-  wire: { x: 772, y: 296, w: 400, h: 380 },
-  analyze: { x: 772, y: 692, w: 400, h: 220 },
-  movers: { x: 772, y: 928, w: 400, h: 460 },
+  wire: { x: 772, y: 0, w: 400, h: 380 },
+  analyze: { x: 772, y: 396, w: 400, h: 220 },
+  movers: { x: 772, y: 632, w: 400, h: 460 },
   health: { x: 0, y: 1108, w: 340, h: 180 },
 }
 
@@ -107,7 +105,26 @@ function maxBottom(map: Partial<DeskLayoutMap>): number {
  * - New cards (not in saved map) get defaults, or stack below the board if
  *   the default would sit on top of an empty area after a sparse layout.
  */
+function withoutMarkets(saved: Partial<DeskLayoutMap> | null): Partial<DeskLayoutMap> | null {
+  if (!saved) return saved
+  const mk = (saved as { markets?: CardLayout }).markets
+  if (!isLayout(mk)) return saved
+  const block = (mk.collapsed ? COLLAPSED_H : mk.h) + 16
+  const next: Partial<DeskLayoutMap> = { ...saved }
+  delete (next as { markets?: CardLayout }).markets
+  for (const id of ALL_IDS) {
+    const L = next[id]
+    if (!isLayout(L)) continue
+    const overlaps = L.x < mk.x + mk.w && L.x + L.w > mk.x
+    if (overlaps && L.y >= mk.y + (mk.collapsed ? COLLAPSED_H : mk.h) - 4) {
+      next[id] = { ...L, y: Math.max(0, L.y - block) }
+    }
+  }
+  return next
+}
+
 function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
+  saved = withoutMarkets(saved)
   if (!saved) return { ...DEFAULT_LAYOUT }
 
   const out: DeskLayoutMap = { ...DEFAULT_LAYOUT }

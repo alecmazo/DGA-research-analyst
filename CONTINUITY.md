@@ -221,6 +221,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Load times** | **`ui638-20260922-load-times`** | Mobile home skips YTD/earnings. Desk paints watchlist before secondary cards. Cached GP session skips the boot splash. |
 | **Stored open** | **`ui639-20260922-stored-open`** | Mobile watchlist and saved reports open from Postgres. No Yahoo wait when a stored price exists. Report body is the saved note. |
 | **One price** | **`ui640-20260922-one-price`** | Desk watchlist fills one quote book. Reports and the report window reuse it. Server reads the store before Yahoo. Quote debug fields stripped. |
+| **No TradingView** | **`ui641-20260922-no-tv`** | Live Markets chart removed from the desk. Index ribbon stays. |
 
 ### One-click handoff (preferred)
 
@@ -408,4 +409,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-22 · Agent: Grok Build · Live: `ui640-20260922-one-price` · Next: `ui641-YYYYMMDD-slug`*
+*Last updated: 2026-09-22 · Agent: Grok Build · Live: `ui641-20260922-no-tv` · Next: `ui642-YYYYMMDD-slug`*

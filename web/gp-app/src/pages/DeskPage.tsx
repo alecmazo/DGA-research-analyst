@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { LiveMarkets } from '@/components/desk/LiveMarkets'
 import { AnalyzeCard } from '@/components/desk/AnalyzeCard'
 import { AnalystCard } from '@/components/desk/AnalystCard'
 import { StrategistCard } from '@/components/desk/StrategistCard'
@@ -601,14 +600,6 @@ export function DeskPage() {
       ),
       flush: true,
       children: <StrategistCard bare />,
-    },
-    {
-      id: 'markets' as const,
-      title: 'Live Markets',
-      badge: 'Real-time',
-      flush: true,
-      action: <span className={styles.meta}>TradingView</span>,
-      children: <LiveMarkets bare />,
     },
     {
       id: 'wire' as const,
