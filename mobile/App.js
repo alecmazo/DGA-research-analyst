@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, ActivityIndicator, AppState, Text } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -26,7 +26,6 @@ import WatchlistScreen        from './src/screens/WatchlistScreen';
 import FinancialsScreen       from './src/screens/FinancialsScreen';
 import MoreScreen             from './src/screens/MoreScreen';
 import CustomTabBar           from './src/components/CustomTabBar';
-import SupportFab             from './src/components/SupportFab';
 
 import { whoamiV2, getV2User, logoutV2 } from './src/api/client';
 import { isBiometricEnabled, disableBiometric } from './src/api/biometric';
@@ -34,6 +33,13 @@ import { colors, ThemeProvider } from './src/design';
 
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
+
+// Native insets arrive a moment later. Without a fallback the provider
+// renders nothing, and useSafeAreaInsets() throws and kills launch.
+const FALLBACK_METRICS = {
+  insets: { top: 0, right: 0, bottom: 0, left: 0 },
+  frame: { x: 0, y: 0, width: 0, height: 0 },
+};
 
 class BootBoundary extends React.Component {
   state = { err: null };
@@ -100,19 +106,11 @@ function MoreStack({ onLogout, isDemo, onSwitchToLP }) {
 
 // ── GP navigator: five primary tabs + a More hub (Podcast, Settings) ─────────
 function GPTabs({ onLogout, isDemo, onSwitchToLP }) {
-  const [tab, setTab] = useState('Markets');
   return (
     <View style={{ flex: 1 }}>
       <Tab.Navigator
         tabBar={(props) => <CustomTabBar {...props} />}
         screenOptions={{ headerShown: false }}
-        screenListeners={{
-          state: (e) => {
-            const s = e.data?.state;
-            const name = s?.routes?.[s.index]?.name;
-            if (name) setTab(name);
-          },
-        }}
       >
         <Tab.Screen name="Markets"    component={MarketsScreen} />
         <Tab.Screen name="Research"   component={HomeStack} />
@@ -123,7 +121,6 @@ function GPTabs({ onLogout, isDemo, onSwitchToLP }) {
           {() => <MoreStack onLogout={onLogout} isDemo={isDemo} onSwitchToLP={onSwitchToLP} />}
         </Tab.Screen>
       </Tab.Navigator>
-      <SupportFab surface={`mobile-gp/${tab}`} />
     </View>
   );
 }
@@ -146,7 +143,6 @@ function LPTabs({ onLogout, isDemo, onSwitchToAdmin }) {
           {() => <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={null} isLpMode={true} onSwitchToAdmin={onSwitchToAdmin} />}
         </Tab.Screen>
       </Tab.Navigator>
-      <SupportFab surface="mobile-lp/Positions" />
     </View>
   );
 }
@@ -319,7 +315,7 @@ export default function App() {
   const isDemo      = !!authState.demo_mode;
 
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics || FALLBACK_METRICS}>
       <BootBoundary>
         <ThemeProvider>
           <NavigationContainer key={lpMode ? 'lp' : 'gp'}>

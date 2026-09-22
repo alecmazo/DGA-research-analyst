@@ -1,42 +1,17 @@
-"""GP mobile must expose the same support FAB as LP so Alec can file tickets."""
+"""Mobile launch must not mount a support button, and Markets must stay cheap."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_support_fab_cannot_throw_on_launch():
-    fab = (ROOT / "mobile" / "src" / "components" / "SupportFab.js").read_text(
-        encoding="utf-8"
-    )
-    assert "useSafeAreaInsets" not in fab
+def test_mobile_has_no_support_button():
     app = (ROOT / "mobile" / "App.js").read_text(encoding="utf-8")
-    assert "SafeAreaProvider" in app
-    signed = app.split("Signed in")[1]
-    assert "<SafeAreaProvider>" in signed
-    assert signed.index("<SafeAreaProvider>") < signed.index("<GPTabs")
+    assert "SupportFab" not in app
     assert "checkForOtaUpdate('cold-start')" not in app
-
-
-def test_gp_tabs_include_support_fab():
-    app = (ROOT / "mobile" / "App.js").read_text(encoding="utf-8")
-    assert "function GPTabs" in app
-    gp = app.split("function GPTabs")[1].split("function LPTabs")[0]
-    assert "<SupportFab" in gp
-    assert "mobile-gp/" in gp
-    lp = app.split("function LPTabs")[1].split("function applyPendingUpdate")[0]
-    assert "<SupportFab" in lp
-
-
-def test_support_fab_posts_tickets():
-    fab = (ROOT / "mobile" / "src" / "components" / "SupportFab.js").read_text(
-        encoding="utf-8"
-    )
-    assert "fileSupportTicket" in fab
-    assert "screenshot_b64" in fab
-    assert "help-buoy" in fab
-    client = (ROOT / "mobile" / "src" / "api" / "client.js").read_text(encoding="utf-8")
-    assert "fileSupportTicket" in client
-    assert "/api/support/tickets" in client
+    assert "initialWindowMetrics" in app
+    assert "FALLBACK_METRICS" in app
+    fab = ROOT / "mobile" / "src" / "components" / "SupportFab.js"
+    assert not fab.exists()
 
 
 def test_markets_does_not_block_on_brief():
