@@ -400,8 +400,10 @@ export const api = {
   cancelJob:    (jobId) => request('/api/jobs/' + encodeURIComponent(jobId) + '/cancel', { method: 'POST' }),
   listJobs:     ()       => request('/api/jobs'),
   // provider: 'grok' (default) | 'claude' — opens the right MD via ?provider=
-  getReport:    (ticker, provider = 'grok') =>
-    request(`/api/report/${ticker}?provider=${encodeURIComponent(provider)}`),
+  getReport: (ticker, provider = 'grok', opts = {}) => {
+    const stored = opts.asStored ? '&as_stored=1' : '';
+    return request(`/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}${stored}`);
+  },
   listReports:  ()       => request('/api/reports'),
   // Bulk re-analyze
   startReanalyzeAll: (tickers) =>

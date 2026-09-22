@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import { api } from '../api/client';
+import { readScreenCache, writeScreenCache } from '../api/screenCache';
 import AppHeader, { BackButton } from '../components/AppHeader';
 import {
   makeReportMdStyles, reportMdRules, compactReportMd, formatDate, haptics, useTheme,
@@ -46,20 +47,48 @@ export default function ReportScreen({ route, navigation }) {
   const [showBackToTop, setShowBackToTop] = useState(false);
 
   // ── Data load + refresh ──────────────────────────────────────────────────
+  const cacheKey = `report_${ticker}_${provider}`;
+
   const loadAll = async () => {
     setError(null);
-    try {
-      const r = await api.getReport(ticker, provider);
-      setReport(r);
-    } catch (e) {
-      setError(e.message);
+    const cached = await readScreenCache(cacheKey);
+    if (cached && cached.report_md) {
+      setReport(cached);
+      setLoading(false);
     }
-    try { setQuote(await api.getQuote(ticker)); } catch {}
+    try {
+      const r = await api.getReport(ticker, provider, { asStored: true });
+      setReport(r);
+      if (r && r.report_md) writeScreenCache(cacheKey, r);
+    } catch (e) {
+      if (!cached) setError(e.message);
+    }
+    api.getQuote(ticker).then(setQuote).catch(() => {});
   };
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    loadAll().finally(() => setLoading(false));
+    (async () => {
+      const cached = await readScreenCache(cacheKey);
+      if (cancelled) return;
+      if (cached && cached.report_md) {
+        setReport(cached);
+        setLoading(false);
+      }
+      try {
+        const r = await api.getReport(ticker, provider, { asStored: true });
+        if (cancelled) return;
+        setReport(r);
+        if (r && r.report_md) writeScreenCache(cacheKey, r);
+      } catch (e) {
+        if (!cancelled && !(cached && cached.report_md)) setError(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+      api.getQuote(ticker).then((q) => { if (!cancelled) setQuote(q); }).catch(() => {});
+    })();
+    return () => { cancelled = true; };
   }, [ticker, provider]);
 
   const onRefresh = async () => {

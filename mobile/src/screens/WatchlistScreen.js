@@ -361,6 +361,18 @@ export default function WatchlistScreen({ navigation }) {
   }, []);
 
   const fetchPositions = useCallback(async (isRefresh = false) => {
+    if (!isRefresh && !paintedRef.current) {
+      try {
+        const raw = await AsyncStorage.getItem(POS_DATA_KEY);
+        if (raw) {
+          const data = JSON.parse(raw);
+          if (data && Array.isArray(data.positions) && data.positions.length) {
+            commitPositions(data, await loadViewConfig());
+            setLoading(false);
+          }
+        }
+      } catch { /* keep going to the network */ }
+    }
     if (isRefresh) setRefreshing(true);
     else if (!paintedRef.current) setLoading(true);
     setError(null);

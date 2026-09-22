@@ -4608,8 +4608,9 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
             # Never stamp yesterday into _QUOTE_CACHE as if it were live.
             if need and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
-                    store = _db_quotes(need, max_age_s=300) or {}
-                    if not live and not fresh:
+                    # Mobile lite: any stored price, no live Yahoo wait.
+                    store = _db_quotes(need, max_age_s=None if lite else 300) or {}
+                    if not live and not fresh and not lite:
                         older = _db_quotes(need, max_age_s=None) or {}
                         for tk, q in older.items():
                             store.setdefault(tk, q)
@@ -4651,7 +4652,7 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
 
             # Live Yahoo — MUST use shutdown(wait=False).
             left = max(0.0, _wl_left())
-            if need and left >= 0.35:
+            if need and (not lite) and left >= 0.35:
                 raw: dict = {}
                 try:
                     raw = _run_with_timeout(
@@ -5495,7 +5496,33 @@ def lp_me_positions(request: Request):
         }
 
     symbols = list({r["symbol"] for r in rows if r["symbol"]})
-    quotes  = batch_quotes(",".join(symbols)) if symbols else {}
+    quotes: dict = {}
+    if symbols:
+        # Holdings are already in Postgres. Paint store prices first so the
+        # phone is not stuck on a Yahoo fan-out. Fill blanks with a short live pass.
+        try:
+            store = _db_quotes(symbols, max_age_s=None) or {}
+            for sym, q in store.items():
+                if (q or {}).get("price") is not None:
+                    quotes[sym] = {
+                        "price": q.get("price"),
+                        "pct_change": q.get("pct_change"),
+                    }
+        except Exception as e:
+            print(f"[positions] store quotes: {e!s:.120}", flush=True)
+        missing = [s for s in symbols if (quotes.get(s) or {}).get("price") is None]
+        if missing:
+            try:
+                live = _run_with_timeout(
+                    lambda: batch_quotes(",".join(missing)) or {},
+                    1.2,
+                    default={},
+                ) or {}
+                for sym, q in live.items():
+                    if (q or {}).get("price") is not None:
+                        quotes[sym] = q
+            except Exception as e:
+                print(f"[positions] live quotes: {e!s:.120}", flush=True)
 
     total_mkt = 0.0
     result    = []
@@ -8263,7 +8290,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui638-20260922-load-times"
+WEB_BUILD_VERSION = "ui639-20260922-stored-open"
 
 
 @app.get("/api/build")
@@ -9226,7 +9253,7 @@ def list_jobs():
 
 
 @app.get("/api/report/{ticker}")
-def get_report(ticker: str, provider: str = "grok", request: Request = None):
+def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, request: Request = None):
     if request is not None and _request_is_demo(request):
         md = _demo_report_lookup(ticker)
         if md is None:
@@ -9264,16 +9291,19 @@ def get_report(ticker: str, provider: str = "grok", request: Request = None):
                 raw = analyst.normalize_dga_report_md(raw)
             except Exception:
                 pass
-            try:
-                import excel_model as _em
-                raw = _em.inject_cover_dcf_target(raw)
-            except Exception:
-                pass
-            try:
-                import research_comps as _rc
-                raw = _rc.replace_in_report(raw, payload.get("ticker") or ticker)
-            except Exception:
-                pass
+            # Mobile opens the note already in Postgres. Comps rewrite and
+            # cover DCF injection hit more tables and are not required to read.
+            if not as_stored:
+                try:
+                    import excel_model as _em
+                    raw = _em.inject_cover_dcf_target(raw)
+                except Exception:
+                    pass
+                try:
+                    import research_comps as _rc
+                    raw = _rc.replace_in_report(raw, payload.get("ticker") or ticker)
+                except Exception:
+                    pass
             payload["report_md"] = raw
             return _finish_report_payload(payload, row)
         if row:

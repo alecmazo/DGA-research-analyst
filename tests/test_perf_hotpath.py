@@ -137,11 +137,16 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "watchlist_get(" in body
     assert "fresh=False" in body
     assert "lite=True" in body
+    wl = _fn_src(ROOT / "api/server.py", "watchlist_get")
+    assert "if need and (not lite)" in wl
+    rep = _fn_src(ROOT / "api/server.py", "get_report")
+    assert "as_stored" in rep
+    assert "if not as_stored" in rep
     assert "get_idea" not in body.lower()
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui638-20260922-load-times"' in src
+    assert 'WEB_BUILD_VERSION = "ui639-20260922-stored-open"' in src
 
 
 def test_mobile_fund_bars_have_yaxis():
