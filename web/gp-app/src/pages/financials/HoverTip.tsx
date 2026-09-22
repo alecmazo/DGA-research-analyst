@@ -7,11 +7,13 @@ export function HoverTip({
   y,
   className,
   children,
+  wrap = false,
 }: {
   x: number
   y: number
   className: string
   children: ReactNode
+  wrap?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -21,10 +23,10 @@ export function HoverTip({
     const vw = window.innerWidth
     const vh = window.innerHeight
     el.style.maxWidth = `${Math.max(160, vw - pad * 2)}px`
-    el.style.whiteSpace = 'nowrap'
+    el.style.whiteSpace = wrap ? 'normal' : 'nowrap'
     let tw = el.offsetWidth
     let th = el.offsetHeight
-    if (tw > vw - pad * 2) {
+    if (!wrap && tw > vw - pad * 2) {
       el.style.whiteSpace = 'normal'
       tw = el.offsetWidth
       th = el.offsetHeight
@@ -37,7 +39,7 @@ export function HoverTip({
     if (top + th > vh - pad) top = Math.max(pad, vh - th - pad)
     el.style.left = `${left}px`
     el.style.top = `${top}px`
-  }, [x, y, children])
+  }, [x, y, children, wrap])
   return createPortal(
     <div ref={ref} className={className} role="tooltip">
       {children}

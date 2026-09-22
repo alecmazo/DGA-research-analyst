@@ -609,7 +609,7 @@ export function CompanyDashboard({
 
           {/* Compact series table under charts */}
           {Array.isArray(dash.series) && dash.series.length > 0 && (
-            <SeriesPanel series={dash.series} />
+            <SeriesPanel series={dash.series} ticker={dash.ticker} />
           )}
 
           {/* Price history */}

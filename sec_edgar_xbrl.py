@@ -471,6 +471,77 @@ def fetch_submissions(cik: str, user_agent: str | None = None) -> dict:
     return _get_json(sess, BASE_SUBMISSIONS.format(cik=cik))
 
 
+# Contractual long-term debt repayments, as tagged on the 10-K.
+# Order is the schedule investors expect. Aliases cover filers that use
+# "year one" instead of "next twelve months".
+_MATURITY_BUCKETS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Within 1 year", (
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths",
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInYearOne",
+    )),
+    ("Year 2", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearTwo",)),
+    ("Year 3", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearThree",)),
+    ("Year 4", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFour",)),
+    ("Year 5", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFive",)),
+    ("Thereafter", (
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalAfterYearFive",
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInYearSixAndBeyond",
+    )),
+)
+
+
+def maturity_rows_from_facts(companyfacts: dict) -> dict:
+    """Latest 10-K contractual debt maturity schedule. No network."""
+    best_end = ""
+    picked: list[tuple[str, dict]] = []
+    for label, tags in _MATURITY_BUCKETS:
+        hit = None
+        for tag in tags:
+            facts = _iter_facts(companyfacts or {}, tag, ("USD",))
+            instants = [
+                r for r in facts
+                if str(r.get("form") or "").startswith("10-K")
+                and r.get("val") is not None
+            ]
+            instants.sort(
+                key=lambda r: (str(r.get("end") or ""), str(r.get("filed") or "")),
+                reverse=True,
+            )
+            if instants:
+                hit = instants[0]
+                break
+        if hit is None:
+            continue
+        end = str(hit.get("end") or "")
+        if end > best_end:
+            best_end = end
+        picked.append((label, hit))
+    rows = []
+    for label, hit in picked:
+        end = str(hit.get("end") or "")
+        # Keep buckets from the same balance-sheet date as the newest bucket.
+        if best_end and end and end != best_end:
+            continue
+        try:
+            amount = float(hit["val"])
+        except (TypeError, ValueError):
+            continue
+        rows.append({
+            "label": label,
+            "amount": amount,
+            "end": end or None,
+            "fy": hit.get("fy"),
+        })
+    total = sum(r["amount"] for r in rows) if rows else None
+    fy = next((r.get("fy") for r in rows if r.get("fy")), None)
+    return {
+        "as_of": best_end or None,
+        "fy": fy,
+        "rows": rows,
+        "total": total,
+    }
+
+
 def fetch_company_facts(cik: str, user_agent: str | None = None) -> dict:
     sess = _session(user_agent)
     return _get_json(sess, BASE_COMPANYFACTS.format(cik=cik))

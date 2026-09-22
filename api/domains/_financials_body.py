@@ -5026,6 +5026,59 @@ def financials_comps(ticker: str, request: Request, limit: int = 8):
     return {"ok": True, **(data or {})}
 
 
+_DEBT_MAT_CACHE: dict = {}
+_DEBT_MAT_TTL_S = 6 * 3600
+
+
+@app.get("/api/financials/{ticker}/debt-maturities")
+def financials_debt_maturities(ticker: str, request: Request):
+    """Contractual debt maturity schedule from the latest 10-K XBRL.
+
+    Not on the dashboard payload — the table stays store-only. The hover
+    calls this once and the result is cached for hours.
+    """
+    _claims_or_401(request)
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+    now = time.time()
+    hit = _DEBT_MAT_CACHE.get(tk)
+    if hit and (now - float(hit.get("ts") or 0)) < float(hit.get("ttl") or _DEBT_MAT_TTL_S):
+        return hit["payload"]
+
+    def _pull():
+        import sec_edgar_xbrl as edgar
+        cik = edgar.resolve_cik(tk)
+        facts = edgar.fetch_company_facts(cik)
+        sched = edgar.maturity_rows_from_facts(facts if isinstance(facts, dict) else {})
+        return {
+            "ok": True,
+            "ticker": tk,
+            "source": "10-K XBRL",
+            **sched,
+            "note": (
+                None if sched.get("rows")
+                else "This 10-K does not tag a contractual maturity schedule in XBRL."
+            ),
+        }
+
+    try:
+        payload = _run_with_timeout(_pull, 8.0, default=None)
+    except Exception as e:
+        payload = None
+        print(f"[debt-mat] {tk}: {e!s:.140}", flush=True)
+    if not payload:
+        payload = {
+            "ok": False,
+            "ticker": tk,
+            "rows": [],
+            "error": "Maturity schedule unavailable",
+        }
+    ttl = _DEBT_MAT_TTL_S if payload.get("rows") else 600
+    _DEBT_MAT_CACHE[tk] = {"ts": now, "ttl": ttl, "payload": payload}
+    return payload
+
+
 @app.get("/api/financials/{ticker}/dashboard")
 def financials_dashboard(ticker: str, request: Request, period_type: str = "annual"):
     """Chart-ready company dashboard: fundamentals series, ROIC/WACC, DGA Score,

@@ -604,6 +604,63 @@
   font-weight: 700;
 }
 
+.debtCell {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.debtTip {
+  position: fixed;
+  z-index: 80;
+  min-width: 220px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-elevated, #fff);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+
+.debtTipTitle {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.debtTipSub {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.debtTipTable {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.debtTipTable td {
+  padding: 3px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.debtTipTable td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.debtTipTable tr:last-child td {
+  font-weight: 700;
+}
+
+.debtTipEmpty {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .tkSm {
   font-family: var(--font-mono, 'SF Mono', Menlo, monospace);
   font-weight: 700;
