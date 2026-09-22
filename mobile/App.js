@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, ActivityIndicator, AppState } from 'react-native';
+import { View, ActivityIndicator, AppState, Text } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -33,6 +34,28 @@ import { colors, ThemeProvider } from './src/design';
 
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
+
+class BootBoundary extends React.Component {
+  state = { err: null };
+  static getDerivedStateFromError(err) {
+    return { err };
+  }
+  render() {
+    if (this.state.err) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0b1220', padding: 28, justifyContent: 'center' }}>
+          <Text style={{ color: '#f8fafc', fontSize: 18, fontWeight: '700', marginBottom: 8 }}>
+            DGA could not open this screen
+          </Text>
+          <Text style={{ color: '#cbd5e1', fontSize: 14 }}>
+            {String(this.state.err.message || this.state.err)}
+          </Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function HomeStack() {
   return (
@@ -223,7 +246,8 @@ export default function App() {
   }, [refreshAuth]);
 
   useEffect(() => {
-    checkForOtaUpdate('cold-start');
+    // Do not touch expo-updates on launch. A check here re-downloaded a
+    // crashing bundle before the first screen could paint.
     bootstrap();
   }, [bootstrap]);
 
@@ -295,14 +319,18 @@ export default function App() {
   const isDemo      = !!authState.demo_mode;
 
   return (
-    <ThemeProvider>
-      <NavigationContainer key={lpMode ? 'lp' : 'gp'}>
-        <StatusBar style="light" />
-        {isGPOrAdmin && !lpMode
-          ? <GPTabs onLogout={handleLogout} isDemo={isDemo} onSwitchToLP={() => setLpMode(true)} />
-          : <LPTabs onLogout={handleLogout} isDemo={isDemo} onSwitchToAdmin={isGPOrAdmin ? () => setLpMode(false) : null} />
-        }
-      </NavigationContainer>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <BootBoundary>
+        <ThemeProvider>
+          <NavigationContainer key={lpMode ? 'lp' : 'gp'}>
+            <StatusBar style="light" />
+            {isGPOrAdmin && !lpMode
+              ? <GPTabs onLogout={handleLogout} isDemo={isDemo} onSwitchToLP={() => setLpMode(true)} />
+              : <LPTabs onLogout={handleLogout} isDemo={isDemo} onSwitchToAdmin={isGPOrAdmin ? () => setLpMode(false) : null} />
+            }
+          </NavigationContainer>
+        </ThemeProvider>
+      </BootBoundary>
+    </SafeAreaProvider>
   );
 }

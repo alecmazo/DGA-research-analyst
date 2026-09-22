@@ -4,7 +4,6 @@ import {
   ActivityIndicator, Platform, KeyboardAvoidingView, ScrollView,
   Dimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { api, getV2User } from '../api/client';
@@ -20,7 +19,6 @@ function blobToDataUrl(blob) {
 }
 
 export default function SupportFab({ surface = 'mobile-gp' }) {
-  const insets = useSafeAreaInsets();
   const { theme: t } = useTheme();
   const styles = useMemo(() => makeStyles(t), [t]);
   const [open, setOpen] = useState(false);
@@ -95,7 +93,7 @@ export default function SupportFab({ surface = 'mobile-gp' }) {
   return (
     <>
       <TouchableOpacity
-        style={[styles.fab, { bottom: Math.max(88, insets.bottom + 64) }]}
+        style={[styles.fab, { bottom: 88 }]}
         onPress={() => { setStatus(''); setOpen(true); }}
         accessibilityLabel="File support ticket"
       >

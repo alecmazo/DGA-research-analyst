@@ -4,6 +4,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_support_fab_cannot_throw_on_launch():
+    fab = (ROOT / "mobile" / "src" / "components" / "SupportFab.js").read_text(
+        encoding="utf-8"
+    )
+    assert "useSafeAreaInsets" not in fab
+    app = (ROOT / "mobile" / "App.js").read_text(encoding="utf-8")
+    assert "SafeAreaProvider" in app
+    signed = app.split("Signed in")[1]
+    assert "<SafeAreaProvider>" in signed
+    assert signed.index("<SafeAreaProvider>") < signed.index("<GPTabs")
+    assert "checkForOtaUpdate('cold-start')" not in app
+
+
 def test_gp_tabs_include_support_fab():
     app = (ROOT / "mobile" / "App.js").read_text(encoding="utf-8")
     assert "function GPTabs" in app
@@ -64,7 +77,7 @@ def test_ota_cold_start_never_reloads():
     assert "fetchOtaOnly" in cold
     assert "reloadAsync" not in cold
     assert "applyPendingUpdate" not in cold
-    assert "checkForOtaUpdate('cold-start')" in app
+    assert "checkForOtaUpdate('cold-start')" not in app
     settings = (ROOT / "mobile" / "src" / "screens" / "SettingsScreen.js").read_text(
         encoding="utf-8"
     )
