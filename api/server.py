@@ -8290,7 +8290,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui643-20260923-sec-wire"
+WEB_BUILD_VERSION = "ui644-20260923-login-busy"
 
 
 @app.get("/api/build")
@@ -9107,12 +9107,22 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
     _save_job_index_entry(job_id, {"ticker": ticker, "type": "analysis",
                                     "provider": label_p, "created_at": now})
 
+    # Own thread, not the request pool. A 15-minute Grok/Gamma run was
+    # occupying a server thread so sign-in sat until the browser gave up.
     if multi:
-        background_tasks.add_task(
-            _run_analysis_multi, job_id, ticker, req.generate_gamma, providers)
+        threading.Thread(
+            target=_run_analysis_multi,
+            args=(job_id, ticker, req.generate_gamma, providers),
+            name=f"analyze-{job_id[:8]}",
+            daemon=True,
+        ).start()
     else:
-        background_tasks.add_task(
-            _run_analysis, job_id, ticker, req.generate_gamma, providers[0])
+        threading.Thread(
+            target=_run_analysis,
+            args=(job_id, ticker, req.generate_gamma, providers[0]),
+            name=f"analyze-{job_id[:8]}",
+            daemon=True,
+        ).start()
     return _jobs[job_id]
 
 
@@ -19111,7 +19121,11 @@ def _fund_conn():
                 raw = pool.getconn()
             except Exception as e:
                 last_err = e
-                # Brief backoff if pool is temporarily empty
+                # Pool exhausted: do not open a fresh 10s connection.
+                # That is what made sign-in hang until the browser called it
+                # a network error.
+                if "exhaust" in str(e).lower():
+                    break
                 time.sleep(0.05 * _attempt)
                 continue
             try:
@@ -19132,14 +19146,10 @@ def _fund_conn():
     except Exception as e:
         last_err = e
         print(f"[db-pool] getconn failed: {e!s:.120}", flush=True)
-    # One last direct connect with timeout (not a permanent bypass)
-    try:
-        return psycopg2.connect(url, **_pg_connect_kwargs())
-    except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Fund DB unavailable: {e or last_err}",
-        )
+    raise HTTPException(
+        status_code=503,
+        detail="Desk is busy — wait a few seconds and sign in again.",
+    )
 
 
 

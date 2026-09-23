@@ -226,7 +226,7 @@ def _save_overlay_to_file(overlay: dict[str, dict]) -> None:
 # full-table SELECT per API call. Cache it briefly; _save_overlay invalidates,
 # so GP edits still take effect immediately within this process.
 _OVERLAY_CACHE: dict = {"data": None, "ts": 0.0}
-_OVERLAY_TTL_SECS = 15.0
+_OVERLAY_TTL_SECS = 60.0
 
 
 def _load_overlay() -> dict[str, dict]:
@@ -242,7 +242,10 @@ def _load_overlay() -> dict[str, dict]:
             # DB wins — merge file first, then DB on top
             data = {**file_data, **db_data}
         except Exception:
-            pass
+            # Desk DB is busy. Keep serving the last good user list so
+            # sign-in is not stuck behind an analysis job.
+            if _OVERLAY_CACHE["data"] is not None:
+                return _OVERLAY_CACHE["data"]
     _OVERLAY_CACHE["data"] = data
     _OVERLAY_CACHE["ts"] = now
     return data
