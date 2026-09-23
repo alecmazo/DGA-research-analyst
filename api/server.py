@@ -4528,12 +4528,16 @@ def _watchlist_apply_ytd(tickers: list[str], quotes: dict, ytd_map: dict) -> int
 
 def _watchlist_set_price(quotes: dict, tk: str, price, pct=None, as_of=None) -> None:
     """Set last/day % without wiping calendar YTD already stamped on the row."""
-    if not tk or price is None:
+    px = _clean_quote_px(price)
+    if not tk or px is None:
         return
+    # A day-% from a quote older than this session is not today's move.
+    if as_of and not _quote_from_current_session(as_of):
+        pct = None
     row = quotes.get(tk) or {}
-    row["price"] = price
+    row["price"] = px
     row["prev"] = None
-    row["pct"] = pct
+    row["pct"] = _clean_quote_pct(pct)
     if as_of:
         row["as_of"] = as_of
     quotes[tk] = row
@@ -4611,9 +4615,10 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
             if need and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
                     # Mobile lite: any stored price, no live Yahoo wait.
-                    store = _db_quotes(need, max_age_s=None if lite else 300) or {}
+                    # Never paint a months-old print. Five days covers a long weekend.
+                    store = _db_quotes(need, max_age_s=5 * 86400 if (lite or not live) else 300) or {}
                     if not live and not fresh and not lite:
-                        older = _db_quotes(need, max_age_s=None) or {}
+                        older = _db_quotes(need, max_age_s=5 * 86400) or {}
                         for tk, q in older.items():
                             store.setdefault(tk, q)
                     still = []
@@ -8319,7 +8324,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui649-20260923-store-first"
+WEB_BUILD_VERSION = "ui650-20260923-clean-px"
 
 
 @app.get("/api/build")
@@ -10280,7 +10285,7 @@ def get_quote(ticker: str):
             "source": "cache",
         }
     try:
-        stored = (_db_quotes([original], max_age_s=None) or {}).get(original) or {}
+        stored = (_db_quotes([original], max_age_s=5 * 86400) or {}).get(original) or {}
         if stored.get("price") is not None:
             return {
                 "ticker": original,
@@ -17729,7 +17734,7 @@ def batch_quotes(tickers: str = ""):
     # Store before any outside source. Watchlist just wrote these prices.
     if misses:
         try:
-            stored = _db_quotes(misses, max_age_s=None) or {}
+            stored = _db_quotes(misses, max_age_s=5 * 86400) or {}
             for sym in list(misses):
                 q = stored.get(sym) or {}
                 if q.get("price") is None:
@@ -19194,6 +19199,28 @@ def _fund_conn():
 
 
 
+def _clean_quote_px(price):
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return None
+    if p != p or p <= 0 or p > 1_000_000:
+        return None
+    return round(p, 2 if abs(p) >= 1 else 4)
+
+
+def _clean_quote_pct(pct):
+    if pct is None:
+        return None
+    try:
+        n = float(pct)
+    except (TypeError, ValueError):
+        return None
+    if n != n or abs(n) > 80:
+        return None
+    return round(n, 2)
+
+
 def _db_quotes(symbols, max_age_s=None) -> dict:
     """{SYM: {price, pct_change, as_of?}} from market_quotes store.
 
@@ -19216,9 +19243,19 @@ def _db_quotes(symbols, max_age_s=None) -> dict:
             else:
                 cur.execute("""SELECT upper(symbol) AS symbol, price, pct_change, updated_at
                                  FROM market_quotes WHERE upper(symbol) = ANY(%s)""", (syms,))
-            return {str(r["symbol"]).upper(): {"price": r["price"], "pct_change": r["pct_change"],
-                                  "as_of": r["updated_at"].isoformat() if r.get("updated_at") else None}
-                    for r in (cur.fetchall() or []) if r.get("price") is not None and r.get("symbol")}
+            out = {}
+            for r in (cur.fetchall() or []):
+                if not r.get("symbol"):
+                    continue
+                px = _clean_quote_px(r.get("price"))
+                if px is None:
+                    continue
+                out[str(r["symbol"]).upper()] = {
+                    "price": px,
+                    "pct_change": _clean_quote_pct(r.get("pct_change")),
+                    "as_of": r["updated_at"].isoformat() if r.get("updated_at") else None,
+                }
+            return out
     except Exception as e:
         print(f"[market] db_quotes failed: {e!s:.120}", flush=True)
         return {}

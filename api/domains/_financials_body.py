@@ -2954,9 +2954,19 @@ def _db_quotes(symbols, max_age_s=None) -> dict:
             else:
                 cur.execute("""SELECT upper(symbol) AS symbol, price, pct_change, updated_at
                                  FROM market_quotes WHERE upper(symbol) = ANY(%s)""", (syms,))
-            return {str(r["symbol"]).upper(): {"price": r["price"], "pct_change": r["pct_change"],
-                                  "as_of": r["updated_at"].isoformat() if r.get("updated_at") else None}
-                    for r in (cur.fetchall() or []) if r.get("price") is not None and r.get("symbol")}
+            out = {}
+            for r in (cur.fetchall() or []):
+                if not r.get("symbol"):
+                    continue
+                px = _clean_quote_px(r.get("price"))
+                if px is None:
+                    continue
+                out[str(r["symbol"]).upper()] = {
+                    "price": px,
+                    "pct_change": _clean_quote_pct(r.get("pct_change")),
+                    "as_of": r["updated_at"].isoformat() if r.get("updated_at") else None,
+                }
+            return out
     except Exception as e:
         print(f"[market] db_quotes failed: {e!s:.120}", flush=True)
         return {}
