@@ -30,6 +30,16 @@ def test_product_log_covers_surfaces():
         assert needle in text, needle
 
 
+def test_sliw_videos_are_not_redeployed():
+    ignore = (ROOT / ".railwayignore").read_text()
+    assert "apps/sliw-agent/**/*.mp4" in ignore
+    assert "apps/sliw-agent/**/*.mp4" in (ROOT / ".dockerignore").read_text()
+    src = (ROOT / "api" / "server.py").read_text()
+    assert "/data/sliw-media" in src
+    assert "if dest.is_file():" in src
+    assert "A file already on the volume is left alone" in src
+
+
 def test_server_has_two_layer_endpoints():
     src = (ROOT / "api" / "server.py").read_text()
     assert '@app.get("/api/continuity/handoff")' in src

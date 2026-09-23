@@ -45,6 +45,7 @@ Brand tokens (shared spirit): navy `#0A1628`, brand blue `#5BB8D4`.
 5. **Do not “fix” broken auth, fund math, or production env** with speculative rewrites. Prefer smallest reversible diffs.
 6. **When you finish:** clear your claim, note outcome in **Handoff log**, push if the human asked for remote sync.
 7. **Working order first.** If local dirty state looks accidental (mass deletes of tracked files), restore from `origin/main` rather than committing the damage.
+8. **Sliw videos are not redeployed.** A video already on the sliw/wedding site (`apps/sliw-agent/` mp4, webm, mov, m4v) stays on the web volume `/data/sliw-media`. Do not put it back in `railway up`, and do not overwrite the stored file, unless Alec specifically asks to replace that video.
 
 ### Conflict rule
 

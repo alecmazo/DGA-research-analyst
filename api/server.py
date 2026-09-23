@@ -8324,7 +8324,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui652-20260923-quote-paint"
+WEB_BUILD_VERSION = "ui653-20260923-sliw-videos"
 
 
 @app.get("/api/build")
@@ -41316,6 +41316,9 @@ def snaptrade_remove(request: Request):
 _SLIW_ROOT = Path(__file__).resolve().parent.parent / "apps" / "sliw-agent"
 _SLIW_WEB = _SLIW_ROOT / "web"
 _SLIW_WEDDINGS_SITE = _SLIW_ROOT / "weddings-site"
+# Video files already on the wedding site live here, not in the deploy
+# archive. Never overwrite a stored file from a new image.
+_SLIW_VIDEO_SUFFIXES = frozenset({".mp4", ".webm", ".mov", ".m4v"})
 _WEDDINGS_HOSTS = frozenset({
     "weddings.edytasliwinska.com",
     "www.weddings.edytasliwinska.com",
@@ -41347,6 +41350,61 @@ def _is_sliw_desk_host(request: Request) -> bool:
     return _request_host(request) in _SLIW_DESK_HOSTS
 
 
+def _sliw_media_dir() -> Path | None:
+    """Persistent sliw video store. Unset or missing on a laptop — use the repo."""
+    raw = (os.environ.get("SLIW_MEDIA_DIR") or "").strip()
+    path = Path(raw) if raw else Path("/data/sliw-media")
+    return path if path.is_dir() else None
+
+
+def _seed_sliw_videos_once() -> None:
+    """Copy a repo video onto the volume only when that file is not there yet.
+
+    A file already on the volume is left alone, even if the image has another
+    copy. Replacing one requires an explicit request.
+    """
+    dest_root = _sliw_media_dir()
+    if dest_root is None or not _SLIW_WEDDINGS_SITE.is_dir():
+        return
+    import shutil
+    seeded = 0
+    for src in _SLIW_WEDDINGS_SITE.rglob("*"):
+        if not src.is_file() or src.suffix.lower() not in _SLIW_VIDEO_SUFFIXES:
+            continue
+        rel = src.relative_to(_SLIW_WEDDINGS_SITE)
+        dest = dest_root / rel
+        if dest.is_file():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        seeded += 1
+    if seeded:
+        print(f"[sliw] seeded {seeded} video(s) onto {dest_root} (existing files kept)",
+              flush=True)
+
+
+def _weddings_resolve(name: str) -> Path:
+    """Wedding asset path. Videos prefer the volume; everything else is the repo."""
+    rel = Path(name)
+    if rel.is_absolute() or ".." in rel.parts:
+        raise HTTPException(status_code=404)
+    media_root = _sliw_media_dir()
+    if media_root is not None and rel.suffix.lower() in _SLIW_VIDEO_SUFFIXES:
+        stored = (media_root / rel).resolve()
+        try:
+            stored.relative_to(media_root.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404)
+        if stored.is_file():
+            return stored
+    target = (_SLIW_WEDDINGS_SITE / rel).resolve()
+    try:
+        target.relative_to(_SLIW_WEDDINGS_SITE.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404)
+    return target
+
+
 def _mount_sliw_agent() -> None:
     """Best-effort optional mount. Never raises into DGA startup."""
     try:
@@ -41374,13 +41432,10 @@ def _mount_sliw_agent() -> None:
         # ── Public wedding storefront (Option A) ────────────────────────────
         # Served at Host: weddings.edytasliwinska.com and path /weddings-site/
         # for preview on portfolio.dgacapital.com.
+        _seed_sliw_videos_once()
         if _SLIW_WEDDINGS_SITE.is_dir():
             def _weddings_file(name: str):
-                target = (_SLIW_WEDDINGS_SITE / name).resolve()
-                try:
-                    target.relative_to(_SLIW_WEDDINGS_SITE.resolve())
-                except ValueError:
-                    raise HTTPException(status_code=404)
+                target = _weddings_resolve(name)
                 if not target.is_file():
                     raise HTTPException(status_code=404)
                 media = "text/html"
@@ -41396,6 +41451,10 @@ def _mount_sliw_agent() -> None:
                     media = "video/mp4"
                 elif target.suffix == ".webm":
                     media = "video/webm"
+                elif target.suffix == ".mov":
+                    media = "video/quicktime"
+                elif target.suffix == ".m4v":
+                    media = "video/mp4"
                 elif target.suffix == ".json":
                     media = "application/json"
                 return FileResponse(
@@ -41432,9 +41491,11 @@ def _mount_sliw_agent() -> None:
                 rel = path.lstrip("/")
                 if ".." in rel:
                     raise HTTPException(status_code=404)
-                candidate = _SLIW_WEDDINGS_SITE / rel
-                if candidate.is_file():
+                try:
                     return _weddings_file(rel)
+                except HTTPException as exc:
+                    if exc.status_code != 404:
+                        raise
                 # SPA-style: unknown paths → home
                 if not path.startswith("/sliw"):
                     return _weddings_file("index.html")

@@ -1,0 +1,6 @@
+# Same rule as .railwayignore: sliw videos are not part of the image.
+# A later build must not wipe the copies already stored on the volume.
+apps/sliw-agent/**/*.mp4
+apps/sliw-agent/**/*.webm
+apps/sliw-agent/**/*.mov
+apps/sliw-agent/**/*.m4v

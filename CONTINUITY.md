@@ -233,6 +233,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Clean prices** | **`ui650-20260923-clean-px`** | Watchlist last/day % rounded. Quotes older than 5 days are not painted. A day-% from a prior session is not shown as today’s move. |
 | **Clean quote columns** | **`ui651-20260923-clean-quotes`** | Last, day %, and YTD right-align and no longer clip. The desk drops a cached price older than five days and does not keep yesterday’s day-% after the server blanks it. |
 | **Quote paint** | **`ui652-20260923-quote-paint`** | A last price from the past five days still paints during the session. Only the day-% is blank when that print is not from today. A months-old print stays off the list. |
+| **Sliw videos stay put** | **`ui653-20260923-sliw-videos`** | Wedding videos are not in the deploy archive. The live copies stay on `/data/sliw-media`. Re-upload only if Alec asks. |
 
 ### One-click handoff (preferred)
 
@@ -356,6 +357,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - Watchlist load **independent** of Daily Pulse (`Promise.all` used to freeze the list)
 - Watchlist YTD: calendar Jan 1; **this-year IPOs** = % since first tape print + small IPO tag
 - Grok Analyze: never persist `web_search` dumps as `report_md`
+- **Sliw videos:** files already on the wedding site stay on the web volume `/data/sliw-media`. `.railwayignore` and `.dockerignore` keep `apps/sliw-agent/**/*.mp4` (and webm/mov/m4v) out of every deploy. Do **not** re-upload or replace one unless Alec specifically asks. A stored file is never overwritten by a new image.
 - Report markdown: cover is a GFM table (no `**` wrapping the row); sections are `# SECTION N` not unicode banners
 - DGA Score: if book invested capital ≤ 0, ROIC uses total assets − cash; negative equity scores 0 on D/E **and ROE** (do not skip); profit ≤70, growth ≤75
 - Financial Strength: **no debt is a strength** — untagged debt on a complete BS is 0× leverage (not blank); cash/debt uses a 1-unit floor then caps at 10×. Charts still leave missing debt as blank.
@@ -420,4 +422,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-23 · Agent: Grok Build · Live: `ui652-20260923-quote-paint` · Next: `ui653-YYYYMMDD-slug`*
+*Last updated: 2026-09-23 · Agent: Grok Build · Live: `ui653-20260923-sliw-videos` · Next: `ui654-YYYYMMDD-slug`*

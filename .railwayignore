@@ -1,0 +1,7 @@
+# Sliw / wedding videos stay on the server volume (/data/sliw-media).
+# Do not upload them again unless Alec specifically asks to replace one.
+# .gitignore still applies. This file only adds extra exclusions.
+apps/sliw-agent/**/*.mp4
+apps/sliw-agent/**/*.webm
+apps/sliw-agent/**/*.mov
+apps/sliw-agent/**/*.m4v
