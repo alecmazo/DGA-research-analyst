@@ -146,7 +146,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui656-20260923-grok-stream"' in src
+    assert 'WEB_BUILD_VERSION = "ui657-20260923-grok-effort"' in src
 
 
 def test_mobile_fund_bars_have_yaxis():

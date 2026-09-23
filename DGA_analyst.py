@@ -822,6 +822,12 @@ def model_routing_status() -> dict:
         "kimi_model": KIMI_MODEL,
         "deepseek_model": DEEPSEEK_MODEL,
         "agentic_model": os.environ.get("AGENTIC_MODEL", "").strip() or CLAUDE_MODEL,
+        "grok_effort": get_grok_report_effort(),
+        "grok_effort_options": [
+            {"id": "low", "label": "Low"},
+            {"id": "medium", "label": "Normal"},
+            {"id": "high", "label": "High"},
+        ],
     }
 
 
@@ -8139,6 +8145,29 @@ def estimate_grok_cost(model: str, input_tokens: int, output_tokens: int,
     return token_cost + search_cost
 
 
+_GROK_EFFORT_API = {"low": "low", "medium": "medium", "high": "high", "normal": "medium"}
+_grok_report_effort: str | None = None
+
+
+def normalize_grok_effort(value: str | None) -> str:
+    """UI Normal is the API's medium. Unknown values fall back to Normal."""
+    key = (value or "").strip().lower()
+    return _GROK_EFFORT_API.get(key, "medium")
+
+
+def get_grok_report_effort() -> str:
+    """Saved Settings choice, else GROK_REPORT_EFFORT, else Normal (medium)."""
+    if _grok_report_effort:
+        return _grok_report_effort
+    return normalize_grok_effort(os.environ.get("GROK_REPORT_EFFORT") or "medium")
+
+
+def set_grok_report_effort(value: str | None) -> str:
+    global _grok_report_effort
+    _grok_report_effort = normalize_grok_effort(value)
+    return _grok_report_effort
+
+
 def call_grok(system_prompt: str, user_content: str,
               model: str = GROK_MODEL,
               *,
@@ -8314,11 +8343,9 @@ def call_grok(system_prompt: str, user_content: str,
             "SEC tables and market data in this prompt. You do not have web "
             "search on this call. Do not describe a plan. Start with the report."
         )
-    # grok-4.7 reasons by default at high effort and bills those tokens as
-    # output ($6/M, $12/M above 200k). Low effort is the old report speed.
-    effort = (os.environ.get("GROK_REPORT_EFFORT") or "low").strip().lower()
-    if effort not in ("low", "medium", "high", "xhigh"):
-        effort = "low"
+    # grok-4.7 cannot turn reasoning off. Normal = API medium.
+    # Settings → Models overrides this. Low is faster; high thinks longer.
+    effort = get_grok_report_effort()
     max_out = int(os.environ.get("GROK_REPORT_MAX_TOKENS") or "12000")
     max_out = max(4000, min(max_out, 20000))
     n_chars = len(system_prompt) + len(plain)

@@ -41,9 +41,12 @@ def test_equity_report_does_not_use_live_search():
     impl = src.split("def _analyze_ticker_impl")[1].split("def run_portfolio_summary")[0]
     assert "_live = False" in impl
     grok = src.split("def call_grok")[1].split("def call_claude")[0]
-    assert 'GROK_REPORT_EFFORT' in grok
+    assert 'GROK_REPORT_EFFORT' in src
+    assert 'get_grok_report_effort()' in grok
     assert '"reasoning_effort": effort' in grok
     assert "max_tokens=max_out" in grok
+    assert "get_grok_report_effort()" in grok
+    assert 'or "low"' not in grok
     assert "max_retries=0" in grok or "max_retries=0" in src
     assert "stream=True" in grok
 

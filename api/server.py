@@ -8355,7 +8355,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui656-20260923-grok-stream"
+WEB_BUILD_VERSION = "ui657-20260923-grok-effort"
 
 
 @app.get("/api/build")
@@ -8826,6 +8826,12 @@ def _load_volume_llm_override_from_db() -> None:
                 print(f"[model-routing] routes from DB: {analyst.get_task_routes()}", flush=True)
             if "volume_enabled" in raw2 and raw2["volume_enabled"] is not None:
                 analyst.set_volume_llm_runtime(bool(raw2["volume_enabled"]))
+            if raw2.get("grok_effort") and hasattr(analyst, "set_grok_report_effort"):
+                analyst.set_grok_report_effort(raw2.get("grok_effort"))
+                print(
+                    f"[model-routing] grok effort from DB: {analyst.get_grok_report_effort()}",
+                    flush=True,
+                )
         # Pin Daily Pulse + Market Pulse to DeepSeek even if an older kv
         # row still says grok/kimi.
         try:
@@ -8854,9 +8860,13 @@ def _persist_volume_llm_settings() -> None:
             "updated_at": _now_pacific().isoformat(),
         }
         _kv_put(_VOLUME_KV_KEY, payload)
+        effort = "medium"
+        if hasattr(analyst, "get_grok_report_effort"):
+            effort = analyst.get_grok_report_effort()
         _kv_put(_ROUTING_KV_KEY, {
             "routes": routes,
             "volume_enabled": en,
+            "grok_effort": effort,
             "updated_at": payload["updated_at"],
         })
     except Exception as e:
@@ -8892,10 +8902,15 @@ def set_model_routing(request: Request):
         body = _request_json_sync(request) or {}
     except Exception:
         body = {}
-    if "routes" not in body and "volume_enabled" not in body and "enabled" not in body:
+    if (
+        "routes" not in body
+        and "volume_enabled" not in body
+        and "enabled" not in body
+        and "grok_effort" not in body
+    ):
         raise HTTPException(
             status_code=422,
-            detail="Body must include {routes: {...}} and/or {volume_enabled: bool}",
+            detail="Body must include {routes: {...}}, {volume_enabled: bool}, and/or {grok_effort}",
         )
     bits = []
     if "volume_enabled" in body or "enabled" in body:
@@ -8905,6 +8920,10 @@ def set_model_routing(request: Request):
     if isinstance(body.get("routes"), dict) and hasattr(analyst, "set_task_routes"):
         routes = analyst.set_task_routes(body["routes"])
         bits.append("Routes: " + ", ".join(f"{k}→{v}" for k, v in sorted(routes.items())))
+    if "grok_effort" in body and hasattr(analyst, "set_grok_report_effort"):
+        saved = analyst.set_grok_report_effort(body.get("grok_effort"))
+        label = {"low": "Low", "medium": "Normal", "high": "High"}.get(saved, saved)
+        bits.append(f"Grok effort → {label}")
     _persist_volume_llm_settings()
     st = analyst.model_routing_status() if hasattr(analyst, "model_routing_status") else {}
     return {
@@ -29399,9 +29418,11 @@ def _run_agentic_analysis(job_id: str, question: str,
                 temperature=_oai_temp, max_tokens=_max_out,
             )
             if provider == "grok":
-                # grok-4.7 reasons by default; pin high so rebalance write-ups
-                # keep a real thread (Chat Completions: extra_body).
-                create_kw["extra_body"] = {"reasoning_effort": "high"}
+                # Same effort as Settings → Models (Normal unless toggled).
+                _effort = "medium"
+                if hasattr(analyst, "get_grok_report_effort"):
+                    _effort = analyst.get_grok_report_effort()
+                create_kw["extra_body"] = {"reasoning_effort": _effort}
             if last_round and tool_log:
                 create_kw["messages"] = messages + [{
                     "role": "user",

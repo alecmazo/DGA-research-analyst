@@ -117,6 +117,7 @@ type Routing = {
   routes?: Record<string, string>
   groups?: string[]
   volume?: VolumeCfg
+  grok_effort?: string
 }
 
 type VolumeCfg = {
@@ -413,6 +414,32 @@ export function ModelsSection() {
         11:00pm–6:00am PT window ($0 SEC / $0 LLM). Idea Generator is
         retired. Full reports + Agents: Grok · Claude · DeepSeek.
       </p>
+
+      <div className={styles.routeRow}>
+        <div>
+          <div className={styles.routeTitle}>Grok 4.7 effort</div>
+          <div className={styles.routeNote}>
+            Normal is the default. Low is faster and cheaper. High thinks longer
+            on each report and agent run.
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <select
+            className={styles.select}
+            style={{ minWidth: 120, height: 30, fontWeight: 700 }}
+            value={routing?.grok_effort === 'low' || routing?.grok_effort === 'high'
+              ? routing.grok_effort
+              : 'medium'}
+            disabled={busy}
+            aria-label="Grok 4.7 effort"
+            onChange={(e) => void setRoutingConfig({ grok_effort: e.target.value })}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Normal</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+      </div>
 
       <div className={styles.provGrid}>
         {ORDER.map((id) => {
