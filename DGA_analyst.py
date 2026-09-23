@@ -7908,6 +7908,33 @@ _TOOL_ITEM_TYPES = {
 }
 
 
+def looks_like_unfinished_report(text: str | None) -> bool:
+    """True when the model announced a search and never wrote the report.
+
+    ADBE 2026-09-23 saved only: "I will pull the last 90 days of ADBE news…"
+    That was persisted as report_md, so the report window looked blank.
+    """
+    t = str(text or "").strip()
+    if not t:
+        return True
+    low = t.lower()
+    planned = any(p in low for p in (
+        "before writing the report",
+        "i will pull",
+        "i'll pull",
+        "i will search",
+        "i'll search",
+        "let me search",
+        "then lock every financial",
+    ))
+    has_body = ("##" in t) or ("investment thesis" in low) or ("price target" in low)
+    if planned and not has_body:
+        return True
+    if len(t) < 400 and not has_body and "report" in low:
+        return True
+    return False
+
+
 def looks_like_llm_tool_trace(text: str | None) -> bool:
     """True when the model dumped live-search / tool calls instead of a report.
 
@@ -8267,11 +8294,23 @@ def call_grok(system_prompt: str, user_content: str,
             )
 
     # Fallback / default path (no server-side search).
+    # Drop the live-search orders. They make Grok announce a search it cannot
+    # run and stop after one sentence.
+    plain = user_content
+    if plain.startswith("LIVE SEARCH WINDOW:"):
+        parts = plain.split("\n\n", 1)
+        plain = parts[1] if len(parts) > 1 else plain
+    if live_search:
+        plain += (
+            "\n\nWrite the complete DGA markdown research report now from the "
+            "SEC tables and market data in this prompt. You do not have web "
+            "search on this call. Do not describe a plan. Start with the report."
+        )
     resp = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
+            {"role": "user", "content": plain},
         ],
     )
     _capture(resp, search_count=0)
@@ -10305,6 +10344,42 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         print(f"   ❌ {_prov.upper()} API error: {exc}")
         result["error"] = f"{_prov.title()}: {exc}"
         return result
+
+    if looks_like_unfinished_report(report_text):
+        print(f"   ⚠️  {ticker}: model returned a plan, not a report "
+              f"({len(report_text or ''):,} chars) — writing the report now")
+        _ck()
+        _emit_progress(on_progress, "grok", 0.50,
+                       f"{_prov.title()} — writing the report")
+        try:
+            report_text2 = call_llm_with_heartbeat(
+                _prov, system_prompt,
+                user_msg + (
+                    "\n\nThe previous answer was only a plan. Write the full "
+                    "DGA markdown report now from the SEC tables and market "
+                    "data above. Do not say you will search."
+                ),
+                live_search=False,
+                on_delta=on_delta,
+                should_cancel=should_cancel,
+                on_progress=on_progress,
+                progress_step="grok",
+                progress_base=0.50,
+                progress_cap=0.80,
+            )
+            if report_text2 and not looks_like_unfinished_report(report_text2):
+                report_text = report_text2
+            else:
+                result["error"] = (
+                    f"{_prov.title()} stopped before writing the report. "
+                    "Run Analyze again."
+                )
+                return result
+        except ClaudeCancelled:
+            raise
+        except Exception as exc:
+            result["error"] = f"{_prov.title()}: {exc}"
+            return result
 
     # Safety net: Grok + live search sometimes invents qualitative table cells
     # ("Elevated", "Turning positive") when year labels conflict. Detect and

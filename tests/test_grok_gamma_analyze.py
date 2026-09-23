@@ -2,7 +2,7 @@
 import time
 from pathlib import Path
 
-from DGA_analyst import _bounded_call
+from DGA_analyst import _bounded_call, looks_like_unfinished_report
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -14,6 +14,18 @@ def test_bounded_call_returns_instead_of_hanging():
     assert val is None
     assert isinstance(err, TimeoutError)
     assert elapsed < 2.0
+
+
+def test_adbe_preamble_is_not_a_report():
+    stub = (
+        "I will pull the last 90 days of ADBE news, M&A, and earnings "
+        "before writing the report, then lock every financial table to "
+        "the verified SEC block."
+    )
+    assert looks_like_unfinished_report(stub)
+    assert not looks_like_unfinished_report(
+        "## Investment thesis\n\nAdobe is a hold.\n\n## Price target\n\n$400\n" * 20
+    )
 
 
 def test_analyze_does_not_blame_gamma_for_llm_timeout():

@@ -8290,7 +8290,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui645-20260923-grok-gamma"
+WEB_BUILD_VERSION = "ui646-20260923-report-stub"
 
 
 @app.get("/api/build")
@@ -9299,6 +9299,18 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
         if not dump:
             try:
                 raw = analyst.normalize_dga_report_md(raw)
+            except Exception:
+                pass
+            try:
+                if analyst.looks_like_unfinished_report(raw):
+                    raw = (
+                        "# Report did not finish\n\n"
+                        "The model stopped after saying it would search, and "
+                        "that sentence was saved in place of the report. "
+                        "Run **Analyze** again for this ticker. "
+                        "The next run writes the full note even if live search "
+                        "does not finish.\n"
+                    )
             except Exception:
                 pass
             # Mobile opens the note already in Postgres. Comps rewrite and
