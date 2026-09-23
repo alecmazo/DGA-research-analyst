@@ -4576,8 +4576,8 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
 
     Always returns the ticker list even if quotes fail. Quote path:
     process cache → market_quotes store (current session while live) →
-    Yahoo chart (hard 1.5s wall) → last-close store (≤4d) so a Yahoo miss
-    still paints a price. Weekend/closed still paints last close.
+    Yahoo chart (hard 1.5s wall) → last-close store (≤5d) so a Yahoo miss
+    still paints a price. A day-% from another session is left blank.
     ``fresh=1`` skips the process cache.
     Earnings chips: process-cached Nasdaq calendar, ≤8s budget, never hangs
     the list (stale-while-revalidate + background refresh).
@@ -4612,36 +4612,33 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
                 if (quotes.get(tk) or {}).get("price") is None:
                     need.append(tk)
 
-            # DB store first (no HTTP) — only current-session rows while live.
-            # Unlimited-age fallback is weekend/closed only (Friday close).
-            # Never stamp yesterday into _QUOTE_CACHE as if it were live.
+            # DB store first (no HTTP). A last price from the past five days
+            # always paints. Day-% is kept only when that print is this session
+            # (_watchlist_set_price). Yesterday is not cached as if it were live,
+            # so a later Yahoo print can still replace it.
             if need and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
-                    # Mobile lite: any stored price, no live Yahoo wait.
-                    # Never paint a months-old print. Five days covers a long weekend.
-                    store = _db_quotes(need, max_age_s=5 * 86400 if (lite or not live) else 300) or {}
-                    if not live and not fresh and not lite:
-                        older = _db_quotes(need, max_age_s=5 * 86400) or {}
-                        for tk, q in older.items():
-                            store.setdefault(tk, q)
+                    store = _db_quotes(need, max_age_s=5 * 86400) or {}
                     still = []
                     for tk in need:
                         q = store.get(tk) or {}
                         as_of = q.get("as_of")
-                        ok = q.get("price") is not None and (
-                            (not live) or _quote_from_current_session(as_of)
-                        )
-                        if ok:
-                            _watchlist_set_price(
-                                quotes, tk, q.get("price"),
-                                pct=q.get("pct_change"), as_of=as_of)
+                        if q.get("price") is None:
+                            still.append(tk)
+                            continue
+                        _watchlist_set_price(
+                            quotes, tk, q.get("price"),
+                            pct=q.get("pct_change"), as_of=as_of)
+                        current = (not live) or _quote_from_current_session(as_of)
+                        if current:
+                            row = quotes.get(tk) or {}
                             _QUOTE_CACHE[tk] = {
-                                "price": q.get("price"),
-                                "pct_change": q.get("pct_change"),
+                                "price": row.get("price"),
+                                "pct_change": row.get("pct"),
                                 "as_of": as_of,
                                 "_ts": now,
                             }
-                        else:
+                        elif not lite:
                             still.append(tk)
                     need = still
                 except Exception as e:
@@ -4682,16 +4679,16 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
                             quotes, tk, q.get("price"),
                             pct=q.get("pct_change"), as_of=q.get("as_of"))
 
-            # Yahoo miss / 6s wall: last-close store (≤4d). Live session already
-            # rejected these as not-current-session so we wouldn't paint Friday
-            # as the open; after a live miss a last close beats a dash.
+            # Yahoo miss must not leave a dash when the store still has a
+            # last price. This read is local — do not skip it when the paint
+            # clock is already spent.
             still_blank = [
                 tk for tk in tickers
                 if (quotes.get(tk) or {}).get("price") is None
             ]
-            if still_blank and _wl_left() > 0.15 and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            if still_blank and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
-                    older = _db_quotes(still_blank, max_age_s=4 * 86400) or {}
+                    older = _db_quotes(still_blank, max_age_s=5 * 86400) or {}
                     for tk in still_blank:
                         q = older.get(tk) or {}
                         if q.get("price") is None:
@@ -8327,7 +8324,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui651-20260923-clean-quotes"
+WEB_BUILD_VERSION = "ui652-20260923-quote-paint"
 
 
 @app.get("/api/build")

@@ -118,7 +118,8 @@ def test_batch_quotes_fast_uses_store_not_null():
 def test_watchlist_get_never_stamps_null_over_last_close():
     body = _fn_src("watchlist_get")
     assert 'q.get("price") is not None or tk not in quotes' not in body
-    assert "4 * 86400" in body
+    assert "5 * 86400" in body
+    assert "else 300" not in body
     assert "last-close" in body.lower() or "still_blank" in body
 
 
