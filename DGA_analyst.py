@@ -7861,11 +7861,45 @@ def fetch_analyst_ratings(ticker: str) -> str:
 # ============================================================================
 # Grok (xAI) call
 # ============================================================================
+def _bounded_call(fn, timeout_s: float):
+    """Run fn on a daemon thread. Returns (value, error).
+
+    On timeout, value is None and error is TimeoutError. The hung call is
+    abandoned so Analyze can fall back instead of waiting out the 15‑minute
+    watchdog.
+    """
+    import threading
+    box: dict = {"val": None, "err": None}
+    done = threading.Event()
+
+    def _work() -> None:
+        try:
+            box["val"] = fn()
+        except BaseException as exc:  # noqa: BLE001
+            box["err"] = exc
+        finally:
+            done.set()
+
+    threading.Thread(target=_work, name="bounded-call", daemon=True).start()
+    if not done.wait(max(1.0, float(timeout_s))):
+        return None, TimeoutError(f"exceeded {int(timeout_s)}s")
+    return box.get("val"), box.get("err")
+
+
 def _client():
     # Imported lazily so the module can be loaded without the openai package
     # (e.g. for parser/word-render unit tests) — only needed at call time.
     from openai import OpenAI  # type: ignore
-    return OpenAI(api_key=get_grok_api_key(), base_url="https://api.x.ai/v1")
+    try:
+        import httpx
+        timeout = httpx.Timeout(240.0, connect=20.0, write=60.0, read=240.0)
+    except Exception:
+        timeout = 240.0
+    return OpenAI(
+        api_key=get_grok_api_key(),
+        base_url="https://api.x.ai/v1",
+        timeout=timeout,
+    )
 
 
 _TOOL_ITEM_TYPES = {
@@ -8133,17 +8167,33 @@ def call_grok(system_prompt: str, user_content: str,
                 + ")…",
                 flush=True,
             )
-            resp = client.responses.create(
-                model=model,
-                input=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ],
-                tools=[
-                    {"type": "web_search"},
-                    {"type": "x_search"},
-                ],
-            )
+            live_cap = float(os.environ.get("GROK_LIVE_SEARCH_TIMEOUT_S") or "180")
+            live_cap = max(45.0, min(live_cap, 300.0))
+
+            def _live_once(content: str):
+                return client.responses.create(
+                    model=model,
+                    input=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": content},
+                    ],
+                    tools=[
+                        {"type": "web_search"},
+                        {"type": "x_search"},
+                    ],
+                )
+
+            resp, live_err = _bounded_call(lambda: _live_once(user_content), live_cap)
+            if live_err is not None or resp is None:
+                print(
+                    f"   ⚠️  Grok live-search did not finish in {int(live_cap)}s "
+                    f"({str(live_err)[:160] if live_err else 'no response'}) "
+                    "— writing the report without live search.",
+                    flush=True,
+                )
+                resp = None
+            if resp is None:
+                raise TimeoutError("live search skipped")
             text = _extract_responses_text(resp)
             if text and looks_like_llm_tool_trace(text):
                 print(
@@ -8183,17 +8233,16 @@ def call_grok(system_prompt: str, user_content: str,
                 + "FINAL OUTPUT must be the complete DGA markdown research report "
                 + "only — never list web_search / x_search queries in the answer."
             )
-            resp2 = client.responses.create(
-                model=model,
-                input=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": reinforce},
-                ],
-                tools=[
-                    {"type": "web_search"},
-                    {"type": "x_search"},
-                ],
+            resp2, live_err2 = _bounded_call(
+                lambda: _live_once(reinforce), min(120.0, live_cap),
             )
+            if live_err2 is not None or resp2 is None:
+                print(
+                    "   ⚠️  Grok live-search retry skipped — "
+                    "writing the report without live search.",
+                    flush=True,
+                )
+                raise TimeoutError("live search retry skipped")
             text2 = _extract_responses_text(resp2)
             if text2 and looks_like_llm_tool_trace(text2):
                 print(
@@ -8788,8 +8837,9 @@ def call_llm_with_heartbeat(
         elapsed = time.time() - t0
         if elapsed >= timeout_s:
             raise TimeoutError(
-                f"{provider} LLM call exceeded {int(timeout_s)}s — try again "
-                f"or disable Gamma / live-search-heavy models."
+                f"{provider} LLM call exceeded {int(timeout_s)}s — "
+                f"the report was not saved. Run it again; Gamma is separate "
+                f"and is not what stalled this step."
             )
         span = max(0.01, progress_cap - progress_base)
         # Time-based toward expected, plus a boost once tokens are streaming
@@ -9269,8 +9319,10 @@ def _gamma_generate(input_text: str, num_cards: int,
         "format": "presentation",
         "numCards": max(8, num_cards),
         "exportAs": "pptx",
-        "folderIds": [GAMMA_FOLDER_ID] if GAMMA_FOLDER_ID else None,
     }
+    # Omitting the key: sending folderIds: null makes Gamma reject the deck.
+    if GAMMA_FOLDER_ID:
+        payload["folderIds"] = [GAMMA_FOLDER_ID]
     try:
         resp = requests.post(
             "https://public-api.gamma.app/v1.0/generations",

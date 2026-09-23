@@ -225,6 +225,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Debt maturities** | **`ui642-20260922-debt-maturities`** | Financials table debt cell hovers the latest 10-K contractual maturity schedule. Loaded on hover, not with the page. |
 | **SEC notice + wire** | **`ui643-20260923-sec-wire`** | Overnight SEC card drops “already in store”. Snapshot links the filing. Market wire restyled, still free RSS. |
 | **Login while busy** | **`ui644-20260923-login-busy`** | Analyze no longer occupies a request thread. Sign-in uses the last user list if the DB pool is full, and the login page retries instead of blaming the connection. |
+| **Grok + Gamma** | **`ui645-20260923-grok-gamma`** | SUP_20260923_21fa9246 — live search is capped at 3 min then the report is written without it. Gamma still runs. Null folderIds no longer sent. |
 
 ### One-click handoff (preferred)
 
@@ -412,4 +413,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-23 · Agent: Grok Build · Live: `ui644-20260923-login-busy` · Next: `ui645-YYYYMMDD-slug`*
+*Last updated: 2026-09-23 · Agent: Grok Build · Live: `ui645-20260923-grok-gamma` · Next: `ui646-YYYYMMDD-slug`*
