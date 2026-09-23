@@ -7,6 +7,8 @@ export type AnalysisSceneState = {
   label: string
   meta?: string
   engine?: SceneEngine
+  /** Analyze pipeline step. Swaps the motion graphic. */
+  step?: string | null
 } | null
 
 type Listener = (s: AnalysisSceneState) => void
@@ -43,8 +45,9 @@ export function beginAnalysisScene(
   label: string,
   meta?: string,
   engine?: SceneEngine,
+  step?: string | null,
 ) {
-  current = { id, label, meta, engine }
+  current = { id, label, meta, engine, step }
   listeners.forEach((fn) => fn(current))
 }
 
@@ -53,9 +56,10 @@ export function updateAnalysisScene(
   label: string,
   meta?: string,
   engine?: SceneEngine,
+  step?: string | null,
 ) {
   if (current && current.id !== id) return
-  current = { id, label, meta, engine }
+  current = { id, label, meta, engine, step }
   listeners.forEach((fn) => fn(current))
 }
 

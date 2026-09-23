@@ -6,11 +6,22 @@ import {
   subscribeAnalysisScene,
   type SceneEngine,
 } from '@/lib/analysisScene'
+import { ANALYZE_STEP_LABEL, analyzeStepId } from '@/lib/analyzeSteps'
 import styles from './AnalysisScene.module.css'
 
 const BASE = import.meta.env.BASE_URL || '/gp/'
 
 type ScenePack = { still: string; video: string; kicker: string }
+
+function stepPack(step?: string | null): ScenePack | null {
+  const id = analyzeStepId(step)
+  if (!id) return null
+  return {
+    still: `${BASE}analyze-steps/${id}.jpg`,
+    video: `${BASE}analyze-steps/${id}.mp4`,
+    kicker: ANALYZE_STEP_LABEL[id],
+  }
+}
 
 function scenePack(engine?: SceneEngine): ScenePack {
   const e = inferSceneEngine(engine, '')
@@ -42,15 +53,17 @@ export function AnalysisScene({
   meta,
   size = 'card',
   engine,
+  step,
   children,
 }: {
   label?: string
   meta?: string
   size?: Size
   engine?: SceneEngine
+  step?: string | null
   children?: ReactNode
 }) {
-  const pack = scenePack(engine)
+  const pack = stepPack(step) || scenePack(engine)
   const [playing, setPlaying] = useState(false)
   const [reduce, setReduce] = useState(false)
 
@@ -117,6 +130,7 @@ export function AnalysisSceneHost() {
         label={job.label}
         meta={job.meta}
         engine={job.engine}
+        step={job.step}
       />
     </div>,
     document.body,

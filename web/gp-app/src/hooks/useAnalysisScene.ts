@@ -13,18 +13,19 @@ export function useAnalysisScene(
   label: string,
   meta?: string,
   engine?: SceneEngine,
+  step?: string | null,
 ) {
   useEffect(() => {
     if (!active) {
       endAnalysisScene(id)
       return
     }
-    beginAnalysisScene(id, label || 'Working…', meta, engine)
+    beginAnalysisScene(id, label || 'Working…', meta, engine, step)
     return () => endAnalysisScene(id)
   }, [id, active])
 
   useEffect(() => {
     if (!active) return
-    updateAnalysisScene(id, label || 'Working…', meta, engine)
-  }, [id, active, label, meta, engine])
+    updateAnalysisScene(id, label || 'Working…', meta, engine, step)
+  }, [id, active, label, meta, engine, step])
 }

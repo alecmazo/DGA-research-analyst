@@ -40,6 +40,25 @@ def test_sliw_videos_are_not_redeployed():
     assert "A file already on the volume is left alone" in src
 
 
+def test_analyze_step_graphics():
+    steps = ROOT / "web" / "gp-app" / "public" / "analyze-steps"
+    for name in (
+        "filings",
+        "financials",
+        "market",
+        "write",
+        "word",
+        "deck",
+        "upload",
+        "done",
+    ):
+        assert (steps / f"{name}.mp4").is_file(), name
+        assert (steps / f"{name}.jpg").is_file(), name
+    src = (ROOT / "web" / "gp-app" / "src" / "components" / "ui" / "AnalysisScene.tsx").read_text()
+    assert "stepPack" in src
+    assert "analyze-steps" in src
+
+
 def test_server_has_two_layer_endpoints():
     src = (ROOT / "api" / "server.py").read_text()
     assert '@app.get("/api/continuity/handoff")' in src

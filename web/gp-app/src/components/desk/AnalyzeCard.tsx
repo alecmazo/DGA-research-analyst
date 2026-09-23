@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { api, type JobStatus, type LlmProvider } from '@/lib/api'
 import { pollJob } from '@/lib/jobs'
+import { AnalysisScene } from '@/components/ui/AnalysisScene'
 import { useAnalysisScene } from '@/hooks/useAnalysisScene'
 import { inferSceneEngine, type SceneEngine } from '@/lib/analysisScene'
 import {
@@ -135,6 +136,7 @@ export function AnalyzeCard({
   const [hintTone, setHintTone] = useState<'ok' | 'err' | 'mid'>('mid')
   const [progPct, setProgPct] = useState<number | null>(null)
   const [progLbl, setProgLbl] = useState('')
+  const [progStep, setProgStep] = useState('')
   const [trace, setTrace] = useState<string[]>([])
   const [showProg, setShowProg] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
@@ -149,6 +151,7 @@ export function AnalyzeCard({
     progLbl || 'Queued…',
     progPct == null ? undefined : `${progPct}%`,
     sceneEngine,
+    progStep,
   )
 
   useEffect(() => {
@@ -226,6 +229,7 @@ export function AnalyzeCard({
             onProgress: (pctInt, lbl, job) => {
               setProgPct(pctInt == null ? null : Math.min(99, pctInt))
               setProgLbl(lbl || '…')
+              setProgStep(String(job?.progress?.step || ''))
               const lines = (job.trace || []).slice(-16).map((row) => {
                 const sec = Math.max(0, Number(row.elapsed_s) || 0)
                 const mm = Math.floor(sec / 60)
@@ -253,6 +257,7 @@ export function AnalyzeCard({
 
         setProgPct(100)
         setProgLbl('Complete')
+        setProgStep('done')
         setTimeout(() => setShowProg(false), 650)
 
         if (outcome.status === 'canceled' || outcome.status === 'cancelled') {
@@ -459,6 +464,13 @@ export function AnalyzeCard({
 
       {showProg && (
         <div className={styles.heroProg}>
+          <AnalysisScene
+            size="card"
+            step={progStep}
+            engine={sceneEngine}
+            label={progLbl || 'Queued…'}
+            meta={progPct == null ? undefined : `${progPct}%`}
+          />
           <div className={styles.heroProgHead}>
             <span className={styles.heroProgDot} />
             <span className={styles.heroProgLbl}>{progLbl || 'Queued…'}</span>
