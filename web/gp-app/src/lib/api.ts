@@ -607,7 +607,8 @@ export type JobStatus = {
   llm_provider?: string
   providers?: Record<string, string> | null
   created_at?: string
-  progress?: { pct?: number | null; label?: string | null; step?: string | null }
+  progress?: { pct?: number | null; label?: string | null; step?: string | null; elapsed_s?: number | null }
+  trace?: { elapsed_s?: number; step?: string; pct?: number; label?: string }[]
   result?: {
     cost_usd?: number
     model?: string

@@ -127,6 +127,20 @@
   }
 }
 
+.heroTrace {
+  margin: 8px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #0b1220;
+  color: #d1fae5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .heroProgLbl {
   flex: 1;
   color: rgba(255, 255, 255, 0.75);

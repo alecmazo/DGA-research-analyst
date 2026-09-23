@@ -135,6 +135,7 @@ export function AnalyzeCard({
   const [hintTone, setHintTone] = useState<'ok' | 'err' | 'mid'>('mid')
   const [progPct, setProgPct] = useState<number | null>(null)
   const [progLbl, setProgLbl] = useState('')
+  const [trace, setTrace] = useState<string[]>([])
   const [showProg, setShowProg] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [canceling, setCanceling] = useState(false)
@@ -225,6 +226,14 @@ export function AnalyzeCard({
             onProgress: (pctInt, lbl, job) => {
               setProgPct(pctInt == null ? null : Math.min(99, pctInt))
               setProgLbl(lbl || '…')
+              const lines = (job.trace || []).slice(-16).map((row) => {
+                const sec = Math.max(0, Number(row.elapsed_s) || 0)
+                const mm = Math.floor(sec / 60)
+                const ss = String(sec % 60).padStart(2, '0')
+                const pct = row.pct != null ? `${Math.round(Number(row.pct) * 100)}%` : ''
+                return `${mm}:${ss}  ${pct}  ${row.step || ''}  ${row.label || ''}`.trim()
+              })
+              if (lines.length) setTrace(lines)
               setSceneEngine(
                 inferSceneEngine(
                   job?.progress?.step || job?.llm_provider || lbl,
@@ -312,6 +321,7 @@ export function AnalyzeCard({
     const ordered = [...engines].sort(
       (a, b) => ENGINE_ORDER.indexOf(a) - ENGINE_ORDER.indexOf(b),
     )
+    setTrace([])
     setProgPct(null)
     setProgLbl(
       ordered.length > 1
@@ -462,6 +472,9 @@ export function AnalyzeCard({
               style={{ width: `${progPct == null ? 6 : Math.max(4, Math.min(100, progPct))}%` }}
             />
           </div>
+          {trace.length > 0 && (
+            <pre className={styles.heroTrace}>{trace.join('\n')}</pre>
+          )}
         </div>
       )}
 

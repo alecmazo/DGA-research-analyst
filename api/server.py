@@ -1875,6 +1875,8 @@ class JobStatus(BaseModel):
     # while status='running'. Frontend uses this to drive a real progress bar
     # instead of simulated step transitions.
     progress: dict | None = None
+    # Ordered step log for the live run. Each line is one pipeline checkpoint.
+    trace: list | None = None
     warning: str | None = None
     llm_provider: str | None = None
 
@@ -7004,11 +7006,38 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
     # Progress callback — runs on the worker thread, mutates the shared job dict.
     # Wrapped so a slow lock acquisition can't slow down the analysis itself.
     def _record_progress(step: str, pct: float, label: str) -> None:
+        now = time.time()
         with _jobs_lock:
-            if job_id in _jobs:
-                _jobs[job_id]["progress"] = {
-                    "step": step, "pct": pct, "label": label,
-                }
+            j = _jobs.get(job_id)
+            if not j:
+                return
+            t0 = float(j.get("_t0") or now)
+            if "_t0" not in j:
+                j["_t0"] = now
+                t0 = now
+            elapsed = max(0, int(now - t0))
+            line = {
+                "elapsed_s": elapsed,
+                "step": step,
+                "pct": round(float(pct), 3),
+                "label": label,
+            }
+            trace = j.setdefault("trace", [])
+            prev = trace[-1] if trace else None
+            if not prev or prev.get("step") != step or prev.get("label") != label:
+                trace.append(line)
+                if len(trace) > 80:
+                    del trace[:-80]
+                mm, ss = divmod(elapsed, 60)
+                print(
+                    f"[analyze {j.get('ticker') or '?'}] "
+                    f"+{mm}:{ss:02d} {int(round(float(pct) * 100)):>3}% "
+                    f"{step} — {label}",
+                    flush=True,
+                )
+            j["progress"] = {
+                "step": step, "pct": pct, "label": label, "elapsed_s": elapsed,
+            }
 
     # Run the analysis. We capture exceptions defensively so the persist
     # helper can still try to save whatever text we have — even when the
@@ -8290,7 +8319,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui647-20260923-fast-report"
+WEB_BUILD_VERSION = "ui648-20260923-analyze-trace"
 
 
 @app.get("/api/build")

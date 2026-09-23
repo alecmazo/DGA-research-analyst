@@ -8313,6 +8313,11 @@ def call_grok(system_prompt: str, user_content: str,
         effort = "low"
     max_out = int(os.environ.get("GROK_REPORT_MAX_TOKENS") or "12000")
     max_out = max(4000, min(max_out, 20000))
+    print(
+        f"   [grok] chat.completions start model={model} effort={effort} "
+        f"max_tokens={max_out} prompt_chars={len(system_prompt) + len(plain):,}",
+        flush=True,
+    )
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -8323,7 +8328,9 @@ def call_grok(system_prompt: str, user_content: str,
         extra_body={"reasoning_effort": effort},
     )
     _capture(resp, search_count=0)
-    return resp.choices[0].message.content or ""
+    text = resp.choices[0].message.content or ""
+    print(f"   [grok] chat.completions done chars={len(text):,}", flush=True)
+    return text
 
 
 # ============================================================================
