@@ -4506,6 +4506,12 @@ def _watchlist_apply_ytd(tickers: list[str], quotes: dict, ytd_map: dict) -> int
         ytd = entry.get("ytd")
         if ytd is None:
             continue
+        try:
+            ytd = round(float(ytd), 2)
+        except (TypeError, ValueError):
+            continue
+        if ytd != ytd or abs(ytd) > 2000:
+            continue
         status = entry.get("status")
         for key in {orig, sym}:
             if not key:
@@ -4600,13 +4606,10 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
             for tk in tickers:
                 entry = None if fresh else _QUOTE_CACHE.get(tk)
                 if _cache_quote_usable(entry, now, live=live):
-                    quotes[tk] = {
-                        "price": entry.get("price"),
-                        "prev": None,
-                        "pct": entry.get("pct_change"),
-                        "as_of": entry.get("as_of"),
-                    }
-                else:
+                    _watchlist_set_price(
+                        quotes, tk, entry.get("price"),
+                        pct=entry.get("pct_change"), as_of=entry.get("as_of"))
+                if (quotes.get(tk) or {}).get("price") is None:
                     need.append(tk)
 
             # DB store first (no HTTP) — only current-session rows while live.
@@ -8324,7 +8327,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui650-20260923-clean-px"
+WEB_BUILD_VERSION = "ui651-20260923-clean-quotes"
 
 
 @app.get("/api/build")
@@ -10277,10 +10280,12 @@ def get_quote(ticker: str):
     cached = _QUOTE_CACHE.get(original)
     if (cached and cached.get("price") is not None
             and (now - float(cached.get("_ts") or 0)) < _QUOTE_TTL):
+        px, pct = _quote_fields(
+            cached.get("price"), cached.get("pct_change"), cached.get("as_of"))
         return {
             "ticker": original,
-            "price": cached.get("price"),
-            "pct_change": cached.get("pct_change"),
+            "price": px,
+            "pct_change": pct,
             "as_of": cached.get("as_of"),
             "source": "cache",
         }
@@ -10355,6 +10360,10 @@ def get_quote(ticker: str):
     for k in list(snapshot.keys()):
         if str(k).startswith("debug_"):
             snapshot.pop(k, None)
+    px, pct = _quote_fields(
+        snapshot.get("price"), snapshot.get("pct_change"), snapshot.get("as_of"))
+    snapshot["price"] = px
+    snapshot["pct_change"] = pct
     return {"ticker": original, **snapshot}
 
 
@@ -17563,16 +17572,14 @@ def _batch_quotes_fast(symbols: list[str]) -> dict:
             return None
 
     def _accept(sym, price, pct=None, prev=None, source="", as_of=None):
+        price = _clean_quote_px(price)
         if price is None:
-            return
-        try:
-            price = float(price)
-        except (TypeError, ValueError):
-            return
-        if price != price:
             return
         if pct is None and prev is not None:
             pct = _pct_from(price, prev)
+        if as_of and not _quote_from_current_session(as_of):
+            pct = None
+        pct = _clean_quote_pct(pct)
         row = {"price": price, "pct_change": pct}
         if as_of:
             row["as_of"] = as_of
@@ -17703,16 +17710,14 @@ def batch_quotes(tickers: str = ""):
             return None
 
     def _accept(sym: str, price, pct=None, prev=None, source: str = "", as_of=None):
+        price = _clean_quote_px(price)
         if price is None:
-            return
-        try:
-            price = float(price)
-        except (TypeError, ValueError):
-            return
-        if price != price:  # NaN
             return
         if pct is None and prev is not None:
             pct = _pct_from(price, prev)
+        if as_of and not _quote_from_current_session(as_of):
+            pct = None
+        pct = _clean_quote_pct(pct)
         row = {"price": price, "pct_change": pct}
         if as_of:
             row["as_of"] = as_of
@@ -19219,6 +19224,13 @@ def _clean_quote_pct(pct):
     if n != n or abs(n) > 80:
         return None
     return round(n, 2)
+
+
+def _quote_fields(price, pct=None, as_of=None):
+    """Rounded last and day-%. Day-% is blank when the print is not this session."""
+    if as_of and not _quote_from_current_session(as_of):
+        pct = None
+    return _clean_quote_px(price), _clean_quote_pct(pct)
 
 
 def _db_quotes(symbols, max_age_s=None) -> dict:

@@ -1,6 +1,10 @@
 export function fmtPx(v: number | null | undefined, digits = 2): string {
   if (v == null || Number.isNaN(Number(v))) return '—'
-  return `$${Number(v).toFixed(digits)}`
+  const n = Number(v)
+  return `$${n.toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}`
 }
 
 export function fmtPct(v: number | null | undefined, digits = 2): string {

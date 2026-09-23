@@ -14,7 +14,7 @@ type Raw = {
   pct_change?: number | null
 }
 
-const BOOK_KEY = 'dga.quote.book.v1'
+const BOOK_KEY = 'dga.quote.book.v2'
 const book: Record<string, BookQuote> = {}
 const listeners = new Set<() => void>()
 
@@ -41,16 +41,35 @@ function saveBook() {
 
 if (typeof sessionStorage !== 'undefined') loadBook()
 
+function cleanBookPx(v: unknown): number | null {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0 || n > 1_000_000) return null
+  const digits = Math.abs(n) >= 1 ? 2 : 4
+  return Number(n.toFixed(digits))
+}
+
+function cleanBookPct(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  if (!Number.isFinite(n) || Math.abs(n) > 80) return null
+  return Number(n.toFixed(2))
+}
+
 export function publishQuotes(map: Record<string, Raw> | null | undefined) {
   if (!map) return
   let changed = false
   for (const [rawKey, v] of Object.entries(map)) {
-    if (!v || v.price == null || Number.isNaN(Number(v.price))) continue
     const tk = rawKey.toUpperCase()
-    const pct = v.pct ?? v.pct_change ?? null
+    const price = v ? cleanBookPx(v.price) : null
+    if (price == null) {
+      if (book[tk]) {
+        delete book[tk]
+        changed = true
+      }
+      continue
+    }
+    const pctN = cleanBookPct(v?.pct ?? v?.pct_change)
     const prev = book[tk]
-    const price = Number(v.price)
-    const pctN = pct == null || Number.isNaN(Number(pct)) ? null : Number(pct)
     if (prev && prev.price === price && (prev.pct ?? null) === pctN) continue
     book[tk] = { price, pct: pctN, pct_change: pctN }
     changed = true

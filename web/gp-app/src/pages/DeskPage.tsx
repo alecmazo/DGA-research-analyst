@@ -83,7 +83,7 @@ function cmpNum(a: number | null, b: number | null, dir: SortDir): number {
   return dir === 'desc' ? -d : d
 }
 
-const WL_CACHE_KEY = 'dga.desk.wl.v1'
+const WL_CACHE_KEY = 'dga.desk.wl.v2'
 
 function readWlCache(): WatchlistResponse | null {
   try {
@@ -113,31 +113,105 @@ function writeWlCache(w: WatchlistResponse) {
   }
 }
 
-/** Keep last-known last / YTD when the feed omits a field (Yahoo miss). */
+function cleanWlPx(v: unknown): number | null {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0 || n > 1_000_000) return null
+  const digits = Math.abs(n) >= 1 ? 2 : 4
+  return Number(n.toFixed(digits))
+}
+
+function cleanWlPct(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  if (!Number.isFinite(n) || Math.abs(n) > 80) return null
+  return Number(n.toFixed(2))
+}
+
+function cleanWlYtd(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  if (!Number.isFinite(n) || Math.abs(n) > 2000) return null
+  return Number(n.toFixed(2))
+}
+
+function asOfAgeDays(asOf?: string | null): number | null {
+  if (!asOf) return null
+  const t = new Date(asOf).getTime()
+  if (Number.isNaN(t)) return null
+  return (Date.now() - t) / 86_400_000
+}
+
+/** A prior-session day-% is not today's move. Missing as_of is not trusted. */
+function dayPctIfCurrent(q?: Quote | null): number | null {
+  if (!q?.as_of) return null
+  const day = new Date(q.as_of)
+  if (Number.isNaN(day.getTime())) return null
+  const session = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(day)
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+  if (session < today) return null
+  return cleanWlPct(q.pct ?? q.pct_change)
+}
+
+function stampYtd(merged: Quote, src?: Quote | null) {
+  if (!src || (src.ytd == null && src.ytd_pct == null)) return
+  const y = cleanWlYtd(src.ytd ?? src.ytd_pct)
+  if (y != null) {
+    merged.ytd = y
+    merged.ytd_pct = y
+  }
+  if (src.ytd_status) merged.ytd_status = src.ytd_status
+  if (src.ytd_label != null) merged.ytd_label = src.ytd_label
+  if (src.ytd_since != null) merged.ytd_since = src.ytd_since
+}
+
+/**
+ * Server quote wins, including a blank day-%. A cached print is kept only
+ * when the feed missed and that print is under five days old.
+ */
 function mergeWlQuotes(
   prev: WatchlistResponse | null,
   next: WatchlistResponse,
 ): WatchlistResponse {
-  const quotes: Record<string, Quote> = { ...(prev?.quotes || {}) }
-  for (const [tk, q] of Object.entries(next.quotes || {})) {
-    const old = quotes[tk] || {}
-    const merged: Quote = { ...old }
-    if (q && q.price != null) {
-      merged.price = q.price
-      if (q.pct != null) merged.pct = q.pct
-      if (q.pct_change != null) merged.pct_change = q.pct_change
-      if (q.as_of) merged.as_of = q.as_of
-    } else if (!quotes[tk] && q) {
-      Object.assign(merged, q)
+  const prevQ = prev?.quotes || {}
+  const nextQ = next.quotes || {}
+  const quotes: Record<string, Quote> = {}
+  for (const tk of next.tickers || []) {
+    const incoming = nextQ[tk] || nextQ[String(tk).toUpperCase()]
+    const old = prevQ[tk] || prevQ[String(tk).toUpperCase()]
+    const merged: Quote = {}
+    const serverPx = incoming ? cleanWlPx(incoming.price) : null
+    if (serverPx != null && incoming) {
+      merged.price = serverPx
+      // Server already drops a day-% that is not this session. A null here
+      // must clear the cached move — do not keep yesterday's percent.
+      const pct = cleanWlPct(incoming.pct ?? incoming.pct_change)
+      merged.pct = pct
+      merged.pct_change = pct
+      if (incoming.as_of) merged.as_of = incoming.as_of
+      stampYtd(merged, incoming.ytd != null || incoming.ytd_pct != null ? incoming : old)
+    } else {
+      const age = asOfAgeDays(old?.as_of)
+      const oldPx = old ? cleanWlPx(old.price) : null
+      if (old && oldPx != null && age != null && age <= 5) {
+        merged.price = oldPx
+        merged.as_of = old.as_of
+        const pct = dayPctIfCurrent(old)
+        merged.pct = pct
+        merged.pct_change = pct
+      }
+      stampYtd(merged, incoming?.ytd != null || incoming?.ytd_pct != null ? incoming : old)
     }
-    if (q && (q.ytd != null || q.ytd_pct != null)) {
-      merged.ytd = q.ytd ?? q.ytd_pct
-      merged.ytd_pct = q.ytd_pct ?? q.ytd
-      if (q.ytd_status) merged.ytd_status = q.ytd_status
-      if (q.ytd_label != null) merged.ytd_label = q.ytd_label
-      if (q.ytd_since != null) merged.ytd_since = q.ytd_since
-    }
-    quotes[tk] = merged
+    if (merged.price != null || merged.ytd != null) quotes[tk] = merged
   }
   return { ...next, quotes }
 }
@@ -226,7 +300,13 @@ export function DeskPage() {
   }, [loadWatchlist, loadBrief])
 
   useEffect(() => {
-    if (wl?.quotes) publishQuotes(wl.quotes as Record<string, { price?: number | null; pct?: number | null }>)
+    if (!wl) return
+    const map: Record<string, { price?: number | null; pct?: number | null }> = {}
+    for (const tk of wl.tickers || []) {
+      const q = wl.quotes?.[tk]
+      map[tk] = { price: q?.price ?? null, pct: q?.pct ?? q?.pct_change ?? null }
+    }
+    publishQuotes(map)
   }, [wl])
 
   useEffect(() => {
@@ -401,7 +481,7 @@ export function DeskPage() {
                       )}
                     </button>
                   </th>
-                  <th className="tabular">
+                  <th className={`tabular ${styles.colLast}`}>
                     <button
                       type="button"
                       className={`${styles.thSort} ${wlSort === 'last' ? styles.thSortOn : ''}`}
@@ -506,7 +586,7 @@ export function DeskPage() {
                         )}
                       </div>
                     </td>
-                    <td className="tabular">{fmtPx(q.price)}</td>
+                    <td className={`tabular ${styles.colLast}`}>{fmtPx(q.price)}</td>
                     <td className={`tabular ${styles.colDay} ${pctClass(pct)}`}>
                       {fmtPct(pct)}
                     </td>

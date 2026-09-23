@@ -153,14 +153,39 @@ def test_watchlist_apply_ytd_stamps_keys():
 
 
 def test_watchlist_set_price_keeps_ytd():
-    ns: dict = {}
-    exec(_fn_src("_watchlist_set_price"), ns)
+    ns: dict = {"_quote_from_current_session": lambda _as_of: True}
+    exec(
+        _fn_src("_clean_quote_px")
+        + "\n"
+        + _fn_src("_clean_quote_pct")
+        + "\n"
+        + _fn_src("_watchlist_set_price"),
+        ns,
+    )
     quotes = {"AAPL": {"ytd": 12.5, "ytd_status": "ok", "ytd_pct": 12.5}}
     ns["_watchlist_set_price"](quotes, "AAPL", 188.4, pct=0.5, as_of="2026-09-08")
     assert quotes["AAPL"]["price"] == 188.4
     assert quotes["AAPL"]["pct"] == 0.5
     assert quotes["AAPL"]["ytd"] == 12.5
     assert quotes["AAPL"]["ytd_status"] == "ok"
+    ns["_quote_from_current_session"] = lambda _as_of: False
+    ns["_watchlist_set_price"](
+        quotes, "AAPL", 220.68499755859375, pct=-4.3038, as_of="2026-07-14")
+    assert quotes["AAPL"]["price"] == 220.68
+    assert quotes["AAPL"]["pct"] is None
+    assert quotes["AAPL"]["ytd"] == 12.5
+
+
+def test_watchlist_cache_hit_is_cleaned():
+    body = _fn_src("watchlist_get")
+    assert '"pct": entry.get("pct_change")' not in body
+    assert body.count("_watchlist_set_price") >= 2
+
+
+def test_desk_drops_cached_stale_day_pct():
+    text = (ROOT / "web/gp-app/src/pages/DeskPage.tsx").read_text()
+    assert "dga.desk.wl.v2" in text
+    assert "if (q.pct != null) merged.pct" not in text
 
 
 def test_watchlist_yahoo_does_not_replace_quote_row():

@@ -128,6 +128,7 @@
 }
 .thSort:hover { color: var(--text-primary); }
 .thSortOn { color: var(--text-secondary); }
+.colLast .thSort,
 .colDay .thSort,
 .colYtd .thSort {
   width: 100%;
@@ -145,19 +146,29 @@
   vertical-align: middle;
 }
 
-/* Compact Day % + YTD columns next to Last */
+/* Last / Day % / YTD share one right edge so decimals line up.
+   Width follows the text — a fixed 4.5rem clipped "-12.34%" into Last. */
+.colLast,
 .colDay,
 .colYtd {
-  width: 4.5rem;
+  width: 1%;
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 10px;
+}
+
+.colLast {
+  font-weight: 650;
+}
+
+.colDay {
   font-size: 12px;
   font-weight: 650;
 }
 
 .colYtd {
-  width: 4.2rem;
   font-size: 11px;
   font-weight: 600;
   opacity: 0.95;
