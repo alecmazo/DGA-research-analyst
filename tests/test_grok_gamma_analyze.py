@@ -44,6 +44,8 @@ def test_equity_report_does_not_use_live_search():
     assert 'GROK_REPORT_EFFORT' in grok
     assert '"reasoning_effort": effort' in grok
     assert "max_tokens=max_out" in grok
+    assert "max_retries=0" in grok or "max_retries=0" in src
+    assert "stream=True" in grok
 
 
 def test_analyze_does_not_blame_gamma_for_llm_timeout():

@@ -7895,13 +7895,17 @@ def _client():
     from openai import OpenAI  # type: ignore
     try:
         import httpx
-        timeout = httpx.Timeout(150.0, connect=15.0, write=30.0, read=150.0)
+        # read=180s is the wait for the next chunk, not three full attempts.
+        # ADBE 2026-09-23: read=150s plus the SDK's 2 retries became a 7.5 min
+        # "Request timed out" with no report.
+        timeout = httpx.Timeout(300.0, connect=15.0, write=30.0, read=180.0)
     except Exception:
-        timeout = 150.0
+        timeout = 180.0
     return OpenAI(
         api_key=get_grok_api_key(),
         base_url="https://api.x.ai/v1",
         timeout=timeout,
+        max_retries=0,
     )
 
 
@@ -8140,6 +8144,7 @@ def call_grok(system_prompt: str, user_content: str,
               *,
               live_search: bool = False,
               search_from_date: str | None = None,
+              on_delta=None,
               usage_capture=None) -> str:
     """Call xAI Grok.
 
@@ -8316,23 +8321,67 @@ def call_grok(system_prompt: str, user_content: str,
         effort = "low"
     max_out = int(os.environ.get("GROK_REPORT_MAX_TOKENS") or "12000")
     max_out = max(4000, min(max_out, 20000))
+    n_chars = len(system_prompt) + len(plain)
     print(
         f"   [grok] chat.completions start model={model} effort={effort} "
-        f"max_tokens={max_out} prompt_chars={len(system_prompt) + len(plain):,}",
+        f"max_tokens={max_out} prompt_chars={n_chars:,} stream=1 retries=0",
         flush=True,
     )
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": plain},
-        ],
-        max_tokens=max_out,
-        extra_body={"reasoning_effort": effort},
+    t_call = time.time()
+    parts: list[str] = []
+    usage_chunk = None
+    first_s = None
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": plain},
+            ],
+            max_tokens=max_out,
+            extra_body={"reasoning_effort": effort},
+            stream=True,
+        )
+        for chunk in stream:
+            if getattr(chunk, "usage", None):
+                usage_chunk = chunk
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            delta = choices[0].delta
+            piece = getattr(delta, "content", None) or ""
+            if piece and first_s is None:
+                first_s = time.time() - t_call
+                print(f"   [grok] first token {first_s:.1f}s", flush=True)
+            if piece:
+                parts.append(piece)
+                if on_delta is not None:
+                    try:
+                        on_delta(piece)
+                    except Exception:
+                        pass
+    except Exception as exc:
+        got = "".join(parts)
+        print(
+            f"   [grok] stream failed after {time.time() - t_call:.0f}s "
+            f"chars={len(got):,} ({type(exc).__name__}: {exc!s:.160})",
+            flush=True,
+        )
+        if got and len(got) > 800 and not looks_like_unfinished_report(got):
+            print("   [grok] keeping partial report", flush=True)
+            return got
+        raise TimeoutError(
+            "Grok write timed out before the report was finished. "
+            "Run Analyze again."
+        ) from exc
+    text = "".join(parts)
+    if usage_chunk is not None:
+        _capture(usage_chunk, search_count=0)
+    print(
+        f"   [grok] chat.completions done chars={len(text):,} "
+        f"in {time.time() - t_call:.0f}s",
+        flush=True,
     )
-    _capture(resp, search_count=0)
-    text = resp.choices[0].message.content or ""
-    print(f"   [grok] chat.completions done chars={len(text):,}", flush=True)
     return text
 
 
@@ -8812,8 +8861,12 @@ def call_llm(provider: str, system_prompt: str, user_content: str,
         # call; one in flight lands at the caller's next checkpoint instead.
         if should_cancel is not None and should_cancel():
             raise ClaudeCancelled("cancelled before LLM call")
-        return call_grok(system_prompt, user_content, live_search=live_search,
-                        usage_capture=usage_capture)
+        return call_grok(
+            system_prompt, user_content,
+            live_search=live_search,
+            on_delta=on_delta,
+            usage_capture=usage_capture,
+        )
     raise ValueError(f"Unknown LLM provider: {provider!r}")
 
 
@@ -8840,16 +8893,20 @@ def call_llm_with_heartbeat(
     ``timeout_s`` aborts with a clear error so the bar never spins forever.
     """
     import threading
+    prov_l = (provider or "").lower()
     if timeout_s is None:
-        # Hard cap — Claude with thinking-disabled + medium effort usually
-        # finishes a full report in 2–6 min; 15 min is safety only.
-        timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "900")
+        # Grok reports stream. One 6-minute cap. The old 150s socket plus two
+        # SDK retries died at 7.5 min with an empty ADBE report.
+        if prov_l == "grok":
+            timeout_s = float(os.environ.get("ANALYZE_GROK_TIMEOUT_S") or "360")
+        else:
+            timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "900")
     timeout_s = max(120.0, min(float(timeout_s), 1800.0))
     # Progress bar uses *expected* duration so 5 min ≠ "only 51% of a 20 min bar".
-    if (provider or "").lower() == "claude":
+    if prov_l == "claude":
         expected_s = float(os.environ.get("ANALYZE_CLAUDE_EXPECTED_S") or "240")  # 4 min
-    elif (provider or "").lower() == "grok":
-        expected_s = float(os.environ.get("ANALYZE_GROK_EXPECTED_S") or "120")
+    elif prov_l == "grok":
+        expected_s = float(os.environ.get("ANALYZE_GROK_EXPECTED_S") or "240")
     else:
         expected_s = float(os.environ.get("ANALYZE_LLM_EXPECTED_S") or "240")
     expected_s = max(60.0, min(expected_s, timeout_s))

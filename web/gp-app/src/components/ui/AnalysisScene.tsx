@@ -18,7 +18,7 @@ function stepPack(step?: string | null): ScenePack | null {
   if (!id) return null
   return {
     still: `${BASE}analyze-steps/${id}.jpg`,
-    video: `${BASE}analyze-steps/${id}.mp4`,
+    video: `${BASE}analyze-steps/${id}.mp4${id === 'write' ? '?v=2' : ''}`,
     kicker: ANALYZE_STEP_LABEL[id],
   }
 }
