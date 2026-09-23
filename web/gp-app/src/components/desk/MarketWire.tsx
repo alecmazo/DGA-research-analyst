@@ -88,25 +88,26 @@ export function MarketWire({ bare = false }: { bare?: boolean }) {
         {items.map((it, i) => {
           const src = it.feed || it.publisher || 'Wire'
           const age = ageLabel(it.pub_ts)
+          const lead = i === 0
           return (
             <a
               key={`${it.url || it.title || i}-${i}`}
-              className={styles.wireRow}
+              className={`${styles.wireRow} ${lead ? styles.wireLead : ''}`}
               href={it.url || '#'}
               target="_blank"
               rel="noopener noreferrer"
             >
-              <div className={styles.wireTitle}>{it.title || '—'}</div>
-              <div className={styles.wireMeta}>
-                <span className={styles.wireChip}>{src}</span>
-                {age ? <span>{age} ago</span> : null}
+              <div className={styles.wireKicker}>
+                <span className={styles.wireChip} data-src={src}>{src}</span>
+                {age ? <span className={styles.wireAge}>{age}</span> : null}
               </div>
+              <div className={styles.wireTitle}>{it.title || '—'}</div>
             </a>
           )
         })}
       </div>
       <div className={styles.wireFoot}>
-        Official + WSJ · IBD · Fox Business · RealClearMarkets · MarketWatch
+        Free wires · no paid news feed
       </div>
     </div>
   )

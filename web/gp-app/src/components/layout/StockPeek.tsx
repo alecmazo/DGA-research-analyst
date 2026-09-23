@@ -57,6 +57,17 @@ export type StockInfo = {
     price_target?: number | null
     generated_at?: string | null
   }
+  latest_filing?: {
+    form?: string
+    filed?: string
+    url?: string
+  }
+}
+
+export type SnapshotFiling = {
+  form?: string
+  filed?: string
+  url?: string
 }
 
 function compact(v: number | null | undefined): string | null {
@@ -164,6 +175,8 @@ type Props = {
   ticker: string
   onClose: () => void
   alreadyOnWatchlist?: boolean
+  /** Overnight filing that opened this snapshot, if any. */
+  filing?: SnapshotFiling | null
   /** Let the page under the dim receive hover/click (Builder boards). */
   passThrough?: boolean
   /** Builder hover: keep the snapshot while the pointer is on the card. */
@@ -175,6 +188,7 @@ export function StockPeek({
   ticker,
   onClose,
   alreadyOnWatchlist = false,
+  filing = null,
   passThrough = false,
   onHoverEnter,
   onHoverLeave,
@@ -358,13 +372,40 @@ export function StockPeek({
 
         <footer className={styles.foot}>
           <span className={styles.footHint}>
-            <a
-              href={`https://www.gurufocus.com/stock/${encodeURIComponent(tk)}/summary`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              GuruFocus
-            </a>
+            {(() => {
+              const link = filing?.url
+                ? filing
+                : data?.latest_filing?.url
+                  ? data.latest_filing
+                  : null
+              if (!link?.url) {
+                return (
+                  <a
+                    href={`https://www.gurufocus.com/stock/${encodeURIComponent(tk)}/summary`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    GuruFocus
+                  </a>
+                )
+              }
+              const label = `${link.form || 'Filing'}${link.filed ? ` · ${String(link.filed).slice(0, 10)}` : ''}`
+              return (
+                <>
+                  <a href={link.url} target="_blank" rel="noopener noreferrer">
+                    {label} on EDGAR
+                  </a>
+                  {' · '}
+                  <a
+                    href={`https://www.gurufocus.com/stock/${encodeURIComponent(tk)}/summary`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    GuruFocus
+                  </a>
+                </>
+              )
+            })()}
           </span>
           {!alreadyOnWatchlist && (
             <Button size="sm" disabled={wlBusy || wlDone} onClick={() => void addWatchlist()}>

@@ -8290,7 +8290,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui642-20260922-debt-maturities"
+WEB_BUILD_VERSION = "ui643-20260923-sec-wire"
 
 
 @app.get("/api/build")
@@ -11121,6 +11121,33 @@ def get_stock_info(ticker: str):
         print(f"[stock-info] ytd {tk}: {e!s:.120}", flush=True)
     if "saved_report" not in out:
         out["saved_report"] = {"exists": False}
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT cik, fp, period_type, period_end, filed, accession
+                  FROM company_financials
+                 WHERE ticker = %s AND accession IS NOT NULL AND accession <> ''
+                 ORDER BY period_end DESC NULLS LAST
+                 LIMIT 1
+                """,
+                (tk,),
+            )
+            fr = cur.fetchone()
+        if fr and fr.get("accession"):
+            import sec_edgar_xbrl as _edgar
+            form = "10-K" if (fr.get("period_type") or "") == "annual" or (fr.get("fp") or "") == "FY" else "10-Q"
+            if (fr.get("fp") or "").upper() == "FY":
+                form = "10-K"
+            filed = fr.get("filed") or fr.get("period_end")
+            out["latest_filing"] = {
+                "form": form,
+                "filed": filed.isoformat() if hasattr(filed, "isoformat") else (str(filed)[:10] if filed else ""),
+                "accession": fr.get("accession"),
+                "url": _edgar.filing_index_url(fr.get("cik") or "", fr.get("accession") or ""),
+            }
+    except Exception as e:
+        print(f"[stock-info] filing {tk}: {e!s:.120}", flush=True)
     out["free"] = True
     out["token_cost"] = 0
     _STOCK_INFO_CACHE[tk] = (time.time(), out)

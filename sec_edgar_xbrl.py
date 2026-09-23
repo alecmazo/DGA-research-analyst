@@ -389,11 +389,19 @@ def parse_daily_master_index(text: str) -> list[dict]:
             cik = f"{int(parts[0].strip()):010d}"
         except (TypeError, ValueError):
             continue
+        filename = (parts[4] or "").strip() if len(parts) > 4 else ""
+        accession = ""
+        if filename:
+            base = filename.rsplit("/", 1)[-1]
+            if base.lower().endswith(".txt"):
+                accession = base[:-4]
         out.append({
             "cik": cik,
             "company": (parts[1] or "").strip(),
             "form": form,
             "filed": (parts[3] or "").strip(),
+            "filename": filename,
+            "accession": accession,
         })
     return out
 
@@ -577,6 +585,22 @@ def latest_filings(submissions: dict) -> dict[str, dict]:
         if "10-K" in out and "10-Q" in out:
             break
     return out
+
+
+def filing_index_url(cik: str, accession: str) -> str:
+    """Human filing index (document list) for one accession. Free EDGAR."""
+    acc = (accession or "").strip()
+    if not acc or not cik:
+        return ""
+    try:
+        cik_n = str(int(str(cik).lstrip("0") or "0"))
+    except (TypeError, ValueError):
+        cik_n = str(cik).lstrip("0")
+    acc_nodash = acc.replace("-", "")
+    return (
+        f"https://www.sec.gov/Archives/edgar/data/{cik_n}/"
+        f"{acc_nodash}/{acc}-index.html"
+    )
 
 
 def filing_url(cik: str, accession: str, primary_doc: str = "") -> str:

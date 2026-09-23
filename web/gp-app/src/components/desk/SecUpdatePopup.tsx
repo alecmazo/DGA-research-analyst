@@ -11,6 +11,7 @@ type Updated = {
   fp?: string
   status?: string
   company?: string
+  filing_url?: string
   rows_written?: number
 }
 
@@ -33,10 +34,17 @@ type Notice = {
 
 const LS_KEY = 'dga.fin.notice.dismissed'
 
+export type SecFilingPick = {
+  ticker: string
+  form?: string
+  filed?: string
+  url?: string
+}
+
 export function SecUpdatePopup({
   onOpenTicker,
 }: {
-  onOpenTicker?: (tk: string) => void
+  onOpenTicker?: (tk: string, filing?: SecFilingPick) => void
 }) {
   const [notice, setNotice] = useState<Notice | null>(null)
 
@@ -115,22 +123,28 @@ export function SecUpdatePopup({
           <div className={styles.chips}>
             {rows.slice(0, 40).map((u, i) => {
               const filed = String(u.filed || '').slice(0, 10)
-              const fresh = u.status === 'new_period'
+              const form = u.form || u.fp || '10-K/10-Q'
               return (
               <button
                 key={`${u.ticker}-${i}`}
                 type="button"
-                className={`${styles.chip} ${fresh ? styles.chipNew : ''}`}
+                className={styles.chip}
                 title={u.company || u.ticker}
-                onClick={() => u.ticker && onOpenTicker?.(u.ticker)}
+                onClick={() =>
+                  u.ticker &&
+                  onOpenTicker?.(u.ticker, {
+                    ticker: u.ticker,
+                    form,
+                    filed,
+                    url: u.filing_url,
+                  })
+                }
               >
                 {u.ticker}
                 <span>
                   {' '}
-                  · {u.form || u.fp || '10-K/10-Q'}
-                  {filed ? ` ${filed}` : ''}
-                  {u.latest_period_end ? ` · ${String(u.latest_period_end).slice(0, 10)}` : ''}
-                  {fresh ? ' · new' : ' · in store'}
+                  · {form}
+                  {filed ? ` filed ${filed}` : ''}
                 </span>
               </button>
               )

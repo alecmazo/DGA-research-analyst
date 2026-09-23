@@ -553,6 +553,8 @@ def _fin_new_filing_tickers(days: int = 2, user_agent: str | None = None) -> lis
                     "form": row.get("form"),
                     "filed": row.get("filed"),
                     "company": row.get("company"),
+                    "accession": row.get("accession") or "",
+                    "filename": row.get("filename") or "",
                 }
     if not want:
         return []
@@ -578,6 +580,15 @@ def _fin_merge_overnight_rows(hits: list, updated: list) -> list[dict]:
         seen.add(tk)
         u = by.get(tk) or {}
         new_p = tk in by
+        cik = h.get("cik") or u.get("cik") or ""
+        accession = h.get("accession") or u.get("accession") or ""
+        filing_url = ""
+        if cik and accession:
+            try:
+                import sec_edgar_xbrl as _edgar
+                filing_url = _edgar.filing_index_url(cik, accession)
+            except Exception:
+                filing_url = ""
         rows.append({
             "ticker": tk,
             "form": u.get("form") or h.get("form"),
@@ -585,7 +596,10 @@ def _fin_merge_overnight_rows(hits: list, updated: list) -> list[dict]:
             "company": h.get("company") or u.get("company"),
             "latest_period_end": u.get("latest_period_end"),
             "fp": u.get("fp"),
-            "status": "new_period" if new_p else "already_current",
+            "cik": cik,
+            "accession": accession,
+            "filing_url": filing_url,
+            "status": "new_period" if new_p else "downloaded",
         })
     for tk, u in by.items():
         if tk in seen:
@@ -608,26 +622,20 @@ def _fin_nightly_notice_text(rows: list[dict], *, paused: bool = False) -> tuple
     elif not n:
         return (
             "SEC nightly · no new filings",
-            "Checked EDGAR daily index for the last 2 days. No 10-K/10-Q "
-            "from names already in the store.",
+            "Checked the EDGAR daily index for the last 2 days. "
+            "No 10-K or 10-Q from names we follow.",
         )
     else:
         title = f"SEC nightly · {n} overnight filing{'s' if n != 1 else ''}"
-        if n_new:
-            title += f" · {n_new} new period{'s' if n_new != 1 else ''}"
-        else:
-            title += " · already current"
         remain = ""
     bits = []
     for r in (rows or [])[:24]:
         tk = r.get("ticker") or ""
         form = r.get("form") or "10-K/10-Q"
         filed = str(r.get("filed") or "")[:10]
-        st = "new period" if r.get("status") == "new_period" else "already in store"
         bit = f"{tk} {form}"
         if filed:
-            bit += f" {filed}"
-        bit += f" · {st}"
+            bit += f" filed {filed}"
         bits.append(bit)
     extra = f" (+{n - 24} more)" if n > 24 else ""
     body = "Overnight 10-K/10-Q in coverage: " + "; ".join(bits) + extra + "."
@@ -2638,6 +2646,18 @@ def financials_desk_notice(request: Request):
             title, body = _fin_nightly_notice_text(
                 rows, paused=str(notice.get("status") or "") == "paused")
             notice = {**notice, "title": title, "body": body, "updated": rows}
+            try:
+                _kv_put("fin.desk_notice", notice)
+            except Exception:
+                pass
+    if isinstance(notice, dict):
+        blob = f"{notice.get('title') or ''} {notice.get('body') or ''}"
+        stale = "already in store" in blob.lower() or "already current" in blob.lower()
+        rows = notice.get("updated") or []
+        if stale and rows:
+            title, body = _fin_nightly_notice_text(
+                rows, paused=str(notice.get("status") or "") == "paused")
+            notice = {**notice, "title": title, "body": body}
             try:
                 _kv_put("fin.desk_notice", notice)
             except Exception:

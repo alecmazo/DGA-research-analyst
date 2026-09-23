@@ -1454,43 +1454,81 @@
 
 .wireRow {
   display: block;
-  padding: 10px 14px;
+  padding: 12px 14px 13px;
   border-bottom: 1px solid var(--border-subtle);
   text-decoration: none;
   color: inherit;
+}
+
+.wireLead {
+  padding: 16px 14px 18px;
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), transparent 80%);
 }
 
 .wireRow:hover {
   background: var(--bg-hover);
 }
 
+.wireKicker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
 .wireTitle {
-  font-size: 12.5px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 720;
   line-height: 1.35;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
 }
 
-.wireMeta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  font-size: 10.5px;
-  color: var(--text-tertiary);
+.wireLead .wireTitle {
+  font-size: 17px;
+  line-height: 1.28;
+}
+
+.wireAge {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .wireChip {
   display: inline-block;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--brand-50, #ecfeff);
-  border: 1px solid rgba(91, 184, 212, 0.28);
-  color: var(--brand-700, #0e7490);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #f8fafc;
   font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.wireChip[data-src*='WSJ'],
+.wireChip[data-src*='Wall'] {
+  background: #1d4e89;
+}
+
+.wireChip[data-src*='MarketWatch'] {
+  background: #0f766e;
+}
+
+.wireChip[data-src*='Fox'] {
+  background: #9a3412;
+}
+
+.wireChip[data-src*='IBD'] {
+  background: #1e3a8a;
+}
+
+.wireChip[data-src*='RealClear'] {
+  background: #3f3f46;
 }
 
 .wireEmpty {

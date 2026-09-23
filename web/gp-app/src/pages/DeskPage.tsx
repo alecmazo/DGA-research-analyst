@@ -157,6 +157,11 @@ export function DeskPage() {
   const [reportsKey, setReportsKey] = useState(0)
   const [earningsTk, setEarningsTk] = useState<string | null>(null)
   const [peekTk, setPeekTk] = useState<string | null>(null)
+  const [peekFiling, setPeekFiling] = useState<{
+    form?: string
+    filed?: string
+    url?: string
+  } | null>(null)
   const [wlSort, setWlSort] = useState<WlSort>('day')
   const [wlDir, setWlDir] = useState<SortDir>('desc')
 
@@ -321,6 +326,7 @@ export function DeskPage() {
   }
 
   const openPeek = (tk: string) => {
+    setPeekFiling(null)
     const sym = (tk || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '')
     if (sym) setPeekTk(sym)
   }
@@ -677,7 +683,11 @@ export function DeskPage() {
           key={peekTk}
           ticker={peekTk}
           alreadyOnWatchlist
-          onClose={() => setPeekTk(null)}
+          filing={peekFiling}
+          onClose={() => {
+            setPeekTk(null)
+            setPeekFiling(null)
+          }}
         />
       )}
       {earningsTk && (
@@ -687,7 +697,12 @@ export function DeskPage() {
         />
       )}
       <SecUpdatePopup
-        onOpenTicker={(tk) => {
+        onOpenTicker={(tk, filing) => {
+          setPeekFiling(
+            filing?.url
+              ? { form: filing.form, filed: filing.filed, url: filing.url }
+              : null,
+          )
           setPeekTk(tk)
         }}
       />

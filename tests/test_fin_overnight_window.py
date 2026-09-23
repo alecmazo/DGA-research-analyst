@@ -70,7 +70,12 @@ def test_nightly_notice_lists_overnight_filings():
     assert '"filings": hits[:80]' in body
     assert "already in the store; " not in body.split("def _run_fin_nightly_followed")[1].split("def _fin_remap_state")[0]
     ui = (ROOT / "web/gp-app/src/components/desk/SecUpdatePopup.tsx").read_text(encoding="utf-8")
-    assert "already in store" in ui or "in store" in ui
+    assert "already in store" not in ui
+    assert "in store" not in ui
+    notice = (ROOT / "api/domains/_financials_body.py").read_text(encoding="utf-8")
+    fn = notice.split("def _fin_nightly_notice_text")[1].split("def _run_fin_nightly_followed")[0]
+    assert "already in store" not in fn
+    assert "already current" not in fn
     assert "u.form" in ui
     assert "u.filed" in ui
 
@@ -98,9 +103,10 @@ def test_merge_overnight_rows_keeps_already_current():
     assert [r["ticker"] for r in rows] == ["AAPL", "MSFT"]
     assert rows[0]["status"] == "new_period"
     assert rows[1]["status"] == "already_current"
-    bits = [f"{r['ticker']} {r['form']} · {'new period' if r['status']=='new_period' else 'already in store'}" for r in rows]
-    assert "MSFT 10-K · already in store" in bits
-    assert "AAPL 10-Q · new period" in bits
+    bits = [f"{r['ticker']} {r['form']}" for r in rows]
+    assert "MSFT 10-K" in bits
+    assert "AAPL 10-Q" in bits
+    assert "already in store" not in " ".join(bits)
 
 
 def test_nightly_code_does_not_default_to_full_us():
