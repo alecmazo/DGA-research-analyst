@@ -232,6 +232,113 @@ def _support_trail_event(actor: str, action: str, detail: str = "") -> dict:
     }
 
 
+def analyze_auto_ticket_id(ticker: str) -> str:
+    tk = re.sub(r"[^A-Z0-9]", "", (ticker or "").upper())[:12] or "TICKER"
+    return f"AUTO_ANALYZE_{tk}"
+
+
+def _analyze_log_text(ticker: str, provider: str, error: str, trace: list,
+                      extra: dict) -> str:
+    lines = [
+        f"Auto log · Analyze {ticker} · {provider}",
+        "Filed because this run failed. Deleted automatically if a later run of this ticker succeeds.",
+        "",
+        f"Build: {extra.get('build') or '—'}",
+        f"Grok effort: {extra.get('effort') or '—'}",
+        f"Job: {extra.get('job_id') or '—'}",
+        f"Gamma: {extra.get('gamma')}",
+        f"Persisted chars: {extra.get('chars')}",
+        f"Error: {error or '—'}",
+        "",
+        "Trace:",
+    ]
+    for row in (trace or [])[-40:]:
+        if not isinstance(row, dict):
+            continue
+        elapsed = int(row.get("elapsed_s") or 0)
+        mm, ss = divmod(elapsed, 60)
+        pct = row.get("pct")
+        try:
+            pct_s = f"{int(round(float(pct) * 100))}%"
+        except (TypeError, ValueError):
+            pct_s = "—"
+        lines.append(
+            f"+{mm}:{ss:02d}  {pct_s:>4}  {row.get('step') or ''}  {row.get('label') or ''}"
+        )
+    if not trace:
+        lines.append("(no step trace)")
+    return "\n".join(lines)[:8000]
+
+
+def file_analyze_auto_log(*, ticker: str, provider: str, email: str, job_id: str,
+                          error: str, trace: list, extra: dict | None = None) -> str:
+    """One open ticket per ticker. Replaced on the next failure of that name."""
+    extra = dict(extra or {})
+    tid = analyze_auto_ticket_id(ticker)
+    text = _analyze_log_text(ticker, provider, error, trace, extra)
+    ctx = {
+        "auto_analyze": "1",
+        "ticker": ticker,
+        "provider": provider,
+        "job_id": job_id,
+        "error": (error or "")[:1000],
+        "build": extra.get("build"),
+        "effort": extra.get("effort"),
+        "trace": (trace or [])[-40:],
+    }
+    trail = [_support_trail_event(
+        "analyze", "auto_filed",
+        f"{ticker} {provider} failed — log attached. Erased if the next run succeeds.",
+    )]
+    _ensure_support_tickets_table()
+    with B._fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO support_tickets (
+                id, created_by, created_by_email, status, priority,
+                description, page_path, active_tab, context_json, fix_trail
+            ) VALUES (
+                %s, %s, %s, 'open', 'high',
+                %s, '/gp', 'analyze', %s::jsonb, %s::jsonb
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                status = 'open',
+                description = EXCLUDED.description,
+                context_json = EXCLUDED.context_json,
+                created_by_email = COALESCE(EXCLUDED.created_by_email, support_tickets.created_by_email),
+                updated_at = now(),
+                fixed_at = NULL,
+                fixed_summary = NULL,
+                diagnosis = NULL
+        """, (
+            tid,
+            email or "analyze",
+            email or None,
+            text,
+            json.dumps(ctx),
+            json.dumps(trail),
+        ))
+        conn.commit()
+    print(f"[analyze] auto ticket {tid} filed", flush=True)
+    return tid
+
+
+def clear_analyze_auto_log(ticker: str) -> bool:
+    """Drop the auto log when this ticker's Analyze run succeeds."""
+    tid = analyze_auto_ticket_id(ticker)
+    _ensure_support_tickets_table()
+    with B._fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            DELETE FROM support_tickets
+             WHERE id = %s
+               AND COALESCE(context_json->>'auto_analyze', '') = '1'
+        """, (tid,))
+        n = cur.rowcount or 0
+        conn.commit()
+    if n:
+        print(f"[analyze] auto ticket {tid} erased after a clean run", flush=True)
+    return bool(n)
+
+
 def _support_row_public(row: dict, *, include_screenshot: bool = False) -> dict:
     if not row:
         return {}

@@ -7173,7 +7173,57 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
                 _db_record_attempt_failure(ticker, result.get("error") or "Unknown error")
             except Exception:
                 pass
+    if finalize:
+        # Only a saved, ok report erases the log. A warning or a timeout keeps it.
+        clean = bool(persisted and isinstance(result, dict) and result.get("ok"))
+        _analyze_auto_ticket(
+            ticker, provider, job_id,
+            ok=clean,
+            error=(result.get("error") if isinstance(result, dict) else "") or "",
+            gamma=generate_gamma,
+            chars=_persist_chars,
+        )
     return ok_run
+
+
+def _analyze_auto_ticket(ticker: str, provider: str, job_id: str, *,
+                         ok: bool, error: str, gamma: bool, chars: int) -> None:
+    """File a support ticket when Analyze fails. Erase it when the run is clean."""
+    try:
+        from api.domains import support_tickets as _st
+        if ok and not error:
+            _st.clear_analyze_auto_log(ticker)
+            return
+        if ok:
+            # Report saved, but a warning is not a failed run.
+            _st.clear_analyze_auto_log(ticker)
+            return
+        with _jobs_lock:
+            j = _jobs.get(job_id) or {}
+            trace = list(j.get("trace") or [])
+            email = j.get("actor_email") or ""
+        effort = ""
+        try:
+            effort = analyst.get_grok_report_effort()
+        except Exception:
+            effort = ""
+        _st.file_analyze_auto_log(
+            ticker=ticker,
+            provider=provider,
+            email=email,
+            job_id=job_id,
+            error=error,
+            trace=trace,
+            extra={
+                "build": WEB_BUILD_VERSION,
+                "effort": effort,
+                "job_id": job_id,
+                "gamma": bool(gamma),
+                "chars": chars,
+            },
+        )
+    except Exception as exc:
+        print(f"[analyze] auto ticket failed: {exc!s:.180}", flush=True)
 
 
 def _run_analysis_multi(job_id: str, ticker: str, generate_gamma: bool,
@@ -7245,6 +7295,13 @@ def _run_analysis_multi(job_id: str, ticker: str, generate_gamma: bool,
             _jobs[job_id]["warning"] = f"Failed: {', '.join(failed)}"
         if not any_ok:
             _jobs[job_id]["error"] = f"All engines failed: {failed}"
+    _analyze_auto_ticket(
+        ticker, "+".join(providers), job_id,
+        ok=bool(any_ok and not failed),
+        error=("" if any_ok and not failed else f"Failed: {', '.join(failed)}"),
+        gamma=generate_gamma,
+        chars=0,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -8355,7 +8412,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui657-20260923-grok-effort"
+WEB_BUILD_VERSION = "ui658-20260923-analyze-autolog"
 
 
 @app.get("/api/build")
@@ -9185,7 +9242,15 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
             "providers": {p: "queued" for p in providers} if multi else None,
             "progress": {"step": "queued", "pct": 0.0,
                           "label": f"Queued — {label_p} starting shortly…"},
+            "actor_email": "",
         }
+        if request is not None:
+            try:
+                _jobs[job_id]["actor_email"] = (
+                    _claims_or_401(request).get("email") or ""
+                )
+            except Exception:
+                pass
 
     # Persist mapping so we can recover after a server restart.
     _save_job_index_entry(job_id, {"ticker": ticker, "type": "analysis",

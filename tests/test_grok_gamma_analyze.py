@@ -51,6 +51,16 @@ def test_equity_report_does_not_use_live_search():
     assert "stream=True" in grok
 
 
+def test_failed_analyze_files_an_auto_ticket():
+    src = (ROOT / "api" / "server.py").read_text(encoding="utf-8")
+    assert "def _analyze_auto_ticket" in src
+    assert "clear_analyze_auto_log" in src
+    assert "file_analyze_auto_log" in src
+    tickets = (ROOT / "api" / "domains" / "support_tickets.py").read_text(encoding="utf-8")
+    assert "AUTO_ANALYZE_" in tickets
+    assert "auto_analyze" in tickets
+
+
 def test_analyze_does_not_blame_gamma_for_llm_timeout():
     src = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
     hb = src.split("def call_llm_with_heartbeat")[1].split("def extract_thesis_snippet")[0]
