@@ -28,6 +28,14 @@ def test_adbe_preamble_is_not_a_report():
     )
 
 
+def test_fresh_store_skips_live_sec():
+    src = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
+    impl = src.split("def _analyze_ticker_impl")[1].split("def run_portfolio_summary")[0]
+    assert "ANALYZE_STORE_FRESH_DAYS" in impl
+    assert "_need_sec = not _store_ok" in impl
+    assert "skipped live SEC" in impl
+
+
 def test_equity_report_does_not_use_live_search():
     src = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
     impl = src.split("def _analyze_ticker_impl")[1].split("def run_portfolio_summary")[0]

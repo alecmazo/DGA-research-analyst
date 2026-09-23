@@ -2075,8 +2075,11 @@ def fetch_market_snapshot(ticker: str) -> dict:
         if yl:
             out["year_low"] = float(yl)
 
-        # .info gives enterprise_value + fallback 52-week range.
-        # Wrapped in its own try/except — slower call, best-effort only.
+        # .info is a second slow Yahoo call. Skip it when fast_info already
+        # has price and market cap — that call was adding tens of seconds.
+        if out.get("price") and out.get("market_cap"):
+            _attach_pct_change(out)
+            return out
         try:
             info = t.info
             ev = info.get("enterpriseValue")
@@ -7892,9 +7895,9 @@ def _client():
     from openai import OpenAI  # type: ignore
     try:
         import httpx
-        timeout = httpx.Timeout(240.0, connect=20.0, write=60.0, read=240.0)
+        timeout = httpx.Timeout(150.0, connect=15.0, write=30.0, read=150.0)
     except Exception:
-        timeout = 240.0
+        timeout = 150.0
     return OpenAI(
         api_key=get_grok_api_key(),
         base_url="https://api.x.ai/v1",
@@ -8846,7 +8849,7 @@ def call_llm_with_heartbeat(
     if (provider or "").lower() == "claude":
         expected_s = float(os.environ.get("ANALYZE_CLAUDE_EXPECTED_S") or "240")  # 4 min
     elif (provider or "").lower() == "grok":
-        expected_s = float(os.environ.get("ANALYZE_GROK_EXPECTED_S") or "300")
+        expected_s = float(os.environ.get("ANALYZE_GROK_EXPECTED_S") or "120")
     else:
         expected_s = float(os.environ.get("ANALYZE_LLM_EXPECTED_S") or "240")
     expected_s = max(60.0, min(expected_s, timeout_s))
@@ -9799,7 +9802,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         _excel_data = None
         _db_data = None
 
-        def _sec_download_timeout(timeout_s: float = 50.0) -> bool:
+        def _sec_download_timeout(timeout_s: float = 25.0, retry: bool = False) -> bool:
             """Download latest 10-K/10-Q Excel with a hard wall-clock cap.
 
             Serializes EDGAR pulls process-wide (rate-limit stampede was why
@@ -9848,13 +9851,12 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
 
             with _sec_download_lock():
                 ok = _one_attempt("(try 1)", timeout_s)
-                if ok:
-                    return True
-                # Cooldown then retry — SEC 429s from edgartools are common under load
+                if ok or not retry:
+                    return ok
                 cool = float(os.environ.get("EDGAR_RETRY_COOLDOWN_S") or "8")
                 print(f"   ⏳ EDGAR cooldown {cool:.0f}s then retry…", flush=True)
                 _time.sleep(max(2.0, cool))
-                return _one_attempt("(try 2)", min(60.0, timeout_s + 15.0))
+                return _one_attempt("(try 2)", min(40.0, timeout_s + 10.0))
 
         def _db_looks_usable(db: dict | None) -> bool:
             if not db:
@@ -9907,15 +9909,40 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             _db_data = None
 
         _age = _quarter_age_days(_db_data)
-        # Always attempt live SEC — this is what surfaces the newest 10-Q
-        # (e.g. Jun 30) when the store still ends at Mar 31.
-        _need_sec = True
+        # A stored quarter younger than this is enough. Live SEC Excel was
+        # adding 1–2 minutes (50s + cooldown + retry) on every report, which
+        # is why a name we already follow took ~9 minutes.
+        _fresh_days = float(os.environ.get("ANALYZE_STORE_FRESH_DAYS") or "140")
+        _store_ok = (
+            _db_looks_usable(_db_data)
+            and _age is not None
+            and _age <= _fresh_days
+        )
+        _need_sec = not _store_ok
 
         # 2) Live SEC Excel pull — same budget for every engine (Grok was at
         # 35s and got rate-limited empty; DeepSeek at 45s succeeded).
+        if _store_ok:
+            data = _db_data
+            try:
+                verified_block = xlsx_edgar.format_verified_block(data)
+                primary_ok = True
+                _qc = (data.get("quarterly") or {}).get("current") or {}
+                _msg = (
+                    f"Stored financials · {_qc.get('fp') or 'Q'}/"
+                    f"{_qc.get('end') or '—'} · {int(_age)}d old · skipped live SEC"
+                )
+                print(f"   ✅ {ticker}: {_msg}", flush=True)
+                _emit_progress(on_progress, "financials", 0.22, _msg)
+            except Exception as _se:
+                print(f"   ⚠️  store format failed ({_se!s:.120}); will try SEC", flush=True)
+                primary_ok = False
+                _need_sec = True
         if _need_sec:
-            _budget = float(os.environ.get("EDGAR_PULL_BUDGET_S") or "50")
-            _sec_download_timeout(_budget)
+            # One attempt when we already have a store. Two attempts only if
+            # the store has nothing.
+            _budget = float(os.environ.get("EDGAR_PULL_BUDGET_S") or "25")
+            _sec_download_timeout(_budget, retry=not _db_looks_usable(_db_data))
             try:
                 _excel_data = xlsx_edgar.extract_financials(ticker)
                 _xq = (_excel_data or {}).get("quarterly") or {}
@@ -9948,10 +9975,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                         print(f"   ⚠️  Excel retry also failed: {exc2!s:.160}", flush=True)
                         _excel_data = None
         else:
-            try:
-                _excel_data = xlsx_edgar.extract_financials(ticker)
-            except Exception:
-                _excel_data = None
+            _excel_data = None
 
         # 3) Merge — prefer live Excel quarterly ALWAYS when present.
         # If Excel is missing, do NOT quietly treat DB as EDGAR-equivalent:
@@ -9975,7 +9999,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                 # If we only have store quarterly (no excel), force companyfacts
                 # pass below by treating as incomplete when excel was intended.
                 _qsrc = data.get("quarterly_source") or ""
-                if _excel_data is None and _qsrc == "company_financials_db":
+                if (not primary_ok) and _excel_data is None and _qsrc == "company_financials_db":
                     print(
                         "   ⚠️  PRIMARY would be store-only for latest Q — "
                         "deferring to companyfacts SEC API",
@@ -10025,7 +10049,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
 
         # 4) companyfacts (SEC JSON API) if live Excel missed — still EDGAR,
         #    not the local store. Only after that accept store fallback.
-        if not primary_ok:
+        if not primary_ok and not _db_looks_usable(_db_data):
             print(f"   Falling back to SEC companyfacts API (budget 30s)…", flush=True)
             _emit_progress(on_progress, "financials", 0.18, "SEC companyfacts fallback…")
             try:
