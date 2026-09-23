@@ -383,6 +383,16 @@ export type WatchlistResponse = {
   earnings?: Record<string, WatchlistEarning>
   reports?: Record<string, boolean>
   timing_ms?: number
+  diag?: {
+    ms?: number
+    n?: number
+    quotes?: number
+    priced?: number
+    ytd?: number
+    earn?: number
+    phases?: Record<string, number>
+    missing?: string[]
+  }
 }
 
 export type EarningsCardPayload = {

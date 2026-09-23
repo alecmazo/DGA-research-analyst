@@ -130,6 +130,7 @@ def test_watchlist_ytd_runs_before_yahoo():
     yahoo = body.find("_batch_quotes_fast")
     assert ytd != -1 and yahoo != -1
     assert ytd < yahoo
+    assert "budget_s=0.45" in body
     sql = _fn_src("_watchlist_ytd_pcts")
     assert "upper(p.symbol)" not in sql
 

@@ -4585,6 +4585,7 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
     *before* Yahoo so a slow quote wall cannot leave the column blank.
     """
     t0 = time.time()
+    marks: list[tuple[str, float]] = [("start", t0)]
     tickers: list[str] = []
     tickers_sorted: list[str] = []
     quotes: dict[str, dict] = {}
@@ -4643,19 +4644,20 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
                     need = still
                 except Exception as e:
                     print(f"[watchlist] store quotes failed: {e!s:.120}", flush=True)
+            marks.append(("store", time.time()))
 
-            # Hard paint deadline. YTD/Yahoo/earnings used to stack to 8–13s
-            # even with "budgets" because they ran sequentially after each other.
+            # YTD has its own budget. Do not skip it when the quote read
+            # already spent the paint clock — that left the column blank.
             _WL_PAINT_S = 1.2
             def _wl_left() -> float:
                 return _WL_PAINT_S - (time.time() - t0)
 
-            if (not lite) and _wl_left() > 0.25:
+            if not lite:
                 try:
-                    _watchlist_fill_ytd(
-                        tickers, quotes, budget_s=min(0.4, max(0.15, _wl_left())))
+                    _watchlist_fill_ytd(tickers, quotes, budget_s=0.45)
                 except Exception as e:
                     print(f"[watchlist] ytd fill failed: {e!s:.160}", flush=True)
+            marks.append(("ytd", time.time()))
 
             # Live Yahoo — MUST use shutdown(wait=False).
             left = max(0.0, _wl_left())
@@ -4678,6 +4680,7 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
                         _watchlist_set_price(
                             quotes, tk, q.get("price"),
                             pct=q.get("pct_change"), as_of=q.get("as_of"))
+            marks.append(("yahoo", time.time()))
 
             # Yahoo miss must not leave a dash when the store still has a
             # last price. This read is local — do not skip it when the paint
@@ -4698,6 +4701,7 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
                             pct=q.get("pct_change"), as_of=q.get("as_of"))
                 except Exception as e:
                     print(f"[watchlist] last-close store failed: {e!s:.120}", flush=True)
+            marks.append(("last", time.time()))
 
             # Report flags (cheap) — skip if we already blew the paint budget.
             if _wl_left() > 0.1 and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
@@ -4714,17 +4718,19 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
                         }
                 except Exception as e:
                     print(f"[watchlist] report lookup failed: {e!s:.120}", flush=True)
+            marks.append(("reports", time.time()))
 
-        # Earnings chips — cache hit is free; otherwise leftover paint budget.
+        # Earnings chips — own short budget, not whatever the paint clock
+        # has left (that leftover was ~0 and the chips never appeared).
         if tickers and not lite:
             try:
-                earn_budget = min(0.35, max(0.05, 1.2 - (time.time() - t0)))
-                earnings_map = _watchlist_earnings_for(tickers, budget_s=earn_budget) or {}
+                earnings_map = _watchlist_earnings_for(tickers, budget_s=0.4) or {}
                 for tk in list(earnings_map.keys()):
                     earnings_map[tk]["has_report"] = bool(reports_map.get(tk))
             except Exception as e:
                 print(f"[watchlist] earnings failed: {e!s:.160}", flush=True)
                 earnings_map = {}
+        marks.append(("earn", time.time()))
 
         def _wl_move_key(tk: str):
             pct = (quotes.get(tk) or {}).get("pct")
@@ -4747,8 +4753,32 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
         1 for q in quotes.values()
         if q.get("ytd") is not None or q.get("ytd_status") == "ipo"
     )
+    priced = [
+        tk for tk in tickers_sorted
+        if (quotes.get(tk) or {}).get("price") is not None
+    ]
+    missing = [tk for tk in tickers_sorted if tk not in priced][:40]
+    phases: dict[str, int] = {}
+    prev_ts = t0
+    for name, ts in marks:
+        if name == "start":
+            prev_ts = ts
+            continue
+        phases[name] = int((ts - prev_ts) * 1000)
+        prev_ts = ts
+    diag = {
+        "ms": elapsed_ms,
+        "n": len(tickers_sorted),
+        "quotes": len(quotes),
+        "priced": len(priced),
+        "ytd": ytd_n,
+        "earn": len(earnings_map),
+        "phases": phases,
+        "missing": missing,
+    }
     print(f"[watchlist] ok n={len(tickers_sorted)} quotes={len(quotes)} "
-          f"earn={len(earnings_map)} ytd={ytd_n} {elapsed_ms}ms",
+          f"priced={len(priced)} earn={len(earnings_map)} ytd={ytd_n} "
+          f"{elapsed_ms}ms phases={phases}",
           flush=True)
     return {
         "tickers": tickers_sorted,
@@ -4757,6 +4787,7 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
         "reports": reports_map,
         "earnings_horizon_days": 14,
         "timing_ms": elapsed_ms,
+        "diag": diag,
     }
 
 
@@ -8324,7 +8355,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui653-20260923-sliw-videos"
+WEB_BUILD_VERSION = "ui654-20260923-wl-log"
 
 
 @app.get("/api/build")

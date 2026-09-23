@@ -56,9 +56,27 @@
 }
 
 .meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
+
+.logBtn {
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.logBtn:hover { color: var(--text-primary); }
 
 .addRow {
   display: flex;

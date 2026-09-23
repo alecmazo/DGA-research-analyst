@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
+import { readSupportLog } from '@/lib/supportLog'
 import { getCachedUser } from '@/lib/auth'
 import { useLocation } from 'react-router-dom'
 import styles from './SupportFab.module.css'
@@ -172,9 +173,12 @@ export function SupportFab() {
       }
     }
     const user = getCachedUser()
+    const watchlistLog = readSupportLog()
     const payload = (screenshot: string | null) =>
       JSON.stringify({
-        description: text,
+        description: watchlistLog
+          ? `${text}\n\n--- watchlist log ---\n${watchlistLog}`
+          : text,
         page_url: location.href,
         page_path: location.pathname + location.search + location.hash,
         active_tab: loc.pathname.replace(/^\//, '') || 'desk',
@@ -192,6 +196,7 @@ export function SupportFab() {
           role: user?.role || 'gp',
           user: user?.email || user?.lp_id || null,
           name: user?.name || '',
+          watchlist_log: watchlistLog || null,
         },
         screenshot_b64: screenshot || null,
         screenshot_mime: 'image/jpeg',
@@ -263,6 +268,9 @@ export function SupportFab() {
             <p className={styles.sub}>
               Describe what broke. A screenshot of this page is attached
               automatically so we can see what you see.
+              {readSupportLog()
+                ? ' Watchlist log from the Log button is attached too.'
+                : ''}
             </p>
             <textarea
               className={styles.ta}
