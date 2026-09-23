@@ -28,6 +28,16 @@ def test_adbe_preamble_is_not_a_report():
     )
 
 
+def test_equity_report_does_not_use_live_search():
+    src = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
+    impl = src.split("def _analyze_ticker_impl")[1].split("def run_portfolio_summary")[0]
+    assert "_live = False" in impl
+    grok = src.split("def call_grok")[1].split("def call_claude")[0]
+    assert 'GROK_REPORT_EFFORT' in grok
+    assert '"reasoning_effort": effort' in grok
+    assert "max_tokens=max_out" in grok
+
+
 def test_analyze_does_not_blame_gamma_for_llm_timeout():
     src = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
     hb = src.split("def call_llm_with_heartbeat")[1].split("def extract_thesis_snippet")[0]

@@ -8306,12 +8306,21 @@ def call_grok(system_prompt: str, user_content: str,
             "SEC tables and market data in this prompt. You do not have web "
             "search on this call. Do not describe a plan. Start with the report."
         )
+    # grok-4.7 reasons by default at high effort and bills those tokens as
+    # output ($6/M, $12/M above 200k). Low effort is the old report speed.
+    effort = (os.environ.get("GROK_REPORT_EFFORT") or "low").strip().lower()
+    if effort not in ("low", "medium", "high", "xhigh"):
+        effort = "low"
+    max_out = int(os.environ.get("GROK_REPORT_MAX_TOKENS") or "12000")
+    max_out = max(4000, min(max_out, 20000))
     resp = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": plain},
         ],
+        max_tokens=max_out,
+        extra_body={"reasoning_effort": effort},
     )
     _capture(resp, search_count=0)
     return resp.choices[0].message.content or ""
@@ -10260,7 +10269,11 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         _model_label = DEEPSEEK_MODEL
     else:
         _model_label = _prov
-    _live = (_prov == "grok")
+    # Live web/X search on grok-4.7 is what made one report take ~14 minutes
+    # and ~$25. The model reasons at high effort while calling web_search and
+    # x_search, then we wrote the report again. The SEC tables and market
+    # snapshot are already in the prompt. One low-effort chat call.
+    _live = False
     # Grok-only: 90-day free catalyst headlines + Munger latticework section.
     # Claude skips both (no live search; Munger would duplicate multi-provider runs).
     _search_from = None

@@ -227,6 +227,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Login while busy** | **`ui644-20260923-login-busy`** | Analyze no longer occupies a request thread. Sign-in uses the last user list if the DB pool is full, and the login page retries instead of blaming the connection. |
 | **Grok + Gamma** | **`ui645-20260923-grok-gamma`** | SUP_20260923_21fa9246 — live search is capped at 3 min then the report is written without it. Gamma still runs. Null folderIds no longer sent. |
 | **Report stub** | **`ui646-20260923-report-stub`** | SUP_20260923_58319155 — a one-line “I will search” answer is not saved as the report. ADBE’s stored stub explains that and asks for a re-run. |
+| **Fast report** | **`ui647-20260923-fast-report`** | Equity reports are one grok-4.7 chat call at low reasoning. No web/X search loop on the report write. |
 
 ### One-click handoff (preferred)
 
@@ -414,4 +415,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-23 · Agent: Grok Build · Live: `ui646-20260923-report-stub` · Next: `ui647-YYYYMMDD-slug`*
+*Last updated: 2026-09-23 · Agent: Grok Build · Live: `ui647-20260923-fast-report` · Next: `ui648-YYYYMMDD-slug`*
