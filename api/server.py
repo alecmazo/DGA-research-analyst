@@ -7052,18 +7052,49 @@ def _run_analysis_both(job_id: str, ticker: str, generate_gamma: bool) -> None:
             _jobs[job_id]["error"] = f"Both providers failed: {provs}"
         _jobs[job_id]["progress"] = {"step": "done", "pct": 1.0,
                                       "label": "Both reports complete"}
-        _g_cost = result_g.get("cost_usd") or 0.0
-        _c_cost = result_c.get("cost_usd") or 0.0
+        _bill = _analyze_bill([result_g, result_c])
         _jobs[job_id]["result"] = {
             "ok": any_ok,
             "providers": provs,
             "has_grok_report":   provs.get("grok") == "done",
             "has_claude_report": provs.get("claude") == "done",
-            # Combined actual spend across both providers.
-            "cost_usd":    round(_g_cost + _c_cost, 4) if (_g_cost or _c_cost) else None,
+            "cost_usd":    _bill["cost_usd"],
+            "cost_estimated": _bill["cost_estimated"],
+            "input_tokens": _bill["input_tokens"],
+            "output_tokens": _bill["output_tokens"],
             "cost_grok":   result_g.get("cost_usd"),
             "cost_claude": result_c.get("cost_usd"),
         }
+        _spent = analyst.format_analyze_cost(_jobs[job_id]["result"])
+        if _spent:
+            _jobs[job_id]["progress"]["label"] = f"Both reports complete · {_spent}"
+
+
+def _analyze_bill(results: list) -> dict:
+    """Sum input, output, and dollars across every engine in one Analyze run."""
+    inn = out = 0
+    cost = 0.0
+    have_tok = have_cost = est = False
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        if r.get("input_tokens") is not None:
+            inn += int(r.get("input_tokens") or 0)
+            have_tok = True
+        if r.get("output_tokens") is not None:
+            out += int(r.get("output_tokens") or 0)
+            have_tok = True
+        if r.get("cost_usd") is not None:
+            cost += float(r.get("cost_usd") or 0)
+            have_cost = True
+        if r.get("cost_estimated"):
+            est = True
+    return {
+        "input_tokens": inn if have_tok else None,
+        "output_tokens": out if have_tok else None,
+        "cost_usd": round(cost, 4) if have_cost else None,
+        "cost_estimated": est,
+    }
 
 
 def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
@@ -7190,7 +7221,15 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
         if not _jobs.get(job_id):
             return ok_run
         if not finalize:
-            # Multi-engine parent owns terminal status.
+            # Multi-engine parent owns terminal status. Keep this engine's bill.
+            bills = list(_jobs[job_id].get("_engine_bills") or [])
+            bills.append({
+                "input_tokens": result.get("input_tokens"),
+                "output_tokens": result.get("output_tokens"),
+                "cost_usd": result.get("cost_usd"),
+                "cost_estimated": result.get("cost_estimated"),
+            })
+            _jobs[job_id]["_engine_bills"] = bills
             if not ok_run:
                 try:
                     _db_record_attempt_failure(
@@ -7203,9 +7242,12 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
             # report. Surface the downstream warning via _jobs[job_id]["warning"]
             # so the UI can optionally show it, but don't mark the job 'failed'.
             _jobs[job_id]["status"] = "done"
-            _jobs[job_id]["progress"] = {"step": "done", "pct": 1.0,
-                                          "label": "Report ready" if persisted
-                                          else "Report ready (DB save pending)"}
+            _spent = analyst.format_analyze_cost(result)
+            _ready = "Report ready" if persisted else "Report ready (DB save pending)"
+            _jobs[job_id]["progress"] = {
+                "step": "done", "pct": 1.0,
+                "label": _ready + (f" · {_spent}" if _spent else ""),
+            }
             _jobs[job_id]["result"] = {k: v for k, v in result.items()
                                        if k != "report_text"}
             _jobs[job_id]["result"]["has_report"] = bool(result.get("report_text") or persisted)
@@ -7229,6 +7271,9 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
         else:
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = result.get("error", "Unknown error")
+            _bill = _analyze_bill([result])
+            if _bill["cost_usd"] is not None or _bill["input_tokens"] is not None:
+                _jobs[job_id]["result"] = _bill
             try:
                 _db_record_attempt_failure(ticker, result.get("error") or "Unknown error")
             except Exception:
@@ -7345,12 +7390,22 @@ def _run_analysis_multi(job_id: str, ticker: str, generate_gamma: bool,
                 f"Saved {', '.join(saved)}" + (f" · failed {', '.join(failed)}" if failed else "")
             ),
         }
+        _bill = _analyze_bill(list(_jobs[job_id].pop("_engine_bills", None) or []))
+        _spent = analyst.format_analyze_cost(_bill)
         _jobs[job_id]["result"] = {
             "ok": any_ok,
             "providers": dict(statuses),
             "has_report": any_ok,
             "persisted_to_db": any_ok,
+            "cost_usd": _bill["cost_usd"],
+            "cost_estimated": _bill["cost_estimated"],
+            "input_tokens": _bill["input_tokens"],
+            "output_tokens": _bill["output_tokens"],
         }
+        if _spent:
+            _jobs[job_id]["progress"]["label"] = (
+                _jobs[job_id]["progress"]["label"] + f" · {_spent}"
+            )
         if failed and any_ok:
             _jobs[job_id]["warning"] = f"Failed: {', '.join(failed)}"
         if not any_ok:
@@ -8472,7 +8527,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui664-20260924-demo-book"
+WEB_BUILD_VERSION = "ui665-20260924-analyze-cost"
 
 
 @app.get("/api/build")

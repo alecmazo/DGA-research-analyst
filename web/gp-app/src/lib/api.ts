@@ -621,6 +621,9 @@ export type JobStatus = {
   trace?: { elapsed_s?: number; step?: string; pct?: number; label?: string }[]
   result?: {
     cost_usd?: number
+    cost_estimated?: boolean
+    input_tokens?: number | null
+    output_tokens?: number | null
     model?: string
     provider?: string
     price_target?: number | null

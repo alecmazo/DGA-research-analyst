@@ -51,6 +51,27 @@ def test_equity_report_does_not_use_live_search():
     assert "stream=True" in grok
 
 
+def test_grok_47_bill_uses_list_price():
+    import DGA_analyst as analyst
+    # Under 200k tokens: $2 in / $6 out. 100k in + 10k out = $0.26.
+    assert abs(analyst.estimate_grok_cost("grok-4.7", 100_000, 10_000) - 0.26) < 1e-9
+    # Cached input is $0.50, not $2.
+    assert abs(analyst.estimate_grok_cost(
+        "grok-4.7", 100_000, 0, cached_input_tokens=100_000) - 0.05) < 1e-9
+    # 200k prompt tokens and above are billed at twice the list rate.
+    assert abs(analyst.estimate_grok_cost("grok-4.7", 200_000, 0) - 0.80) < 1e-9
+    assert analyst.estimate_grok_cost("grok-4.7", 1_000_000, 1_000_000) == 16.0
+    label = analyst.format_analyze_cost({
+        "input_tokens": 71188, "output_tokens": 18402, "cost_usd": 0.2528,
+    })
+    assert label == "71,188 in · 18,402 out · $0.25"
+    src = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
+    grok = src.split("def call_grok")[1].split("def call_claude")[0]
+    assert "include_usage" in grok
+    impl = src.split("def _analyze_ticker_impl")[1].split("def run_portfolio_summary")[0]
+    assert impl.count("usage_capture=_bill") >= 3
+
+
 def test_cutoff_report_is_not_complete():
     import DGA_analyst as analyst
     body = "# SECTION 7 — VALUATION\n" + ("comps table line\n" * 80)

@@ -8156,14 +8156,91 @@ def grok_rates(model: str) -> tuple:
     return best[1] if best else (2.00, 6.00)
 
 
+# Cached input $/MTok. xAI bills a prompt at or above 200k tokens at 2×.
+GROK_CACHE_HIT_PER_MTOK = {
+    "grok-4.7": 0.50,
+    "grok-4.6": 0.50,
+    "grok-4.5": 0.50,
+    "grok-4.3": 0.20,
+    "grok-4.20-reasoning": 0.20,
+    "grok-4.20-0309-reasoning": 0.20,
+    "grok-latest": 0.20,
+}
+
+
+def grok_cache_rate(model: str) -> float | None:
+    """Cached-input $/MTok, or None when this model has no published cache rate."""
+    m = (model or "").lower().strip()
+    best = None
+    for k, v in GROK_CACHE_HIT_PER_MTOK.items():
+        if m.startswith(k) and (best is None or len(k) > best[0]):
+            best = (len(k), v)
+    return best[1] if best else None
+
+
 def estimate_grok_cost(model: str, input_tokens: int, output_tokens: int,
-                       live_search_count: int = 0) -> float:
-    """Estimate USD cost for a Grok call. live_search_count adds the search
-    surcharge (xAI bills per search invocation on top of the LLM tokens)."""
+                       live_search_count: int = 0, *,
+                       cached_input_tokens: int = 0) -> float:
+    """USD for one Grok call.
+
+    List price is $2 / $6 per million for grok-4.7. Cached input is cheaper.
+    A prompt of 200k tokens or more is billed at twice those rates.
+    Reasoning tokens are already inside output_tokens when the API reports them.
+    """
     inp_rate, out_rate = grok_rates(model)
-    token_cost = (input_tokens * inp_rate + output_tokens * out_rate) / 1_000_000.0
+    billed_in = max(0, int(input_tokens or 0))
+    billed_out = max(0, int(output_tokens or 0))
+    cached = max(0, min(int(cached_input_tokens or 0), billed_in))
+    full_in = billed_in - cached
+    if billed_in >= 200_000:
+        inp_rate *= 2
+        out_rate *= 2
+    cache_rate = grok_cache_rate(model)
+    if cache_rate is None:
+        cache_rate = inp_rate
+    elif billed_in >= 200_000:
+        cache_rate *= 2
+    token_cost = (
+        full_in * inp_rate + cached * cache_rate + billed_out * out_rate
+    ) / 1_000_000.0
     search_cost = live_search_count * GROK_LIVE_SEARCH_PER_CALL
     return token_cost + search_cost
+
+
+def merge_usage(dst: dict, src: dict | None) -> None:
+    """Add one call's token bill onto the run total. Costs are summed, not recomputed."""
+    if not isinstance(src, dict):
+        return
+    for key in ("input_tokens", "output_tokens", "cached_input_tokens"):
+        if src.get(key) is None:
+            continue
+        dst[key] = int(dst.get(key) or 0) + int(src[key] or 0)
+    if src.get("cost_usd") is not None:
+        dst["cost_usd"] = round(
+            float(dst.get("cost_usd") or 0) + float(src["cost_usd"] or 0), 6)
+    if src.get("cost_estimated"):
+        dst["cost_estimated"] = True
+    if src.get("model"):
+        dst["model"] = src["model"]
+
+
+def format_analyze_cost(usage: dict | None) -> str:
+    """'71,188 in · 18,402 out · $0.25' or '' when the run has no bill yet."""
+    if not isinstance(usage, dict):
+        return ""
+    bits: list[str] = []
+    if usage.get("input_tokens") is not None:
+        bits.append(f"{int(usage['input_tokens']):,} in")
+    if usage.get("output_tokens") is not None:
+        bits.append(f"{int(usage['output_tokens']):,} out")
+    cost = usage.get("cost_usd")
+    if isinstance(cost, (int, float)):
+        n = float(cost)
+        shown = f"${n:.4f}" if 0 < n < 0.01 else f"${n:.2f}"
+        if usage.get("cost_estimated"):
+            shown = "about " + shown
+        bits.append(shown)
+    return " · ".join(bits)
 
 
 _GROK_EFFORT_API = {"low": "low", "medium": "medium", "high": "high", "normal": "medium"}
@@ -8214,24 +8291,71 @@ def call_grok(system_prompt: str, user_content: str,
     """
     client = _client()
 
-    def _capture(resp, *, search_count: int = 0):
-        """Best-effort: pull usage from any response shape + invoke usage_capture."""
+    def _usage_rejected(exc: BaseException) -> bool:
+        msg = str(exc).lower()
+        return any(s in msg for s in (
+            "stream_options", "include_usage", "unknown parameter",
+            "unexpected keyword", "extra_forbidden",
+        ))
+
+    def _cached_tokens(u) -> int:
+        details = getattr(u, "prompt_tokens_details", None)
+        if details is None and isinstance(u, dict):
+            details = u.get("prompt_tokens_details")
+        if details is None:
+            return 0
+        if isinstance(details, dict):
+            return int(details.get("cached_tokens") or 0)
+        return int(getattr(details, "cached_tokens", None) or 0)
+
+    def _capture(resp, *, search_count: int = 0, text_for_estimate: str = "",
+                 prompt_chars: int | None = None):
+        """Pull the API's token bill. If the stream omitted it, estimate from chars."""
         if usage_capture is None:
             return
         try:
-            u = getattr(resp, "usage", None) or {}
+            u = getattr(resp, "usage", None) if resp is not None else None
+            if u is None and isinstance(resp, dict):
+                u = resp.get("usage")
             inp = int(getattr(u, "prompt_tokens", None)
-                      or getattr(u, "input_tokens", None) or 0)
+                      or getattr(u, "input_tokens", None)
+                      or (u.get("prompt_tokens") if isinstance(u, dict) else 0)
+                      or 0)
             out = int(getattr(u, "completion_tokens", None)
-                      or getattr(u, "output_tokens", None) or 0)
-            cost = estimate_grok_cost(model, inp, out, live_search_count=search_count)
+                      or getattr(u, "output_tokens", None)
+                      or (u.get("completion_tokens") if isinstance(u, dict) else 0)
+                      or 0)
+            cached = _cached_tokens(u) if u is not None else 0
+            estimated = False
+            if inp <= 0 and out <= 0 and text_for_estimate:
+                chars_in = prompt_chars
+                if chars_in is None:
+                    chars_in = len(system_prompt) + len(user_content)
+                inp = max(1, int(chars_in) // 4)
+                out = max(1, len(text_for_estimate) // 4)
+                cached = 0
+                estimated = True
+            if inp <= 0 and out <= 0:
+                return
+            cost = estimate_grok_cost(
+                model, inp, out, live_search_count=search_count,
+                cached_input_tokens=cached,
+            )
             usage_capture({
-                "model":              model,
-                "input_tokens":       inp,
-                "output_tokens":      out,
-                "live_search_calls":  search_count,
-                "cost_usd":           cost,
+                "model": model,
+                "input_tokens": inp,
+                "output_tokens": out,
+                "cached_input_tokens": cached,
+                "live_search_calls": search_count,
+                "cost_usd": cost,
+                "cost_estimated": estimated,
             })
+            tag = "estimated" if estimated else "api"
+            print(
+                f"   [grok] usage {tag} in={inp:,} out={out:,} "
+                f"cached={cached:,} ${cost:.4f}",
+                flush=True,
+            )
         except Exception as _e:
             print(f"⚠️  [call_grok] usage capture failed: {_e!s:.120}", flush=True)
 
@@ -8379,8 +8503,9 @@ def call_grok(system_prompt: str, user_content: str,
     parts: list[str] = []
     usage_chunk = None
     first_s = None
-    try:
-        stream = client.chat.completions.create(
+
+    def _open_stream(with_usage: bool):
+        kw = dict(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -8390,6 +8515,22 @@ def call_grok(system_prompt: str, user_content: str,
             extra_body={"reasoning_effort": effort},
             stream=True,
         )
+        if with_usage:
+            kw["stream_options"] = {"include_usage": True}
+        return client.chat.completions.create(**kw)
+
+    try:
+        try:
+            stream = _open_stream(True)
+        except Exception as exc:
+            if not _usage_rejected(exc):
+                raise
+            print(
+                "   [grok] stream usage flag was rejected; "
+                "this call will estimate tokens from length",
+                flush=True,
+            )
+            stream = _open_stream(False)
         for chunk in stream:
             if getattr(chunk, "usage", None):
                 usage_chunk = chunk
@@ -8417,14 +8558,20 @@ def call_grok(system_prompt: str, user_content: str,
         )
         if got and len(got) > 800 and not looks_like_unfinished_report(got):
             print("   [grok] keeping partial report", flush=True)
+            _capture(
+                usage_chunk, text_for_estimate=got,
+                prompt_chars=len(system_prompt) + len(plain),
+            )
             return got
         raise TimeoutError(
             "Grok write timed out before the report was finished. "
             "Run Analyze again."
         ) from exc
     text = "".join(parts)
-    if usage_chunk is not None:
-        _capture(usage_chunk, search_count=0)
+    _capture(
+        usage_chunk, search_count=0, text_for_estimate=text,
+        prompt_chars=len(system_prompt) + len(plain),
+    )
     print(
         f"   [grok] chat.completions done chars={len(text):,} "
         f"in {time.time() - t_call:.0f}s",
@@ -10494,7 +10641,9 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     _emit_progress(on_progress, "grok", 0.40,
                    f"{_prov.title()} ({_model_label}) — analyzing"
                    + (" + live X/news search (90d)" if _live else ""))
-    _usage: dict = {}   # filled by call_* → {model, input/output_tokens, cost_usd}
+    _usage: dict = {}   # summed across every billed call in this run
+    def _bill(u):
+        merge_usage(_usage, u)
     try:
         # Heartbeats keep Desk + mobile progress bars moving during long
         # non-stream Grok/Claude calls. Without this UI freezes ~40–50%.
@@ -10503,7 +10652,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             live_search=_live,
             search_from_date=_search_from if _live else None,
             on_delta=on_delta,
-            usage_capture=lambda u: _usage.update(u or {}),
+            usage_capture=_bill,
             should_cancel=should_cancel,
             on_progress=on_progress,
             progress_step="grok",
@@ -10533,6 +10682,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                 ),
                 live_search=False,
                 on_delta=on_delta,
+                usage_capture=_bill,
                 should_cancel=should_cancel,
                 on_progress=on_progress,
                 progress_step="grok",
@@ -10575,6 +10725,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                 f"CUTOFF:\n{tail}",
                 live_search=False,
                 on_delta=on_delta,
+                usage_capture=_bill,
                 should_cancel=should_cancel,
                 on_progress=on_progress,
                 progress_step="grok",
@@ -10604,12 +10755,11 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         _emit_progress(on_progress, "grok", 0.55,
                        f"{_prov.title()} — re-running tables without live search")
         try:
-            _usage2: dict = {}
             report_text2 = call_llm_with_heartbeat(
                 _prov, system_prompt, user_msg,
                 live_search=False,
                 on_delta=on_delta,
-                usage_capture=lambda u: _usage2.update(u or {}),
+                usage_capture=_bill,
                 should_cancel=should_cancel,
                 on_progress=on_progress,
                 progress_step="grok",
@@ -10618,20 +10768,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             )
             if report_text2 and not _financial_tables_look_degraded(report_text2):
                 report_text = report_text2
-                # Merge costs (both calls)
-                try:
-                    _usage["input_tokens"] = (
-                        int(_usage.get("input_tokens") or 0)
-                        + int(_usage2.get("input_tokens") or 0))
-                    _usage["output_tokens"] = (
-                        int(_usage.get("output_tokens") or 0)
-                        + int(_usage2.get("output_tokens") or 0))
-                    _usage["cost_usd"] = (
-                        float(_usage.get("cost_usd") or 0)
-                        + float(_usage2.get("cost_usd") or 0))
-                    _usage["live_search_retry"] = True
-                except Exception:
-                    pass
+                _usage["live_search_retry"] = True
                 print(f"   ✅ {ticker}: clean tables after no-search retry")
             elif report_text2:
                 # Still degraded but prefer the no-search version (less invention)
@@ -10718,12 +10855,14 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         pass
 
     still = report_tail_gap(report_text, _prov)
+    _bill_txt = format_analyze_cost(_usage)
+    _bill_suffix = f" · {_bill_txt}" if _bill_txt else ""
     if still:
         result["incomplete"] = still
         result["error"] = f"Report incomplete: {still}"
-        _emit_progress(on_progress, "grok", 0.90, f"Incomplete · {still}")
+        _emit_progress(on_progress, "grok", 0.90, f"Incomplete · {still}{_bill_suffix}")
     else:
-        _emit_progress(on_progress, "done", 1.0, "Report ready")
+        _emit_progress(on_progress, "done", 1.0, f"Report ready{_bill_suffix}")
     result.update({
         "ok": not still,
         "entity_name": data.get("entity_name", ticker),
@@ -10742,6 +10881,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         "model":         _usage.get("model") or _model_label,
         # Actual LLM spend for this run (from the provider's token usage).
         "cost_usd":      _usage.get("cost_usd"),
+        "cost_estimated": bool(_usage.get("cost_estimated")),
         "cost_model":    _usage.get("model") or _model_label,
         "input_tokens":  _usage.get("input_tokens"),
         "output_tokens": _usage.get("output_tokens"),

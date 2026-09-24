@@ -26,6 +26,23 @@ const ACTIVE_JOB_KEY = 'dga.analyze.active.v1'
 
 const ENGINE_ORDER: LlmProvider[] = ['grok', 'claude', 'kimi', 'deepseek']
 
+function formatRunCost(result: JobStatus['result'] | null | undefined): string {
+  if (!result) return ''
+  const bits: string[] = []
+  if (result.input_tokens != null) {
+    bits.push(`${Number(result.input_tokens).toLocaleString()} in`)
+  }
+  if (result.output_tokens != null) {
+    bits.push(`${Number(result.output_tokens).toLocaleString()} out`)
+  }
+  if (result.cost_usd != null && !Number.isNaN(Number(result.cost_usd))) {
+    const n = Number(result.cost_usd)
+    const shown = n > 0 && n < 0.01 ? n.toFixed(4) : n.toFixed(2)
+    bits.push(`${result.cost_estimated ? 'about ' : ''}$${shown}`)
+  }
+  return bits.length ? ` · ${bits.join(' · ')}` : ''
+}
+
 type StoredActive = {
   jobId: string
   ticker: string
@@ -255,17 +272,20 @@ export function AnalyzeCard({
         setActiveJobId(null)
         onComplete?.()
 
+        const spent = formatRunCost(outcome.result)
         setProgPct(100)
-        setProgLbl('Complete')
+        setProgLbl(spent ? spent.slice(3) : 'Complete')
         setProgStep('done')
-        setTimeout(() => setShowProg(false), 650)
+        setTimeout(() => setShowProg(false), 4000)
 
         if (outcome.status === 'canceled' || outcome.status === 'cancelled') {
           setHintTone('mid')
           setHint('Canceled — any finished engines were saved to Saved Reports.')
         } else if (outcome.status === 'failed') {
           setHintTone('err')
-          setHint(`Error: ${outcome.error || outcome.detail || 'analysis failed'}`)
+          setHint(
+            `Error: ${outcome.error || outcome.detail || 'analysis failed'}${spent}`,
+          )
         } else {
           const provs = (outcome.result?.providers || {}) as Record<string, string>
           const names = Object.keys(provs)
@@ -280,13 +300,12 @@ export function AnalyzeCard({
               ? 0
               : ordered.length
           const failNames = names.filter((k) => provs[k] !== 'done')
-          const c = outcome.result?.cost_usd
           const warn = outcome.warning || outcome.error || outcome.detail
           setHintTone(failN && !okN ? 'err' : failN ? 'mid' : 'ok')
           setHint(
             `${okN ? `✅ ${okN} report${okN > 1 ? 's' : ''} saved` : '❌ none saved'}${
               failN ? ` · ${failN} failed${failNames.length ? ` (${failNames.join(', ')})` : ''}` : ''
-            }${c != null && !Number.isNaN(Number(c)) ? ` · $${Number(c).toFixed(2)}` : ''} — see Saved Reports${
+            }${spent} — see Saved Reports${
               warn && failN ? ` · ${String(warn).slice(0, 140)}` : ''
             }`,
           )
