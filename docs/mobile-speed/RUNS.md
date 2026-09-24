@@ -2,6 +2,8 @@
 
 Newest run first. Each block comes from `python3 docs/mobile-speed/measure.py`. The steps are defined in `CHECKLIST.md`. Do not renumber them.
 
+The Budget column in each run is the limit that was in force that day. Current limits are in `CHECKLIST.md` (revised 2026-09-24, after Run 002). Do not rewrite these cells when a budget changes.
+
 ## Run 002 — 2026-09-24
 
 Demo book, 10 names. Two passes: `ui662` before the read-path change, `ui663` after it. The `ui663` block below is the one that counts. A first pass on `ui663` returned 0 tickers because the demo login's watchlist rows were still on a previous user id; those 10 names were copied onto the current demo user before this pass.

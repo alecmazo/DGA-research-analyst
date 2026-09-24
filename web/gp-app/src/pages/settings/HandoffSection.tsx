@@ -12,6 +12,7 @@ type HandoffPack = {
   git_subject?: string
   generated_at?: string
   paste_markdown?: string
+  speed_paste_markdown?: string
   filename?: string
   instructions?: string
 }
@@ -44,6 +45,7 @@ export function HandoffSection() {
   const [statusOk, setStatusOk] = useState(true)
   const [loading, setLoading] = useState(true)
   const [copyLabel, setCopyLabel] = useState('Copy briefing for next agent')
+  const [speedLabel, setSpeedLabel] = useState('Copy mobile speed prompt')
   const [dlBusy, setDlBusy] = useState(false)
 
   const load = useCallback(async () => {
@@ -71,6 +73,32 @@ export function HandoffSection() {
     const d = await api<HandoffPack>('/api/continuity/handoff')
     setPack(d)
     return d.paste_markdown || ''
+  }
+
+  const copySpeed = async () => {
+    try {
+      let text = pack?.speed_paste_markdown || ''
+      if (!text) {
+        const d = await api<HandoffPack>('/api/continuity/handoff')
+        setPack(d)
+        text = d.speed_paste_markdown || ''
+      }
+      if (!text) {
+        setStatusOk(false)
+        setStatus('Mobile speed prompt was not on this briefing. Refresh and try again.')
+        return
+      }
+      await copyText(text)
+      setStatusOk(true)
+      setStatus(
+        '✓ Copied the mobile speed prompt. Paste it into Grok Build, or into Claude if that is the model you are using. It tells that model to read the continuity docs, then the speed checklist and the run history.',
+      )
+      setSpeedLabel('✓ Copied speed prompt')
+      setTimeout(() => setSpeedLabel('Copy mobile speed prompt'), 2800)
+    } catch {
+      setStatusOk(false)
+      setStatus('Copy failed — try again.')
+    }
   }
 
   const copy = async () => {
@@ -152,6 +180,9 @@ export function HandoffSection() {
         <Button size="sm" variant="primary" onClick={() => void copy()}>
           {copyLabel}
         </Button>
+        <Button size="sm" variant="secondary" onClick={() => void copySpeed()}>
+          {speedLabel}
+        </Button>
         <Button
           size="sm"
           variant="secondary"
@@ -165,6 +196,12 @@ export function HandoffSection() {
           <span className={statusOk ? styles.statusOk : styles.statusErr}>{status}</span>
         )}
       </div>
+      <p className={styles.help}>
+        <strong>Copy mobile speed prompt</strong> is for the phone, not a new
+        computer. Paste it into Grok Build, or into Claude if you switch models.
+        That model reads the same continuity docs, then the speed checklist and
+        the saved run history, and times the live server.
+      </p>
       <p className={styles.help}>
         <strong>Download package</strong> is optional. It saves a dated zip of
         the briefing + product log + version log for your records, or if you

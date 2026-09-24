@@ -13,6 +13,8 @@ opens the files here. Do not skip them. Do not send Alec to Terminal.
 | **`../../LLM_COORDINATION.md`** | Multi-agent claims / do-not-stomp | Before overlapping edits |
 | **`../../ACCESS_CONTROL_POLICY.md`** | GP / LP / demo isolation | Before auth or demo work |
 | **`../../docs/support-inbox/README.md`** | How to fix GP/LP support tickets | Always: read the live fix trail |
+| **`../mobile-speed/CHECKLIST.md`** | Phone speed steps and budgets | When the phone is slow, or Settings → **Copy mobile speed prompt** |
+| **`../mobile-speed/RUNS.md`** | History of those timings, newest first | Same. Do not delete old runs |
 
 ## Two layers (do not collapse them)
 
@@ -36,6 +38,11 @@ Alec does **not** clone, pull, or open Terminal.
 4. That agent curls /api/build, opens PRODUCT_LOG.md + CONTINUITY.md,
    and reads GET /api/support/tickets (the fix trail). Then it does the task.
 ```
+
+**Copy mobile speed prompt** (same Settings card) is a second paste, for
+Grok Build or Claude. It still requires the files in the table above, then
+`docs/mobile-speed/CHECKLIST.md` and `docs/mobile-speed/RUNS.md`. It does
+not replace the briefing.
 
 **Download package** (Settings) is a dated zip of briefing + product log +
 version log for **records**, or a file copy of the briefing if clipboard is

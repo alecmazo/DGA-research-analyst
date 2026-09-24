@@ -85,7 +85,17 @@ def test_briefing_agent_gets_the_repo():
     tsx = (ROOT / "web/gp-app/src/pages/settings/HandoffSection.tsx").read_text()
     assert "On the <em>new</em> computer: clone" not in tsx
     assert "Copy briefing for next agent" in tsx
+    assert "Copy mobile speed prompt" in tsx
     assert "You do not clone" in tsx
+    speed = src.split("def _continuity_speed_prompt")[1].split("def ")[0]
+    assert "docs/mobile-speed/CHECKLIST.md" in speed
+    assert "docs/mobile-speed/RUNS.md" in speed
+    assert "docs/continuity/PRODUCT_LOG.md" in speed
+    assert "CONTINUITY.md" in speed
+    assert "LLM_COORDINATION.md" in speed
+    assert "python3 docs/mobile-speed/measure.py" in speed
+    assert "speed_paste_markdown" in src
+    assert "cont_md" not in speed
     readme = (ROOT / "docs/continuity/README.md").read_text()
     assert "Alec does **not** clone" in readme
     handoff = (ROOT / "docs/continuity/HANDOFF.md").read_text()

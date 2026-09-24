@@ -55,6 +55,14 @@ ask him to open Terminal or clone anything himself.
 9. Do not commit `api/domains/grok_bot.py`, `ticket_*.jpg`, GrokBot/FabDock, or `mobile/logo-options/`.
 10. Support tickets: `GET /api/support/agent-inbox` (or Settings). Close with PATCH + trail.
 
-## 4. If the user says “fix ticket”
+## 4. If the paste is the mobile speed prompt
+
+Alec clicked **Copy mobile speed prompt** instead of the general briefing.
+Still do section 1 (get the repo, open every continuity file, read the
+support fix trail). Then open `docs/mobile-speed/CHECKLIST.md` and
+`docs/mobile-speed/RUNS.md`, run `python3 docs/mobile-speed/measure.py`,
+and follow the prompt. Do not invent a new speed path.
+
+## 5. If the user says “fix ticket”
 
 Open tickets are the job. Read `docs/support-inbox/README.md`, fetch the inbox, screenshot, fix, ship, mark `fixed`.

@@ -8527,7 +8527,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui665-20260924-analyze-cost"
+WEB_BUILD_VERSION = "ui666-20260924-speed-prompt"
 
 
 @app.get("/api/build")
@@ -8715,6 +8715,90 @@ def _continuity_pack() -> dict:
     }
 
 
+def _continuity_speed_prompt() -> str:
+    """Clipboard prompt for the phone-speed audit.
+
+    Works in Grok Build or Claude. Names every continuity file. Does not
+    paste those files in — the agent opens them from the repo.
+    """
+    git_sha, git_branch, git_msg = _continuity_git()
+    next_build = _continuity_next_n()
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (
+        f"# DGA Capital — mobile speed\n\n"
+        f"Alec clicked **Copy mobile speed prompt** in GP Settings → Handoff "
+        f"and pasted this into this chat. You may be Grok Build or Claude. "
+        f"Do the same job either way. Do not invent a new speed test.\n\n"
+        f"## Continuity — open every one of these before you change a budget\n\n"
+        f"1. **Get the code yourself.** Repo: "
+        f"`https://github.com/alecmazo/DGA-research-analyst` (`main`). "
+        f"If this workspace is already that repo, `git pull origin main`. "
+        f"Otherwise clone it. If GitHub is locked, ask Alec to log in in this "
+        f"tool, then you clone. Do not send him to Terminal.\n"
+        f"2. `curl -s https://portfolio.dgacapital.com/api/build` "
+        f"(must match **{WEB_BUILD_VERSION}** or newer).\n"
+        f"3. Read these files from the repo, in this order. Do not skip one "
+        f"because the task is only speed:\n"
+        f"   - `docs/continuity/README.md`\n"
+        f"   - `docs/continuity/HANDOFF.md`\n"
+        f"   - `docs/continuity/PRODUCT_LOG.md`\n"
+        f"   - `CONTINUITY.md`\n"
+        f"   - `LLM_COORDINATION.md`\n"
+        f"   - `ACCESS_CONTROL_POLICY.md`\n"
+        f"   - `docs/support-inbox/README.md`\n"
+        f"4. Read the support fix trail: `GET /api/support/tickets?limit=30` "
+        f"and `GET /api/support/agent-inbox`. Do not re-open a fixed ticket "
+        f"unless Alec asks.\n"
+        f"5. Hard rules that still apply: never decrease `WEB_BUILD_VERSION`; "
+        f"bump `BUILD_VERSION` and add a `CONTINUITY.md` row; after a desk UI "
+        f"edit run `npm run build` in `web/gp-app/` and commit `dist/`; one "
+        f"uvicorn worker; do not auto-send email; do not publish a mobile "
+        f"update unless Alec asks; do not re-upload wedding videos already "
+        f"on `/data/sliw-media`; do not commit `grok_bot.py`, `ticket_*.jpg`, "
+        f"GrokBot, FabDock, or `mobile/logo-options/`.\n\n"
+        f"## Then do the speed audit\n\n"
+        f"1. Read `docs/mobile-speed/CHECKLIST.md`. The budgets are the steps "
+        f"table. Older limits are under **Budget revisions**. Do not renumber "
+        f"steps.\n"
+        f"2. Read `docs/mobile-speed/RUNS.md` newest first. That file is the "
+        f"history. Do not delete old runs. Do not rewrite their Budget cells.\n"
+        f"3. From the repo root run `python3 docs/mobile-speed/measure.py`.\n"
+        f"4. Compare each step to the previous run. Write better, worse, or "
+        f"same. Worse means more than 30 percent slower, or over the budget.\n"
+        f"5. Paste the printed block at the top of `RUNS.md`.\n"
+        f"6. If a step is over budget, change only the slowest one, time it "
+        f"again, and add an `after` block on that same run.\n"
+        f"7. Change a budget only when `RUNS.md` shows the current number is "
+        f"wrong: tighter than every healthy run, or so loose that a recorded "
+        f"slow run would still pass. Write the old number, the new number, "
+        f"and the runs you used under Budget revisions in `CHECKLIST.md`.\n"
+        f"8. The audit uses the demo book (10 names), not the GP book (about "
+        f"55). If Alec's phone is still slow while the demo audit passes, "
+        f"say that. Demo login time is not the GP sign-in budget.\n"
+        f"9. Do not time Metro, do not start Daily Brief, Market Pulse, or a "
+        f"live SEC pull, and do not publish a phone update as part of this.\n\n"
+        f"## Budgets in force when this prompt was copied\n\n"
+        f"These match `CHECKLIST.md`. History that set them is Run 002 "
+        f"(healthy) and Run 001 (slow), both 2026-09-24.\n\n"
+        f"- Health: under 300 ms (healthy about 100 ms)\n"
+        f"- GP sign-in: under 2 s. Demo sign-in is not this budget "
+        f"(it was about 5–12 s)\n"
+        f"- Markets home: first under 1 s (healthy 311 ms), second under 400 ms "
+        f"(healthy about 90 ms)\n"
+        f"- Saved reports list: under 300 ms (healthy about 100 ms)\n"
+        f"- Full watchlist: first under 2 s (healthy 1.6 s), second under 400 ms\n"
+        f"- Open one saved report: under 800 ms. Only a short demo note has "
+        f"been timed (about 100 ms). Do not tighten this until a full note "
+        f"is in `RUNS.md`.\n\n"
+        f"## Live production when this was copied\n\n"
+        f"- **Build:** `{WEB_BUILD_VERSION}`\n"
+        f"- **Next N hint:** `{next_build}`\n"
+        f"- **Git:** `{git_branch or '—'}@{git_sha or '—'}` — {git_msg or '—'}\n"
+        f"- **Copied:** {now}\n"
+        f"- **Site:** `https://portfolio.dgacapital.com/gp`\n"
+    )
+
+
 def _continuity_package_zip() -> tuple[bytes, str, str]:
     """Snapshot zip: briefing + product log + version log. Records only."""
     import zipfile
@@ -8776,7 +8860,9 @@ def continuity_handoff(request: Request):
     No secrets. The long product encyclopedia is /api/continuity/product-log.
     """
     _plaid_require_gp(request)
-    return _continuity_pack()
+    pack = _continuity_pack()
+    pack["speed_paste_markdown"] = _continuity_speed_prompt()
+    return pack
 
 
 @app.get("/api/continuity/product-log")

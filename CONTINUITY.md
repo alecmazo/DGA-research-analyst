@@ -246,6 +246,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Mobile read** | **`ui663-20260924-mobile-read`** | Saved reports and opening one stay in memory. Markets no longer queries the report table on first paint. |
 | **Demo book** | **`ui664-20260924-demo-book`** | If the demo login's watchlist is empty, boot copies the names off the previous demo id. No full reseed. |
 | **Analyze cost** | **`ui665-20260924-analyze-cost`** | When a report finishes, the desk shows input tokens, output tokens, and the dollar cost. |
+| **Speed prompt** | **`ui666-20260924-speed-prompt`** | Settings → Handoff copies a mobile-speed prompt for Grok Build or Claude. Budgets match the recorded runs. |
 
 ### One-click handoff (preferred)
 
@@ -435,4 +436,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-24 · Agent: Grok Build · Live: `ui665-20260924-analyze-cost` · Next: `ui666-YYYYMMDD-slug`*
+*Last updated: 2026-09-24 · Agent: Grok Build · Live: `ui666-20260924-speed-prompt` · Next: `ui667-YYYYMMDD-slug`*

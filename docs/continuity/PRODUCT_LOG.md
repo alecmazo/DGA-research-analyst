@@ -11,6 +11,10 @@ continue. Do not send him to Terminal to clone. Then read
 `GET /api/support/tickets` (Settings → Support tickets & fix trail) so you
 know what we already fixed, one problem at a time.
 
+**Phone speed:** Settings → **Copy mobile speed prompt** (same Handoff card).
+That paste works in Grok Build or Claude. It still requires the continuity
+files in this log plus `docs/mobile-speed/CHECKLIST.md` and `RUNS.md`.
+
 Live probe: `GET https://portfolio.dgacapital.com/api/build`  
 GP UI: `https://portfolio.dgacapital.com/gp`  
 Repo: `https://github.com/alecmazo/DGA-research-analyst` (`main`)  
@@ -190,7 +194,7 @@ IC memos / PDF. Snapshot table required when assigned to a book.
 
 ### 5.10 Settings (`/settings`)
 
-Handoff · Support tickets & trail · Models/routing/schedule · Connections (SnapTrade, Dropbox, …) · Publishing · Security · Users & Funds · System.
+Handoff (Copy briefing for next agent, and Copy mobile speed prompt) · Support tickets & trail · Models/routing/schedule · Connections (SnapTrade, Dropbox, …) · Publishing · Security · Users & Funds · System.
 
 ### 5.11 Sliw
 
