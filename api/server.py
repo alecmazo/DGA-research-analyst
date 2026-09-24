@@ -1958,6 +1958,13 @@ def auth_v2_login(req: AuthV2LoginRequest, request: Request):
             detail="Too many failed attempts. Please wait 15 minutes and try again.",
         )
 
+    if email == _DEMO_GP_EMAIL and not _DEMO_DISABLED:
+        # Seed before the password check so a drifted demo password can be
+        # restored. The restore itself runs at most once (see ensure).
+        try:
+            _demo_ensure_seeded()
+        except Exception as _seed_err:
+            print(f"[demo] ensure before login failed: {_seed_err}", flush=True)
     result = auth_v2_mod.login(email, req.password)
     if not result:
         _rl_record_failure(email)
@@ -8463,7 +8470,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui661-20260924-mobile-budget"
+WEB_BUILD_VERSION = "ui662-20260924-demo-login"
 
 
 @app.get("/api/build")
@@ -42635,8 +42642,15 @@ def _demo_ensure_seeded() -> dict:
         reg = _demo_registry(force=True) or {}
         funds = list(reg.get("fund_ids") or [])
         if gp and gp.get("demo_mode") and len(funds) >= 3:
-            # Do not rehash on every demo login. That PBKDF2 held the one
-            # worker for many seconds and every phone request waited behind it.
+            # Rehash at most once. Every login used to redo PBKDF2 and stall
+            # the worker. After demo.password_synced is set, this is a no-op.
+            if not _kv_get("demo.password_synced"):
+                try:
+                    _av2.gp_set_password(
+                        gp["lp_id"], _DEMO_GP_PASSWORD, must_change=False)
+                    _kv_put("demo.password_synced", {"ok": True})
+                except Exception as e:
+                    print(f"[demo] password sync: {e!s:.120}", flush=True)
             return {"ok": True, "already": True, "fund_ids": funds}
         print("[demo] seeding 3-book anonymous sandbox", flush=True)
         return _demo_reseed()

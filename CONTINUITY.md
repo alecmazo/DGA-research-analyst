@@ -242,6 +242,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Let the write finish** | **`ui659-20260923-grok-finish`** | ADBE reasoned 340s then wrote 37k chars. The 6-minute cap killed it while the text was still arriving. A growing report is no longer cut off. |
 | **Unfinished report** | **`ui660-20260924-report-tail`** | A report that stops before the verdict and Munger section is not marked done. The next Analyze continues from the cutoff. |
 | **Mobile budget** | **`ui661-20260924-mobile-budget`** | Phone home, watchlist, and demo reports reuse a short memory cache. Markets does not wait on Yahoo. Demo login no longer rehashes. |
+| **Demo login once** | **`ui662-20260924-demo-login`** | Demo password is restored at most once, before the password check, then left alone. |
 
 ### One-click handoff (preferred)
 
@@ -431,4 +432,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-24 · Agent: Grok Build · Live: `ui661-20260924-mobile-budget` · Next: `ui662-YYYYMMDD-slug`*
+*Last updated: 2026-09-24 · Agent: Grok Build · Live: `ui662-20260924-demo-login` · Next: `ui663-YYYYMMDD-slug`*
