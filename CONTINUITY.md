@@ -357,6 +357,7 @@ Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topb
 - **Support tickets:** `/api/support/tickets` + agent inbox; mark fixed with PATCH + trail
 - **GP bundle:** `npm run build` in `web/gp-app/` then **commit `dist/`** (Nixpacks has no Node step)
 - **Sliw:** Alec / Edyta only; CRM in shared Postgres; do not auto-send email; do not resurrect Contacted history unless asked
+- **Mobile speed:** rerun `docs/mobile-speed/CHECKLIST.md`. Do not invent a new path. Append the result to `docs/mobile-speed/RUNS.md` and compare it to the previous run.
 
 ### Do not regress
 
