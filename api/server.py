@@ -6851,6 +6851,7 @@ def _persist_analysis_text(
             if ok:
                 print(f"✅ [persist] {provider.upper()} report for {ticker} "
                       f"({len(text):,} chars · price_target={summary.get('price_target')})")
+                _stamp_report_tail(ticker, provider, text)
                 return True, len(text)
             print(f"❌ [persist] {provider.upper()} DB write returned False for {ticker} "
                   f"({len(text):,} chars still on disk/result — Saved Reports will miss this until re-upsert)")
@@ -6876,6 +6877,7 @@ def _persist_analysis_text(
         if ok:
             print(f"✅ [persist] GROK report for {ticker} "
                   f"({len(text):,} chars · price_target={summary.get('price_target')})")
+            _stamp_report_tail(ticker, "grok", text)
             return True, len(text)
         print(f"❌ [persist] GROK DB write returned False for {ticker} "
               f"({len(text):,} chars still on disk/result — Saved Reports will miss this until re-upsert)")
@@ -6883,6 +6885,28 @@ def _persist_analysis_text(
     except Exception as e:
         print(f"❌ [persist] GROK DB write failed for {ticker}: {e!s:.300}")
         return False, len(text)
+
+
+def _stamp_report_tail(ticker: str, provider: str, text: str) -> None:
+    """A saved report that stops before the verdict is not a finished run."""
+    try:
+        gap = analyst.report_tail_gap(text, provider)
+    except Exception:
+        return
+    if not gap:
+        return
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE analyst_reports
+                   SET last_attempt_status = 'incomplete',
+                       last_attempt_error = %s
+                 WHERE ticker = %s
+            """, (gap[:300], ticker))
+            conn.commit()
+        print(f"[persist] {ticker}/{provider} incomplete: {gap}", flush=True)
+    except Exception as exc:
+        print(f"[persist] incomplete stamp failed: {exc!s:.140}", flush=True)
 
 
 def _run_analysis_both(job_id: str, ticker: str, generate_gamma: bool) -> None:
@@ -8412,7 +8436,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui659-20260923-grok-finish"
+WEB_BUILD_VERSION = "ui660-20260924-report-tail"
 
 
 @app.get("/api/build")
@@ -9553,6 +9577,17 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
             if (row.get("report_md_deepseek") or "").strip():
                 engines.append("deepseek")
             payload["providers"] = engines
+        try:
+            gap = analyst.report_tail_gap(
+                payload.get("report_md"), payload.get("provider") or "grok")
+        except Exception:
+            gap = None
+        if gap:
+            payload["incomplete"] = True
+            payload["note"] = (
+                f"This report is not finished ({gap}). "
+                "The verdict and later sections were cut off. Re-run Analyze."
+            )
         return payload
 
     def _iso(v):

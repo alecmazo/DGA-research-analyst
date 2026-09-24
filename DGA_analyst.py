@@ -7921,6 +7921,27 @@ _TOOL_ITEM_TYPES = {
 }
 
 
+def report_tail_gap(text: str | None, provider: str = "grok") -> str | None:
+    """Why a long report is still unfinished. None when the required tail is there.
+
+    ADBE 2026-09-24 hit the token cap inside the comps write-up. Section 8
+    and the Munger section were never written, but the run was saved as success.
+    """
+    t = str(text or "")
+    if len(t.strip()) < 800:
+        return None
+    up = t.upper()
+    if (provider or "grok").lower() == "grok":
+        if "MUNGER" not in up:
+            return "missing the Munger section"
+        if "VERDICT" not in up and "SECTION 8" not in up:
+            return "missing the verdict"
+        return None
+    if "VERDICT" not in up and "SECTION 8" not in up:
+        return "missing the verdict"
+    return None
+
+
 def looks_like_unfinished_report(text: str | None) -> bool:
     """True when the model announced a search and never wrote the report.
 
@@ -10532,6 +10553,46 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             result["error"] = f"{_prov.title()}: {exc}"
             return result
 
+    gap = report_tail_gap(report_text, _prov)
+    if gap:
+        print(f"   ⚠️  {ticker}: {gap} — continuing from the cutoff", flush=True)
+        _ck()
+        _emit_progress(on_progress, "grok", 0.72,
+                       f"{_prov.title()} — finishing the verdict"
+                       + (" and Munger" if _prov == "grok" else ""))
+        tail = (report_text or "")[-7000:]
+        extra = (
+            " and SECTION 8.5 — Charlie Munger Latticework in full"
+            if _prov == "grok" else ""
+        )
+        try:
+            more = call_llm_with_heartbeat(
+                _prov, system_prompt,
+                "The report was cut off by the length limit. Continue from the "
+                "cutoff. Do not repeat earlier sections. Finish the unfinished "
+                "section, then write SECTION 8 — The Verdict"
+                f"{extra}, then any remaining sections and a sources list.\n\n"
+                f"CUTOFF:\n{tail}",
+                live_search=False,
+                on_delta=on_delta,
+                should_cancel=should_cancel,
+                on_progress=on_progress,
+                progress_step="grok",
+                progress_base=0.72,
+                progress_cap=0.84,
+            )
+            if more and not looks_like_unfinished_report(more):
+                report_text = (report_text or "").rstrip() + "\n\n" + more.strip() + "\n"
+                print(f"   ✅ {ticker}: continuation added ({len(more):,} chars)", flush=True)
+        except ClaudeCancelled:
+            raise
+        except Exception as exc:
+            print(f"   ⚠️  {ticker}: continuation failed: {exc!s:.160}", flush=True)
+        still = report_tail_gap(report_text, _prov)
+        if still:
+            result["incomplete"] = still
+            print(f"   ⚠️  {ticker}: still incomplete after continuation ({still})", flush=True)
+
     # Safety net: Grok + live search sometimes invents qualitative table cells
     # ("Elevated", "Turning positive") when year labels conflict. Detect and
     # regenerate once without live search so SEC numbers win.
@@ -10656,9 +10717,15 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     except Exception:  # noqa: BLE001
         pass
 
-    _emit_progress(on_progress, "done", 1.0, "Report ready")
+    still = report_tail_gap(report_text, _prov)
+    if still:
+        result["incomplete"] = still
+        result["error"] = f"Report incomplete: {still}"
+        _emit_progress(on_progress, "grok", 0.90, f"Incomplete · {still}")
+    else:
+        _emit_progress(on_progress, "done", 1.0, "Report ready")
     result.update({
-        "ok": True,
+        "ok": not still,
         "entity_name": data.get("entity_name", ticker),
         "latest_filing_type": data.get("latest_filing_type"),
         "market_price": mkt.get("price"),

@@ -306,6 +306,7 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
               const runMs = freshnessMs(rep)
               const runIso = runMs ? new Date(runMs).toISOString() : rep.last_attempt_at
               const failed = rep.last_attempt_status === 'failed'
+              const incomplete = rep.last_attempt_status === 'incomplete'
               const running =
                 rep.last_attempt_status === 'running' ||
                 rep.last_attempt_status === 'in_progress'
@@ -320,6 +321,15 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
                       <div className={styles.repTkRow}>
                         {running ? (
                           <span title="Analyze in progress">⏳</span>
+                        ) : incomplete ? (
+                          <span
+                            title={
+                              rep.last_attempt_error ||
+                              'Report stopped early — verdict was not written'
+                            }
+                          >
+                            ⚠
+                          </span>
                         ) : (rep.providers || []).length || grokPt != null || claudePt != null ? (
                           <>
                             <span title="OK">✅</span>

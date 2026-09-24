@@ -51,6 +51,14 @@ def test_equity_report_does_not_use_live_search():
     assert "stream=True" in grok
 
 
+def test_cutoff_report_is_not_complete():
+    import DGA_analyst as analyst
+    body = "# SECTION 7 — VALUATION\n" + ("comps table line\n" * 80)
+    assert analyst.report_tail_gap(body, "grok") == "missing the Munger section"
+    done = body + "\n# SECTION 8 — The Verdict\nbase case.\n# SECTION 8.5 Munger latticework\n"
+    assert analyst.report_tail_gap(done, "grok") is None
+
+
 def test_failed_analyze_files_an_auto_ticket():
     src = (ROOT / "api" / "server.py").read_text(encoding="utf-8")
     assert "def _analyze_auto_ticket" in src
