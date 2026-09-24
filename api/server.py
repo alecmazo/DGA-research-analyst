@@ -4724,8 +4724,10 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
                     print(f"[watchlist] last-close store failed: {e!s:.120}", flush=True)
             marks.append(("last", time.time()))
 
-            # Report flags (cheap) — skip if we already blew the paint budget.
-            if _wl_left() > 0.1 and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+            # Report flags. The phone's Markets home is lite and does not
+            # read these — querying analyst_reports here cost ~1.6s whenever
+            # that table was busy, which blew the home budget.
+            if (not lite) and _wl_left() > 0.1 and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
                     with _fund_conn() as conn, conn.cursor() as cur:
                         cur.execute("""
@@ -8470,7 +8472,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui662-20260924-demo-login"
+WEB_BUILD_VERSION = "ui663-20260924-mobile-read"
 
 
 @app.get("/api/build")
@@ -11081,6 +11083,10 @@ _REPORTS_HYDRATE_ONCE: bool = False
 _REPORTS_LIST_CACHE: dict = {"ts": 0.0, "rows": None}
 _REPORTS_LIST_TTL_S = 60.0
 _REPORTS_LIST_LOCK = threading.Lock()
+# Set only on the background rebuild thread. A phone open serves the last
+# list immediately once one exists; this flag is what lets that thread
+# rebuild instead of serving the same stale rows forever.
+_REPORTS_LIST_FORCE = threading.local()
 
 
 @app.get("/api/stock-info/{ticker}")
@@ -16700,6 +16706,23 @@ def _report_freshness_key(row: dict) -> tuple:
     return (gen, content)
 
 
+def _reports_list_refresh_bg() -> None:
+    """Rebuild the saved-report list off the request that noticed it was stale."""
+    if _REPORTS_LIST_LOCK.locked():
+        return
+
+    def _run() -> None:
+        _REPORTS_LIST_FORCE.on = True
+        try:
+            list_reports(None)
+        except Exception as e:
+            print(f"[list_reports] bg rebuild: {e!s:.140}", flush=True)
+        finally:
+            _REPORTS_LIST_FORCE.on = False
+
+    threading.Thread(target=_run, daemon=True, name="reports-list").start()
+
+
 @app.get("/api/reports")
 def list_reports(request: Request = None):
     """Return saved-report tickers for the Research table.
@@ -16708,6 +16731,10 @@ def list_reports(request: Request = None):
     and full-book Yahoo fan-out used to run on this request and hang the
     panel for tens of seconds (or forever) — hydrate stays on the
     background worker started after listen.
+
+    Once a list exists, a later open never waits on the rebuild. The
+    background thread refreshes it. The first build after boot is still
+    synchronous, and startup kicks that before a phone is likely to ask.
     """
     t0 = time.time()
     if request is not None and _request_is_demo(request):
@@ -16715,11 +16742,17 @@ def list_reports(request: Request = None):
         demo.sort(key=_report_freshness_key, reverse=True)
         return demo
 
+    force = bool(getattr(_REPORTS_LIST_FORCE, "on", False))
     cached = _REPORTS_LIST_CACHE.get("rows")
     cache_age = t0 - float(_REPORTS_LIST_CACHE.get("ts") or 0)
     if cached is not None and cache_age < _REPORTS_LIST_TTL_S:
         print(f"[list_reports] cache n={len(cached)} {cache_age*1000:.0f}ms-old",
               flush=True)
+        return cached
+    if cached is not None and not force:
+        print(f"[list_reports] stale n={len(cached)} {cache_age*1000:.0f}ms-old",
+              flush=True)
+        _reports_list_refresh_bg()
         return cached
     if not _REPORTS_LIST_LOCK.acquire(blocking=False):
         if cached is not None:
@@ -20372,6 +20405,10 @@ async def _on_startup_run_migrations() -> None:
                 _demo_reports_mem()
             except Exception as _e:
                 print(f"[startup] demo reports cache: {_e!s:.120}", flush=True)
+            try:
+                list_reports(None)
+            except Exception as _e:
+                print(f"[startup] reports list: {_e!s:.120}", flush=True)
             try:
                 _start_post_listen_workers()
             except Exception as _e:
@@ -42593,6 +42630,10 @@ def _demo_reseed(n_funds: int = 1, n_managed: int = 2, wl_count: int = 10) -> di
             "report_md": _demo_report_md(tk, m.get("name") or tk, px, m.get("sector")),
         })
     _kv_put("demo.reports", demo_reports)
+    try:
+        _demo_reports_apply(demo_reports)
+    except Exception:
+        _DEMO_REPORTS_MEM["ts"] = 0.0
 
     # ── 9. Registry → activates the symmetric guard ─────────────────────────
     _kv_put(_DEMO_REG_KEY, {
@@ -42656,29 +42697,50 @@ def _demo_ensure_seeded() -> dict:
         return _demo_reseed()
 
 _DEMO_REPORTS_MEM: dict[str, Any] = {"ts": 0.0, "slim": None, "by_tk": {}}
+_DEMO_REPORTS_LOCK = threading.Lock()
+# How long a loaded demo list counts as fresh. After this, the phone still
+# gets the list it already has; a background read replaces it.
+_DEMO_REPORTS_FRESH_S = 300.0
 
 
-def _demo_reports_mem(force: bool = False) -> dict:
-    """Stripped demo report list. Avoids a Postgres read on every phone open."""
-    now = time.time()
-    if (
-        not force
-        and _DEMO_REPORTS_MEM.get("slim") is not None
-        and now - float(_DEMO_REPORTS_MEM.get("ts") or 0) < 60
-    ):
-        return _DEMO_REPORTS_MEM
-    rows = _kv_get("demo.reports") or []
+def _demo_reports_apply(rows) -> dict:
+    """Publish demo report rows into process memory. No database."""
     slim = []
     by_tk = {}
-    for r in rows:
+    for r in rows or []:
         if not isinstance(r, dict):
             continue
         tk = (r.get("ticker") or "").upper()
         if tk:
             by_tk[tk] = r.get("report_md")
         slim.append({k: v for k, v in r.items() if k != "report_md"})
-    _DEMO_REPORTS_MEM.update(ts=now, slim=slim, by_tk=by_tk)
+    # An empty load is not "fresh" — the next open refreshes in the
+    # background instead of pinning a blank Research list for five minutes.
+    _DEMO_REPORTS_MEM.update(ts=time.time() if slim else 0.0, slim=slim, by_tk=by_tk)
     return _DEMO_REPORTS_MEM
+
+
+def _demo_reports_mem(force: bool = False) -> dict:
+    """Stripped demo report list. A phone open never waits on Postgres once
+    the list has been loaded (startup, or the first cold read)."""
+    now = time.time()
+    have = _DEMO_REPORTS_MEM.get("slim") is not None
+    age = now - float(_DEMO_REPORTS_MEM.get("ts") or 0)
+    if have and not force and age < _DEMO_REPORTS_FRESH_S:
+        return _DEMO_REPORTS_MEM
+    if have and not force:
+        if _DEMO_REPORTS_LOCK.acquire(blocking=False):
+            def _refresh() -> None:
+                try:
+                    _demo_reports_apply(_kv_get("demo.reports") or [])
+                except Exception as e:
+                    print(f"[demo] reports refresh: {e!s:.120}", flush=True)
+                finally:
+                    _DEMO_REPORTS_LOCK.release()
+            threading.Thread(
+                target=_refresh, daemon=True, name="demo-reports").start()
+        return _DEMO_REPORTS_MEM
+    return _demo_reports_apply(_kv_get("demo.reports") or [])
 
 
 def _demo_report_lookup(ticker: str, create: bool = True) -> str | None:
@@ -42711,8 +42773,12 @@ def _demo_report_lookup(ticker: str, create: bool = True) -> str | None:
                  "rating": "BUY", "price_target": round(px * 1.18, 2) if px else None,
                  "upside_pct": 18.0, "has_docx": False, "has_pptx": False,
                  "archived": False, "report_md": md})
-    _kv_put("demo.reports", rows[-40:])
-    _DEMO_REPORTS_MEM["ts"] = 0.0
+    saved = rows[-40:]
+    _kv_put("demo.reports", saved)
+    try:
+        _demo_reports_apply(saved)
+    except Exception:
+        _DEMO_REPORTS_MEM["ts"] = 0.0
     return md
 
 

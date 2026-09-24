@@ -104,6 +104,16 @@ def line(step: str, path: str, result: dict) -> str:
     return " | ".join(bits)
 
 
+def first_saved_ticker(data) -> str:
+    """The phone opens a row from the list it just loaded, not a hardcoded name."""
+    if not isinstance(data, list):
+        return ""
+    for row in data:
+        if isinstance(row, dict) and row.get("ticker"):
+            return str(row["ticker"]).upper()
+    return ""
+
+
 def main() -> None:
     print(f"build | {curl('GET', '/api/build')['json']}")
     print(line("1 health", "/health", curl("GET", "/health")))
@@ -114,7 +124,7 @@ def main() -> None:
     print(line("2 login demo", "/api/auth/v2/login", login) + (" | token" if token else " | no token"))
     if not token:
         return
-    report_ticker = "ADBE"
+    report_ticker = ""
     steps = [
         ("3 home first", "/api/mobile/home"),
         ("3 home second", "/api/mobile/home"),
@@ -122,10 +132,17 @@ def main() -> None:
         ("4 reports second", "/api/reports"),
         ("5 watchlist first", "/api/watchlist"),
         ("5 watchlist second", "/api/watchlist"),
-        ("6 report open", f"/api/report/{urllib.parse.quote(report_ticker)}?provider=grok&as_stored=1"),
     ]
     for name, path in steps:
-        print(line(name, path, curl("GET", path, token=token)))
+        result = curl("GET", path, token=token)
+        print(line(name, path, result))
+        if name == "4 reports first":
+            report_ticker = first_saved_ticker(result["json"])
+    if not report_ticker:
+        print("6 report open | FAIL | 0 ms | server — | 0 B | no saved ticker")
+        return
+    path = f"/api/report/{urllib.parse.quote(report_ticker)}?provider=grok&as_stored=1"
+    print(line(f"6 report open {report_ticker}", path, curl("GET", path, token=token)))
 
 
 if __name__ == "__main__":
