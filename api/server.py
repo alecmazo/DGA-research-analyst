@@ -8527,7 +8527,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui666-20260924-speed-prompt"
+WEB_BUILD_VERSION = "ui667-20260924-munger-tail"
 
 
 @app.get("/api/build")
@@ -9763,7 +9763,7 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
             payload["incomplete"] = True
             payload["note"] = (
                 f"This report is not finished ({gap}). "
-                "The verdict and later sections were cut off. Re-run Analyze."
+                "Re-run Analyze to write the rest from the cutoff."
             )
         return payload
 

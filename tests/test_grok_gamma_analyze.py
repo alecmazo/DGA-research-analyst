@@ -76,7 +76,23 @@ def test_cutoff_report_is_not_complete():
     import DGA_analyst as analyst
     body = "# SECTION 7 — VALUATION\n" + ("comps table line\n" * 80)
     assert analyst.report_tail_gap(body, "grok") == "missing the Munger section"
-    done = body + "\n# SECTION 8 — The Verdict\nbase case.\n# SECTION 8.5 Munger latticework\n"
+    partial = (
+        body
+        + "\n# SECTION 8 — The Verdict\nbase case.\n"
+        + "### 8.5.1 Circle of Competence\nInside the circle.\n"
+        + "### 8.5.2 Invert\nIt loses money if leverage breaks.\n"
+        + "### 8.5.3 Moat, Incentives & Two-Track Analysis\n"
+        + "The moat is the license. Incentives are mixed.\n"
+    )
+    gap = analyst.report_tail_gap(partial, "grok")
+    assert gap is not None and "8.5.4" in gap and "8.5.7" in gap
+    done = partial + (
+        "### 8.5.4 Latticework\nModels interact.\n"
+        "### 8.5.5 Psychology\nSocial proof.\n"
+        "### 8.5.6 Labels\nSIT-ON-YOUR-ASS.\n"
+        "### 8.5.7 What Munger Would Likely Do\n"
+        + ("Pass. The price does not clear a margin of safety.\n" * 4)
+    )
     assert analyst.report_tail_gap(done, "grok") is None
 
 

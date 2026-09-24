@@ -7921,21 +7921,46 @@ _TOOL_ITEM_TYPES = {
 }
 
 
+_MUNGER_SUBS = (
+    "8.5.1", "8.5.2", "8.5.3", "8.5.4", "8.5.5", "8.5.6", "8.5.7",
+)
+
+
+def _munger_missing(text: str) -> list[str]:
+    """Required Munger subsections that are absent, or 8.5.7 with no conclusion."""
+    t = text or ""
+    missing = [s for s in _MUNGER_SUBS if s not in t]
+    if "8.5.7" not in missing:
+        after = t[t.rfind("8.5.7") + len("8.5.7"):].strip()
+        if len(after) < 80:
+            missing.append("8.5.7")
+    return missing
+
+
 def report_tail_gap(text: str | None, provider: str = "grok") -> str | None:
     """Why a long report is still unfinished. None when the required tail is there.
 
-    ADBE 2026-09-24 hit the token cap inside the comps write-up. Section 8
-    and the Munger section were never written, but the run was saved as success.
+    ADBE 2026-09-24 stopped in the comps table and was saved as success.
+    MGM 2026-09-24 stopped at the end of 8.5.3. The word Munger was already
+    on the page, so the old check called that finished.
     """
     t = str(text or "")
     if len(t.strip()) < 800:
         return None
     up = t.upper()
     if (provider or "grok").lower() == "grok":
-        if "MUNGER" not in up:
+        missing = _munger_missing(t)
+        if "MUNGER" not in up and "8.5.1" not in t:
             return "missing the Munger section"
         if "VERDICT" not in up and "SECTION 8" not in up:
             return "missing the verdict"
+        if missing:
+            if any(s in t for s in ("8.5.1", "8.5.2", "8.5.3")):
+                return (
+                    "stopped during the Munger section "
+                    f"(missing {missing[0]}–{missing[-1]})"
+                )
+            return "missing the Munger section"
         return None
     if "VERDICT" not in up and "SECTION 8" not in up:
         return "missing the verdict"
@@ -10711,18 +10736,33 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                        f"{_prov.title()} — finishing the verdict"
                        + (" and Munger" if _prov == "grok" else ""))
         tail = (report_text or "")[-7000:]
-        extra = (
-            " and SECTION 8.5 — Charlie Munger Latticework in full"
-            if _prov == "grok" else ""
-        )
-        try:
-            more = call_llm_with_heartbeat(
-                _prov, system_prompt,
+        missing = _munger_missing(report_text or "") if _prov == "grok" else []
+        if missing and any(s in (report_text or "") for s in ("8.5.1", "8.5.2", "8.5.3")):
+            ask = (
+                "The report was cut off inside SECTION 8.5. Continue from the "
+                "cutoff. Do not repeat subsections already written. Write "
+                + ", ".join(f"### {s}" for s in missing)
+                + " as real paragraphs. ### 8.5.7 must say buy, pass, or "
+                "too-hard, with one reason. Do not invent figures that are "
+                "not in the cutoff.\n\n"
+                f"CUTOFF:\n{tail}"
+            )
+        else:
+            extra = (
+                " and SECTION 8.5 — Charlie Munger Latticework through ### 8.5.7"
+                if _prov == "grok" else ""
+            )
+            ask = (
                 "The report was cut off by the length limit. Continue from the "
                 "cutoff. Do not repeat earlier sections. Finish the unfinished "
                 "section, then write SECTION 8 — The Verdict"
                 f"{extra}, then any remaining sections and a sources list.\n\n"
-                f"CUTOFF:\n{tail}",
+                f"CUTOFF:\n{tail}"
+            )
+        try:
+            more = call_llm_with_heartbeat(
+                _prov, system_prompt,
+                ask,
                 live_search=False,
                 on_delta=on_delta,
                 usage_capture=_bill,
