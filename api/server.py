@@ -2394,6 +2394,9 @@ _INDEX_ALIASES = {
 }
 _INDICES_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
 _INDICES_TTL = 60  # seconds — mobile polls this; Yahoo-per-name was 6s×11
+# Phone Markets poll. A repeat within 45s does not wait on Postgres.
+_MOBILE_HOME_CACHE: dict[str, tuple[float, dict]] = {}
+_WL_RESP_CACHE: dict[tuple, tuple[float, dict]] = {}
 
 # ─── Per-ticker news cache (15-min TTL) ────────────────────────────────
 # Powers the inline headline strip under each saved-report row. Pure
@@ -3647,9 +3650,13 @@ def news_desk_feeds(request: Request, market_limit: int = 12, filings_limit: int
 
 
 @app.get("/api/market/indices")
-def market_indices():
-    """Index ribbon. Store + 1.5s batch quotes — never 11 sequential yfinance
-    fast_info calls (that froze mobile Markets for tens of seconds)."""
+def market_indices(store_only: bool = False):
+    """Index ribbon. Store + a short batch — never 11 sequential yfinance
+    fast_info calls (that froze mobile Markets for tens of seconds).
+
+    ``store_only`` is the phone's first paint. A missing index stays blank
+    until the next cached refresh rather than waiting on Yahoo.
+    """
     now = time.time()
     if _INDICES_CACHE["data"] and (now - _INDICES_CACHE["ts"]) < _INDICES_TTL:
         return _INDICES_CACHE["data"]
@@ -3663,7 +3670,7 @@ def market_indices():
     except Exception as e:
         print(f"[indices] store: {e!s:.120}", flush=True)
     still = [s for s in want if (qmap.get(s) or {}).get("price") is None]
-    if still:
+    if still and not store_only:
         try:
             extra = _batch_quotes_fast(still) or {}
             for s, q in extra.items():
@@ -4594,6 +4601,13 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
     try:
         claims = _claims_or_401(request)
         lp_id = claims.get("lp_id") or ""
+        if not fresh:
+            hit = _WL_RESP_CACHE.get((lp_id, bool(lite)))
+            if hit and (time.time() - hit[0]) < (45 if lite else 20):
+                cached = dict(hit[1])
+                cached["timing_ms"] = 1
+                cached["cache"] = "watchlist"
+                return cached
         try:
             _watchlist_migrate_legacy_once()
         except Exception as e:
@@ -4780,7 +4794,7 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
           f"priced={len(priced)} earn={len(earnings_map)} ytd={ytd_n} "
           f"{elapsed_ms}ms phases={phases}",
           flush=True)
-    return {
+    payload = {
         "tickers": tickers_sorted,
         "quotes": quotes,
         "earnings": earnings_map,
@@ -4789,6 +4803,9 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
         "timing_ms": elapsed_ms,
         "diag": diag,
     }
+    if not fresh:
+        _WL_RESP_CACHE[(lp_id, bool(lite))] = (time.time(), payload)
+    return payload
 
 
 @app.get("/api/mobile/home")
@@ -4798,20 +4815,30 @@ def mobile_home(request: Request):
     Indices (store) + watchlist (1.2s paint wall). No idea-feed, brief, or
     scan — those stay off the first paint so the phone is usable.
     """
-    _claims_or_401(request)
+    claims = _claims_or_401(request)
+    lp = str(claims.get("lp_id") or "")
+    now = time.time()
+    hit = _MOBILE_HOME_CACHE.get(lp)
+    if hit and now - hit[0] < 45:
+        body = dict(hit[1])
+        body["elapsed_ms"] = 1
+        body["cache"] = "home"
+        return body
     t0 = time.time()
     try:
-        idx = market_indices() or {}
+        idx = market_indices(store_only=True) or {}
     except Exception as e:
         print(f"[mobile-home] indices: {e!s:.120}", flush=True)
         idx = {"indices": []}
     wl = watchlist_get(request, fresh=False, lite=True)
-    return {
+    body = {
         "ok": True,
         "indices": (idx or {}).get("indices") or [],
         "watchlist": wl if isinstance(wl, dict) else {},
         "elapsed_ms": int((time.time() - t0) * 1000),
     }
+    _MOBILE_HOME_CACHE[lp] = (time.time(), body)
+    return body
 
 
 class WatchlistAddRequest(BaseModel):
@@ -8436,7 +8463,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui660-20260924-report-tail"
+WEB_BUILD_VERSION = "ui661-20260924-mobile-budget"
 
 
 @app.get("/api/build")
@@ -11045,7 +11072,7 @@ _STOCK_INFO_CACHE: dict[str, tuple[float, dict]] = {}
 # list_reports orphan hydration / date backfill — once per process only
 _REPORTS_HYDRATE_ONCE: bool = False
 _REPORTS_LIST_CACHE: dict = {"ts": 0.0, "rows": None}
-_REPORTS_LIST_TTL_S = 20.0
+_REPORTS_LIST_TTL_S = 60.0
 _REPORTS_LIST_LOCK = threading.Lock()
 
 
@@ -16677,8 +16704,7 @@ def list_reports(request: Request = None):
     """
     t0 = time.time()
     if request is not None and _request_is_demo(request):
-        rows = _kv_get("demo.reports") or []
-        demo = [{k: v for k, v in r.items() if k != "report_md"} for r in rows]
+        demo = list(_demo_reports_mem().get("slim") or [])
         demo.sort(key=_report_freshness_key, reverse=True)
         return demo
 
@@ -19331,9 +19357,24 @@ def _fund_conn():
                 if getattr(raw, "closed", 1):
                     pool.putconn(raw, close=True)
                     continue
-                with raw.cursor() as _c:
-                    _c.execute("SELECT 1")
-                raw.rollback()
+                import socket as _sock
+                _ping_sock = None
+                try:
+                    _ping_sock = _sock.socket(fileno=raw.fileno())
+                    _ping_sock.settimeout(2.0)
+                except Exception:
+                    _ping_sock = None
+                try:
+                    with raw.cursor() as _c:
+                        _c.execute("SELECT 1")
+                    raw.rollback()
+                finally:
+                    if _ping_sock is not None:
+                        try:
+                            _ping_sock.settimeout(None)
+                            _ping_sock.detach()
+                        except Exception:
+                            pass
                 return _PooledConn(raw)
             except Exception as e:
                 last_err = e
@@ -20320,6 +20361,10 @@ async def _on_startup_run_migrations() -> None:
     def _bg_startup() -> None:
         t0 = time.time()
         try:
+            try:
+                _demo_reports_mem()
+            except Exception as _e:
+                print(f"[startup] demo reports cache: {_e!s:.120}", flush=True)
             try:
                 _start_post_listen_workers()
             except Exception as _e:
@@ -42590,18 +42635,45 @@ def _demo_ensure_seeded() -> dict:
         reg = _demo_registry(force=True) or {}
         funds = list(reg.get("fund_ids") or [])
         if gp and gp.get("demo_mode") and len(funds) >= 3:
-            try:
-                _av2.gp_set_password(
-                    gp["lp_id"], _DEMO_GP_PASSWORD, must_change=False)
-            except Exception as e:
-                print(f"[demo] password sync: {e!s:.120}", flush=True)
+            # Do not rehash on every demo login. That PBKDF2 held the one
+            # worker for many seconds and every phone request waited behind it.
             return {"ok": True, "already": True, "fund_ids": funds}
         print("[demo] seeding 3-book anonymous sandbox", flush=True)
         return _demo_reseed()
 
+_DEMO_REPORTS_MEM: dict[str, Any] = {"ts": 0.0, "slim": None, "by_tk": {}}
+
+
+def _demo_reports_mem(force: bool = False) -> dict:
+    """Stripped demo report list. Avoids a Postgres read on every phone open."""
+    now = time.time()
+    if (
+        not force
+        and _DEMO_REPORTS_MEM.get("slim") is not None
+        and now - float(_DEMO_REPORTS_MEM.get("ts") or 0) < 60
+    ):
+        return _DEMO_REPORTS_MEM
+    rows = _kv_get("demo.reports") or []
+    slim = []
+    by_tk = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        tk = (r.get("ticker") or "").upper()
+        if tk:
+            by_tk[tk] = r.get("report_md")
+        slim.append({k: v for k, v in r.items() if k != "report_md"})
+    _DEMO_REPORTS_MEM.update(ts=now, slim=slim, by_tk=by_tk)
+    return _DEMO_REPORTS_MEM
+
+
 def _demo_report_lookup(ticker: str, create: bool = True) -> str | None:
     """Fetch (or lazily synthesize) a demo sample report for `ticker`."""
     tk = (ticker or "").strip().upper()
+    mem = _demo_reports_mem()
+    cached_md = (mem.get("by_tk") or {}).get(tk)
+    if cached_md:
+        return cached_md
     rows = _kv_get("demo.reports") or []
     for r in rows:
         if (r.get("ticker") or "").upper() == tk:
@@ -42626,6 +42698,7 @@ def _demo_report_lookup(ticker: str, create: bool = True) -> str | None:
                  "upside_pct": 18.0, "has_docx": False, "has_pptx": False,
                  "archived": False, "report_md": md})
     _kv_put("demo.reports", rows[-40:])
+    _DEMO_REPORTS_MEM["ts"] = 0.0
     return md
 
 

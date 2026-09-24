@@ -133,7 +133,8 @@ def test_market_indices_never_loops_yfinance_tickers():
 def test_mobile_home_is_cheap_bootstrap():
     fn = _fn_src(ROOT / "api/server.py", "mobile_home")
     body = fn.split('"""', 2)[-1]
-    assert "market_indices()" in body
+    assert "market_indices(store_only=True)" in body
+    assert "_MOBILE_HOME_CACHE" in body
     assert "watchlist_get(" in body
     assert "fresh=False" in body
     assert "lite=True" in body
@@ -146,7 +147,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui660-20260924-report-tail"' in src
+    assert 'WEB_BUILD_VERSION = "ui661-20260924-mobile-budget"' in src
 
 
 def test_mobile_fund_bars_have_yaxis():
