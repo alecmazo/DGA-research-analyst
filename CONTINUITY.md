@@ -244,6 +244,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Mobile budget** | **`ui661-20260924-mobile-budget`** | Phone home, watchlist, and demo reports reuse a short memory cache. Markets does not wait on Yahoo. Demo login no longer rehashes. |
 | **Demo login once** | **`ui662-20260924-demo-login`** | Demo password is restored at most once, before the password check, then left alone. |
 | **Mobile read** | **`ui663-20260924-mobile-read`** | Saved reports and opening one stay in memory. Markets no longer queries the report table on first paint. |
+| **Demo book** | **`ui664-20260924-demo-book`** | If the demo login's watchlist is empty, boot copies the names off the previous demo id. No full reseed. |
 
 ### One-click handoff (preferred)
 
@@ -433,4 +434,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-24 · Agent: Grok Build · Live: `ui663-20260924-mobile-read` · Next: `ui664-YYYYMMDD-slug`*
+*Last updated: 2026-09-24 · Agent: Grok Build · Live: `ui664-20260924-demo-book` · Next: `ui665-YYYYMMDD-slug`*

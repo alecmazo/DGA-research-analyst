@@ -8472,7 +8472,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui663-20260924-mobile-read"
+WEB_BUILD_VERSION = "ui664-20260924-demo-book"
 
 
 @app.get("/api/build")
@@ -42673,6 +42673,35 @@ def _demo_wipe_users() -> list[str]:
     return removed
 
 
+_DEMO_WL_REPAIRED = False
+
+
+def _demo_watchlist_repair(lp_id: str, reg: dict | None = None) -> None:
+    """Give the live demo login its names if a reseed left them on an old id.
+
+    Once per process when the list is already there. A full reseed is not
+    required, and this does not run on every phone open.
+    """
+    global _DEMO_WL_REPAIRED
+    if _DEMO_WL_REPAIRED or not lp_id:
+        return
+    if _wl_get_db(lp_id):
+        _DEMO_WL_REPAIRED = True
+        return
+    donors = [u for u in ((reg or {}).get("user_ids") or []) if u and u != lp_id]
+    copied: list[str] = []
+    for uid in donors:
+        copied = _wl_get_db(uid) or []
+        if copied:
+            break
+    if not copied:
+        return
+    for tk in copied:
+        _wl_add_db(lp_id, tk)
+    _DEMO_WL_REPAIRED = True
+    print(f"[demo] watchlist repaired n={len(copied)}", flush=True)
+
+
 def _demo_ensure_seeded() -> dict:
     """Idempotent: seed the 3-book sandbox if missing. Safe on every boot/login."""
     if _DEMO_DISABLED:
@@ -42692,6 +42721,10 @@ def _demo_ensure_seeded() -> dict:
                     _kv_put("demo.password_synced", {"ok": True})
                 except Exception as e:
                     print(f"[demo] password sync: {e!s:.120}", flush=True)
+            try:
+                _demo_watchlist_repair(gp["lp_id"], reg)
+            except Exception as e:
+                print(f"[demo] watchlist repair: {e!s:.120}", flush=True)
             return {"ok": True, "already": True, "fund_ids": funds}
         print("[demo] seeding 3-book anonymous sandbox", flush=True)
         return _demo_reseed()
