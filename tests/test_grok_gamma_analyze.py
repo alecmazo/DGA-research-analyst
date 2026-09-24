@@ -65,6 +65,8 @@ def test_analyze_does_not_blame_gamma_for_llm_timeout():
     src = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
     hb = src.split("def call_llm_with_heartbeat")[1].split("def extract_thesis_snippet")[0]
     assert "disable Gamma" not in hb
+    assert "idle_cap" in hb
+    assert "silent_cap" in hb
     grok = src.split("def call_grok")[1].split("def call_claude")[0]
     assert "GROK_LIVE_SEARCH_TIMEOUT_S" in grok
     assert "_bounded_call" in grok

@@ -8922,18 +8922,20 @@ def call_llm_with_heartbeat(
     import threading
     prov_l = (provider or "").lower()
     if timeout_s is None:
-        # Grok reports stream. One 6-minute cap. The old 150s socket plus two
-        # SDK retries died at 7.5 min with an empty ADBE report.
+        # Medium effort on a full SEC prompt reasoned ~6 min before the first
+        # report words (ADBE 2026-09-23), then wrote 37k chars. A flat 6-minute
+        # kill threw that report away. The caps below are idle/silent, not a
+        # single wall that fires while text is still arriving.
         if prov_l == "grok":
-            timeout_s = float(os.environ.get("ANALYZE_GROK_TIMEOUT_S") or "360")
+            timeout_s = float(os.environ.get("ANALYZE_GROK_TIMEOUT_S") or "720")
         else:
             timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "900")
-    timeout_s = max(120.0, min(float(timeout_s), 1800.0))
+    timeout_s = max(180.0, min(float(timeout_s), 1800.0))
     # Progress bar uses *expected* duration so 5 min ≠ "only 51% of a 20 min bar".
     if prov_l == "claude":
         expected_s = float(os.environ.get("ANALYZE_CLAUDE_EXPECTED_S") or "240")  # 4 min
     elif prov_l == "grok":
-        expected_s = float(os.environ.get("ANALYZE_GROK_EXPECTED_S") or "240")
+        expected_s = float(os.environ.get("ANALYZE_GROK_EXPECTED_S") or "420")
     else:
         expected_s = float(os.environ.get("ANALYZE_LLM_EXPECTED_S") or "240")
     expected_s = max(60.0, min(expected_s, timeout_s))
@@ -8967,6 +8969,13 @@ def call_llm_with_heartbeat(
     th = threading.Thread(target=_work, name=f"llm-{provider}", daemon=True)
     th.start()
     t0 = time.time()
+    last_chars = 0
+    last_change = t0
+    # No report words yet: medium effort reasoned 340s on ADBE before writing.
+    silent_cap = 480.0 if prov_l == "grok" else float(timeout_s)
+    # Words arriving: only stop if the stream goes quiet, or the whole call
+    # runs past the absolute cap. Do not cut a report that is still growing.
+    idle_cap = 120.0
     while not done.wait(8.0):
         if should_cancel is not None:
             try:
@@ -8976,7 +8985,23 @@ def call_llm_with_heartbeat(
                 raise
             except Exception:
                 pass
-        elapsed = time.time() - t0
+        now = time.time()
+        elapsed = now - t0
+        chars = int(box.get("chars") or 0)
+        if chars != last_chars:
+            last_chars = chars
+            last_change = now
+        idle = now - last_change
+        if chars < 200 and elapsed >= silent_cap:
+            raise TimeoutError(
+                f"{provider} thought for {int(elapsed)}s and never started "
+                f"the report. Run Analyze again."
+            )
+        if chars >= 200 and idle >= idle_cap:
+            raise TimeoutError(
+                f"{provider} stopped writing for {int(idle)}s at {chars:,} "
+                f"characters. The partial report was not saved."
+            )
         if elapsed >= timeout_s:
             raise TimeoutError(
                 f"{provider} LLM call exceeded {int(timeout_s)}s — "
@@ -8986,8 +9011,6 @@ def call_llm_with_heartbeat(
         span = max(0.01, progress_cap - progress_base)
         # Time-based toward expected, plus a boost once tokens are streaming
         time_frac = min(0.90, elapsed / expected_s)
-        chars = int(box.get("chars") or 0)
-        # ~35k chars ≈ full report; start boosting once any text arrives
         stream_frac = min(0.95, chars / 35000.0) if chars else 0.0
         frac = max(time_frac, stream_frac * 0.85 + time_frac * 0.15)
         pct = progress_base + span * min(0.95, frac)
