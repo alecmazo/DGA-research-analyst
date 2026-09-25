@@ -142,7 +142,7 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
       title="📈 Financials"
       badge="VALUE LINE"
       action={action}
-      defaultOpen={false}
+      defaultOpen
       compact
     >
       <p className={styles.help}>
@@ -199,6 +199,9 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
               </div>
               {sectorLine && (
                 <div className={styles.sectorLine}>{sectorLine}</div>
+              )}
+              {sheet.business_summary && (
+                <p className={styles.bizSummary}>{sheet.business_summary}</p>
               )}
             </div>
             <div className={styles.vlHeadRight}>

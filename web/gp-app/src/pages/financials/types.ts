@@ -130,6 +130,7 @@ export type Dashboard = {
   entity_name?: string
   sector?: string
   industry?: string
+  business_summary?: string
   period_type?: string
   series?: DashSeriesPoint[]
   price?: number | null
@@ -193,6 +194,7 @@ export type SheetData = {
   entity_name?: string
   industry?: string
   sector?: string
+  business_summary?: string
   price?: number | null
   capital?: Record<string, number | string | null | undefined>
   annual?: SheetBlock

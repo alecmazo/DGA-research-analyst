@@ -4,6 +4,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_financials_page_shows_what_the_company_does():
+    sheet = (ROOT / "web/gp-app/src/pages/financials/ValueLineSheet.tsx").read_text()
+    assert 'title="📈 Financials"' in sheet
+    assert "defaultOpen={false}" not in sheet
+    dash = (ROOT / "web/gp-app/src/pages/financials/CompanyDashboard.tsx").read_text()
+    assert "business_summary" in dash
+    body = (ROOT / "api/domains/_financials_body.py").read_text()
+    assert "def _company_business_summary" in body
+    assert "en.wikipedia.org/api/rest_v1/page/summary" in body
+
+
 def test_continuity_files_exist():
     kit = ROOT / "docs" / "continuity"
     assert (kit / "README.md").is_file()

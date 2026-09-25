@@ -2907,6 +2907,12 @@ def _ensure_market_tables():
             );
             CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol);
         """)
+        cur.execute(
+            "ALTER TABLE security_meta ADD COLUMN IF NOT EXISTS business_summary TEXT"
+        )
+        cur.execute(
+            "ALTER TABLE security_meta ADD COLUMN IF NOT EXISTS summary_at TIMESTAMPTZ"
+        )
         conn.commit()
 
 
@@ -3146,6 +3152,118 @@ def _warm_quotes_for_comps(symbols: list, cap: int = 16) -> dict:
         print(f"[fin-comps] quote persist failed: {e!s:.140}", flush=True)
 
     return have
+
+
+def _clip_business_summary(text: str, limit: int = 420) -> str:
+    """Two or three sentences. A Yahoo profile is a page; the card is not."""
+    t = " ".join((text or "").split())
+    if len(t) <= limit:
+        return t
+    cut = t[:limit]
+    for sep in (". ", "; "):
+        i = cut.rfind(sep)
+        if i >= 160:
+            return cut[: i + 1].strip()
+    return cut.rsplit(" ", 1)[0].strip() + "…"
+
+
+def _wiki_business_summary(name: str) -> str:
+    """One paragraph on what the company does. Empty on any miss.
+
+    Yahoo's profile endpoint now returns 401, so this is the free source.
+    """
+    import requests
+    q = " ".join((name or "").split())
+    if len(q) < 2:
+        return ""
+    headers = {"User-Agent": "DGA-Capital-research/1.0 (portfolio.dgacapital.com)"}
+    search = requests.get(
+        "https://en.wikipedia.org/w/api.php",
+        params={
+            "action": "query",
+            "list": "search",
+            "srsearch": q,
+            "srlimit": 1,
+            "format": "json",
+        },
+        headers=headers,
+        timeout=2.5,
+    )
+    search.raise_for_status()
+    hits = ((search.json().get("query") or {}).get("search") or [])
+    title = (hits[0].get("title") if hits else "") or ""
+    if not title:
+        return ""
+    page = requests.get(
+        "https://en.wikipedia.org/api/rest_v1/page/summary/"
+        + requests.utils.quote(title.replace(" ", "_")),
+        headers=headers,
+        timeout=2.5,
+    )
+    page.raise_for_status()
+    data = page.json()
+    if data.get("type") == "disambiguation":
+        return ""
+    return _clip_business_summary(data.get("extract") or "")
+
+
+def _company_business_summary(ticker: str, name: str = "") -> str:
+    """Cached one-paragraph description. Looks up Wikipedia only when stale.
+
+    A miss returns the last stored text, or nothing. It does not fail the page.
+    """
+    tk = (ticker or "").strip().upper()
+    if not tk or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return ""
+    try:
+        _ensure_market_tables()
+    except Exception:
+        return ""
+    stored = ""
+    fresh = False
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT business_summary, summary_at FROM security_meta WHERE symbol=%s",
+                (tk,),
+            )
+            row = cur.fetchone()
+        if row:
+            stored = (row[0] or "").strip()
+            ts = row[1]
+            if stored and ts is not None:
+                import datetime as _dt
+                now = _dt.datetime.now(_dt.timezone.utc)
+                if getattr(ts, "tzinfo", None) is None:
+                    ts = ts.replace(tzinfo=_dt.timezone.utc)
+                fresh = (now - ts).total_seconds() < 30 * 24 * 3600
+    except Exception as e:
+        print(f"[fin] business summary read {tk}: {e!s:.120}", flush=True)
+        return ""
+    if fresh:
+        return stored
+    try:
+        text = _wiki_business_summary(name or tk)
+    except Exception as e:
+        print(f"[fin] business summary yahoo {tk}: {e!s:.120}", flush=True)
+        return stored
+    if not text:
+        return stored
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO security_meta
+                       (symbol, business_summary, summary_at, source, updated_at)
+                   VALUES (%s, %s, now(), 'wikipedia', now())
+                   ON CONFLICT (symbol) DO UPDATE SET
+                     business_summary = EXCLUDED.business_summary,
+                     summary_at = now()""",
+                (tk, text),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[fin] business summary save {tk}: {e!s:.120}", flush=True)
+    return text
 
 
 def _db_meta(symbols) -> dict:
@@ -5124,7 +5242,11 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
     dash_ck = (tk, pt)
     hit = _FIN_DASH_CACHE.get(dash_ck)
     if hit and (time.time() - hit[0]) < _FIN_DASH_TTL_S and isinstance(hit[1], dict):
-        return dict(hit[1])
+        body = dict(hit[1])
+        if not body.get("business_summary"):
+            body["business_summary"] = _company_business_summary(
+                tk, body.get("entity_name") or "")
+        return body
 
     # One store read (was 3× SELECT *). Split + annual de-dupe in process.
     raw_all = [r for r in _fin_rows_for_ticker(tk, "all")]
@@ -5439,6 +5561,8 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "sector": meta.get("sector") or peers.get("sector"),
             "industry": meta.get("industry") or peers.get("industry"),
             "period_type": pt, "series": series,
+            "business_summary": _company_business_summary(
+                tk, (rows[-1].get("entity_name") if rows else None) or meta.get("name") or ""),
             "price": price, "rating": rating,
             "dga_value": dga_value, "verdict": verdict,
             "targets": {"grok": pt_grok, "claude": pt_claude, "as_of": targets_asof},
@@ -5777,6 +5901,7 @@ def _build_fin_sheet(ticker: str) -> dict:
         "entity_name": entity,
         "sector": meta.get("sector"),
         "industry": meta.get("industry"),
+        "business_summary": _company_business_summary(tk, entity or ""),
         "price": price,
         "as_of_quote": q.get("as_of") or q.get("updated_at"),
         "capital": {

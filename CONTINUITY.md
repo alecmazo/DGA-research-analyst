@@ -248,6 +248,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Analyze cost** | **`ui665-20260924-analyze-cost`** | When a report finishes, the desk shows input tokens, output tokens, and the dollar cost. |
 | **Speed prompt** | **`ui666-20260924-speed-prompt`** | Settings → Handoff copies a mobile-speed prompt for Grok Build or Claude. Budgets match the recorded runs. |
 | **Munger tail** | **`ui667-20260924-munger-tail`** | A Grok report that stops inside 8.5 is not finished. MGM was cut off at 8.5.3; the missing subsections are written on. |
+| **Business summary** | **`ui668-20260925-biz-summary`** | Financials shows a short description of what the company does, under the name. The Financials card opens on load. |
 
 ### One-click handoff (preferred)
 
@@ -437,4 +438,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-24 · Agent: Grok Build · Live: `ui667-20260924-munger-tail` · Next: `ui668-YYYYMMDD-slug`*
+*Last updated: 2026-09-25 · Agent: Grok Build · Live: `ui668-20260925-biz-summary` · Next: `ui669-YYYYMMDD-slug`*
