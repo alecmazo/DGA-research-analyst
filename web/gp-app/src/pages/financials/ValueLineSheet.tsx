@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
@@ -7,6 +7,7 @@ import type { SheetData, SheetLink, StatementLine, StatementPack } from './types
 import { vlMoney } from './format'
 import styles from '../FinancialsPage.module.css'
 import { BizBlurb } from './BizBlurb'
+import { HoverTip } from './HoverTip'
 
 type Props = {
   ticker: string
@@ -344,7 +345,11 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
                     stmtView === 'income'
                       ? stmts.income
                       : stmtView === 'balance'
-                        ? [...(stmts.assets || []), ...(stmts.liabilities || [])]
+                        ? stmts.balance || [
+                            ...(stmts.assets || []),
+                            ...(stmts.liabilities || []),
+                            ...(stmts.equity || []),
+                          ]
                         : stmtView === 'cash_flow'
                           ? stmts.cash_flow
                           : stmts.comprehensive
@@ -384,6 +389,8 @@ function alignLines(
   return (lines || []).map((line) => ({
     label: line.label,
     unit: line.unit,
+    role: line.role,
+    note: line.note,
     values: labs.map((lab) => {
       const i = yrs.indexOf(lab)
       return i >= 0 ? (line.values || [])[i] ?? null : null
@@ -425,6 +432,8 @@ function VlTable({
       id?: string
       label?: string
       unit?: string
+      role?: string
+      note?: string
       values?: Array<number | null | undefined>
     }>
   }
@@ -438,7 +447,11 @@ function VlTable({
 }) {
   const labels = block.labels || []
   const rows = block.rows || []
+  const [tip, setTip] = useState<{ x: number; y: number; title: string; body: string } | null>(null)
   if (!labels.length || !rows.length) return null
+  const showNote = (e: ReactMouseEvent, title: string, body: string) => {
+    setTip({ x: e.clientX, y: e.clientY, title, body })
+  }
   return (
     <div className={styles.vlScroll}>
       <table className={styles.vlTable}>
@@ -468,7 +481,12 @@ function VlTable({
             const open = !!(r.id && expand?.open[r.id])
             return (
               <Fragment key={r.id || i}>
-                <tr>
+                <tr
+                  className={r.role === 'total' ? styles.vlTotal : undefined}
+                  onMouseEnter={(e) => r.note && showNote(e, r.label || '', r.note)}
+                  onMouseMove={(e) => r.note && showNote(e, r.label || '', r.note)}
+                  onMouseLeave={() => setTip(null)}
+                >
                   <td className={styles.vlLab}>
                     {kids ? (
                       <button
@@ -490,7 +508,17 @@ function VlTable({
                 </tr>
                 {open &&
                   (kids || []).map((child, k) => (
-                    <tr key={`${r.id}-c-${k}`} className={styles.vlChild}>
+                    <tr
+                      key={`${r.id}-c-${k}`}
+                      className={styles.vlChild}
+                      onMouseEnter={(e) =>
+                        child.note && showNote(e, child.label || '', child.note)
+                      }
+                      onMouseMove={(e) =>
+                        child.note && showNote(e, child.label || '', child.note)
+                      }
+                      onMouseLeave={() => setTip(null)}
+                    >
                       <td className={styles.vlLab}>{child.label || ''}</td>
                       {(child.values || []).map((v, j) => (
                         <td key={j} className={`${styles.vlNum} tabular`}>
@@ -504,6 +532,12 @@ function VlTable({
           })}
         </tbody>
       </table>
+      {tip && (
+        <HoverTip x={tip.x} y={tip.y} className={styles.noteTip} wrap>
+          <div className={styles.scoreTipTitle}>{tip.title}</div>
+          <div>{tip.body}</div>
+        </HoverTip>
+      )}
     </div>
   )
 }

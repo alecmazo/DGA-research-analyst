@@ -1155,6 +1155,28 @@
   padding-left: 18px;
 }
 
+.vlTotal td {
+  font-weight: 800;
+  border-top: 1px solid var(--border-default, #cbd5e1);
+}
+
+.noteTip {
+  position: fixed;
+  z-index: 80;
+  pointer-events: none;
+  background: rgba(15, 23, 42, 0.96);
+  color: #e2e8f0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  white-space: normal;
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: 280px;
+  overflow: auto;
+}
+
 .vlSec td {
   background: #e0f2fe !important;
   color: #075985;

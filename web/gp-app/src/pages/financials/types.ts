@@ -190,6 +190,8 @@ export type SheetBlock = {
 export type StatementLine = {
   label?: string
   unit?: string
+  role?: 'section' | 'line' | 'total' | string
+  note?: string
   values?: Array<number | null>
 }
 
@@ -201,6 +203,8 @@ export type StatementPack = {
   fy?: number[]
   assets?: StatementLine[]
   liabilities?: StatementLine[]
+  equity?: StatementLine[]
+  balance?: StatementLine[]
   income?: StatementLine[]
   cash_flow?: StatementLine[]
   comprehensive?: StatementLine[]

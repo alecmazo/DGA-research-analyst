@@ -16,6 +16,8 @@ def test_financials_page_shows_what_the_company_does():
     assert '/api/financials/{ticker}/statements' in body
     sheet = (ROOT / "web/gp-app/src/pages/financials/ValueLineSheet.tsx").read_text()
     assert "Income statement" in sheet
+    assert "Free cash flow" in body
+    assert '("Equity"' in body or '("Equity",' in body
     assert "id === 'assets'" in sheet
     assert "_warm_quotes_for_comps(list(fins.keys())" not in body
 

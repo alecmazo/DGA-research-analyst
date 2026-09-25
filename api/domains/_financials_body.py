@@ -6203,66 +6203,92 @@ def _fin_sheet_pdf_bytes(sheet: dict) -> bytes:
 
 _FIN_STMT_CACHE: dict = {}
 _FIN_STMT_TTL_S = 6 * 3600
-# Standard 10-K lines. A missing tag is left blank — it is not zero.
+# (label, tags, kind, role, note tags). role is line, total, or section.
+# A missing tag stays blank — it is not zero. Core P&L lines are always shown.
 _STMT_SPECS = {
     "assets": [
-        ("Cash and cash equivalents", ("CashAndCashEquivalentsAtCarryingValue", "Cash"), "instant"),
-        ("Short-term investments", ("ShortTermInvestments", "MarketableSecuritiesCurrent"), "instant"),
-        ("Receivables", ("AccountsReceivableNetCurrent", "AccountsReceivableNet"), "instant"),
-        ("Inventory", ("InventoryNet", "Inventory"), "instant"),
-        ("Other current assets", ("OtherAssetsCurrent",), "instant"),
-        ("Total current assets", ("AssetsCurrent",), "instant"),
-        ("Property and equipment", ("PropertyPlantAndEquipmentNet",), "instant"),
-        ("Goodwill", ("Goodwill",), "instant"),
-        ("Intangible assets", ("IntangibleAssetsNetExcludingGoodwill", "FiniteLivedIntangibleAssetsNet"), "instant"),
-        ("Other assets", ("OtherAssetsNoncurrent", "OtherAssets"), "instant"),
-        ("Total assets", ("Assets",), "instant"),
+        ("Assets", (), "section", "section", ()),
+        ("Cash and cash equivalents", ("CashAndCashEquivalentsAtCarryingValue", "Cash"), "instant", "line", ("CashAndCashEquivalentsDisclosureTextBlock", "CashAndCashEquivalentsPolicyTextBlock")),
+        ("Short-term investments", ("ShortTermInvestments", "MarketableSecuritiesCurrent"), "instant", "line", ("MarketableSecuritiesDisclosureTextBlock",)),
+        ("Receivables", ("AccountsReceivableNetCurrent", "AccountsReceivableNet"), "instant", "line", ("AccountsReceivableDisclosureTextBlock", "ScheduleOfAccountsReceivableTextBlock")),
+        ("Inventory", ("InventoryNet", "Inventory"), "instant", "line", ("InventoryDisclosureTextBlock", "InventoryPolicyTextBlock")),
+        ("Other current assets", ("OtherAssetsCurrent",), "instant", "line", ()),
+        ("Total current assets", ("AssetsCurrent",), "instant", "total", ()),
+        ("Property and equipment", ("PropertyPlantAndEquipmentNet",), "instant", "line", ("PropertyPlantAndEquipmentDisclosureTextBlock", "PropertyPlantAndEquipmentPolicyTextBlock")),
+        ("Goodwill", ("Goodwill",), "instant", "line", ("GoodwillDisclosureTextBlock", "GoodwillAndIntangibleAssetsDisclosureTextBlock")),
+        ("Intangible assets", ("IntangibleAssetsNetExcludingGoodwill", "FiniteLivedIntangibleAssetsNet"), "instant", "line", ("IntangibleAssetsDisclosureTextBlock", "GoodwillAndIntangibleAssetsDisclosureTextBlock")),
+        ("Other assets", ("OtherAssetsNoncurrent", "OtherAssets"), "instant", "line", ()),
+        ("Total assets", ("Assets",), "instant", "total", ("OrganizationConsolidationAndPresentationOfFinancialStatementsDisclosureTextBlock",)),
     ],
     "liabilities": [
-        ("Accounts payable", ("AccountsPayableCurrent", "AccountsPayable"), "instant"),
-        ("Accrued liabilities", ("AccruedLiabilitiesCurrent",), "instant"),
-        ("Short-term borrowings", ("ShortTermBorrowings", "LongTermDebtCurrent", "DebtCurrent"), "instant"),
-        ("Current lease liabilities", ("OperatingLeaseLiabilityCurrent",), "instant"),
-        ("Deferred revenue, current", ("ContractWithCustomerLiabilityCurrent", "DeferredRevenueCurrent"), "instant"),
-        ("Other current liabilities", ("OtherLiabilitiesCurrent",), "instant"),
-        ("Total current liabilities", ("LiabilitiesCurrent",), "instant"),
-        ("Long-term debt", ("LongTermDebtNoncurrent", "LongTermDebt"), "instant"),
-        ("Lease liabilities", ("OperatingLeaseLiabilityNoncurrent",), "instant"),
-        ("Other liabilities", ("OtherLiabilitiesNoncurrent",), "instant"),
-        ("Total liabilities", ("Liabilities",), "instant"),
-        ("Shareholders' equity", ("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"), "instant"),
+        ("Liabilities", (), "section", "section", ()),
+        ("Accounts payable", ("AccountsPayableCurrent", "AccountsPayable"), "instant", "line", ("AccountsPayableAndAccruedLiabilitiesDisclosureTextBlock",)),
+        ("Accrued liabilities", ("AccruedLiabilitiesCurrent",), "instant", "line", ("AccountsPayableAndAccruedLiabilitiesDisclosureTextBlock",)),
+        ("Short-term borrowings", ("ShortTermBorrowings", "LongTermDebtCurrent", "DebtCurrent"), "instant", "line", ("DebtDisclosureTextBlock", "ShortTermDebtTextBlock")),
+        ("Current lease liabilities", ("OperatingLeaseLiabilityCurrent",), "instant", "line", ("LesseeOperatingLeaseLiabilityTextBlock", "LesseeLeaseDescriptionTextBlock")),
+        ("Deferred revenue, current", ("ContractWithCustomerLiabilityCurrent", "DeferredRevenueCurrent"), "instant", "line", ("RevenueFromContractWithCustomerPolicyTextBlock", "ContractWithCustomerLiabilityDisclosureTextBlock")),
+        ("Other current liabilities", ("OtherLiabilitiesCurrent",), "instant", "line", ()),
+        ("Total current liabilities", ("LiabilitiesCurrent",), "instant", "total", ()),
+        ("Long-term debt", ("LongTermDebtNoncurrent", "LongTermDebt"), "instant", "line", ("DebtDisclosureTextBlock", "LongTermDebtTextBlock", "ScheduleOfMaturitiesOfLongTermDebtTableTextBlock")),
+        ("Lease liabilities", ("OperatingLeaseLiabilityNoncurrent",), "instant", "line", ("LesseeOperatingLeaseLiabilityTextBlock", "LesseeLeaseDescriptionTextBlock")),
+        ("Other liabilities", ("OtherLiabilitiesNoncurrent",), "instant", "line", ()),
+        ("Total liabilities", ("Liabilities",), "instant", "total", ()),
+    ],
+    "equity": [
+        ("Equity", (), "section", "section", ()),
+        ("Common stock and paid-in capital", ("CommonStockValue", "AdditionalPaidInCapital"), "instant", "line", ("StockholdersEquityNoteDisclosureTextBlock",)),
+        ("Retained earnings", ("RetainedEarningsAccumulatedDeficit",), "instant", "line", ("StockholdersEquityNoteDisclosureTextBlock",)),
+        ("Accumulated other comprehensive income", ("AccumulatedOtherComprehensiveIncomeLossNetOfTax",), "instant", "line", ("OtherComprehensiveIncomeDisclosureTextBlock",)),
+        ("Shareholders' equity", ("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"), "instant", "total", ("StockholdersEquityNoteDisclosureTextBlock",)),
     ],
     "income": [
-        ("Revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet", "Revenue"), "duration"),
-        ("Cost of revenue", ("CostOfRevenue", "CostOfGoodsAndServicesSold"), "duration"),
-        ("Gross profit", ("GrossProfit",), "duration"),
-        ("Research and development", ("ResearchAndDevelopmentExpense",), "duration"),
-        ("Selling, general and administrative", ("SellingGeneralAndAdministrativeExpense",), "duration"),
-        ("Operating income", ("OperatingIncomeLoss",), "duration"),
-        ("Interest expense", ("InterestExpense",), "duration"),
-        ("Income before tax", ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest", "IncomeLossFromContinuingOperationsBeforeIncomeTaxes"), "duration"),
-        ("Income tax", ("IncomeTaxExpenseBenefit",), "duration"),
-        ("Net income", ("NetIncomeLoss",), "duration"),
-        ("Diluted EPS", ("EarningsPerShareDiluted",), "per_share"),
+        ("Revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet", "Revenue"), "duration", "line", ()),
+        ("Cost of revenue", ("CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsSold"), "duration", "line", ()),
+        ("Gross income", ("GrossProfit",), "duration", "total", ()),
+        ("Operating expenses", (), "section", "section", ()),
+        ("Selling, general and administrative", ("SellingGeneralAndAdministrativeExpense",), "duration", "line", ()),
+        ("Research and development", ("ResearchAndDevelopmentExpense",), "duration", "line", ()),
+        ("Operating income", ("OperatingIncomeLoss",), "duration", "total", ()),
+        ("Below operating income", (), "section", "section", ()),
+        ("Interest expense", ("InterestExpense",), "duration", "line", ()),
+        ("Income before tax", ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest", "IncomeLossFromContinuingOperationsBeforeIncomeTaxes"), "duration", "line", ()),
+        ("Income tax", ("IncomeTaxExpenseBenefit",), "duration", "line", ()),
+        ("Net income", ("NetIncomeLoss",), "duration", "total", ()),
+        ("Diluted EPS", ("EarningsPerShareDiluted",), "per_share", "line", ()),
     ],
     "cash_flow": [
-        ("Net income", ("NetIncomeLoss",), "duration"),
-        ("Depreciation and amortization", ("DepreciationDepletionAndAmortization", "DepreciationAndAmortization"), "duration"),
-        ("Stock-based compensation", ("ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"), "duration"),
-        ("Operating cash flow", ("NetCashProvidedByUsedInOperatingActivities",), "duration"),
-        ("Capital expenditures", ("PaymentsToAcquirePropertyPlantAndEquipment",), "duration"),
-        ("Acquisitions", ("PaymentsToAcquireBusinessesNetOfCashAcquired",), "duration"),
-        ("Investing cash flow", ("NetCashProvidedByUsedInInvestingActivities",), "duration"),
-        ("Dividends paid", ("PaymentsOfDividendsCommonStock", "PaymentsOfDividends"), "duration"),
-        ("Share repurchases", ("PaymentsForRepurchaseOfCommonStock",), "duration"),
-        ("Financing cash flow", ("NetCashProvidedByUsedInFinancingActivities",), "duration"),
+        ("Operating", (), "section", "section", ()),
+        ("Net income", ("NetIncomeLoss",), "duration", "line", ()),
+        ("Depreciation and amortization", ("DepreciationDepletionAndAmortization", "DepreciationAndAmortization"), "duration", "line", ()),
+        ("Stock-based compensation", ("ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"), "duration", "line", ()),
+        ("Operating cash flow", ("NetCashProvidedByUsedInOperatingActivities",), "duration", "total", ()),
+        ("Investing", (), "section", "section", ()),
+        ("Capital expenditures", ("PaymentsToAcquirePropertyPlantAndEquipment",), "duration", "line", ()),
+        ("Acquisitions", ("PaymentsToAcquireBusinessesNetOfCashAcquired",), "duration", "line", ()),
+        ("Investing cash flow", ("NetCashProvidedByUsedInInvestingActivities",), "duration", "total", ()),
+        ("Financing", (), "section", "section", ()),
+        ("Dividends paid", ("PaymentsOfDividendsCommonStock", "PaymentsOfDividends"), "duration", "line", ()),
+        ("Share repurchases", ("PaymentsForRepurchaseOfCommonStock",), "duration", "line", ()),
+        ("Financing cash flow", ("NetCashProvidedByUsedInFinancingActivities",), "duration", "total", ()),
     ],
     "comprehensive": [
-        ("Net income", ("NetIncomeLoss",), "duration"),
-        ("Other comprehensive income", ("OtherComprehensiveIncomeLossNetOfTax",), "duration"),
-        ("Comprehensive income", ("ComprehensiveIncomeNetOfTax",), "duration"),
+        ("Net income", ("NetIncomeLoss",), "duration", "line", ()),
+        ("Other comprehensive income", ("OtherComprehensiveIncomeLossNetOfTax",), "duration", "line", ()),
+        ("Comprehensive income", ("ComprehensiveIncomeNetOfTax",), "duration", "total", ()),
     ],
 }
+_INCOME_ALWAYS = {
+    "Revenue", "Cost of revenue", "Gross income",
+    "Selling, general and administrative", "Operating income",
+}
+_DEBT_MATURITY = (
+    ("Due within one year", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths", "LongTermDebtMaturitiesRepaymentsOfPrincipalInYearOne")),
+    ("Year 2", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearTwo",)),
+    ("Year 3", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearThree",)),
+    ("Year 4", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFour",)),
+    ("Year 5", ("LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFive",)),
+    ("Thereafter", ("LongTermDebtMaturitiesRepaymentsOfPrincipalAfterYearFive",)),
+)
 
 
 def _stmt_line_value(facts: dict, tags: tuple, fy: int, kind: str):
@@ -6287,6 +6313,121 @@ def _stmt_line_value(facts: dict, tags: tuple, fy: int, kind: str):
     return None
 
 
+def _plain_note(raw: str, limit: int = 1400) -> str:
+    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", raw or "")
+    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = (
+        text.replace("&nbsp;", " ").replace("&#160;", " ")
+        .replace("&#8217;", "'").replace("&#8220;", '"').replace("&#8221;", '"')
+        .replace("&amp;", "&")
+    )
+    text = re.sub(r"&#\d+;", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].strip() + "…"
+
+
+def _latest_text_block(facts: dict, tags: tuple) -> str:
+    us = ((facts or {}).get("facts") or {}).get("us-gaap") or {}
+    best = ""
+    best_filed = ""
+    for tag in tags:
+        units = ((us.get(tag) or {}).get("units") or {})
+        for rows in units.values():
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if row.get("form") not in ("10-K", "10-K/A"):
+                    continue
+                val = row.get("val")
+                if not isinstance(val, str) or len(val) < 40:
+                    continue
+                filed = str(row.get("filed") or "")
+                if filed >= best_filed:
+                    best_filed = filed
+                    best = val
+    return _plain_note(best)
+
+
+def _debt_maturity_note(facts: dict, fy: int) -> str:
+    bits = []
+    for label, tags in _DEBT_MATURITY:
+        val = _stmt_line_value(facts, tags, fy, "instant")
+        if val is None:
+            continue
+        bits.append(f"{label}: ${val:,.0f}")
+    if not bits:
+        return ""
+    return "Debt maturities (latest year in this table). " + "; ".join(bits) + "."
+
+
+def _add_ebit_lines(facts: dict, years: list, lines: list) -> list:
+    """EBIT when it is not the same as operating income. EBITDA when D&A is filed."""
+    oi = next((ln["values"] for ln in lines if ln.get("label") == "Operating income"), None)
+    ebit_tags = (
+        "IncomeLossFromContinuingOperationsBeforeInterestExpenseInterestIncomeIncomeTaxesExtraordinaryItemsNoncontrollingInterestsMinorityInterestsNetOfTax",
+    )
+    ebit_vals = [_stmt_line_value(facts, ebit_tags, fy, "duration") for fy in years]
+    if any(v is not None for v in ebit_vals) and ebit_vals != oi:
+        lines.append({"label": "EBIT", "unit": "$", "role": "total", "values": ebit_vals, "note": ""})
+    da = [
+        _stmt_line_value(
+            facts,
+            ("DepreciationDepletionAndAmortization", "DepreciationAndAmortization"),
+            fy, "duration",
+        )
+        for fy in years
+    ]
+    base = ebit_vals if any(v is not None for v in ebit_vals) else oi
+    if base and any(v is not None for v in da):
+        ebitda = []
+        for a, b in zip(base, da):
+            if a is None and b is None:
+                ebitda.append(None)
+            else:
+                ebitda.append((a or 0.0) + abs(b or 0.0))
+        lines.append({
+            "label": "EBITDA", "unit": "$", "role": "total", "values": ebitda,
+            "note": "Operating income (or EBIT) plus depreciation and amortization filed in the 10-K.",
+        })
+    return lines
+
+
+def _cash_flow_with_total(lines: list) -> list:
+    """Section the three cash-flow totals, then sum them."""
+    def vals(label):
+        for ln in lines:
+            if ln.get("label") == label:
+                return list(ln.get("values") or [])
+        return []
+    ocf, inv, fin = vals("Operating cash flow"), vals("Investing cash flow"), vals("Financing cash flow")
+    n = max(len(ocf), len(inv), len(fin))
+    total = []
+    for i in range(n):
+        parts = [
+            ocf[i] if i < len(ocf) else None,
+            inv[i] if i < len(inv) else None,
+            fin[i] if i < len(fin) else None,
+        ]
+        if all(p is None for p in parts):
+            total.append(None)
+        else:
+            total.append(sum(p or 0.0 for p in parts))
+    lines.append({
+        "label": "Free cash flow",
+        "unit": "$",
+        "role": "total",
+        "values": total,
+        "note": (
+            "Operating cash flow plus investing cash flow plus financing cash flow. "
+            "That is the net cash those three sections produced, before exchange-rate effects."
+        ),
+    })
+    return lines
+
+
 def _statement_tables(facts: dict, n_years: int = 5) -> dict:
     import sec_edgar_xbrl as edgar
     found = set()
@@ -6295,15 +6436,49 @@ def _statement_tables(facts: dict, n_years: int = 5) -> dict:
             if row.get("form") == "10-K" and row.get("fp") == "FY" and row.get("fy"):
                 found.add(int(row["fy"]))
     years = sorted(found)[-n_years:]
+    latest_fy = years[-1] if years else None
     out = {"years": [f"FY{y}" for y in years], "fy": years}
-    for key, spec in _STMT_SPECS.items():
+
+    def build(key: str) -> list:
         lines = []
-        for label, tags, kind in spec:
-            vals = [_stmt_line_value(facts, tags, fy, kind) for fy in years]
-            if any(v is not None for v in vals):
-                unit = "$/sh" if kind == "per_share" else "$"
-                lines.append({"label": label, "unit": unit, "values": vals})
-        out[key] = lines
+        for label, tags, kind, role, note_tags in _STMT_SPECS[key]:
+            if role == "section":
+                lines.append({"label": label, "unit": "section", "role": "section", "values": []})
+                continue
+            vals = [_stmt_line_value(facts, tags, fy, kind) for fy in years] if tags else [None] * len(years)
+            keep = any(v is not None for v in vals) or label in _INCOME_ALWAYS
+            if not keep:
+                continue
+            note = _latest_text_block(facts, note_tags) if note_tags else ""
+            if label == "Long-term debt" and latest_fy:
+                mat = _debt_maturity_note(facts, latest_fy)
+                note = (note + " " + mat).strip()
+            unit = "$/sh" if kind == "per_share" else "$"
+            lines.append({
+                "label": label, "unit": unit, "role": role,
+                "values": vals, "note": note,
+            })
+        return lines
+
+    out["assets"] = build("assets")
+    out["liabilities"] = build("liabilities")
+    out["equity"] = build("equity")
+    out["balance"] = out["assets"] + out["liabilities"] + out["equity"]
+    income = _add_ebit_lines(facts, years, build("income"))
+    # Keep EBIT and EBITDA with the operating block, before "Below operating income".
+    below = next((i for i, ln in enumerate(income) if ln.get("label") == "Below operating income"), None)
+    extras = [ln for ln in income if ln.get("label") in ("EBIT", "EBITDA")]
+    income = [ln for ln in income if ln.get("label") not in ("EBIT", "EBITDA")]
+    if below is None:
+        income.extend(extras)
+    else:
+        # extras were appended, so the index of the section row is unchanged
+        # only if extras were at the end. Insert just before the section.
+        idx = next(i for i, ln in enumerate(income) if ln.get("label") == "Below operating income")
+        income = income[:idx] + extras + income[idx:]
+    out["income"] = income
+    out["cash_flow"] = _cash_flow_with_total(build("cash_flow"))
+    out["comprehensive"] = build("comprehensive")
     return out
 
 
