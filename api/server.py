@@ -6914,6 +6914,7 @@ def _persist_analysis_text(
             print(f"✅ [persist] GROK report for {ticker} "
                   f"({len(text):,} chars · price_target={summary.get('price_target')})")
             _stamp_report_tail(ticker, "grok", text)
+            _index_munger_rules(ticker, text)
             return True, len(text)
         print(f"❌ [persist] GROK DB write returned False for {ticker} "
               f"({len(text):,} chars still on disk/result — Saved Reports will miss this until re-upsert)")
@@ -6921,6 +6922,79 @@ def _persist_analysis_text(
     except Exception as e:
         print(f"❌ [persist] GROK DB write failed for {ticker}: {e!s:.300}")
         return False, len(text)
+
+
+_MUNGER_CITE_RE = re.compile(r"Rule\s+(\d{1,2})\b[^\n]{0,320}", re.I)
+_MUNGER_INDEX_STARTED = False
+
+
+def _ensure_munger_cites() -> None:
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS munger_rule_cites (
+                ticker TEXT NOT NULL,
+                rule SMALLINT NOT NULL,
+                excerpt TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (ticker, rule)
+            )
+        """)
+        conn.commit()
+
+
+def _index_munger_rules(ticker: str, text: str) -> None:
+    """Store Rule N citations from one Grok report. Replaces that name's old cites."""
+    tk = (ticker or "").strip().upper()
+    if not tk or not text:
+        return
+    found: dict[int, str] = {}
+    for m in _MUNGER_CITE_RE.finditer(text):
+        n = int(m.group(1))
+        if 1 <= n <= 50 and n not in found:
+            found[n] = " ".join(m.group(0).split())[:280]
+    try:
+        _ensure_munger_cites()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM munger_rule_cites WHERE ticker=%s", (tk,))
+            for n, excerpt in found.items():
+                cur.execute(
+                    """INSERT INTO munger_rule_cites (ticker, rule, excerpt)
+                       VALUES (%s, %s, %s)""",
+                    (tk, n, excerpt),
+                )
+            conn.commit()
+    except Exception as exc:
+        print(f"[munger] index {tk}: {exc!s:.140}", flush=True)
+
+
+def _munger_index_book(tickers: list[str]) -> None:
+    """Read saved Grok notes once, off the page request."""
+    if not tickers:
+        return
+    try:
+        _ensure_munger_cites()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """SELECT ticker, report_md FROM analyst_reports
+                    WHERE ticker = ANY(%s) AND report_md IS NOT NULL""",
+                (tickers,),
+            )
+            rows = cur.fetchall()
+        for tk, md in rows:
+            _index_munger_rules(tk, md or "")
+    except Exception as exc:
+        print(f"[munger] book index: {exc!s:.140}", flush=True)
+
+
+def _kick_munger_index(tickers: list[str]) -> None:
+    global _MUNGER_INDEX_STARTED
+    if _MUNGER_INDEX_STARTED or not tickers:
+        return
+    _MUNGER_INDEX_STARTED = True
+    threading.Thread(
+        target=_munger_index_book, args=(list(tickers),),
+        daemon=True, name="munger-index",
+    ).start()
 
 
 def _stamp_report_tail(ticker: str, provider: str, text: str) -> None:
@@ -8527,7 +8601,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui671-20260925-stmt-sections"
+WEB_BUILD_VERSION = "ui672-20260925-munger-page"
 
 
 @app.get("/api/build")
@@ -8851,6 +8925,75 @@ def continuity_package(request: Request):
             "X-DGA-Build": str(build),
         },
     )
+
+
+@app.get("/api/munger/desk")
+def munger_desk(request: Request):
+    """Morning rule plus the watchlist and any Rule N citations already saved.
+
+    One watchlist read and one small cite read. Reports are indexed in the
+    background, not on this request. No model call.
+    """
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    import munger_fifty
+    from zoneinfo import ZoneInfo
+    lp = str(claims.get("lp_id") or "")
+    tickers = _wl_get_db(lp) if lp else []
+    names: dict[str, str] = {}
+    cites: list[dict] = []
+    try:
+        _ensure_munger_cites()
+    except Exception as exc:
+        print(f"[munger] table: {exc!s:.140}", flush=True)
+    try:
+        if tickers:
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT symbol, name FROM security_meta WHERE symbol = ANY(%s)",
+                    (tickers,),
+                )
+                names = {r[0]: r[1] or "" for r in cur.fetchall()}
+                cur.execute(
+                    """SELECT ticker, rule, excerpt FROM munger_rule_cites
+                        WHERE ticker = ANY(%s)""",
+                    (tickers,),
+                )
+                cites = [
+                    {"ticker": r[0], "rule": int(r[1]), "excerpt": r[2] or ""}
+                    for r in cur.fetchall()
+                ]
+    except Exception as exc:
+        print(f"[munger] desk: {exc!s:.140}", flush=True)
+    _kick_munger_index(tickers)
+    day = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    rule_n = (day.toordinal() % 50) + 1
+    holding = sorted(tickers)[day.toordinal() % len(tickers)] if tickers else ""
+    excerpt = next(
+        (c["excerpt"] for c in cites if c["ticker"] == holding and c["rule"] == rule_n),
+        "",
+    )
+    title = next((t for n, t, _a in munger_fifty.RULES if n == rule_n), "")
+    return {
+        "ok": True,
+        "day": day.isoformat(),
+        "morning": {
+            "rule": rule_n,
+            "title": title,
+            "ticker": holding,
+            "name": names.get(holding) or "",
+            "excerpt": excerpt,
+        },
+        "holdings": [
+            {"ticker": t, "name": names.get(t) or ""} for t in tickers
+        ],
+        "citations": cites,
+        "rules": [
+            {"n": n, "title": title, "apply": apply}
+            for n, title, apply in munger_fifty.RULES
+        ],
+    }
 
 
 @app.get("/api/continuity/handoff")

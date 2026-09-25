@@ -7,6 +7,7 @@ import { PositionsPage } from '@/pages/PositionsPage'
 import { FundPage } from '@/pages/FundPage'
 import { BuilderPage } from '@/pages/BuilderPage'
 import { FinancialsPage } from '@/pages/FinancialsPage'
+import { MungerPage } from '@/pages/MungerPage'
 import { PodcastsPage } from '@/pages/PodcastsPage'
 import { TranscriptsPage } from '@/pages/TranscriptsPage'
 import { MemosPage } from '@/pages/MemosPage'
@@ -112,6 +113,14 @@ export default function App() {
                 element={
                   <ErrorBoundary label="Desk">
                     <DeskPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="munger"
+                element={
+                  <ErrorBoundary label="Munger">
+                    <MungerPage />
                   </ErrorBoundary>
                 }
               />

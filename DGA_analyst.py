@@ -1966,6 +1966,14 @@ def load_munger_core_context() -> str:
     return ""
 
 
+def _munger_fifty_prompt_list() -> str:
+    try:
+        import munger_fifty
+        return munger_fifty.prompt_list()
+    except Exception:
+        return ""
+
+
 def build_munger_system_appendix() -> str:
     """Grok-only mandatory SECTION 8.5 + full core context."""
     ctx = load_munger_core_context()
@@ -2022,6 +2030,12 @@ MARGIN OF SAFETY INADEQUATE**
 ### 8.5.7 What Munger Would Likely Do
 Plain-spoken conclusion: buy / pass / too-hard — with the single best reason
 and the single biggest stupidity to avoid. No soft-pedaling.
+
+Inside 8.5, cite 3 to 5 rules from the list below. Each citation is its own
+line, exactly `Rule N — Title`, then two to four sentences on THIS company.
+Use the number and title as written. Do not cite a rule you do not apply.
+
+""" + _munger_fifty_prompt_list() + """
 
 ================================================================================
 MUNGER CORE CONTEXT (authoritative — follow strictly)

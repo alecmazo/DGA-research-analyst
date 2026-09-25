@@ -22,6 +22,19 @@ def test_financials_page_shows_what_the_company_does():
     assert "_warm_quotes_for_comps(list(fins.keys())" not in body
 
 
+def test_munger_page_does_not_call_a_model():
+    src = (ROOT / "api" / "server.py").read_text()
+    assert '@app.get("/api/munger/desk")' in src
+    fn = src.split("def munger_desk")[1].split("\n@app.")[0]
+    assert "call_grok" not in fn
+    assert "_kick_munger_index" in fn
+    page = (ROOT / "web/gp-app/src/pages/MungerPage.tsx").read_text()
+    assert "This morning" in page
+    assert "Not cited" in page or "not cited" in page
+    appendix = (ROOT / "DGA_analyst.py").read_text()
+    assert "Rule N — Title" in appendix
+
+
 def test_continuity_files_exist():
     kit = ROOT / "docs" / "continuity"
     assert (kit / "README.md").is_file()
