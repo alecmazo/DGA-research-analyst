@@ -250,6 +250,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Munger tail** | **`ui667-20260924-munger-tail`** | A Grok report that stops inside 8.5 is not finished. MGM was cut off at 8.5.3; the missing subsections are written on. |
 | **Business summary** | **`ui668-20260925-biz-summary`** | Financials shows a short description of what the company does, under the name. The Financials card opens on load. |
 | **Financials blurb** | **`ui669-20260925-fin-blurb`** | Company description comes from the 10-K, not a name search. It is two lines until clicked. Peer prices are not fetched live on the dashboard. |
+| **Statement lines** | **`ui670-20260925-stmt-lines`** | Assets and liabilities in the Value Line array expand. Income, balance sheet, cash flow, and comprehensive income open for the last five years. |
 
 ### One-click handoff (preferred)
 
@@ -439,4 +440,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-25 · Agent: Grok Build · Live: `ui669-20260925-fin-blurb` · Next: `ui670-YYYYMMDD-slug`*
+*Last updated: 2026-09-25 · Agent: Grok Build · Live: `ui670-20260925-stmt-lines` · Next: `ui671-YYYYMMDD-slug`*

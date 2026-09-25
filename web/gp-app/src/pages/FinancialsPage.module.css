@@ -1126,6 +1126,35 @@
   color: var(--text-primary);
 }
 
+.stmtBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0 8px;
+}
+
+.vlToggle {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.vlChild td {
+  font-weight: 450 !important;
+  color: var(--text-secondary);
+  background: #f8fafc;
+}
+
+.vlChild .vlLab {
+  padding-left: 18px;
+}
+
 .vlSec td {
   background: #e0f2fe !important;
   color: #075985;

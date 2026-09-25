@@ -13,6 +13,10 @@ def test_financials_page_shows_what_the_company_does():
     body = (ROOT / "api/domains/_financials_body.py").read_text()
     assert "def _company_business_summary" in body
     assert "sec-10k" in body
+    assert '/api/financials/{ticker}/statements' in body
+    sheet = (ROOT / "web/gp-app/src/pages/financials/ValueLineSheet.tsx").read_text()
+    assert "Income statement" in sheet
+    assert "id === 'assets'" in sheet
     assert "_warm_quotes_for_comps(list(fins.keys())" not in body
 
 

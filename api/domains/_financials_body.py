@@ -6201,6 +6201,143 @@ def _fin_sheet_pdf_bytes(sheet: dict) -> bytes:
     return buf.getvalue()
 
 
+_FIN_STMT_CACHE: dict = {}
+_FIN_STMT_TTL_S = 6 * 3600
+# Standard 10-K lines. A missing tag is left blank — it is not zero.
+_STMT_SPECS = {
+    "assets": [
+        ("Cash and cash equivalents", ("CashAndCashEquivalentsAtCarryingValue", "Cash"), "instant"),
+        ("Short-term investments", ("ShortTermInvestments", "MarketableSecuritiesCurrent"), "instant"),
+        ("Receivables", ("AccountsReceivableNetCurrent", "AccountsReceivableNet"), "instant"),
+        ("Inventory", ("InventoryNet", "Inventory"), "instant"),
+        ("Other current assets", ("OtherAssetsCurrent",), "instant"),
+        ("Total current assets", ("AssetsCurrent",), "instant"),
+        ("Property and equipment", ("PropertyPlantAndEquipmentNet",), "instant"),
+        ("Goodwill", ("Goodwill",), "instant"),
+        ("Intangible assets", ("IntangibleAssetsNetExcludingGoodwill", "FiniteLivedIntangibleAssetsNet"), "instant"),
+        ("Other assets", ("OtherAssetsNoncurrent", "OtherAssets"), "instant"),
+        ("Total assets", ("Assets",), "instant"),
+    ],
+    "liabilities": [
+        ("Accounts payable", ("AccountsPayableCurrent", "AccountsPayable"), "instant"),
+        ("Accrued liabilities", ("AccruedLiabilitiesCurrent",), "instant"),
+        ("Short-term borrowings", ("ShortTermBorrowings", "LongTermDebtCurrent", "DebtCurrent"), "instant"),
+        ("Current lease liabilities", ("OperatingLeaseLiabilityCurrent",), "instant"),
+        ("Deferred revenue, current", ("ContractWithCustomerLiabilityCurrent", "DeferredRevenueCurrent"), "instant"),
+        ("Other current liabilities", ("OtherLiabilitiesCurrent",), "instant"),
+        ("Total current liabilities", ("LiabilitiesCurrent",), "instant"),
+        ("Long-term debt", ("LongTermDebtNoncurrent", "LongTermDebt"), "instant"),
+        ("Lease liabilities", ("OperatingLeaseLiabilityNoncurrent",), "instant"),
+        ("Other liabilities", ("OtherLiabilitiesNoncurrent",), "instant"),
+        ("Total liabilities", ("Liabilities",), "instant"),
+        ("Shareholders' equity", ("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"), "instant"),
+    ],
+    "income": [
+        ("Revenue", ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet", "Revenue"), "duration"),
+        ("Cost of revenue", ("CostOfRevenue", "CostOfGoodsAndServicesSold"), "duration"),
+        ("Gross profit", ("GrossProfit",), "duration"),
+        ("Research and development", ("ResearchAndDevelopmentExpense",), "duration"),
+        ("Selling, general and administrative", ("SellingGeneralAndAdministrativeExpense",), "duration"),
+        ("Operating income", ("OperatingIncomeLoss",), "duration"),
+        ("Interest expense", ("InterestExpense",), "duration"),
+        ("Income before tax", ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest", "IncomeLossFromContinuingOperationsBeforeIncomeTaxes"), "duration"),
+        ("Income tax", ("IncomeTaxExpenseBenefit",), "duration"),
+        ("Net income", ("NetIncomeLoss",), "duration"),
+        ("Diluted EPS", ("EarningsPerShareDiluted",), "per_share"),
+    ],
+    "cash_flow": [
+        ("Net income", ("NetIncomeLoss",), "duration"),
+        ("Depreciation and amortization", ("DepreciationDepletionAndAmortization", "DepreciationAndAmortization"), "duration"),
+        ("Stock-based compensation", ("ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"), "duration"),
+        ("Operating cash flow", ("NetCashProvidedByUsedInOperatingActivities",), "duration"),
+        ("Capital expenditures", ("PaymentsToAcquirePropertyPlantAndEquipment",), "duration"),
+        ("Acquisitions", ("PaymentsToAcquireBusinessesNetOfCashAcquired",), "duration"),
+        ("Investing cash flow", ("NetCashProvidedByUsedInInvestingActivities",), "duration"),
+        ("Dividends paid", ("PaymentsOfDividendsCommonStock", "PaymentsOfDividends"), "duration"),
+        ("Share repurchases", ("PaymentsForRepurchaseOfCommonStock",), "duration"),
+        ("Financing cash flow", ("NetCashProvidedByUsedInFinancingActivities",), "duration"),
+    ],
+    "comprehensive": [
+        ("Net income", ("NetIncomeLoss",), "duration"),
+        ("Other comprehensive income", ("OtherComprehensiveIncomeLossNetOfTax",), "duration"),
+        ("Comprehensive income", ("ComprehensiveIncomeNetOfTax",), "duration"),
+    ],
+}
+
+
+def _stmt_line_value(facts: dict, tags: tuple, fy: int, kind: str):
+    import sec_edgar_xbrl as edgar
+    if kind == "per_share":
+        units = ("USD/shares", "USD/share")
+        picker = edgar._pick_annual
+    elif kind == "instant":
+        units = ("USD",)
+        picker = edgar._pick_annual_instant
+    else:
+        units = ("USD",)
+        picker = edgar._pick_annual
+    for tag in tags:
+        rows = edgar._iter_facts(facts, tag, units)
+        hit = picker(rows, fy) if rows else None
+        if hit is not None and hit.get("val") is not None:
+            try:
+                return float(hit["val"])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _statement_tables(facts: dict, n_years: int = 5) -> dict:
+    import sec_edgar_xbrl as edgar
+    found = set()
+    for tag in ("Assets", "NetIncomeLoss", "Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"):
+        for row in edgar._iter_facts(facts, tag, ("USD",)):
+            if row.get("form") == "10-K" and row.get("fp") == "FY" and row.get("fy"):
+                found.add(int(row["fy"]))
+    years = sorted(found)[-n_years:]
+    out = {"years": [f"FY{y}" for y in years], "fy": years}
+    for key, spec in _STMT_SPECS.items():
+        lines = []
+        for label, tags, kind in spec:
+            vals = [_stmt_line_value(facts, tags, fy, kind) for fy in years]
+            if any(v is not None for v in vals):
+                unit = "$/sh" if kind == "per_share" else "$"
+                lines.append({"label": label, "unit": unit, "values": vals})
+        out[key] = lines
+    return out
+
+
+@app.get("/api/financials/{ticker}/statements")
+def financials_statements(ticker: str, request: Request):
+    """Balance sheet, income, cash flow, and comprehensive income for recent years.
+
+    SEC companyfacts, cached six hours. Not called when the Value Line card
+    first paints — only when a total is opened or a statement is chosen.
+    """
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        raise HTTPException(400, "ticker required")
+    hit = _FIN_STMT_CACHE.get(tk)
+    if hit and (time.time() - hit[0]) < _FIN_STMT_TTL_S:
+        return hit[1]
+    try:
+        import sec_edgar_xbrl as edgar
+        ua = analyst.get_sec_user_agent()
+        cik = edgar.resolve_cik(tk, user_agent=ua)
+        facts = edgar.fetch_company_facts(cik, user_agent=ua)
+        tables = _statement_tables(facts, 5)
+    except Exception as e:
+        print(f"[fin-stmt] {tk}: {e!s:.160}", flush=True)
+        return {"ok": False, "ticker": tk, "error": f"Could not read SEC statements for {tk}."}
+    payload = {"ok": True, "ticker": tk, **tables,
+               "note": "Last five fiscal years from the 10-K. A blank line means the company did not file that tag."}
+    _FIN_STMT_CACHE[tk] = (time.time(), payload)
+    return payload
+
+
 @app.get("/api/financials/{ticker}/sheet")
 def financials_valueline_sheet(ticker: str, request: Request):
     """Value Line–style financial sheet (JSON). Pure DB — free, no LLM, no SEC."""

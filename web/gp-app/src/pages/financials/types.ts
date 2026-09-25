@@ -187,6 +187,26 @@ export type SheetBlock = {
   }>
 }
 
+export type StatementLine = {
+  label?: string
+  unit?: string
+  values?: Array<number | null>
+}
+
+export type StatementPack = {
+  ok?: boolean
+  error?: string
+  ticker?: string
+  years?: string[]
+  fy?: number[]
+  assets?: StatementLine[]
+  liabilities?: StatementLine[]
+  income?: StatementLine[]
+  cash_flow?: StatementLine[]
+  comprehensive?: StatementLine[]
+  note?: string
+}
+
 export type SheetData = {
   ok?: boolean
   error?: string

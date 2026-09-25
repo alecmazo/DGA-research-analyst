@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
 import { api, downloadAuth } from '@/lib/api'
-import type { SheetData, SheetLink } from './types'
+import type { SheetData, SheetLink, StatementLine, StatementPack } from './types'
 import { vlMoney } from './format'
 import styles from '../FinancialsPage.module.css'
 import { BizBlurb } from './BizBlurb'
@@ -21,6 +21,13 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
   const [err, setErr] = useState<string | null>(null)
   const [activeTk, setActiveTk] = useState<string | null>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const [stmts, setStmts] = useState<StatementPack | null>(null)
+  const [stmtBusy, setStmtBusy] = useState(false)
+  const [stmtErr, setStmtErr] = useState<string | null>(null)
+  const [stmtView, setStmtView] = useState<
+    'income' | 'balance' | 'cash_flow' | 'comprehensive' | null
+  >(null)
+  const [openLines, setOpenLines] = useState<Record<string, boolean>>({})
 
   const loadLinks = useCallback(async () => {
     try {
@@ -42,6 +49,10 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
     if (!tk) return
     setLoading(true)
     setErr(null)
+    setStmts(null)
+    setStmtView(null)
+    setOpenLines({})
+    setStmtErr(null)
     setActiveTk(tk)
     setInput(tk)
     try {
@@ -63,6 +74,27 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
       setLoading(false)
     }
   }, [])
+
+  const ensureStatements = useCallback(async (tkRaw: string) => {
+    const tk = tkRaw.trim().toUpperCase()
+    if (!tk || stmts?.ticker === tk || stmtBusy) return
+    setStmtBusy(true)
+    setStmtErr(null)
+    try {
+      const d = await api<StatementPack>(
+        `/api/financials/${encodeURIComponent(tk)}/statements`,
+      )
+      if (d && d.ok === false) {
+        setStmtErr(d.error || 'Statements unavailable')
+        return
+      }
+      setStmts(d)
+    } catch (e) {
+      setStmtErr(e instanceof Error ? e.message : 'Statements unavailable')
+    } finally {
+      setStmtBusy(false)
+    }
+  }, [stmts?.ticker, stmtBusy])
 
   // Sync with dashboard ticker
   useEffect(() => {
@@ -255,7 +287,71 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
           {sheet.annual && (
             <>
               <div className={styles.vlSection}>Statistical array (annual)</div>
-              <VlTable block={sheet.annual} title="Annual" />
+              <div className={styles.stmtBar}>
+                {(
+                  [
+                    ['income', 'Income statement'],
+                    ['balance', 'Balance sheet'],
+                    ['cash_flow', 'Cash flow'],
+                    ['comprehensive', 'Comprehensive income'],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={stmtView === id ? styles.segOn : styles.segBtn}
+                    onClick={() => {
+                      setStmtView((cur) => (cur === id ? null : id))
+                      void ensureStatements(activeTk || sheet.ticker || '')
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+                {stmtBusy && <span className={styles.mutedSm}>Reading the 10-K…</span>}
+              </div>
+              {stmtErr && <div className={styles.inlineErr}>{stmtErr}</div>}
+              <VlTable
+                block={sheet.annual}
+                title="Annual"
+                expand={{
+                  open: openLines,
+                  assets: alignLines(stmts?.assets, stmts?.years, sheet.annual.labels),
+                  liabilities: alignLines(
+                    stmts?.liabilities,
+                    stmts?.years,
+                    sheet.annual.labels,
+                  ),
+                  onToggle: (id) => {
+                    setOpenLines((cur) => ({ ...cur, [id]: !cur[id] }))
+                    void ensureStatements(activeTk || sheet.ticker || '')
+                  },
+                }}
+              />
+              {stmtView && stmts?.ok && (
+                <StatementBlock
+                  title={
+                    stmtView === 'income'
+                      ? 'Income statement'
+                      : stmtView === 'balance'
+                        ? 'Balance sheet'
+                        : stmtView === 'cash_flow'
+                          ? 'Cash flow'
+                          : 'Comprehensive income'
+                  }
+                  years={stmts.years || []}
+                  lines={
+                    stmtView === 'income'
+                      ? stmts.income
+                      : stmtView === 'balance'
+                        ? [...(stmts.assets || []), ...(stmts.liabilities || [])]
+                        : stmtView === 'cash_flow'
+                          ? stmts.cash_flow
+                          : stmts.comprehensive
+                  }
+                  note={stmts.note}
+                />
+              )}
             </>
           )}
           {sheet.quarterly && (
@@ -278,12 +374,67 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
   )
 }
 
+function alignLines(
+  lines: StatementLine[] | undefined,
+  years: string[] | undefined,
+  labels: string[] | undefined,
+): StatementLine[] {
+  const yrs = years || []
+  const labs = labels || []
+  return (lines || []).map((line) => ({
+    label: line.label,
+    unit: line.unit,
+    values: labs.map((lab) => {
+      const i = yrs.indexOf(lab)
+      return i >= 0 ? (line.values || [])[i] ?? null : null
+    }),
+  }))
+}
+
+function StatementBlock({
+  title,
+  years,
+  lines,
+  note,
+}: {
+  title: string
+  years: string[]
+  lines?: StatementLine[]
+  note?: string
+}) {
+  if (!lines?.length) {
+    return <div className={styles.mutedSm}>No {title.toLowerCase()} lines in the last five 10-Ks.</div>
+  }
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className={styles.vlSection}>{title} · last five years</div>
+      <VlTable block={{ labels: years, rows: lines }} title={title} />
+      {note && <div className={styles.mutedSm}>{note}</div>}
+    </div>
+  )
+}
+
 function VlTable({
   block,
   title,
+  expand,
 }: {
-  block: { labels?: string[]; rows?: Array<{ label?: string; unit?: string; values?: Array<number | null | undefined> }> }
+  block: {
+    labels?: string[]
+    rows?: Array<{
+      id?: string
+      label?: string
+      unit?: string
+      values?: Array<number | null | undefined>
+    }>
+  }
   title: string
+  expand?: {
+    open: Record<string, boolean>
+    assets?: StatementLine[]
+    liabilities?: StatementLine[]
+    onToggle: (id: string) => void
+  }
 }) {
   const labels = block.labels || []
   const rows = block.rows || []
@@ -308,15 +459,47 @@ function VlTable({
                 </tr>
               )
             }
+            const kids =
+              r.id === 'assets'
+                ? expand?.assets
+                : r.id === 'liabilities'
+                  ? expand?.liabilities
+                  : undefined
+            const open = !!(r.id && expand?.open[r.id])
             return (
-              <tr key={i}>
-                <td className={styles.vlLab}>{r.label || ''}</td>
-                {(r.values || []).map((v, j) => (
-                  <td key={j} className={`${styles.vlNum} tabular`}>
-                    {vlMoney(v, r.unit)}
+              <Fragment key={r.id || i}>
+                <tr>
+                  <td className={styles.vlLab}>
+                    {kids ? (
+                      <button
+                        type="button"
+                        className={styles.vlToggle}
+                        onClick={() => r.id && expand?.onToggle(r.id)}
+                      >
+                        {open ? '▾' : '▸'} {r.label || ''}
+                      </button>
+                    ) : (
+                      r.label || ''
+                    )}
                   </td>
-                ))}
-              </tr>
+                  {(r.values || []).map((v, j) => (
+                    <td key={j} className={`${styles.vlNum} tabular`}>
+                      {vlMoney(v, r.unit)}
+                    </td>
+                  ))}
+                </tr>
+                {open &&
+                  (kids || []).map((child, k) => (
+                    <tr key={`${r.id}-c-${k}`} className={styles.vlChild}>
+                      <td className={styles.vlLab}>{child.label || ''}</td>
+                      {(child.values || []).map((v, j) => (
+                        <td key={j} className={`${styles.vlNum} tabular`}>
+                          {vlMoney(v, child.unit || '$')}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+              </Fragment>
             )
           })}
         </tbody>
