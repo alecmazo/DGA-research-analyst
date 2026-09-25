@@ -3167,50 +3167,139 @@ def _clip_business_summary(text: str, limit: int = 420) -> str:
     return cut.rsplit(" ", 1)[0].strip() + "…"
 
 
-def _wiki_business_summary(name: str) -> str:
-    """One paragraph on what the company does. Empty on any miss.
+_BIZ_FILLING: set = set()
+_BIZ_STOP = {
+    "international", "incorporated", "company", "corporation", "corp",
+    "inc", "ltd", "limited", "holdings", "group", "the", "and",
+}
 
-    Yahoo's profile endpoint now returns 401, so this is the free source.
+
+def _summary_fits_company(text: str, name: str) -> bool:
+    """True when the blurb is actually about this issuer.
+
+    Wikipedia search for TRT returned a jazz trio. The legal name's words
+    have to show up, not just a shared ticker.
     """
+    tokens = [
+        w for w in re.findall(r"[a-z]{4,}", (name or "").lower())
+        if w not in _BIZ_STOP
+    ]
+    if not tokens:
+        return bool((text or "").strip())
+    low = (text or "").lower()
+    return all(tok in low for tok in tokens)
+
+
+def _excerpt_10k_overview(html: str) -> str:
+    """The 10-K 'Overview' paragraph — what the company says it does."""
+    raw = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html or "")
+    raw = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", raw)
+    text = re.sub(r"(?is)<[^>]+>", " ", raw)
+    text = text.replace("&nbsp;", " ").replace("&#160;", " ")
+    text = re.sub(r"\s+", " ", text)
+    text = (
+        text.replace("&#160;", " ").replace("&#8217;", "'")
+        .replace("&#8220;", '"').replace("&#8221;", '"')
+        .replace("&amp;", "&")
+    )
+    text = re.sub(r"&#\d+;", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    text = text.replace(" fo r ", " for ")
+    low = text.lower()
+    body = ""
+    start = 0
+    while True:
+        i = low.find("our core business", start)
+        if i < 0:
+            break
+        chunk = text[i:i + 900]
+        if "segment" in chunk.lower():
+            body = chunk
+            break
+        if not body:
+            body = chunk
+        start = i + 16
+    if not body:
+        mark = low.find("overview")
+        body = text[mark + len("overview"):mark + 900] if mark >= 0 else ""
+    return _clip_business_summary(body.strip(" .:-"), 720)
+
+
+def _sec_business_summary(ticker: str, name: str) -> str:
+    """One paragraph from the latest 10-K. Empty on any miss. Not for the request path."""
     import requests
-    q = " ".join((name or "").split())
-    if len(q) < 2:
+    tk = (ticker or "").strip().upper()
+    headers = {"User-Agent": "DGA Capital research alec@dgacapital.com"}
+    cik = ""
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT cik FROM company_financials WHERE ticker=%s AND cik IS NOT NULL LIMIT 1",
+                (tk,),
+            )
+            row = cur.fetchone()
+            cik = (row[0] if row else "") or ""
+    except Exception:
+        cik = ""
+    cik_digits = re.sub(r"\D", "", str(cik))
+    if not cik_digits:
         return ""
-    headers = {"User-Agent": "DGA-Capital-research/1.0 (portfolio.dgacapital.com)"}
-    search = requests.get(
-        "https://en.wikipedia.org/w/api.php",
-        params={
-            "action": "query",
-            "list": "search",
-            "srsearch": q,
-            "srlimit": 1,
-            "format": "json",
-        },
-        headers=headers,
-        timeout=2.5,
+    sub = requests.get(
+        f"https://data.sec.gov/submissions/CIK{cik_digits.zfill(10)}.json",
+        headers=headers, timeout=8,
     )
-    search.raise_for_status()
-    hits = ((search.json().get("query") or {}).get("search") or [])
-    title = (hits[0].get("title") if hits else "") or ""
-    if not title:
+    sub.raise_for_status()
+    recent = (sub.json().get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+    acc = doc = ""
+    for i, form in enumerate(forms):
+        if form in ("10-K", "20-F", "10-K/A"):
+            acc = (recent.get("accessionNumber") or [""])[i]
+            doc = (recent.get("primaryDocument") or [""])[i]
+            break
+    if not acc or not doc:
         return ""
-    page = requests.get(
-        "https://en.wikipedia.org/api/rest_v1/page/summary/"
-        + requests.utils.quote(title.replace(" ", "_")),
-        headers=headers,
-        timeout=2.5,
+    acc_nodash = acc.replace("-", "")
+    url = (
+        f"https://www.sec.gov/Archives/edgar/data/{int(cik_digits)}/"
+        f"{acc_nodash}/{doc}"
     )
-    page.raise_for_status()
-    data = page.json()
-    if data.get("type") == "disambiguation":
+    filing = requests.get(url, headers=headers, timeout=20)
+    filing.raise_for_status()
+    text = _excerpt_10k_overview(filing.text)
+    if not _summary_fits_company(text, name):
         return ""
-    return _clip_business_summary(data.get("extract") or "")
+    return text
+
+
+def _fill_business_summary(ticker: str, name: str) -> None:
+    try:
+        text = _sec_business_summary(ticker, name)
+        if not text:
+            return
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO security_meta
+                       (symbol, business_summary, summary_at, source, updated_at)
+                   VALUES (%s, %s, now(), 'sec-10k', now())
+                   ON CONFLICT (symbol) DO UPDATE SET
+                     business_summary = EXCLUDED.business_summary,
+                     summary_at = now(),
+                     source = 'sec-10k'""",
+                (ticker, text),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[fin] business summary fill {ticker}: {e!s:.140}", flush=True)
+    finally:
+        _BIZ_FILLING.discard(ticker)
 
 
 def _company_business_summary(ticker: str, name: str = "") -> str:
-    """Cached one-paragraph description. Looks up Wikipedia only when stale.
+    """Stored 10-K blurb. A missing or wrong one is filled off the request.
 
-    A miss returns the last stored text, or nothing. It does not fail the page.
+    Wikipedia search is not used: TRT came back as a jazz trio. The page
+    does not wait on EDGAR.
     """
     tk = (ticker or "").strip().upper()
     if not tk or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
@@ -3224,13 +3313,22 @@ def _company_business_summary(ticker: str, name: str = "") -> str:
     try:
         with _fund_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT business_summary, summary_at FROM security_meta WHERE symbol=%s",
+                """SELECT business_summary, summary_at, source
+                     FROM security_meta WHERE symbol=%s""",
                 (tk,),
             )
             row = cur.fetchone()
         if row:
             stored = (row[0] or "").strip()
             ts = row[1]
+            source = (row[2] or "") if len(row) > 2 else ""
+            if source == "sec-10k" and stored and ts is not None:
+                import datetime as _dt
+                now = _dt.datetime.now(_dt.timezone.utc)
+                if getattr(ts, "tzinfo", None) is None:
+                    ts = ts.replace(tzinfo=_dt.timezone.utc)
+                if (now - ts).total_seconds() < 180 * 24 * 3600:
+                    return stored
             if stored and ts is not None:
                 import datetime as _dt
                 now = _dt.datetime.now(_dt.timezone.utc)
@@ -3240,30 +3338,16 @@ def _company_business_summary(ticker: str, name: str = "") -> str:
     except Exception as e:
         print(f"[fin] business summary read {tk}: {e!s:.120}", flush=True)
         return ""
-    if fresh:
-        return stored
-    try:
-        text = _wiki_business_summary(name or tk)
-    except Exception as e:
-        print(f"[fin] business summary yahoo {tk}: {e!s:.120}", flush=True)
-        return stored
-    if not text:
-        return stored
-    try:
-        with _fund_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                """INSERT INTO security_meta
-                       (symbol, business_summary, summary_at, source, updated_at)
-                   VALUES (%s, %s, now(), 'wikipedia', now())
-                   ON CONFLICT (symbol) DO UPDATE SET
-                     business_summary = EXCLUDED.business_summary,
-                     summary_at = now()""",
-                (tk, text),
-            )
-            conn.commit()
-    except Exception as e:
-        print(f"[fin] business summary save {tk}: {e!s:.120}", flush=True)
-    return text
+    good = stored if (fresh and _summary_fits_company(stored, name or "")) else ""
+    if good:
+        return good
+    if tk not in _BIZ_FILLING:
+        _BIZ_FILLING.add(tk)
+        threading.Thread(
+            target=_fill_business_summary, args=(tk, name or ""),
+            daemon=True, name=f"biz-{tk}",
+        ).start()
+    return good
 
 
 def _db_meta(symbols) -> dict:
@@ -4068,7 +4152,8 @@ def _industry_peer_snapshots(tk: str, limit: int = 40) -> tuple[list, str | None
             """, (cand_syms,))
             fins = {r["ticker"].upper(): r for r in (cur.fetchall() or [])}
 
-        quotes = _warm_quotes_for_comps(list(fins.keys()) + [tk], cap=24)
+        # Store only. A live Yahoo cascade here was 17–23s on the dashboard.
+        quotes = _db_quotes(list(fins.keys()) + [tk]) or {}
         # Build candidate_meta with mcaps for scoring
         cand_meta = []
         for r in cand_rows:

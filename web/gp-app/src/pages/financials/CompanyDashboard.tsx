@@ -13,6 +13,7 @@ import type {
   PeriodType,
 } from './types'
 import { HoverTip } from './HoverTip'
+import { BizBlurb } from './BizBlurb'
 import { LS_LAST_TICKER } from './types'
 import {
   gfCap,
@@ -303,9 +304,7 @@ export function CompanyDashboard({
                   {[dash.sector, dash.industry].filter(Boolean).join(' · ')}
                 </div>
               )}
-              {dash.business_summary && (
-                <p className={styles.bizSummary}>{dash.business_summary}</p>
-              )}
+              <BizBlurb text={dash.business_summary} />
               <div className={styles.priceBig}>
                 {price != null ? fmtPx(price) : '—'}
                 {dash.rating && (

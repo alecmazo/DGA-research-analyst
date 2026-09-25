@@ -6,6 +6,7 @@ import { api, downloadAuth } from '@/lib/api'
 import type { SheetData, SheetLink } from './types'
 import { vlMoney } from './format'
 import styles from '../FinancialsPage.module.css'
+import { BizBlurb } from './BizBlurb'
 
 type Props = {
   ticker: string
@@ -200,9 +201,7 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
               {sectorLine && (
                 <div className={styles.sectorLine}>{sectorLine}</div>
               )}
-              {sheet.business_summary && (
-                <p className={styles.bizSummary}>{sheet.business_summary}</p>
-              )}
+              <BizBlurb text={sheet.business_summary} />
             </div>
             <div className={styles.vlHeadRight}>
               Value Line–style · SEC store

@@ -12,7 +12,8 @@ def test_financials_page_shows_what_the_company_does():
     assert "business_summary" in dash
     body = (ROOT / "api/domains/_financials_body.py").read_text()
     assert "def _company_business_summary" in body
-    assert "en.wikipedia.org/api/rest_v1/page/summary" in body
+    assert "sec-10k" in body
+    assert "_warm_quotes_for_comps(list(fins.keys())" not in body
 
 
 def test_continuity_files_exist():
