@@ -25,6 +25,9 @@ export function FundPositionsTable({ rows }: { rows: FundPosition[] }) {
               <th className="tabular">Last</th>
               <th className="tabular">Mkt Value</th>
               <th className="tabular">Unreal.</th>
+              <th className="tabular" title="Percent change from average cost">
+                Since cost
+              </th>
               <th className="tabular">Weight</th>
             </tr>
           </thead>
@@ -38,16 +41,19 @@ export function FundPositionsTable({ rows }: { rows: FundPosition[] }) {
                     : p.market_value && totalMv > 0
                       ? (p.market_value / totalMv) * 100
                       : p.weight_pct
+                const isCash =
+                  p.asset_class === 'cash' || (p.symbol || '').toUpperCase() === 'CASH'
+                const sinceCost =
+                  !isCash && p.avg_cost != null && p.avg_cost > 0 && p.last_price != null
+                    ? ((p.last_price - p.avg_cost) / p.avg_cost) * 100
+                    : null
                 return (
                   <tr key={`${p.symbol}-${i}`}>
                     <td>
                       <span className={styles.tk} title={p.name || ''}>
                         {p.symbol || '—'}
                       </span>
-                      {(p.asset_class === 'cash' ||
-                        (p.symbol || '').toUpperCase() === 'CASH') && (
-                        <span className={styles.pill}>CASH</span>
-                      )}
+                      {isCash && <span className={styles.pill}>CASH</span>}
                     </td>
                     <td className="tabular">{(p.total_qty || 0).toFixed(2)}</td>
                     <td className="tabular">
@@ -57,6 +63,9 @@ export function FundPositionsTable({ rows }: { rows: FundPosition[] }) {
                     <td className="tabular">{fmtUsd(p.market_value)}</td>
                     <td className={`tabular ${pctClass(p.unrealized_gain)}`}>
                       {p.unrealized_gain != null ? fmtUsd(p.unrealized_gain) : '—'}
+                    </td>
+                    <td className={`tabular ${pctClass(sinceCost)}`}>
+                      {sinceCost != null ? fmtPct(sinceCost, 1) : '—'}
                     </td>
                     <td className="tabular">
                       {curPct != null ? fmtPct(curPct, 1).replace('+', '') : '—'}

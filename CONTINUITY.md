@@ -253,6 +253,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Statement lines** | **`ui670-20260925-stmt-lines`** | Assets and liabilities in the Value Line array expand. Income, balance sheet, cash flow, and comprehensive income open for the last five years. |
 | **Statement sections** | **`ui671-20260925-stmt-sections`** | Balance sheet splits assets, liabilities, and equity. Income statement keeps revenue, cost of revenue, gross income, SG&A, and operating income in order. Cash flow splits operating, investing, and financing, then sums them. Hover a balance-sheet line for the 10-K note. |
 | **Munger page** | **`ui672-20260925-munger-page`** | A Munger page: morning card (one rule, one holding), the fifty as an index, and each rule across the watchlist from saved report citations. No model call on load. |
+| **Since cost** | **`ui673-20260926-since-cost`** | Open positions show percent change from average cost, between unrealized gain and weight. |
 
 ### One-click handoff (preferred)
 
@@ -442,4 +443,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-25 · Agent: Grok Build · Live: `ui672-20260925-munger-page` · Next: `ui673-YYYYMMDD-slug`*
+*Last updated: 2026-09-26 · Agent: Grok Build · Live: `ui673-20260926-since-cost` · Next: `ui674-YYYYMMDD-slug`*
