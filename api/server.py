@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui680-20260928-transcript-ask"
+WEB_BUILD_VERSION = "ui681-20260928-local-refusal"
 
 
 @app.get("/api/build")
@@ -9692,6 +9692,12 @@ def local_save_report(body: LocalSaveRequest, request: Request):
     text = (body.text or "").strip()
     if len(text) < 20:
         raise HTTPException(status_code=400, detail="Report is too short to save")
+    from api.domains.local_finance_llm import is_model_refusal
+    if is_model_refusal(text):
+        raise HTTPException(
+            status_code=422,
+            detail="The local model refused this run. The previous note was kept.",
+        )
     md_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report_local.md"
     docx_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report_local.docx"
     md_path.parent.mkdir(parents=True, exist_ok=True)
@@ -10145,6 +10151,7 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
         provider = "kimi"
     if provider not in ("grok", "claude", "kimi", "deepseek", "local"):
         provider = "grok"
+    held_local: dict | None = None
 
     def _present_md(md: str, *, row=None, payload: dict) -> dict:
         """If this engine saved a live-search dump, show a real report or a
@@ -10378,7 +10385,12 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                                        else _f(row.get("upside_pct")),
                     })
                 if provider == "local" and (row.get("report_md_local") or "").strip():
-                    return _present_md(row["report_md_local"], row=row, payload={
+                    from api.domains.local_finance_llm import is_model_refusal
+                    local_md = row["report_md_local"]
+                    if is_model_refusal(local_md):
+                        local_md = ""
+                    if local_md:
+                        held_payload = {
                         "ticker": ticker,
                         "provider": "local",
                         "version_count": _vc,
@@ -10393,7 +10405,14 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                         "rating": row.get("local_rating"),
                         "price_target": _f(row.get("local_price_target")),
                         "upside_pct": _f(row.get("local_upside_pct")),
-                    })
+                        }
+                        held_local = held_payload
+                        try:
+                            return _present_md(local_md, row=row, payload=held_payload)
+                        except Exception as _present_exc:
+                            print(f"[local] present {ticker}: {_present_exc!s:.160}", flush=True)
+                            held_payload["report_md"] = local_md
+                            return held_payload
                 if provider == "local":
                     row = None
                 if row and provider == "grok" and (row.get("report_md") or "").strip():
@@ -10442,12 +10461,23 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
         except Exception as _e:
             print(f"[analyst_reports] get_report DB query failed for {ticker} (falling back): {_e!s:.200}")
 
+    if provider == "local" and held_local and (held_local.get("report_md") or "").strip():
+        return held_local
+
     # ── Fallback: filesystem ─────────────────────────────────────────────────
     _suffix = "" if provider == "grok" else f"_{provider}"
     md_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report{_suffix}.md"
     if not md_path.exists():
         raise HTTPException(status_code=404,
                              detail=f"No {provider} report found for {ticker}")
+    if provider == "local":
+        from api.domains.local_finance_llm import is_model_refusal
+        _file_text = md_path.read_text()
+        if is_model_refusal(_file_text):
+            raise HTTPException(
+                status_code=404,
+                detail="The local model refused this run. The previous note was kept.",
+            )
     folder = analyst.STOCKS_FOLDER
     has_docx = (folder / f"{ticker}_DGA_Report{_suffix}.docx").exists()
     has_pptx = (folder / f"{ticker}_DGA_Presentation.pptx").exists() if provider == "grok" else False

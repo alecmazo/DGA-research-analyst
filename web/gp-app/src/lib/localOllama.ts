@@ -6,6 +6,28 @@ export const LOCAL_MODEL = 'gpt-oss-20b-finance'
 
 const OFFLINE = 'Local model offline – start Ollama'
 
+/** A one-line apology is not a research note. */
+export function isModelRefusal(text: string): boolean {
+  const raw = (text || '').trim()
+  if (!raw || raw.length > 800) return false
+  const low = raw.toLowerCase().replace(/’/g, "'")
+  return [
+    "i'm sorry",
+    'i am sorry',
+    "can't comply",
+    'cannot comply',
+    "can't continue",
+    'cannot continue',
+    "can't assist",
+    'cannot assist',
+    "can't help with that",
+    'cannot help with that',
+  ].some((n) => low.includes(n))
+}
+
+export const LOCAL_RETRY_SYSTEM =
+  "You are DGA Capital's research analyst. Write a full equity research note in markdown using only the figures in the user message. Use those figures exactly. Include an executive summary with a rating (Strong Buy, Buy, Hold, or Sell) and a 12-month price target, a business overview, financial tables, valuation, risks, and a sources line. Write the note. Do not refuse and do not stop after one sentence."
+
 export type OllamaState = {
   ok: boolean
   message: string

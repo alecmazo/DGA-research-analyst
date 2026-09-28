@@ -261,6 +261,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Transcript library** | **`ui678-20260928-transcript-tree`** | Interviews and earnings calls sit in one folder tree on Transcripts. Local opens that library. A red Ollama pill starts or restarts Ollama on this Mac. |
 | **Local window** | **`ui679-20260928-local-window`** | A local note opens in its own window, labeled local plus the model name, in light red and grey. It is not listed on the desk, and a new run is compared only with the previous local note. |
 | **Transcript ask** | **`ui680-20260928-transcript-ask`** | Expanding an earnings-call company offers Refresh for that ticker only. Ask a question uses the on-Mac model unless another engine is chosen. |
+| **Local refusal** | **`ui681-20260928-local-refusal`** | A one-line local refusal is not saved over the note. HHH opens the stored research report. A refusal retries once, then keeps the previous note. |
 
 ### One-click handoff (preferred)
 
@@ -450,4 +451,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-28 · Agent: Grok Build · Live: `ui680-20260928-transcript-ask` · Next: `ui681-YYYYMMDD-slug`*
+*Last updated: 2026-09-28 · Agent: Grok Build · Live: `ui681-20260928-local-refusal` · Next: `ui682-YYYYMMDD-slug`*

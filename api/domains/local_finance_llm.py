@@ -23,6 +23,37 @@ class LocalLlmError(RuntimeError):
     """The local model did not answer. Do not fall back to a paid provider."""
 
 
+def is_model_refusal(text: str | None) -> bool:
+    """True when the local model returned a one-line refusal instead of a note."""
+    raw = (text or "").strip()
+    if not raw or len(raw) > 800:
+        return False
+    low = raw.lower().replace("’", "'")
+    needles = (
+        "i'm sorry",
+        "i am sorry",
+        "can't comply",
+        "cannot comply",
+        "can't continue",
+        "cannot continue",
+        "can't assist",
+        "cannot assist",
+        "can't help with that",
+        "cannot help with that",
+    )
+    return any(n in low for n in needles)
+
+
+LOCAL_RETRY_SYSTEM = (
+    "You are DGA Capital's research analyst. Write a full equity research note "
+    "in markdown using only the figures in the user message. Use those figures "
+    "exactly. Include an executive summary with a rating (Strong Buy, Buy, Hold, "
+    "or Sell) and a 12-month price target, a business overview, financial tables, "
+    "valuation, risks, and a sources line. Write the note. Do not refuse and do "
+    "not stop after one sentence."
+)
+
+
 def _env(name: str, default: str) -> str:
     value = os.environ.get(name, "").strip()
     return value or default

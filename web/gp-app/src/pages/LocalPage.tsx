@@ -2,7 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { openReportWindow } from '@/pages/ReportPage'
-import { ensureOllama, ollamaChat, ollamaStatus, parseToolCall } from '@/lib/localOllama'
+import {
+  ensureOllama,
+  isModelRefusal,
+  LOCAL_RETRY_SYSTEM,
+  ollamaChat,
+  ollamaStatus,
+  parseToolCall,
+} from '@/lib/localOllama'
 import { renderMd } from '@/lib/md'
 import { Button } from '@/components/ui/Button'
 import { Panel } from '@/components/ui/Panel'
@@ -127,11 +134,20 @@ export function LocalPage() {
       )
       if (!prep.system || !prep.user) throw new Error(prep.detail || 'Could not build the prompt')
       setProgress('Writing on this Mac…')
-      const chat = await ollamaChat({
+      let chat = await ollamaChat({
         system: prep.system,
         user: prep.user,
       })
-      if (!chat.text) throw new Error('The local model returned an empty answer')
+      if (isModelRefusal(chat.text)) {
+        setProgress('Writing the note again…')
+        chat = await ollamaChat({
+          system: LOCAL_RETRY_SYSTEM,
+          user: prep.user,
+        })
+      }
+      if (!chat.text || isModelRefusal(chat.text)) {
+        throw new Error('The local model refused this run. The previous note was kept.')
+      }
       setProgress('Saving…')
       await api('/api/local/save', {
         method: 'POST',
