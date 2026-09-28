@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, type JobStatus } from '@/lib/api'
-import { pollJob } from '@/lib/jobs'
+import { api } from '@/lib/api'
+import { ollamaChat, ollamaStatus, parseToolCall } from '@/lib/localOllama'
 import { renderMd } from '@/lib/md'
 import { Button } from '@/components/ui/Button'
 import page from './page.module.css'
@@ -14,6 +14,8 @@ type Status = {
   host?: string
   worktree?: string
   branch?: string
+  agent_system?: string
+  portfolio_system?: string
 }
 
 type Portfolio = {
@@ -44,11 +46,20 @@ export function LocalPage() {
   const [book, setBook] = useState('')
   const [reviewing, setReviewing] = useState(false)
   const [review, setReview] = useState<Answer | null>(null)
+  const [draft, setDraft] = useState('')
 
   const loadStatus = useCallback(() => {
-    void api<Status>('/api/local/status')
-      .then(setStatus)
-      .catch(() => setStatus({ ok: false, message: 'Local model offline – start Ollama' }))
+    void Promise.all([
+      ollamaStatus(),
+      api<Status>('/api/local/status').catch(() => ({}) as Status),
+    ]).then(([ollama, meta]) => {
+      setStatus({
+        ...meta,
+        ok: ollama.ok,
+        message: ollama.ok ? meta.message : ollama.message,
+        model: ollama.model || meta.model,
+      })
+    })
   }, [])
 
   useEffect(() => {
@@ -75,29 +86,34 @@ export function LocalPage() {
     setRunning(true)
     setRunErr(null)
     setDoneTicker(null)
-    setProgress('Queued…')
+    setDraft('')
+    setProgress('Gathering the filing and Yahoo news…')
     try {
-      const job = await api<JobStatus>('/api/analyze', {
+      const prep = await api<{ ok?: boolean; system?: string; user?: string; detail?: string }>(
+        '/api/local/research-prompt',
+        { method: 'POST', body: JSON.stringify({ ticker: tk }) },
+      )
+      if (!prep.system || !prep.user) throw new Error(prep.detail || 'Could not build the prompt')
+      setProgress('Writing on this Mac…')
+      const chat = await ollamaChat({
+        system: prep.system,
+        user: prep.user,
+        onDelta: (chunk) => setDraft((prev) => prev + chunk),
+      })
+      if (!chat.text) throw new Error('The local model returned an empty answer')
+      setProgress('Saving…')
+      await api('/api/local/save', {
         method: 'POST',
         body: JSON.stringify({
           ticker: tk,
-          generate_gamma: false,
-          llm_provider: 'local',
-          llm_providers: ['local'],
+          text: chat.text,
+          tokens_per_sec: chat.tokensPerSec,
+          latency_ms: chat.latencyMs,
         }),
       })
-      if (!job.job_id) throw new Error('No job id')
-      const final = await pollJob(job.job_id, {
-        onProgress: (_pct, label) => setProgress(label || 'Running…'),
-      })
-      if (final.status === 'failed') {
-        setRunErr(final.error || 'Local analysis failed')
-      } else if (final.status === 'done') {
-        setDoneTicker(tk)
-        setProgress(final.progress?.label || 'Report ready · cost: $0')
-      } else {
-        setRunErr(final.error || final.status || 'Stopped')
-      }
+      const speed = chat.tokensPerSec != null ? ` · ${chat.tokensPerSec.toFixed(1)} tok/s` : ''
+      setDoneTicker(tk)
+      setProgress(`Report ready · ${Math.round(chat.latencyMs / 1000)}s${speed} · cost: $0`)
     } catch (e) {
       setRunErr(e instanceof Error ? e.message : 'Could not start')
     } finally {
@@ -110,14 +126,36 @@ export function LocalPage() {
     if (!q) return
     setAsking(true)
     setAsk(null)
+    const system = status?.agent_system || 'You are the local finance analyst. Do not invent figures.'
+    let transcript = q
+    const steps: { tool?: string; ticker?: string }[] = []
     try {
-      const d = await api<Answer>('/api/local/ask', {
-        method: 'POST',
-        body: JSON.stringify({ question: q }),
-      })
-      setAsk(d)
+      let answer = ''
+      for (let i = 0; i < 4; i++) {
+        const chat = await ollamaChat({ system, user: transcript, maxTokens: 3500 })
+        const call = parseToolCall(chat.text)
+        if (!call) {
+          answer = chat.text
+          break
+        }
+        const tool = await api<{ result?: string }>('/api/local/tool', {
+          method: 'POST',
+          body: JSON.stringify(call),
+        })
+        steps.push({ tool: call.tool, ticker: call.ticker || call.portfolio })
+        transcript += `\n\nTOOL ${call.tool} RESULT:\n${tool.result || ''}\n\nUse this. Ask for another tool as JSON, or write the markdown answer.`
+      }
+      if (!answer) {
+        const chat = await ollamaChat({
+          system,
+          user: `${transcript}\n\nWrite the markdown answer now. Do not call a tool.`,
+          maxTokens: 3500,
+        })
+        answer = chat.text
+      }
+      setAsk({ ok: true, answer, steps })
     } catch (e) {
-      setAsk({ ok: false, error: e instanceof Error ? e.message : 'Ask failed' })
+      setAsk({ ok: false, error: e instanceof Error ? e.message : 'Ask failed', steps })
     } finally {
       setAsking(false)
     }
@@ -128,11 +166,17 @@ export function LocalPage() {
     setReviewing(true)
     setReview(null)
     try {
-      const d = await api<Answer>('/api/local/portfolio', {
-        method: 'POST',
-        body: JSON.stringify({ portfolio: book }),
+      const prep = await api<{ ok?: boolean; system?: string; user?: string; error?: string }>(
+        '/api/local/portfolio-prompt',
+        { method: 'POST', body: JSON.stringify({ portfolio: book }) },
+      )
+      if (!prep.ok || !prep.user) throw new Error(prep.error || 'Could not load the portfolio')
+      const chat = await ollamaChat({
+        system: prep.system || status?.portfolio_system || 'You are the local portfolio analyst.',
+        user: prep.user,
+        maxTokens: 4000,
       })
-      setReview(d)
+      setReview({ ok: true, answer: chat.text })
     } catch (e) {
       setReview({ ok: false, error: e instanceof Error ? e.message : 'Review failed' })
     } finally {
@@ -186,6 +230,9 @@ export function LocalPage() {
           </Button>
         </div>
         {progress && <p className={styles.meta}>{progress}</p>}
+        {draft && (
+          <div className={styles.answer} dangerouslySetInnerHTML={{ __html: renderMd(draft) }} />
+        )}
         {runErr && <p className={styles.warn}>{runErr}</p>}
         {doneTicker && (
           <p className={styles.meta}>

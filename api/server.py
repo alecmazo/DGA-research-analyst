@@ -8601,7 +8601,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui675-20260928-local-page"
+WEB_BUILD_VERSION = "ui676-20260928-local-browser"
 
 
 @app.get("/api/build")
@@ -9544,6 +9544,30 @@ class LocalPortfolioRequest(BaseModel):
     portfolio: str = ""
 
 
+class LocalTickerRequest(BaseModel):
+    ticker: str = ""
+
+
+class LocalSaveRequest(BaseModel):
+    ticker: str = ""
+    text: str = ""
+    tokens_per_sec: float | None = None
+    latency_ms: int | None = None
+
+
+class LocalToolRequest(BaseModel):
+    tool: str = ""
+    ticker: str = ""
+    portfolio: str = ""
+
+
+def _local_ticker(raw: str) -> str:
+    ticker = (raw or "").strip().upper()
+    if not ticker or len(ticker) > 12 or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,11}", ticker):
+        raise HTTPException(status_code=422, detail="Invalid ticker symbol")
+    return ticker
+
+
 @app.get("/api/local/status")
 def local_page_status(request: Request):
     """Ollama dot plus the worktree this page is running from."""
@@ -9586,6 +9610,85 @@ def local_page_portfolio(body: LocalPortfolioRequest, request: Request):
         rows_fn=_local_store_rows,
         platform_fn=_agentic_exec_tool,
     )
+
+
+@app.post("/api/local/research-prompt")
+def local_research_prompt(body: LocalTickerRequest, request: Request):
+    """Build the local research prompt. The browser sends it to Ollama."""
+    _claims_or_401(request)
+    ticker = _local_ticker(body.ticker)
+    result = analyst.analyze_ticker(
+        ticker,
+        system_prompt=analyst.load_system_prompt(),
+        generate_gamma=False,
+        verbose=False,
+        llm_provider="local",
+        prepare_only=True,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=500, detail=str(result.get("error") or "Could not build the prompt")[:400])
+    return {
+        "ok": True,
+        "ticker": ticker,
+        "system": result.get("system_prompt") or "",
+        "user": result.get("user_msg") or "",
+        "model": "gpt-oss-20b-finance",
+    }
+
+
+@app.post("/api/local/tool")
+def local_tool(body: LocalToolRequest, request: Request):
+    """One data lookup for the browser-side local agent. No model call."""
+    _claims_or_401(request)
+    from api.domains.local_desk import run_local_tools
+    text = run_local_tools(
+        {"tool": body.tool, "ticker": body.ticker, "portfolio": body.portfolio},
+        rows_fn=_local_store_rows,
+        platform_fn=_agentic_exec_tool,
+    )
+    return {"ok": True, "result": text}
+
+
+@app.post("/api/local/portfolio-prompt")
+def local_portfolio_prompt(body: LocalPortfolioRequest, request: Request):
+    """Portfolio context for the browser to send to Ollama."""
+    _claims_or_401(request)
+    from api.domains.local_desk import portfolio_prompt
+    return portfolio_prompt(
+        body.portfolio,
+        rows_fn=_local_store_rows,
+        platform_fn=_agentic_exec_tool,
+    )
+
+
+@app.post("/api/local/save")
+def local_save_report(body: LocalSaveRequest, request: Request):
+    """Store a report the browser wrote with the local model."""
+    _claims_or_401(request)
+    ticker = _local_ticker(body.ticker)
+    text = (body.text or "").strip()
+    if len(text) < 20:
+        raise HTTPException(status_code=400, detail="Report is too short to save")
+    md_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report_local.md"
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(text, encoding="utf-8")
+    try:
+        summary = analyst.extract_summary_from_report(text)
+    except Exception:
+        summary = {}
+    result = {
+        "ok": True,
+        "report_text": text,
+        "summary": summary,
+        "ticker": ticker,
+        "cost_usd": 0,
+        "tokens_per_sec": body.tokens_per_sec,
+        "latency_ms": body.latency_ms,
+    }
+    persisted, chars = _persist_analysis_text(
+        ticker=ticker, provider="local", result=result,
+    )
+    return {"ok": True, "persisted": bool(persisted), "chars": chars, "ticker": ticker}
 
 
 @app.post("/api/analyze", response_model=JobStatus)

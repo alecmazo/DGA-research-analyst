@@ -40,6 +40,12 @@ def worktree_info() -> dict:
     return {"path": str(_REPO), "branch": branch}
 
 
+PORTFOLIO_SYSTEM = (
+    "You are the local portfolio analyst. Be concrete. Cost is $0. "
+    "No paid-model search."
+)
+
+
 def page_status() -> dict:
     health = check_local_health()
     cfg = local_settings()
@@ -48,10 +54,14 @@ def page_status() -> dict:
         "ok": bool(health.get("ok")),
         "message": health.get("message") or "",
         "model": health.get("model") or cfg["model"],
-        "host": cfg["base_url"],
+        "host": "http://127.0.0.1:11434",
         "enabled": cfg["enabled"],
         "worktree": tree["path"],
         "branch": tree["branch"],
+        "agent_system": AGENT_SYSTEM,
+        "portfolio_system": PORTFOLIO_SYSTEM,
+        "num_ctx": cfg["num_ctx"],
+        "think": cfg["think"],
     }
 
 
@@ -127,7 +137,7 @@ def run_local_tools(call: dict, *, rows_fn, platform_fn) -> str:
     return f"Unknown tool {name}. Use company_financials, yahoo_news, list_portfolios, portfolio_holdings, or quote."
 
 
-_AGENT_SYSTEM = """You are the local finance analyst on this Mac. You only know what your tools return.
+AGENT_SYSTEM = """You are the local finance analyst on this Mac. You only know what your tools return.
 Do not invent financial figures, news, or holdings.
 
 To fetch data, reply with ONLY a JSON object, no markdown:
@@ -160,7 +170,7 @@ def run_local_agent(question: str, *, rows_fn=None, platform_fn=None,
     answer = ""
     for _ in range(4):
         try:
-            answer = chat(_AGENT_SYSTEM, transcript)
+            answer = chat(AGENT_SYSTEM, transcript)
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:300], "steps": steps}
         call = parse_tool_call(answer)
@@ -175,7 +185,7 @@ def run_local_agent(question: str, *, rows_fn=None, platform_fn=None,
     else:
         try:
             answer = chat(
-                _AGENT_SYSTEM,
+                AGENT_SYSTEM,
                 transcript + "\n\nWrite the markdown answer now. Do not call a tool.",
             )
         except Exception as exc:
@@ -183,14 +193,11 @@ def run_local_agent(question: str, *, rows_fn=None, platform_fn=None,
     return {"ok": True, "answer": answer, "steps": steps}
 
 
-def recommend_portfolio(name: str, *, rows_fn=None, platform_fn=None, chat_fn=None) -> dict:
-    """One local pass over a real account: holdings, store figures, Yahoo news."""
+def portfolio_prompt(name: str, *, rows_fn=None, platform_fn=None) -> dict:
+    """Holdings, store figures, and Yahoo news. The browser sends this to Ollama."""
     account = (name or "").strip()
     if not account:
         return {"ok": False, "error": "Pick a portfolio first."}
-    health = check_local_health()
-    if not health.get("ok"):
-        return {"ok": False, "error": health.get("message") or "Local model offline – start Ollama"}
     platform = platform_fn or (lambda _n, _a: "That tool is not available.")
     holdings = platform("get_portfolio_holdings", {"portfolio": account})
     tickers = re.findall(r"\b[A-Z]{1,5}(?:\.[A-Z])?\b", holdings or "")[:8]
@@ -214,15 +221,22 @@ def recommend_portfolio(name: str, *, rows_fn=None, platform_fn=None, chat_fn=No
         f"HOLDINGS:\n{holdings[:12000]}\n\n"
         + "\n\n".join(packets)
     )
+    return {"ok": True, "system": PORTFOLIO_SYSTEM, "user": user, "tickers": tickers}
+
+
+def recommend_portfolio(name: str, *, rows_fn=None, platform_fn=None, chat_fn=None) -> dict:
+    """Server-side pass. The live site uses portfolio_prompt and the browser instead."""
+    built = portfolio_prompt(name, rows_fn=rows_fn, platform_fn=platform_fn)
+    if not built.get("ok"):
+        return built
+    health = check_local_health()
+    if not health.get("ok"):
+        return {"ok": False, "error": health.get("message") or "Local model offline – start Ollama"}
     chat = chat_fn or (lambda system, content: complete_local(
-        system, content, max_tokens=4000, ticker=account[:12] or "BOOK",
+        system, content, max_tokens=4000, ticker=(name or "BOOK")[:12],
     ))
     try:
-        answer = chat(
-            "You are the local portfolio analyst. Be concrete. Cost is $0. "
-            "No paid-model search.",
-            user,
-        )
+        answer = chat(built["system"], built["user"])
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:300]}
-    return {"ok": True, "answer": answer, "tickers": tickers}
+    return {"ok": True, "answer": answer, "tickers": built.get("tickers") or []}

@@ -9819,7 +9819,7 @@ def analyze_ticker(ticker: str, *, system_prompt: str, generate_gamma: bool,
                    verbose: bool = True, reuse_existing: bool = False,
                    on_progress=None, llm_provider: str = "grok",
                    on_delta=None, reuse_user_msg: bool = False,
-                   should_cancel=None) -> dict:
+                   should_cancel=None, prepare_only: bool = False) -> dict:
     """Public wrapper around :func:`_analyze_ticker_impl` that never raises —
     EXCEPT :class:`ClaudeCancelled`, which passes through so callers can
     distinguish a user cancel from a failure.
@@ -9850,6 +9850,7 @@ def analyze_ticker(ticker: str, *, system_prompt: str, generate_gamma: bool,
             on_delta=on_delta,
             reuse_user_msg=reuse_user_msg,
             should_cancel=should_cancel,
+            prepare_only=prepare_only,
         )
     except ClaudeCancelled:
         raise
@@ -9885,7 +9886,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                          verbose: bool = True, reuse_existing: bool = False,
                          on_progress=None, llm_provider: str = "grok",
                          on_delta=None, reuse_user_msg: bool = False,
-                         should_cancel=None) -> dict:
+                         should_cancel=None, prepare_only: bool = False) -> dict:
     """Analyze a single ticker end-to-end.
 
     When ``reuse_existing`` is True and a cached markdown report already exists
@@ -10741,6 +10742,16 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             )
     except Exception as _pe:
         print(f"   ⚠️  Prior thesis inject failed: {_pe!s:.120}", flush=True)
+
+    if prepare_only:
+        return {
+            "ok": True,
+            "prepare_only": True,
+            "ticker": ticker,
+            "system_prompt": system_prompt,
+            "user_msg": user_msg,
+            "model": _model_label,
+        }
 
     print(f"   🧠 Calling {_prov.upper()} ({_model_label})"
           + (" with live X/news/web search (90d)…" if _live else "…"))
