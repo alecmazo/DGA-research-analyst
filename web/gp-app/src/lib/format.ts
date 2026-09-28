@@ -93,6 +93,7 @@ export function printEngineName(providerOrModel?: string | null): string {
   if (m.includes('grok') || m === 'xai') return 'Rock'
   if (m.includes('kimi')) return 'Kimi'
   if (m.includes('deepseek')) return 'DeepSeek'
+  if (m === 'local' || m.includes('gpt-oss')) return 'Local Finance'
   return providerOrModel || ''
 }
 

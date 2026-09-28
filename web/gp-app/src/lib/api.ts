@@ -530,7 +530,7 @@ export type MeResponse = {
   demo_mode?: boolean
 }
 
-export type LlmProvider = 'grok' | 'claude' | 'deepseek' | 'kimi'
+export type LlmProvider = 'grok' | 'claude' | 'deepseek' | 'kimi' | 'local'
 
 export type ReportDelta = {
   has_change?: boolean
@@ -624,6 +624,8 @@ export type JobStatus = {
     cost_estimated?: boolean
     input_tokens?: number | null
     output_tokens?: number | null
+    tokens_per_sec?: number | null
+    latency_ms?: number | null
     model?: string
     provider?: string
     price_target?: number | null

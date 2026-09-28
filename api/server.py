@@ -6812,7 +6812,7 @@ def _persist_analysis_text(
     provider = (provider or "grok").lower().strip()
     if provider == "volume":
         provider = "kimi"
-    if provider not in ("grok", "claude", "kimi", "deepseek"):
+    if provider not in ("grok", "claude", "kimi", "deepseek", "local"):
         return False, 0
     _suffix  = "" if provider == "grok" else f"_{provider}"
     _md_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report{_suffix}.md"
@@ -7186,7 +7186,7 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
     if provider == "volume":
         # Legacy alias: prefer Kimi when configured, else DeepSeek
         provider = "kimi" if getattr(analyst, "kimi_configured", lambda: False)() else "deepseek"
-    if provider not in ("grok", "claude", "deepseek", "kimi", "both"):
+    if provider not in ("grok", "claude", "deepseek", "kimi", "local", "both"):
         provider = "grok"
 
     # Dispatch 'both' to the dedicated runner
@@ -7262,7 +7262,7 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
                 verbose=False,
                 on_progress=_record_progress,
                 llm_provider=provider,
-                reuse_user_msg=(provider in ("claude", "kimi")),
+                reuse_user_msg=(provider in ("claude", "kimi", "local")),
                 should_cancel=_cancel_requested,
             )
         except analyst.ClaudeCancelled:
@@ -9521,6 +9521,14 @@ def diagnostics(request: Request):
     }
 
 
+@app.get("/api/llm/local/health")
+def local_llm_health(request: Request):
+    """Ollama is up and gpt-oss-20b-finance is installed. Never calls a paid model."""
+    _claims_or_401(request)
+    from api.domains.local_finance_llm import check_local_health
+    return check_local_health()
+
+
 @app.post("/api/analyze", response_model=JobStatus)
 def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
                    request: Request = None):
@@ -9536,7 +9544,7 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
     if not ticker or len(ticker) > 12 or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,11}", ticker):
         raise HTTPException(status_code=422, detail="Invalid ticker symbol")
 
-    allowed = ("grok", "claude", "deepseek", "kimi", "both")
+    allowed = ("grok", "claude", "deepseek", "kimi", "local", "both")
     raw_list = req.llm_providers if isinstance(req.llm_providers, list) else []
     providers: list[str] = []
     for p in raw_list:
@@ -9549,7 +9557,7 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
         if p in allowed and p != "both" and p not in providers:
             providers.append(p)
     # Grok first so Claude/Kimi can reuse its user_msg cache.
-    _ord = ("grok", "claude", "kimi", "deepseek")
+    _ord = ("grok", "claude", "kimi", "deepseek", "local")
     providers.sort(key=lambda p: _ord.index(p) if p in _ord else 99)
     provider = (req.llm_provider or "grok").lower().strip()
     if provider == "volume":
@@ -9562,7 +9570,7 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
         if provider not in allowed:
             raise HTTPException(
                 status_code=422,
-                detail="llm_provider must be 'grok' | 'claude' | 'deepseek' | 'kimi' | 'both'",
+                detail="llm_provider must be 'grok' | 'claude' | 'deepseek' | 'kimi' | 'local' | 'both'",
             )
         providers = [provider]
 
@@ -9896,6 +9904,8 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                 engines.append("kimi")
             if (row.get("report_md_deepseek") or "").strip():
                 engines.append("deepseek")
+            if (row.get("report_md_local") or "").strip():
+                engines.append("local")
             payload["providers"] = engines
         try:
             gap = analyst.report_tail_gap(
@@ -9933,10 +9943,12 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                            report_md_claude, claude_generated_at,
                            report_md_kimi, kimi_generated_at,
                            report_md_deepseek, deepseek_generated_at,
+                           report_md_local, local_generated_at,
                            rating, price_target, upside_pct,
                            claude_rating, claude_price_target, claude_upside_pct,
                            kimi_rating, kimi_price_target, kimi_upside_pct,
                            deepseek_rating, deepseek_price_target, deepseek_upside_pct,
+                           local_rating, local_price_target, local_upside_pct,
                            COALESCE(version_count, 1) AS version_count,
                            delta_from_prior
                     FROM analyst_reports
@@ -10006,7 +10018,29 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                                        if row.get("deepseek_upside_pct") is not None
                                        else _f(row.get("upside_pct")),
                     })
-                if provider == "grok" and (row.get("report_md") or "").strip():
+                if provider == "local" and (row.get("report_md_local") or "").strip():
+                    return _present_md(row["report_md_local"], row=row, payload={
+                        "ticker": ticker,
+                        "provider": "local",
+                        "version_count": _vc,
+                        "delta_from_prior": _parse_delta_blob(_delta_raw, "local"),
+                        "report_md": row["report_md_local"],
+                        "generated_at": _iso(row.get("local_generated_at")),
+                        "has_docx": False,
+                        "has_pptx": False,
+                        "gamma_url": None,
+                        "gamma_generated_at": None,
+                        "rating": row.get("local_rating") or row.get("rating"),
+                        "price_target": _f(row.get("local_price_target"))
+                                         if row.get("local_price_target") is not None
+                                         else _f(row.get("price_target")),
+                        "upside_pct": _f(row.get("local_upside_pct"))
+                                       if row.get("local_upside_pct") is not None
+                                       else _f(row.get("upside_pct")),
+                    })
+                if provider == "local":
+                    row = None
+                if row and provider == "grok" and (row.get("report_md") or "").strip():
                     return _present_md(row["report_md"], row=row, payload={
                         "ticker": ticker,
                         "provider": "grok",
@@ -10024,29 +10058,31 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                     })
                 # Requested engine missing — try any available rather than
                 # silently returning the wrong provider's text.
-                for alt, md_key, ts_key, rat_key, pt_key, up_key in (
-                    ("grok", "report_md", "generated_at", "rating", "price_target", "upside_pct"),
-                    ("claude", "report_md_claude", "claude_generated_at", "claude_rating", "claude_price_target", "claude_upside_pct"),
-                    ("kimi", "report_md_kimi", "kimi_generated_at", "kimi_rating", "kimi_price_target", "kimi_upside_pct"),
-                    ("deepseek", "report_md_deepseek", "deepseek_generated_at", "deepseek_rating", "deepseek_price_target", "deepseek_upside_pct"),
-                ):
-                    if (row.get(md_key) or "").strip():
-                        return _present_md(row[md_key], row=row, payload={
-                            "ticker": ticker,
-                            "provider": alt,
-                            "version_count": _vc,
-                            "delta_from_prior": _parse_delta_blob(_delta_raw, alt),
-                            "report_md": row[md_key],
-                            "generated_at": _iso(row.get(ts_key)),
-                            "has_docx": bool(row.get("has_docx")) if alt == "grok" else False,
-                            "has_pptx": bool(row.get("has_pptx")) if alt == "grok" else False,
-                            "gamma_url": row.get("gamma_url") if alt == "grok" else None,
-                            "gamma_generated_at": None,
-                            "rating": row.get(rat_key) or row.get("rating"),
-                            "price_target": _f(row.get(pt_key)) if row.get(pt_key) is not None else _f(row.get("price_target")),
-                            "upside_pct": _f(row.get(up_key)) if row.get(up_key) is not None else _f(row.get("upside_pct")),
-                            "note": f"Requested {provider} not found; showing {alt}.",
-                        })
+                # A missing local report must not be replaced by a paid model.
+                if provider != "local":
+                    for alt, md_key, ts_key, rat_key, pt_key, up_key in (
+                        ("grok", "report_md", "generated_at", "rating", "price_target", "upside_pct"),
+                        ("claude", "report_md_claude", "claude_generated_at", "claude_rating", "claude_price_target", "claude_upside_pct"),
+                        ("kimi", "report_md_kimi", "kimi_generated_at", "kimi_rating", "kimi_price_target", "kimi_upside_pct"),
+                        ("deepseek", "report_md_deepseek", "deepseek_generated_at", "deepseek_rating", "deepseek_price_target", "deepseek_upside_pct"),
+                    ):
+                        if (row.get(md_key) or "").strip():
+                            return _present_md(row[md_key], row=row, payload={
+                                "ticker": ticker,
+                                "provider": alt,
+                                "version_count": _vc,
+                                "delta_from_prior": _parse_delta_blob(_delta_raw, alt),
+                                "report_md": row[md_key],
+                                "generated_at": _iso(row.get(ts_key)),
+                                "has_docx": bool(row.get("has_docx")) if alt == "grok" else False,
+                                "has_pptx": bool(row.get("has_pptx")) if alt == "grok" else False,
+                                "gamma_url": row.get("gamma_url") if alt == "grok" else None,
+                                "gamma_generated_at": None,
+                                "rating": row.get(rat_key) or row.get("rating"),
+                                "price_target": _f(row.get(pt_key)) if row.get(pt_key) is not None else _f(row.get("price_target")),
+                                "upside_pct": _f(row.get(up_key)) if row.get(up_key) is not None else _f(row.get("upside_pct")),
+                                "note": f"Requested {provider} not found; showing {alt}.",
+                            })
         except Exception as _e:
             print(f"[analyst_reports] get_report DB query failed for {ticker} (falling back): {_e!s:.200}")
 
@@ -15855,36 +15891,42 @@ def _archive_prior_report_version(cur, ticker: str, provider: str, new_summary: 
         "claude": "report_md_claude",
         "kimi": "report_md_kimi",
         "deepseek": "report_md_deepseek",
+        "local": "report_md_local",
     }.get(provider, "report_md")
     col_gen = {
         "grok": "generated_at",
         "claude": "claude_generated_at",
         "kimi": "kimi_generated_at",
         "deepseek": "deepseek_generated_at",
+        "local": "local_generated_at",
     }.get(provider, "generated_at")
     col_rating = {
         "grok": "rating",
         "claude": "claude_rating",
         "kimi": "kimi_rating",
         "deepseek": "deepseek_rating",
+        "local": "local_rating",
     }.get(provider, "rating")
     col_pt = {
         "grok": "price_target",
         "claude": "claude_price_target",
         "kimi": "kimi_price_target",
         "deepseek": "deepseek_price_target",
+        "local": "local_price_target",
     }.get(provider, "price_target")
     col_up = {
         "grok": "upside_pct",
         "claude": "claude_upside_pct",
         "kimi": "kimi_upside_pct",
         "deepseek": "deepseek_upside_pct",
+        "local": "local_upside_pct",
     }.get(provider, "upside_pct")
     col_rd = {
         "grok": "report_date",
         "claude": "claude_report_date",
         "kimi": "kimi_report_date",
         "deepseek": "deepseek_report_date",
+        "local": "local_report_date",
     }.get(provider, "report_date")
 
     cur.execute(f"""
@@ -16263,6 +16305,40 @@ def _db_upsert_report(
                             archived          = FALSE,
                             last_attempt_at   = CASE WHEN %s THEN NOW()
                                                      ELSE analyst_reports.last_attempt_at END,
+                            last_attempt_status = CASE WHEN %s THEN 'success'
+                                                       ELSE analyst_reports.last_attempt_status END,
+                            last_attempt_error  = CASE WHEN %s THEN NULL
+                                                       ELSE analyst_reports.last_attempt_error END
+                    """, (
+                        ticker, md_text, report_date,
+                        summary.get("rating"), summary.get("price_target"),
+                        summary.get("upside_pct"),
+                        _touch, _touch, _touch, _touch,
+                    ))
+                    if delta_from_prior is not None:
+                        _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+
+                elif provider == "local":
+                    cur.execute("""
+                        INSERT INTO analyst_reports
+                            (ticker, generated_at, report_md, has_docx, has_pptx,
+                             report_md_local, local_generated_at, local_report_date,
+                             local_rating, local_price_target, local_upside_pct,
+                             last_attempt_at, last_attempt_status, last_attempt_error)
+                        VALUES (%s, NOW(), '', FALSE, FALSE,
+                                %s, NOW(), %s, %s, %s, %s,
+                                NOW(), 'success', NULL)
+                        ON CONFLICT (ticker) DO UPDATE SET
+                            report_md_local    = EXCLUDED.report_md_local,
+                            local_generated_at = CASE WHEN %s THEN NOW()
+                                                      ELSE COALESCE(analyst_reports.local_generated_at, NOW()) END,
+                            local_report_date  = EXCLUDED.local_report_date,
+                            local_rating       = EXCLUDED.local_rating,
+                            local_price_target = EXCLUDED.local_price_target,
+                            local_upside_pct   = EXCLUDED.local_upside_pct,
+                            archived           = FALSE,
+                            last_attempt_at    = CASE WHEN %s THEN NOW()
+                                                      ELSE analyst_reports.last_attempt_at END,
                             last_attempt_status = CASE WHEN %s THEN 'success'
                                                        ELSE analyst_reports.last_attempt_status END,
                             last_attempt_error  = CASE WHEN %s THEN NULL
@@ -20098,6 +20174,12 @@ def _ensure_analyst_reports_table(conn) -> None:
         ("deepseek_price_target", "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS deepseek_price_target NUMERIC"),
         ("deepseek_upside_pct",   "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS deepseek_upside_pct NUMERIC"),
         ("deepseek_report_date",  "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS deepseek_report_date TEXT"),
+        ("report_md_local",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS report_md_local TEXT"),
+        ("local_generated_at",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_generated_at TIMESTAMP"),
+        ("local_rating",          "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_rating VARCHAR(30)"),
+        ("local_price_target",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_price_target NUMERIC"),
+        ("local_upside_pct",      "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_upside_pct NUMERIC"),
+        ("local_report_date",     "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_report_date TEXT"),
         # Desk style pill (VALUE / GROWTH / GARP / RICH / CORE)
         ("stock_style",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style VARCHAR(16)"),
         ("stock_style_note",  "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style_note TEXT"),

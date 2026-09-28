@@ -15,6 +15,7 @@ export const DEFAULT_REPORT_COST: Record<LlmProvider, CostRange> = {
   claude: [0.5, 1.0],
   deepseek: [0.01, 0.05],
   kimi: [0.15, 0.6],
+  local: [0, 0],
 }
 
 /** Multi-step Analyst agent */
@@ -94,6 +95,7 @@ function parseCatalog(d: ModelsCatalog): CatalogState {
     claude: asRange(est.claude_report, DEFAULT_REPORT_COST.claude),
     deepseek: asRange(est.deepseek_report, DEFAULT_REPORT_COST.deepseek),
     kimi: asRange(est.kimi_report, DEFAULT_REPORT_COST.kimi),
+    local: [0, 0],
   }
 
   // Prefer per-engine maps from API; fall back to flat est.agentic / defaults

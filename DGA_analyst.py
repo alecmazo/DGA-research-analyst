@@ -7962,7 +7962,7 @@ def report_tail_gap(text: str | None, provider: str = "grok") -> str | None:
     if len(t.strip()) < 800:
         return None
     up = t.upper()
-    if (provider or "grok").lower() == "grok":
+    if (provider or "grok").lower() in ("grok", "local"):
         missing = _munger_missing(t)
         if "MUNGER" not in up and "8.5.1" not in t:
             return "missing the Munger section"
@@ -8261,6 +8261,10 @@ def merge_usage(dst: dict, src: dict | None) -> None:
         dst["cost_estimated"] = True
     if src.get("model"):
         dst["model"] = src["model"]
+    if src.get("tokens_per_sec") is not None:
+        dst["tokens_per_sec"] = float(src["tokens_per_sec"])
+    if src.get("latency_ms") is not None:
+        dst["latency_ms"] = int(dst.get("latency_ms") or 0) + int(src["latency_ms"] or 0)
 
 
 def format_analyze_cost(usage: dict | None) -> str:
@@ -8275,10 +8279,17 @@ def format_analyze_cost(usage: dict | None) -> str:
     cost = usage.get("cost_usd")
     if isinstance(cost, (int, float)):
         n = float(cost)
-        shown = f"${n:.4f}" if 0 < n < 0.01 else f"${n:.2f}"
-        if usage.get("cost_estimated"):
-            shown = "about " + shown
-        bits.append(shown)
+        if n == 0 and usage.get("tokens_per_sec") is not None:
+            bits.append("cost: $0")
+        else:
+            shown = f"${n:.4f}" if 0 < n < 0.01 else f"${n:.2f}"
+            if usage.get("cost_estimated"):
+                shown = "about " + shown
+            bits.append(shown)
+    if usage.get("tokens_per_sec") is not None:
+        bits.append(f"{float(usage['tokens_per_sec']):.1f} tok/s")
+    if usage.get("latency_ms"):
+        bits.append(f"{int(usage['latency_ms']) / 1000:.0f}s")
     return " · ".join(bits)
 
 
@@ -9070,6 +9081,25 @@ def call_llm(provider: str, system_prompt: str, user_content: str,
     analysis is grounded in the gathered user_msg (SEC/yfinance/etc.).
     """
     p = (provider or "grok").lower().strip()
+    if p != "local":
+        try:
+            from api.domains.local_finance_llm import dump_prompt_if_debug
+            dump_prompt_if_debug(p, system_prompt, user_content)
+        except Exception:
+            pass
+    if p == "local":
+        if should_cancel is not None and should_cancel():
+            raise ClaudeCancelled("cancelled before LLM call")
+        from api.domains.local_finance_llm import LocalLlmError, complete_local
+        try:
+            return complete_local(
+                system_prompt, user_content,
+                on_delta=on_delta,
+                usage_capture=usage_capture,
+                should_cancel=should_cancel,
+            )
+        except LocalLlmError as exc:
+            raise RuntimeError(str(exc)) from exc
     if p == "claude":
         return call_claude(system_prompt, user_content, on_delta=on_delta,
                            usage_capture=usage_capture,
@@ -9135,6 +9165,9 @@ def call_llm_with_heartbeat(
         # single wall that fires while text is still arriving.
         if prov_l == "grok":
             timeout_s = float(os.environ.get("ANALYZE_GROK_TIMEOUT_S") or "720")
+        elif prov_l == "local":
+            timeout_s = float(os.environ.get("LOCAL_LLM_TIMEOUT_MS") or "300000") / 1000.0
+            timeout_s = max(300.0, timeout_s)
         else:
             timeout_s = float(os.environ.get("ANALYZE_LLM_TIMEOUT_S") or "900")
     timeout_s = max(180.0, min(float(timeout_s), 1800.0))
@@ -9143,6 +9176,8 @@ def call_llm_with_heartbeat(
         expected_s = float(os.environ.get("ANALYZE_CLAUDE_EXPECTED_S") or "240")  # 4 min
     elif prov_l == "grok":
         expected_s = float(os.environ.get("ANALYZE_GROK_EXPECTED_S") or "420")
+    elif prov_l == "local":
+        expected_s = float(os.environ.get("ANALYZE_LOCAL_EXPECTED_S") or "600")
     else:
         expected_s = float(os.environ.get("ANALYZE_LLM_EXPECTED_S") or "240")
     expected_s = max(60.0, min(expected_s, timeout_s))
@@ -10612,6 +10647,12 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         _model_label = KIMI_MODEL
     elif _prov == "deepseek":
         _model_label = DEEPSEEK_MODEL
+    elif _prov == "local":
+        try:
+            from api.domains.local_finance_llm import local_settings
+            _model_label = local_settings()["model"]
+        except Exception:
+            _model_label = "gpt-oss-20b-finance"
     else:
         _model_label = _prov
     # Live web/X search on grok-4.7 is what made one report take ~14 minutes
@@ -10639,6 +10680,33 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             )
         except Exception as _ne:
             print(f"   ⚠️  Catalyst headline inject failed: {_ne!s:.120}", flush=True)
+        try:
+            _mung = build_munger_system_appendix()
+            if _mung:
+                system_prompt = (system_prompt or load_system_prompt()).rstrip() + "\n" + _mung
+                print(
+                    f"   🧠 Munger SECTION 8.5 appendix attached ({len(_mung):,} chars)",
+                    flush=True,
+                )
+        except Exception as _me:
+            print(f"   ⚠️  Munger appendix failed: {_me!s:.120}", flush=True)
+    elif _prov == "local":
+        # Same system prompt and filing context as Grok. News is Yahoo Finance
+        # only — Grok's Google News mix is left unchanged.
+        try:
+            from api.domains.yahoo_finance_news import (
+                fetch_yahoo_finance_news, format_yahoo_news_block,
+            )
+            _yitems = fetch_yahoo_finance_news(ticker)
+            user_msg = user_msg.rstrip() + "\n\n" + format_yahoo_news_block(ticker, _yitems)
+            print(
+                f"   📰 Yahoo Finance news for local {ticker}: {len(_yitems)} item(s)",
+                flush=True,
+            )
+        except Exception as _ye:
+            from api.domains.yahoo_finance_news import EMPTY_NOTE, format_yahoo_news_block
+            user_msg = user_msg.rstrip() + "\n\n" + format_yahoo_news_block(ticker, [])
+            print(f"   ⚠️  Yahoo news failed ({_ye!s:.120}); {EMPTY_NOTE}", flush=True)
         try:
             _mung = build_munger_system_appendix()
             if _mung:
@@ -10748,9 +10816,9 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         _ck()
         _emit_progress(on_progress, "grok", 0.72,
                        f"{_prov.title()} — finishing the verdict"
-                       + (" and Munger" if _prov == "grok" else ""))
+                       + (" and Munger" if _prov in ("grok", "local") else ""))
         tail = (report_text or "")[-7000:]
-        missing = _munger_missing(report_text or "") if _prov == "grok" else []
+        missing = _munger_missing(report_text or "") if _prov in ("grok", "local") else []
         if missing and any(s in (report_text or "") for s in ("8.5.1", "8.5.2", "8.5.3")):
             ask = (
                 "The report was cut off inside SECTION 8.5. Continue from the "
@@ -10939,6 +11007,8 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         "cost_model":    _usage.get("model") or _model_label,
         "input_tokens":  _usage.get("input_tokens"),
         "output_tokens": _usage.get("output_tokens"),
+        "tokens_per_sec": _usage.get("tokens_per_sec"),
+        "latency_ms": _usage.get("latency_ms"),
     })
     return result
 

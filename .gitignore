@@ -34,6 +34,9 @@ stock-financials/
 .claude/
 .grok/
 
+# Exact prompts dumped when LLM_DEBUG_CONTEXT=true
+logs/llm-context/
+
 # OS
 .DS_Store
 Thumbs.db

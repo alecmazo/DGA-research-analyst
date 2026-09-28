@@ -169,7 +169,8 @@ export function ReportPage() {
   if (shownProvider) engines.add(shownProvider)
   const switchGrok = engines.has('grok')
   const switchClaude = engines.has('claude')
-  const showEngineSwitch = switchGrok && switchClaude
+  const switchLocal = engines.has('local') || shownProvider === 'local'
+  const showEngineSwitch = (switchGrok && switchClaude) || switchLocal
 
   const switchEngine = (pv: string) => {
     if (!ticker || pv === shownProvider) return
@@ -387,6 +388,20 @@ export function ReportPage() {
               >
                 Claude
               </button>
+              {switchLocal && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={shownProvider === 'local'}
+                  className={`${styles.engineBtn} ${shownProvider === 'local' ? styles.engineOn : ''}`}
+                  data-p="local"
+                  disabled={loading}
+                  onClick={() => switchEngine('local')}
+                  title="Show the local finance model report"
+                >
+                  Local
+                </button>
+              )}
             </div>
           )}
           <select
