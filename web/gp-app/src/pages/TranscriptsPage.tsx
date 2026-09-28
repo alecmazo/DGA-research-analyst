@@ -3,6 +3,7 @@ import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api } from '@/lib/api'
+import { LibraryTree } from '@/components/transcripts/LibraryTree'
 import page from './page.module.css'
 import styles from './TranscriptsPage.module.css'
 
@@ -254,8 +255,8 @@ export function TranscriptsPage() {
           <p className={page.kicker}>Research</p>
           <h1 className={page.h1}>Transcripts</h1>
           <p className={page.sub}>
-            Ingest interview &amp; keynote transcripts, index earnings calls,
-            and browse coverage freshness.
+            One library for interviews and earnings calls. Shows, speakers,
+            tickers, and quarters are labeled in the folder tree.
           </p>
         </div>
         <div className={page.heroActions}>
@@ -272,6 +273,10 @@ export function TranscriptsPage() {
         <Spinner label="Loading transcript coverage…" />
       ) : (
         <>
+          <Panel title="Transcript library" badge="Interviews · Earnings calls" flush>
+            <LibraryTree />
+          </Panel>
+
           <div className={styles.grid2}>
             <Panel title="Ingest a YouTube transcript" badge="~$0.02–0.05">
               <p className={styles.hint}>

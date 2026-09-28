@@ -1,6 +1,7 @@
 /** Talk to Ollama on this Mac from the browser. The live site cannot see it. */
 
 export const OLLAMA_HOST = 'http://127.0.0.1:11434'
+export const OLLAMA_DESK = 'http://127.0.0.1:8766'
 export const LOCAL_MODEL = 'gpt-oss-20b-finance'
 
 const OFFLINE = 'Local model offline – start Ollama'
@@ -41,6 +42,24 @@ export async function ollamaStatus(): Promise<OllamaState> {
     return { ok: true, message: 'ok', model: LOCAL_MODEL }
   } catch {
     return { ok: false, message: OFFLINE, model: LOCAL_MODEL }
+  }
+}
+
+/** Ask the on-Mac helper to start Ollama, or restart it when the process is stuck. */
+export async function ensureOllama(): Promise<{ ok: boolean; message: string; action?: string }> {
+  try {
+    const res = await fetch(`${OLLAMA_DESK}/ensure`, { method: 'POST' })
+    const data = (await res.json()) as { ok?: boolean; message?: string; action?: string }
+    return {
+      ok: Boolean(data.ok),
+      message: data.message || (data.ok ? 'Ollama is up' : 'Could not start Ollama'),
+      action: data.action,
+    }
+  } catch {
+    return {
+      ok: false,
+      message: 'Ollama is off, and the start helper on this Mac is not running.',
+    }
   }
 }
 

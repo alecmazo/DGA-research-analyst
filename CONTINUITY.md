@@ -258,6 +258,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Local page** | **`ui675-20260928-local-page`** | A Local page on the GP site runs research, questions, and portfolio notes on the on-Mac finance model only. |
 | **Local browser** | **`ui676-20260928-local-browser`** | The Local page calls Ollama on this Mac from the browser. The live site still supplies filings, Yahoo news, and portfolios. |
 | **Local reports** | **`ui677-20260928-local-reports`** | A local run opens in the report window, labeled local, with the same export buttons. The Word file is saved to Dropbox Apps/DGA Research/Local_Reports. |
+| **Transcript library** | **`ui678-20260928-transcript-tree`** | Interviews and earnings calls sit in one folder tree on Transcripts. Local opens that library. A red Ollama pill starts or restarts Ollama on this Mac. |
 
 ### One-click handoff (preferred)
 
@@ -447,4 +448,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-28 · Agent: Grok Build · Live: `ui677-20260928-local-reports` · Next: `ui678-YYYYMMDD-slug`*
+*Last updated: 2026-09-28 · Agent: Grok Build · Live: `ui678-20260928-transcript-tree` · Next: `ui679-YYYYMMDD-slug`*

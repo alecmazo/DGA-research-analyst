@@ -1,0 +1,150 @@
+.library {
+  display: grid;
+  grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+  min-height: 460px;
+}
+
+@media (max-width: 800px) {
+  .library {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tree {
+  max-height: 680px;
+  overflow: auto;
+  padding: 10px 10px 16px;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 34px;
+  margin-bottom: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  font: inherit;
+  font-size: 13px;
+}
+
+.root,
+.folder,
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.root {
+  font-size: 13px;
+}
+
+.folder {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.item {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.root:hover,
+.folder:hover,
+.item:hover {
+  background: var(--bg-sunken, rgba(15, 23, 42, 0.04));
+}
+
+.item[data-on='1'] {
+  background: var(--brand-50);
+  color: var(--text-primary);
+}
+
+.root em,
+.folder em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.nest {
+  padding-left: 8px;
+}
+
+.items {
+  padding-left: 18px;
+}
+
+.empty,
+.err {
+  margin: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.err {
+  color: #9b2c2c;
+}
+
+.reader {
+  max-height: 680px;
+  overflow: auto;
+  padding: 16px 18px 24px;
+}
+
+.reader h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.reader a {
+  font-size: 13px;
+}
+
+.summary {
+  margin: 10px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.ents li {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-sunken, rgba(15, 23, 42, 0.05));
+  font-size: 12px;
+}
+
+.text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-sans, inherit);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}

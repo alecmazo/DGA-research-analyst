@@ -8601,7 +8601,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui677-20260928-local-reports"
+WEB_BUILD_VERSION = "ui678-20260928-transcript-tree"
 
 
 @app.get("/api/build")
@@ -35302,6 +35302,102 @@ def transcripts_list(request: Request):
             "n_entities": int(r.get("n_entities") or 0),
             "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
         } for r in rows]}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+
+
+@app.get("/api/transcripts/library")
+def transcripts_library(request: Request):
+    """Folder tree of stored interviews and earnings calls. No new store."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    from podcast_intel.tree import enabled, group_calls, group_interviews
+    if not enabled():
+        return {"ok": True, "enabled": False, "interviews": [], "calls": []}
+    _ensure_transcripts_tables()
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, person, title, channel, video_url, published_at,
+                       word_count, created_at, source
+                  FROM transcripts
+                 ORDER BY created_at DESC
+                 LIMIT 500
+            """)
+            interviews = []
+            for row in cur.fetchall() or []:
+                item = dict(row)
+                created = item.get("created_at")
+                if hasattr(created, "isoformat"):
+                    item["created_at"] = created.isoformat()
+                interviews.append(item)
+            cur.execute("""
+                SELECT ticker,
+                       COALESCE(NULLIF(quarter, ''), 'Undated') AS quarter,
+                       MAX(call_date) AS call_date,
+                       MAX(source) AS source,
+                       COUNT(*) AS chunks
+                  FROM call_chunks
+                 GROUP BY ticker, COALESCE(NULLIF(quarter, ''), 'Undated')
+                 ORDER BY ticker
+            """)
+            calls = [dict(row) for row in cur.fetchall() or []]
+        return {
+            "ok": True,
+            "enabled": True,
+            "interviews": group_interviews(interviews),
+            "calls": group_calls(calls),
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+
+
+@app.get("/api/transcripts/calls/read")
+def transcripts_call_read(ticker: str, quarter: str, request: Request):
+    """One earnings-call transcript, stitched from stored chunks."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    ticker = (ticker or "").strip().upper()
+    quarter = (quarter or "").strip() or "Undated"
+    if not ticker:
+        raise HTTPException(400, "Missing ticker")
+    _ensure_transcripts_tables()
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT speaker, chunk_text, chunk_idx, call_date, source
+                  FROM call_chunks
+                 WHERE upper(ticker) = %s
+                   AND COALESCE(NULLIF(quarter, ''), 'Undated') = %s
+                 ORDER BY chunk_idx
+                 LIMIT 400
+            """, (ticker, quarter))
+            rows = cur.fetchall() or []
+        if not rows:
+            raise HTTPException(404, "No call transcript for that ticker and quarter")
+        parts = []
+        for row in rows:
+            speaker = (row.get("speaker") or "").strip()
+            text = (row.get("chunk_text") or "").strip()
+            if not text:
+                continue
+            parts.append(f"{speaker}: {text}" if speaker else text)
+        note = ""
+        if len(rows) >= 400:
+            note = "Showing the first 400 sections of this call."
+        return {
+            "ok": True,
+            "ticker": ticker,
+            "quarter": quarter,
+            "call_date": rows[0].get("call_date"),
+            "source": rows[0].get("source"),
+            "text": "\n\n".join(parts),
+            "note": note,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
 

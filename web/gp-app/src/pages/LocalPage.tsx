@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { openReportWindow } from '@/pages/ReportPage'
-import { ollamaChat, ollamaStatus, parseToolCall } from '@/lib/localOllama'
+import { ensureOllama, ollamaChat, ollamaStatus, parseToolCall } from '@/lib/localOllama'
 import { renderMd } from '@/lib/md'
 import { Button } from '@/components/ui/Button'
 import { Panel } from '@/components/ui/Panel'
@@ -49,6 +50,10 @@ export function LocalPage() {
   const [reviewing, setReviewing] = useState(false)
   const [review, setReview] = useState<Answer | null>(null)
   const [reportsKey, setReportsKey] = useState(0)
+  const [launching, setLaunching] = useState(false)
+  const [deskMsg, setDeskMsg] = useState<string | null>(null)
+  const [libraryCount, setLibraryCount] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   const loadStatus = useCallback(() => {
     void Promise.all([
@@ -71,6 +76,19 @@ export function LocalPage() {
   }, [loadStatus])
 
   useEffect(() => {
+    void api<{
+      interviews?: { count?: number }[]
+      calls?: { count?: number }[]
+    }>('/api/transcripts/library')
+      .then((data) => {
+        const interviews = (data.interviews || []).reduce((n, f) => n + (f.count || 0), 0)
+        const calls = (data.calls || []).reduce((n, f) => n + (f.count || 0), 0)
+        setLibraryCount(`${interviews} interviews · ${calls} earnings calls`)
+      })
+      .catch(() => setLibraryCount(null))
+  }, [])
+
+  useEffect(() => {
     void api<{ portfolios?: Portfolio[] }>('/api/local/portfolios')
       .then((d) => {
         const rows = d.portfolios || []
@@ -81,6 +99,19 @@ export function LocalPage() {
   }, [])
 
   const online = Boolean(status?.ok)
+
+  const startOllama = async () => {
+    setLaunching(true)
+    setDeskMsg(null)
+    try {
+      const result = await ensureOllama()
+      setDeskMsg(result.message)
+      loadStatus()
+      window.setTimeout(loadStatus, 1500)
+    } finally {
+      setLaunching(false)
+    }
+  }
 
   const runResearch = async () => {
     const tk = ticker.trim().toUpperCase()
@@ -193,26 +224,59 @@ export function LocalPage() {
           <p className={page.kicker}>This Mac only</p>
           <h1 className={page.h1}>Local</h1>
         </div>
-        <div className={styles.status} title={status?.message || ''}>
-          <span className={`${styles.dot} ${online ? styles.up : styles.down}`} />
-          <div>
-            <strong>{online ? 'Ollama running' : 'Ollama offline'}</strong>
-            <span>
-              {status?.model || 'gpt-oss-20b-finance'}
-              {status?.branch ? ` · ${status.branch}` : ''}
-            </span>
+        {online ? (
+          <div className={styles.status} title={status?.message || ''}>
+            <span className={`${styles.dot} ${styles.up}`} />
+            <div>
+              <strong>Ollama running</strong>
+              <span>
+                {status?.model || 'gpt-oss-20b-finance'}
+                {status?.branch ? ` · ${status.branch}` : ''}
+              </span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <button
+            type="button"
+            className={`${styles.status} ${styles.statusBtn}`}
+            title="Start Ollama on this Mac, or restart it if it is stuck"
+            disabled={launching}
+            onClick={() => void startOllama()}
+          >
+            <span className={`${styles.dot} ${styles.down}`} />
+            <div>
+              <strong>{launching ? 'Starting Ollama…' : 'Ollama offline'}</strong>
+              <span>{launching ? 'Launching on this Mac' : 'Click to start or restart'}</span>
+            </div>
+          </button>
+        )}
       </header>
       <p className={styles.lead}>
         Research runs on this Mac and opens in the same report window as the desk.
         Filings come from the financial store. Recent developments come from Yahoo Finance.
         The Word file is saved to Dropbox under Apps / DGA Research / Local_Reports.
       </p>
-      {!online && status?.message && <p className={styles.warn}>{status.message}</p>}
+      {!online && (deskMsg || status?.message) && (
+        <p className={styles.warn}>{deskMsg || status?.message}</p>
+      )}
 
       <div className={styles.grid}>
       <div className={styles.stack}>
+      <section className={styles.card}>
+        <h2>Podcast Intel</h2>
+        <p>
+          Interviews and earnings calls already in the research library, in one
+          folder tree. Shows are labeled by channel. Calls are labeled by ticker,
+          quarter, and source.
+        </p>
+        {libraryCount && <p className={styles.meta}>{libraryCount}</p>}
+        <div className={styles.row}>
+          <Button variant="primary" onClick={() => navigate('/transcripts')}>
+            Open transcript library
+          </Button>
+        </div>
+      </section>
+
       <section className={styles.card}>
         <h2>Research</h2>
         <p>Same investment-case note as Analyze. It opens in a new window when it is saved.</p>

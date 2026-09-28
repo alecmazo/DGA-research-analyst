@@ -43,6 +43,21 @@
   box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.16);
 }
 
+.statusBtn {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.statusBtn:hover {
+  border-color: var(--border-default);
+}
+
+.statusBtn:disabled {
+  cursor: progress;
+}
+
 .grid {
   display: grid;
   grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
