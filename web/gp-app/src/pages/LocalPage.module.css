@@ -43,6 +43,30 @@
   box-shadow: 0 0 0 4px rgba(192, 57, 43, 0.16);
 }
 
+.grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.saved {
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .lead,
 .tree,
 .meta {

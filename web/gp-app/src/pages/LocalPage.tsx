@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
+import { openReportWindow } from '@/pages/ReportPage'
 import { ollamaChat, ollamaStatus, parseToolCall } from '@/lib/localOllama'
 import { renderMd } from '@/lib/md'
 import { Button } from '@/components/ui/Button'
+import { Panel } from '@/components/ui/Panel'
+import { SavedReports } from '@/components/desk/SavedReports'
 import page from './page.module.css'
 import styles from './LocalPage.module.css'
 
@@ -46,7 +48,7 @@ export function LocalPage() {
   const [book, setBook] = useState('')
   const [reviewing, setReviewing] = useState(false)
   const [review, setReview] = useState<Answer | null>(null)
-  const [draft, setDraft] = useState('')
+  const [reportsKey, setReportsKey] = useState(0)
 
   const loadStatus = useCallback(() => {
     void Promise.all([
@@ -86,7 +88,6 @@ export function LocalPage() {
     setRunning(true)
     setRunErr(null)
     setDoneTicker(null)
-    setDraft('')
     setProgress('Gathering the filing and Yahoo news…')
     try {
       const prep = await api<{ ok?: boolean; system?: string; user?: string; detail?: string }>(
@@ -98,7 +99,6 @@ export function LocalPage() {
       const chat = await ollamaChat({
         system: prep.system,
         user: prep.user,
-        onDelta: (chunk) => setDraft((prev) => prev + chunk),
       })
       if (!chat.text) throw new Error('The local model returned an empty answer')
       setProgress('Saving…')
@@ -113,7 +113,9 @@ export function LocalPage() {
       })
       const speed = chat.tokensPerSec != null ? ` · ${chat.tokensPerSec.toFixed(1)} tok/s` : ''
       setDoneTicker(tk)
-      setProgress(`Report ready · ${Math.round(chat.latencyMs / 1000)}s${speed} · cost: $0`)
+      setReportsKey((n) => n + 1)
+      setProgress(`Saved · ${Math.round(chat.latencyMs / 1000)}s${speed} · cost: $0`)
+      openReportWindow(tk, 'local')
     } catch (e) {
       setRunErr(e instanceof Error ? e.message : 'Could not start')
     } finally {
@@ -203,21 +205,17 @@ export function LocalPage() {
         </div>
       </header>
       <p className={styles.lead}>
-        Research, questions, and portfolio notes stay on the local finance model.
-        Figures come from the financial store. Recent developments come from Yahoo Finance.
-        This page does not call Grok, Claude, or DeepSeek.
+        Research runs on this Mac and opens in the same report window as the desk.
+        Filings come from the financial store. Recent developments come from Yahoo Finance.
+        The Word file is saved to Dropbox under Apps / DGA Research / Local_Reports.
       </p>
-      {status?.worktree && (
-        <p className={styles.tree}>
-          Worktree <code>{status.worktree}</code>
-          {status.host ? ` · ${status.host}` : ''}
-        </p>
-      )}
       {!online && status?.message && <p className={styles.warn}>{status.message}</p>}
 
+      <div className={styles.grid}>
+      <div className={styles.stack}>
       <section className={styles.card}>
         <h2>Research</h2>
-        <p>Run the same investment-case analysis as the desk, on the local model only.</p>
+        <p>Same investment-case note as Analyze. It opens in a new window when it is saved.</p>
         <div className={styles.row}>
           <input
             value={ticker}
@@ -230,17 +228,10 @@ export function LocalPage() {
           </Button>
         </div>
         {progress && <p className={styles.meta}>{progress}</p>}
-        {draft && (
-          <div className={styles.answer} dangerouslySetInnerHTML={{ __html: renderMd(draft) }} />
-        )}
         {runErr && <p className={styles.warn}>{runErr}</p>}
         {doneTicker && (
           <p className={styles.meta}>
-            Saved.{' '}
-            <Link to={`/report?ticker=${encodeURIComponent(doneTicker)}&provider=local`}>
-              Open the {doneTicker} local report
-            </Link>
-            {' · cost: $0'}
+            {doneTicker} saved · cost: $0
           </p>
         )}
       </section>
@@ -301,6 +292,16 @@ export function LocalPage() {
           <div className={styles.answer} dangerouslySetInnerHTML={{ __html: renderMd(review.answer) }} />
         )}
       </section>
+      </div>
+      <Panel title="Saved Local Reports" badge="local" flush className={styles.saved}>
+        <SavedReports
+          provider="local"
+          embed
+          refreshKey={reportsKey}
+          onAnalyze={(tk) => setTicker(tk)}
+        />
+      </Panel>
+      </div>
     </div>
   )
 }

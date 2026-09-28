@@ -231,8 +231,10 @@ export function ReportPage() {
     setDocBusy(true)
     try {
       await downloadAuth(
-        `/api/download/${encodeURIComponent(ticker)}/docx`,
-        `${ticker}_DGA_Report.docx`,
+        `/api/download/${encodeURIComponent(ticker)}/docx?provider=${encodeURIComponent(shownProvider)}`,
+        shownProvider === 'local'
+          ? `${ticker}_DGA_Report_local.docx`
+          : `${ticker}_DGA_Report.docx`,
       )
     } catch (e) {
       alert('Word download failed: ' + (e instanceof Error ? e.message : e))
@@ -246,8 +248,10 @@ export function ReportPage() {
     setPptBusy(true)
     try {
       await downloadAuth(
-        `/api/download/${encodeURIComponent(ticker)}/pptx`,
-        `${ticker}_DGA_Presentation.pptx`,
+        `/api/download/${encodeURIComponent(ticker)}/pptx?provider=${encodeURIComponent(shownProvider)}`,
+        shownProvider === 'local'
+          ? `${ticker}_DGA_Presentation_local.pptx`
+          : `${ticker}_DGA_Presentation.pptx`,
       )
     } catch (e) {
       alert(
@@ -272,8 +276,27 @@ export function ReportPage() {
           : 'Export'
 
   const onExportAction = (v: string) => {
-    if (v === 'gamma' && data?.gamma_url) {
-      window.open(data.gamma_url, '_blank', 'noopener,noreferrer')
+    if (v === 'gamma') {
+      if (data?.gamma_url) {
+        window.open(data.gamma_url, '_blank', 'noopener,noreferrer')
+      } else if (shownProvider === 'local' && ticker) {
+        void (async () => {
+          setSharing(true)
+          try {
+            const d = await api<{ gamma_url?: string; detail?: string }>(
+              '/api/local/gamma',
+              { method: 'POST', body: JSON.stringify({ ticker }) },
+            )
+            if (!d.gamma_url) throw new Error(d.detail || 'Gamma did not return a link')
+            setData((prev) => (prev ? { ...prev, gamma_url: d.gamma_url } : prev))
+            window.open(d.gamma_url, '_blank', 'noopener,noreferrer')
+          } catch (e) {
+            alert('Gamma failed: ' + (e instanceof Error ? e.message : e))
+          } finally {
+            setSharing(false)
+          }
+        })()
+      }
     } else if (v === 'ppt') void downloadPptx()
     else if (v === 'word') void downloadDocx()
     else if (v === 'excel') void downloadExcel()
@@ -346,7 +369,7 @@ export function ReportPage() {
         <div className={styles.title}>
           <strong>{ticker || '—'}</strong>
           <span className={styles.prov} data-p={shownProvider}>
-            {printName.toUpperCase()}
+            {shownProvider === 'local' ? 'local' : printName.toUpperCase()}
           </span>
           {vc > 1 && (
             <span className={styles.verBadge} title="Analyze re-run count for this ticker/engine">
@@ -421,7 +444,9 @@ export function ReportPage() {
             <option value="" disabled>
               {exportLabel}
             </option>
-            {data?.gamma_url ? <option value="gamma">Gamma deck</option> : null}
+            {data?.gamma_url || shownProvider === 'local' ? (
+              <option value="gamma">Gamma deck</option>
+            ) : null}
             <option value="ppt">PowerPoint</option>
             <option value="word" disabled={data?.has_docx === false}>
               Word

@@ -92,9 +92,17 @@ type Props = {
   onAnalyze?: (ticker: string) => void
   /** When true, omit outer Panel (Desk board supplies chrome). */
   embed?: boolean
+  /** Desk lists Grok reports. The Local page lists only local reports. */
+  provider?: 'grok' | 'local'
 }
 
-export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props) {
+export function SavedReports({
+  refreshKey = 0,
+  onAnalyze,
+  embed = false,
+  provider = 'grok',
+}: Props) {
+  const local = provider === 'local'
   const [reports, setReports] = useState<SavedReport[]>([])
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
   const [loading, setLoading] = useState(true)
@@ -104,13 +112,13 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
 
   const openRep = (ticker: string) => {
-    openReportWindow(ticker, 'grok')
+    openReportWindow(ticker, local ? 'local' : 'grok')
   }
 
   const load = useCallback(async () => {
     setErr(null)
     try {
-      const list = await api<SavedReport[]>('/api/reports')
+      const list = await api<SavedReport[]>(local ? '/api/local/reports' : '/api/reports')
       const arr = Array.isArray(list) ? list : []
       setReports(arr)
       // Day-% comes from the shared quote clock / list seed prices.
@@ -120,11 +128,15 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [local])
 
   useEffect(() => {
+    if (local) {
+      void load()
+      return
+    }
     return delayAfterWatchlist(refreshKey ? 0 : 800, () => void load())
-  }, [load, refreshKey])
+  }, [load, refreshKey, local])
 
   useEffect(() => {
     const pull = () => {
@@ -198,10 +210,15 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
 
   const remove = async (tk: string, e: MouseEvent) => {
     e.stopPropagation()
-    if (!confirm(`Remove saved report for ${tk}?`)) return
+    if (!confirm(local ? `Remove the local report for ${tk}?` : `Remove saved report for ${tk}?`)) return
     setBusyTk(tk)
     try {
-      await api(`/api/reports/${encodeURIComponent(tk)}`, { method: 'DELETE' })
+      await api(
+        local
+          ? `/api/local/reports/${encodeURIComponent(tk)}`
+          : `/api/reports/${encodeURIComponent(tk)}`,
+        { method: 'DELETE' },
+      )
       await load()
     } catch (err) {
       setErr(err instanceof Error ? err.message : 'Delete failed')
@@ -265,7 +282,9 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
             {!loading && !sorted.length && (
               <tr>
                 <td colSpan={3} className={styles.emptyCell}>
-                  No saved reports yet — run Analyze on a ticker.
+                  {local
+                    ? 'No local reports yet — run a ticker on this page.'
+                    : 'No saved reports yet — run Analyze on a ticker.'}
                 </td>
               </tr>
             )}

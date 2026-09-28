@@ -8601,7 +8601,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui676-20260928-local-browser"
+WEB_BUILD_VERSION = "ui677-20260928-local-reports"
 
 
 @app.get("/api/build")
@@ -9670,12 +9670,30 @@ def local_save_report(body: LocalSaveRequest, request: Request):
     if len(text) < 20:
         raise HTTPException(status_code=400, detail="Report is too short to save")
     md_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report_local.md"
+    docx_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report_local.docx"
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(text, encoding="utf-8")
     try:
         summary = analyst.extract_summary_from_report(text)
     except Exception:
         summary = {}
+    try:
+        from word_report import render_report
+        render_report(
+            text,
+            ticker=ticker,
+            entity_name=str((summary or {}).get("entity_name") or ticker),
+            output_path=str(docx_path),
+            price=(summary or {}).get("current_price"),
+            rating_hint=str((summary or {}).get("rating") or ""),
+            engine_label="local",
+        )
+    except Exception as exc:
+        print(f"[local] word render failed for {ticker}: {exc!s:.160}", flush=True)
+    try:
+        analyst.push_to_dropbox([docx_path, md_path], dest_subfolder="Local_Reports")
+    except Exception as exc:
+        print(f"[local] dropbox upload failed for {ticker}: {exc!s:.160}", flush=True)
     result = {
         "ok": True,
         "report_text": text,
@@ -9688,7 +9706,158 @@ def local_save_report(body: LocalSaveRequest, request: Request):
     persisted, chars = _persist_analysis_text(
         ticker=ticker, provider="local", result=result,
     )
-    return {"ok": True, "persisted": bool(persisted), "chars": chars, "ticker": ticker}
+    return {
+        "ok": True,
+        "persisted": bool(persisted),
+        "chars": chars,
+        "ticker": ticker,
+        "has_docx": docx_path.exists(),
+    }
+
+
+def _local_gamma_store(ticker: str, url: str) -> None:
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL") and url):
+        return
+    try:
+        _ensure_analyst_reports_table_schema()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE analyst_reports SET local_gamma_url=%s WHERE ticker=%s",
+                (url, ticker),
+            )
+            conn.commit()
+    except Exception as exc:
+        print(f"[local] gamma url save failed for {ticker}: {exc!s:.160}", flush=True)
+
+
+@app.post("/api/local/gamma")
+def local_gamma(body: LocalTickerRequest, request: Request):
+    """Build a Gamma deck from the saved local report. Does not touch Grok's deck."""
+    _claims_or_401(request)
+    ticker = _local_ticker(body.ticker)
+    md_path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report_local.md"
+    text = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+    if len(text) < 20 and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT report_md_local FROM analyst_reports WHERE ticker=%s",
+                    (ticker,),
+                )
+                row = cur.fetchone()
+            if row and row[0]:
+                text = str(row[0])
+        except Exception:
+            text = ""
+    if len(text) < 20:
+        raise HTTPException(404, "No local report to send to Gamma")
+    pptx = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Presentation_local.pptx"
+    url, _credits = analyst.create_gamma_for_stock(text, ticker, "10-K", out_pptx=pptx)
+    if not url:
+        raise HTTPException(502, "Gamma generation failed")
+    _local_gamma_store(ticker, url)
+    try:
+        if pptx.exists():
+            analyst.push_to_dropbox([pptx], dest_subfolder="Local_Reports")
+    except Exception:
+        pass
+    return {"ok": True, "gamma_url": url, "ticker": ticker}
+
+
+@app.get("/api/local/reports")
+def local_reports_list(request: Request):
+    """Saved local reports for the Local page card."""
+    _claims_or_401(request)
+    rows: list[dict] = []
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            _ensure_analyst_reports_table_schema()
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT ticker, local_generated_at, local_rating,
+                           local_price_target, local_upside_pct, local_report_date,
+                           last_attempt_status, last_attempt_at, last_attempt_error,
+                           COALESCE(version_count, 1) AS version_count,
+                           delta_from_prior, stock_style, stock_style_note
+                      FROM analyst_reports
+                     WHERE report_md_local IS NOT NULL
+                       AND length(report_md_local) > 20
+                       AND archived IS NOT TRUE
+                     ORDER BY local_generated_at DESC NULLS LAST
+                """)
+                for r in cur.fetchall() or []:
+                    rows.append({
+                        "ticker": r.get("ticker"),
+                        "generated_at": r.get("local_generated_at").isoformat()
+                            if hasattr(r.get("local_generated_at"), "isoformat")
+                            else r.get("local_generated_at"),
+                        "report_date": r.get("local_report_date"),
+                        "rating": r.get("local_rating"),
+                        "price_target": float(r["local_price_target"])
+                            if r.get("local_price_target") is not None else None,
+                        "upside_pct": float(r["local_upside_pct"])
+                            if r.get("local_upside_pct") is not None else None,
+                        "providers": ["local"],
+                        "last_attempt_status": r.get("last_attempt_status"),
+                        "last_attempt_at": r.get("last_attempt_at").isoformat()
+                            if hasattr(r.get("last_attempt_at"), "isoformat")
+                            else r.get("last_attempt_at"),
+                        "last_attempt_error": r.get("last_attempt_error"),
+                        "version_count": r.get("version_count") or 1,
+                        "delta_from_prior": r.get("delta_from_prior"),
+                        "stock_style": r.get("stock_style"),
+                        "stock_style_note": r.get("stock_style_note"),
+                    })
+        except Exception as exc:
+            print(f"[local] report list failed: {exc!s:.180}", flush=True)
+    if not rows:
+        folder = analyst.STOCKS_FOLDER
+        if folder.exists():
+            for path in sorted(folder.glob("*_DGA_Report_local.md")):
+                tk = path.name.replace("_DGA_Report_local.md", "")
+                rows.append({
+                    "ticker": tk,
+                    "generated_at": datetime.utcfromtimestamp(path.stat().st_mtime).isoformat(),
+                    "providers": ["local"],
+                    "version_count": 1,
+                })
+    return rows
+
+
+@app.delete("/api/local/reports/{ticker}")
+def local_reports_delete(ticker: str, request: Request):
+    """Remove only the local report. Grok and Claude notes stay."""
+    _claims_or_401(request)
+    tk = _local_ticker(ticker)
+    for name in (
+        f"{tk}_DGA_Report_local.md",
+        f"{tk}_DGA_Report_local.docx",
+        f"{tk}_DGA_Presentation_local.pptx",
+    ):
+        path = analyst.STOCKS_FOLDER / name
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception:
+            pass
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE analyst_reports
+                       SET report_md_local = NULL,
+                           local_generated_at = NULL,
+                           local_rating = NULL,
+                           local_price_target = NULL,
+                           local_upside_pct = NULL,
+                           local_report_date = NULL,
+                           local_gamma_url = NULL
+                     WHERE ticker = %s
+                """, (tk,))
+                conn.commit()
+        except Exception as exc:
+            raise HTTPException(500, f"Could not remove local report: {exc!s:.160}")
+    return {"ok": True, "ticker": tk}
 
 
 @app.post("/api/analyze", response_model=JobStatus)
@@ -10105,7 +10274,7 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                            report_md_claude, claude_generated_at,
                            report_md_kimi, kimi_generated_at,
                            report_md_deepseek, deepseek_generated_at,
-                           report_md_local, local_generated_at,
+                           report_md_local, local_generated_at, local_gamma_url,
                            rating, price_target, upside_pct,
                            claude_rating, claude_price_target, claude_upside_pct,
                            kimi_rating, kimi_price_target, kimi_upside_pct,
@@ -10188,9 +10357,9 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                         "delta_from_prior": _parse_delta_blob(_delta_raw, "local"),
                         "report_md": row["report_md_local"],
                         "generated_at": _iso(row.get("local_generated_at")),
-                        "has_docx": False,
-                        "has_pptx": False,
-                        "gamma_url": None,
+                        "has_docx": (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report_local.docx").exists(),
+                        "has_pptx": (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Presentation_local.pptx").exists(),
+                        "gamma_url": row.get("local_gamma_url"),
                         "gamma_generated_at": None,
                         "rating": row.get("local_rating") or row.get("rating"),
                         "price_target": _f(row.get("local_price_target"))
@@ -10635,10 +10804,12 @@ def email_desk_window_pdf(body: WindowEmailRequest, request: Request):
 
 
 @app.get("/api/download/{ticker}/docx")
-def download_docx(ticker: str):
+def download_docx(ticker: str, provider: str = "grok"):
     """Download the Word report for *ticker*."""
     ticker = ticker.strip().upper()
-    path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report.docx"
+    prov = (provider or "grok").lower().strip()
+    suffix = "" if prov == "grok" else f"_{prov}"
+    path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report{suffix}.docx"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Word report not found")
     return FileResponse(
@@ -10649,10 +10820,12 @@ def download_docx(ticker: str):
 
 
 @app.get("/api/download/{ticker}/pptx")
-def download_pptx(ticker: str):
+def download_pptx(ticker: str, provider: str = "grok"):
     """Download the PowerPoint presentation for *ticker*."""
     ticker = ticker.strip().upper()
-    path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Presentation.pptx"
+    prov = (provider or "grok").lower().strip()
+    suffix = "" if prov == "grok" else f"_{prov}"
+    path = analyst.STOCKS_FOLDER / f"{ticker}_DGA_Presentation{suffix}.pptx"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Presentation not found")
     return FileResponse(
@@ -20342,6 +20515,7 @@ def _ensure_analyst_reports_table(conn) -> None:
         ("local_price_target",    "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_price_target NUMERIC"),
         ("local_upside_pct",      "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_upside_pct NUMERIC"),
         ("local_report_date",     "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_report_date TEXT"),
+        ("local_gamma_url",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_gamma_url TEXT"),
         # Desk style pill (VALUE / GROWTH / GARP / RICH / CORE)
         ("stock_style",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style VARCHAR(16)"),
         ("stock_style_note",  "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style_note TEXT"),

@@ -55,6 +55,9 @@
 .prov[data-p='deepseek'] {
   background: #1e3a8a;
 }
+.prov[data-p='local'] {
+  background: #0e7490;
+}
 
 .meta {
   font-size: 11px;

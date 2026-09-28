@@ -284,7 +284,8 @@ _BRANDING_DIR = Path(__file__).resolve().parent / "branding"
 
 
 def _add_cover(doc: Document, ticker: str, entity: str, rating_hint: str = "",
-               price: str | float | None = None, as_of: str | None = None) -> None:
+               price: str | float | None = None, as_of: str | None = None,
+               engine_label: str = "") -> None:
     logo_path = _BRANDING_DIR / "dga_logo.png"
     if logo_path.exists():
         logo_para = doc.add_paragraph()
@@ -303,6 +304,8 @@ def _add_cover(doc: Document, ticker: str, entity: str, rating_hint: str = "",
     meta = doc.add_paragraph()
     meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
     line_parts = [as_of or datetime.now().strftime("%B %d, %Y")]
+    if engine_label:
+        line_parts.append(engine_label)
     if price not in (None, "", "N/A"):
         try:
             line_parts.append(f"Last Price: ${float(price):,.2f}")
@@ -353,6 +356,7 @@ def render_report(
     output_path: str,
     price: str | float | None = None,
     rating_hint: str = "",
+    engine_label: str = "",
 ) -> str:
     """Render Grok's markdown report into a polished .docx."""
     markdown_text = (
@@ -376,7 +380,8 @@ def render_report(
         section.top_margin = Inches(1)
         section.bottom_margin = Inches(1)
 
-    _add_cover(doc, ticker, entity_name or ticker, rating_hint=rating_hint, price=price)
+    _add_cover(doc, ticker, entity_name or ticker, rating_hint=rating_hint, price=price,
+               engine_label=engine_label)
 
     lines = markdown_text.split("\n")
     i = 0
