@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { api, type JobStatus, type LlmProvider } from '@/lib/api'
 import { pollJob } from '@/lib/jobs'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { AnalysisScene } from '@/components/ui/AnalysisScene'
 import { useAnalysisScene } from '@/hooks/useAnalysisScene'
 import { inferSceneEngine, type SceneEngine } from '@/lib/analysisScene'
@@ -384,46 +385,49 @@ export function AnalyzeCard({
   // Re-attach a job that kept running after we left Desk (other tabs unmount this card).
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      if (following.current) return
-      const stored = loadActiveJob()
-      let job: JobStatus | null = null
-      if (stored?.jobId) {
-        try {
-          job = await api<JobStatus>(`/api/jobs/${encodeURIComponent(stored.jobId)}`)
-        } catch {
-          job = null
+    const stop = delayAfterWatchlist(0, () => {
+      void (async () => {
+        if (following.current) return
+        const stored = loadActiveJob()
+        let job: JobStatus | null = null
+        if (stored?.jobId) {
+          try {
+            job = await api<JobStatus>(`/api/jobs/${encodeURIComponent(stored.jobId)}`)
+          } catch {
+            job = null
+          }
         }
-      }
-      if (!isLiveAnalyze(job)) {
-        try {
-          const all = await api<JobStatus[]>('/api/jobs')
-          job =
-            (Array.isArray(all) ? all : []).find((j) => isLiveAnalyze(j)) || null
-        } catch {
-          job = null
+        if (!isLiveAnalyze(job)) {
+          try {
+            const all = await api<JobStatus[]>('/api/jobs')
+            job =
+              (Array.isArray(all) ? all : []).find((j) => isLiveAnalyze(j)) || null
+          } catch {
+            job = null
+          }
         }
-      }
-      if (cancelled || !isLiveAnalyze(job) || !job?.job_id || !job.ticker) {
-        if (stored && !isLiveAnalyze(job)) clearActiveJob()
-        return
-      }
-      const tk = job.ticker
-      const ordered = enginesFromJob(job, stored?.engines || engines)
-      onTickerChange?.(tk)
-      setLocalTicker(tk)
-      const pctRaw = job.progress?.pct
-      setProgPct(
-        pctRaw != null && !Number.isNaN(Number(pctRaw))
-          ? Math.min(99, Math.round(Number(pctRaw) * 100))
-          : null,
-      )
-      setProgLbl(job.progress?.label || `${tk} still running…`)
-      onStart?.()
-      await followJob(job.job_id, tk, ordered, true)
-    })()
+        if (cancelled || !isLiveAnalyze(job) || !job?.job_id || !job.ticker) {
+          if (stored && !isLiveAnalyze(job)) clearActiveJob()
+          return
+        }
+        const tk = job.ticker
+        const ordered = enginesFromJob(job, stored?.engines || engines)
+        onTickerChange?.(tk)
+        setLocalTicker(tk)
+        const pctRaw = job.progress?.pct
+        setProgPct(
+          pctRaw != null && !Number.isNaN(Number(pctRaw))
+            ? Math.min(99, Math.round(Number(pctRaw) * 100))
+            : null,
+        )
+        setProgLbl(job.progress?.label || `${tk} still running…`)
+        onStart?.()
+        await followJob(job.job_id, tk, ordered, true)
+      })()
+    })
     return () => {
       cancelled = true
+      stop()
       pollAbort.current?.abort()
     }
     // Mount-only: re-attach whatever is live on the server / session.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { getCachedUser } from '@/lib/auth'
 import {
   AGENT_ENGINES,
@@ -102,8 +103,7 @@ export function AnalystCard({ bare = false }: Props) {
   }, [])
 
   useEffect(() => {
-    const id = window.setTimeout(() => void loadReviews(), 1100)
-    return () => window.clearTimeout(id)
+    return delayAfterWatchlist(1100, () => void loadReviews())
   }, [loadReviews])
 
   const run = async () => {

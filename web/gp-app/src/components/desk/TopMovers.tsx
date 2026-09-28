@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type MarketMoversResponse } from '@/lib/api'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { Button } from '@/components/ui/Button'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
 import styles from './deskWidgets.module.css'
@@ -53,19 +54,22 @@ export function TopMovers({
   }, [])
 
   useEffect(() => {
-    const first = window.setTimeout(() => void load(false), 900)
-    const id = window.setInterval(() => {
-      if (document.hidden) return
-      void load(false)
-    }, 90_000)
+    let interval = 0
     const onVis = () => {
       if (document.hidden) return
       void load(false)
     }
-    document.addEventListener('visibilitychange', onVis)
+    const stopFirst = delayAfterWatchlist(900, () => {
+      void load(false)
+      interval = window.setInterval(() => {
+        if (document.hidden) return
+        void load(false)
+      }, 90_000)
+      document.addEventListener('visibilitychange', onVis)
+    })
     return () => {
-      window.clearTimeout(first)
-      window.clearInterval(id)
+      stopFirst()
+      window.clearInterval(interval)
       document.removeEventListener('visibilitychange', onVis)
     }
   }, [load])

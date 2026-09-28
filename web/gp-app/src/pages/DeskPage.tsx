@@ -20,6 +20,12 @@ import {
   type WatchlistResponse,
 } from '@/lib/api'
 import { requestQuoteRefresh, subscribeQuoteRefresh } from '@/lib/quoteRefresh'
+import {
+  delayAfterWatchlist,
+  isFirstDeskLoadToday,
+  markDeskBooted,
+  notifyWatchlistSettled,
+} from '@/lib/deskBoot'
 import { publishQuotes } from '@/lib/quoteBook'
 import { saveSupportLog } from '@/lib/supportLog'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
@@ -243,9 +249,13 @@ export function DeskPage() {
 
   const loadWatchlist = useCallback(async () => {
     const ac = new AbortController()
-    const timer = window.setTimeout(() => ac.abort(), 10_000)
+    // First open of the day has a cold quote book. Give it the worker
+    // before the 10s limit that leaves last week's list on screen.
+    const limit = isFirstDeskLoadToday() ? 20_000 : 10_000
+    const timer = window.setTimeout(() => ac.abort(), limit)
     try {
       const w = await api<WatchlistResponse>('/api/watchlist', { signal: ac.signal })
+      markDeskBooted()
       setWl((prev) => {
         const merged = mergeWlQuotes(prev, w)
         writeWlCache(merged)
@@ -267,6 +277,7 @@ export function DeskPage() {
     } finally {
       window.clearTimeout(timer)
       setLoading(false)
+      notifyWatchlistSettled()
     }
   }, [])
 
@@ -313,13 +324,13 @@ export function DeskPage() {
 
   useEffect(() => {
     void loadWatchlist()
-    // Brief is optional. Let the watchlist own the one worker first.
-    const briefTimer = window.setTimeout(() => void loadBrief(), 600)
+    // Brief waits. On the first open of the day it also waits for the list.
+    const stopBrief = delayAfterWatchlist(600, () => void loadBrief())
     const unsub = subscribeQuoteRefresh(() => {
       void loadWatchlist()
     })
     return () => {
-      window.clearTimeout(briefTimer)
+      stopBrief()
       unsub()
     }
   }, [loadWatchlist, loadBrief])

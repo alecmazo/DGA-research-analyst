@@ -3,6 +3,7 @@ import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { api, type Quote, type SavedReport } from '@/lib/api'
 import { readQuote, subscribeQuoteBook } from '@/lib/quoteBook'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/pages/ReportPage'
 import { openValuationWindow } from '@/pages/ValuationBridgePage'
@@ -122,8 +123,7 @@ export function SavedReports({ refreshKey = 0, onAnalyze, embed = false }: Props
   }, [])
 
   useEffect(() => {
-    const id = window.setTimeout(() => void load(), refreshKey ? 0 : 800)
-    return () => window.clearTimeout(id)
+    return delayAfterWatchlist(refreshKey ? 0 : 800, () => void load())
   }, [load, refreshKey])
 
   useEffect(() => {

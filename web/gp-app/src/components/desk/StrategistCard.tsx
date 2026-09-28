@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { getCachedUser } from '@/lib/auth'
 import {
   AGENT_ENGINES,
@@ -103,11 +104,10 @@ export function StrategistCard({ bare = false }: Props) {
   }, [])
 
   useEffect(() => {
-    const id = window.setTimeout(() => {
+    return delayAfterWatchlist(1100, () => {
       void loadFunds()
       void loadArchive()
-    }, 1100)
-    return () => window.clearTimeout(id)
+    })
   }, [loadFunds, loadArchive])
 
   const start = async (

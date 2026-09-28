@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { api, type IndexRow } from '@/lib/api'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { subscribeQuoteRefresh } from '@/lib/quoteRefresh'
 import { fmtPct, pctClass } from '@/lib/format'
 import styles from './MarketRibbon.module.css'
@@ -69,9 +71,12 @@ function normalize(data: unknown): Idx[] {
 export function MarketRibbon() {
   const [rows, setRows] = useState<Idx[]>(FALLBACK)
   const [stale, setStale] = useState(false)
+  const loc = useLocation()
+  const onDesk = loc.pathname === '/' || loc.pathname === ''
 
   useEffect(() => {
     let alive = true
+    let unsub = () => {}
     const load = async () => {
       try {
         const d = await api<unknown>('/api/market/indices')
@@ -82,16 +87,24 @@ export function MarketRibbon() {
         if (alive) setStale(true)
       }
     }
-    void load()
-    // Same clock as Desk watchlist — no marquee, no second cadence.
-    const unsub = subscribeQuoteRefresh(() => {
+    const arm = () => {
       void load()
-    })
+      // Same clock as Desk watchlist — no marquee, no second cadence.
+      unsub = subscribeQuoteRefresh(() => {
+        void load()
+      })
+    }
+    // On the desk, the first open of the day keeps this off the worker
+    // until the watchlist has answered. Other pages load it now.
+    let stop = () => {}
+    if (onDesk) stop = delayAfterWatchlist(0, arm)
+    else arm()
     return () => {
       alive = false
+      stop()
       unsub()
     }
-  }, [])
+  }, [onDesk])
 
   return (
     <div className={styles.wrap} role="region" aria-label="Market indices">

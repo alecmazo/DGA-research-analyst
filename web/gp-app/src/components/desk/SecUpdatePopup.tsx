@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { delayAfterWatchlist, isFirstDeskLoadToday } from '@/lib/deskBoot'
 import { Button } from '@/components/ui/Button'
 import styles from './SecUpdatePopup.module.css'
 
@@ -71,11 +72,17 @@ export function SecUpdatePopup({
   }, [])
 
   useEffect(() => {
-    const first = window.setTimeout(() => void load(), 1500)
-    const t = window.setInterval(() => void load(), 120000)
+    // First open of the day: watchlist finishes, then this notice.
+    // Later the same day the 1.5s delay is enough.
+    const wait = isFirstDeskLoadToday() ? 0 : 1500
+    let interval = 0
+    const stop = delayAfterWatchlist(wait, () => {
+      void load()
+      interval = window.setInterval(() => void load(), 120000)
+    })
     return () => {
-      window.clearTimeout(first)
-      window.clearInterval(t)
+      stop()
+      window.clearInterval(interval)
     }
   }, [load])
 

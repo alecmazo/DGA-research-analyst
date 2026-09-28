@@ -9,6 +9,7 @@ import {
   type ValuationApproach,
 } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { fmtCap, fmtPct, pctClass } from '@/lib/format'
 import { openValuationWindow } from '@/pages/ValuationBridgePage'
 import { openCompsWindow } from '@/pages/CompsPage'
@@ -219,36 +220,39 @@ export function MarketPulse({
       return
     }
     let alive = true
-    const wait = window.setTimeout(() => {
-    void api<{ metrics?: Record<string, PulseMetrics> }>(
-      `/api/financials/metrics?tickers=${encodeURIComponent(tickers.join(','))}`,
-    )
-      .then((d) => {
-        if (alive) setMetrics(d.metrics || {})
-      })
-      .catch(() => {
-        if (alive) setMetrics({})
-      })
-    }, 1400)
+    const stop = delayAfterWatchlist(1400, () => {
+      void api<{ metrics?: Record<string, PulseMetrics> }>(
+        `/api/financials/metrics?tickers=${encodeURIComponent(tickers.join(','))}`,
+      )
+        .then((d) => {
+          if (alive) setMetrics(d.metrics || {})
+        })
+        .catch(() => {
+          if (alive) setMetrics({})
+        })
+    })
     return () => {
       alive = false
-      window.clearTimeout(wait)
+      stop()
     }
   }, [tickers])
 
   useEffect(() => {
-    const first = window.setTimeout(() => void load(false), 1200)
-    const id = window.setInterval(() => {
-      if (document.hidden) return
-      void load(false)
-    }, 5 * 60_000)
+    let interval = 0
     const onVis = () => {
       if (!document.hidden) void load(false)
     }
-    document.addEventListener('visibilitychange', onVis)
+    const stopFirst = delayAfterWatchlist(1200, () => {
+      void load(false)
+      interval = window.setInterval(() => {
+        if (document.hidden) return
+        void load(false)
+      }, 5 * 60_000)
+      document.addEventListener('visibilitychange', onVis)
+    })
     return () => {
-      window.clearTimeout(first)
-      window.clearInterval(id)
+      stopFirst()
+      window.clearInterval(interval)
       document.removeEventListener('visibilitychange', onVis)
     }
   }, [load])

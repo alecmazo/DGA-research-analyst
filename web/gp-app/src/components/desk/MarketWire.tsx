@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { Button } from '@/components/ui/Button'
 import styles from './deskWidgets.module.css'
 
@@ -49,11 +50,14 @@ export function MarketWire({ bare = false }: { bare?: boolean }) {
   }, [])
 
   useEffect(() => {
-    const first = window.setTimeout(() => void load(false), 1000)
-    const id = window.setInterval(() => void load(false), 5 * 60_000)
+    let interval = 0
+    const stopFirst = delayAfterWatchlist(1000, () => {
+      void load(false)
+      interval = window.setInterval(() => void load(false), 5 * 60_000)
+    })
     return () => {
-      window.clearTimeout(first)
-      window.clearInterval(id)
+      stopFirst()
+      window.clearInterval(interval)
     }
   }, [load])
 

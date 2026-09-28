@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { delayAfterWatchlist } from '@/lib/deskBoot'
 import styles from './TicketStatusDot.module.css'
 
 const POLL_MS = 60_000
@@ -24,16 +25,20 @@ export function TicketStatusDot() {
   }, [])
 
   useEffect(() => {
-    void load()
-    const t = window.setInterval(() => void load(), POLL_MS)
+    let interval = 0
     const onVis = () => {
       if (document.visibilityState === 'visible') void load()
     }
-    window.addEventListener('focus', load)
-    document.addEventListener('visibilitychange', onVis)
-    window.addEventListener('dga-ticket-filed', load)
+    const stop = delayAfterWatchlist(0, () => {
+      void load()
+      interval = window.setInterval(() => void load(), POLL_MS)
+      window.addEventListener('focus', load)
+      document.addEventListener('visibilitychange', onVis)
+      window.addEventListener('dga-ticket-filed', load)
+    })
     return () => {
-      window.clearInterval(t)
+      stop()
+      window.clearInterval(interval)
       window.removeEventListener('focus', load)
       document.removeEventListener('visibilitychange', onVis)
       window.removeEventListener('dga-ticket-filed', load)
