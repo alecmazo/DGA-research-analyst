@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api } from '@/lib/api'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import styles from './LibraryTree.module.css'
@@ -66,13 +66,18 @@ export function LibraryTree() {
   const [sel, setSel] = useState<Selection | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [reading, setReading] = useState(false)
+  const [busyTk, setBusyTk] = useState<string | null>(null)
+  const [refreshTk, setRefreshTk] = useState<string | null>(null)
+  const [refreshNote, setRefreshNote] = useState('')
+
+  const load = useCallback(async () => {
+    const data = await api<Library>('/api/transcripts/library')
+    setLib(data)
+  }, [])
 
   useEffect(() => {
     let cancel = false
-    api<Library>('/api/transcripts/library')
-      .then((data) => {
-        if (!cancel) setLib(data)
-      })
+    load()
       .catch((e) => {
         if (!cancel) setErr(e instanceof Error ? e.message : 'Could not load the library')
       })
@@ -82,7 +87,50 @@ export function LibraryTree() {
     return () => {
       cancel = true
     }
-  }, [])
+  }, [load])
+
+  const refreshCalls = async (ticker: string) => {
+    setBusyTk(ticker)
+    setRefreshTk(ticker)
+    setErr(null)
+    setRefreshNote(`Refreshing ${ticker}…`)
+    let finalNote = `${ticker} updated`
+    try {
+      const job = await api<{ job_id?: string; error?: string }>('/api/transcripts/calls/sync', {
+        method: 'POST',
+        body: JSON.stringify({
+          tickers: [ticker],
+          max_quarters: 6,
+          max_names: 1,
+          missing_only: false,
+          allow_grok: 0,
+          prefer_stale: false,
+          include_current: true,
+        }),
+      })
+      if (!job.job_id) throw new Error(job.error || 'Could not start the refresh')
+      for (let i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 2000))
+        const st = await api<{ status?: string; label?: string; error?: string }>(
+          `/api/transcripts/calls/sync/${encodeURIComponent(job.job_id)}`,
+        )
+        setRefreshNote(st.label || `Refreshing ${ticker}…`)
+        const status = st.status || ''
+        if (status === 'done' || status === 'failed' || status === 'error' || status === 'canceled') {
+          if (status !== 'done') setErr(st.error || st.label || `${ticker} refresh failed`)
+          finalNote = st.label || finalNote
+          break
+        }
+      }
+      await load()
+      setRefreshNote(finalNote)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Refresh failed')
+      setRefreshNote('')
+    } finally {
+      setBusyTk(null)
+    }
+  }
 
   const q = query.trim().toLowerCase()
   const interviews = useMemo(() => filterFolders(lib?.interviews || [], q), [lib, q])
@@ -195,6 +243,9 @@ export function LibraryTree() {
                   count={folder.items.length}
                   open={!!open[`c:${folder.label}`]}
                   onToggle={() => toggle(`c:${folder.label}`)}
+                  onRefresh={() => void refreshCalls(folder.label)}
+                  refreshing={busyTk === folder.label}
+                  note={refreshTk === folder.label ? refreshNote : ''}
                 >
                   {folder.items.map((item) => {
                     const on =
@@ -304,6 +355,9 @@ function FolderBlock({
   count,
   open,
   onToggle,
+  onRefresh,
+  refreshing,
+  note,
   children,
 }: {
   folderKey: string
@@ -311,15 +365,31 @@ function FolderBlock({
   count: number
   open: boolean
   onToggle: () => void
+  onRefresh?: () => void
+  refreshing?: boolean
+  note?: string
   children: ReactNode
 }) {
   return (
     <div>
-      <button type="button" className={styles.folder} onClick={onToggle} aria-expanded={open}>
-        <span>{open ? '▾' : '▸'}</span>
-        {label}
-        <em>{count}</em>
-      </button>
+      <div className={styles.folderRow}>
+        <button type="button" className={styles.folder} onClick={onToggle} aria-expanded={open}>
+          <span>{open ? '▾' : '▸'}</span>
+          {label}
+          <em>{count}</em>
+        </button>
+        {open && onRefresh && (
+          <button
+            type="button"
+            className={styles.refresh}
+            disabled={refreshing}
+            onClick={onRefresh}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        )}
+      </div>
+      {open && note && <p className={styles.note}>{note}</p>}
       {open && <div className={styles.items}>{children}</div>}
     </div>
   )

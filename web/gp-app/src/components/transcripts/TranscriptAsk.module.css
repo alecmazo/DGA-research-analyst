@@ -1,0 +1,65 @@
+.via,
+.used,
+.err {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.via,
+.used {
+  color: var(--text-secondary);
+}
+
+.err {
+  color: #9b2c2c;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.lbl select,
+textarea {
+  font: inherit;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  color: inherit;
+}
+
+.lbl select {
+  height: 34px;
+  padding: 0 8px;
+  min-width: 240px;
+}
+
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  resize: vertical;
+}
+
+.answer {
+  max-height: 420px;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.answer :global(p) {
+  margin: 0 0 8px;
+}

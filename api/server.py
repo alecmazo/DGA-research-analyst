@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui679-20260928-local-window"
+WEB_BUILD_VERSION = "ui680-20260928-transcript-ask"
 
 
 @app.get("/api/build")
@@ -34462,7 +34462,8 @@ def _estimate_call_sync_cost(n_names: int, max_quarters: int, n_already: int = 0
 
 
 def _sync_one_ticker_calls(ticker: str, max_quarters: int = 4,
-                           allow_grok: bool = True) -> dict:
+                           allow_grok: bool = True,
+                           include_current: bool = False) -> dict:
     """Index recent earnings calls for one ticker. Returns
     {indexed, found, errors, grok_calls, free_hits, sources}.
 
@@ -34486,7 +34487,7 @@ def _sync_one_ticker_calls(ticker: str, max_quarters: int = 4,
         grok_calls, free_hits = 0, 0
         sources_used: list[str] = []
         pure_grok = (src_mode == "grok")
-        for (y, q) in _recent_quarters(max_quarters + 4):
+        for (y, q) in _recent_quarters(max_quarters + 4, include_current=include_current):
             if new_count >= max_quarters:
                 break
             qtag = f"{y}Q{q}"
@@ -34613,7 +34614,7 @@ def _call_sync_cancel_requested(job_id: str) -> bool:
 
 
 def _run_call_sync(job_id: str, tickers: list[str], max_quarters: int,
-                   allow_grok: bool = True) -> None:
+                   allow_grok: bool = True, include_current: bool = False) -> None:
     """Background worker: build/refresh the earnings RAG index for tickers."""
     def _set(**kw):
         prev = _call_sync_jobs.get(job_id) or {}
@@ -34675,7 +34676,8 @@ def _run_call_sync(job_id: str, tickers: list[str], max_quarters: int,
                  cost_usd=round(cost_usd, 2), trail=trail_all[-40:])
             try:
                 r = _sync_one_ticker_calls(tk, max_quarters=max_quarters,
-                                           allow_grok=allow_grok)
+                                           allow_grok=allow_grok,
+                                           include_current=include_current)
                 total_indexed += r.get("indexed", 0)
                 gc = int(r.get("grok_calls") or 0)
                 fh = int(r.get("free_hits") or 0)
@@ -35413,6 +35415,166 @@ def transcripts_library(request: Request):
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
 
 
+_ASK_TICKER_STOP = {
+    "THE", "AND", "FOR", "WITH", "FROM", "THIS", "THAT", "WHAT", "WHEN",
+    "HAVE", "BEEN", "SAID", "ABOUT", "CALL", "CALLS", "THEY", "THEIR",
+    "WERE", "WILL", "YOUR", "INTO", "OVER", "JUST", "LIKE", "SOME",
+    "MORE", "THAN", "THEN", "ALSO", "ONLY", "DOES", "DID", "HOW", "WHY",
+    "WHO", "WHICH", "EARNINGS", "TRANSCRIPT", "SAID", "YEAR", "QUARTER",
+    "CEO", "CFO", "EPS", "AI", "FY", "Q1", "Q2", "Q3", "Q4",
+}
+
+
+def _transcript_ask_pack(question: str, ticker: str = "") -> dict:
+    """Passages from the stored library. No model call."""
+    question = (question or "").strip()
+    ticker = (ticker or "").strip().upper()
+    interviews: list[str] = []
+    calls: list[str] = []
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return {
+            "system": "You answer only from the excerpts. None were stored.",
+            "user": f"Question: {question}\n\nNo transcript database is available.",
+            "ticker": ticker,
+        }
+    _ensure_transcripts_tables()
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            if not ticker:
+                words = [
+                    w.upper() for w in re.findall(r"[A-Za-z]{1,5}", question)
+                    if w.upper() not in _ASK_TICKER_STOP
+                ]
+                if words:
+                    cur.execute(
+                        "SELECT DISTINCT ticker FROM call_chunks WHERE ticker = ANY(%s) LIMIT 1",
+                        (words,),
+                    )
+                    hit = cur.fetchone()
+                    if hit and hit.get("ticker"):
+                        ticker = str(hit["ticker"]).upper()
+            try:
+                cur.execute(
+                    """
+                    SELECT title, channel, person,
+                           ts_headline(
+                             'english', coalesce(full_text, ''),
+                             plainto_tsquery('english', %s),
+                             'MaxFragments=2, MaxWords=36, MinWords=12'
+                           ) AS passage
+                      FROM transcripts
+                     WHERE to_tsvector('english', coalesce(full_text, ''))
+                           @@ plainto_tsquery('english', %s)
+                     ORDER BY created_at DESC
+                     LIMIT 4
+                    """,
+                    (question, question),
+                )
+                for row in cur.fetchall() or []:
+                    who = " · ".join(
+                        p for p in (row.get("channel"), row.get("person"), row.get("title")) if p
+                    )
+                    interviews.append(f"[Interview · {who}]\n{(row.get('passage') or '').strip()}")
+            except Exception:
+                conn.rollback()
+            if ticker:
+                cur.execute(
+                    """
+                    SELECT quarter, call_date,
+                           ts_headline(
+                             'english', coalesce(chunk_text, ''),
+                             plainto_tsquery('english', %s),
+                             'MaxFragments=1, MaxWords=48, MinWords=16'
+                           ) AS passage
+                      FROM call_chunks
+                     WHERE ticker = %s
+                       AND to_tsvector('english', coalesce(chunk_text, ''))
+                           @@ plainto_tsquery('english', %s)
+                     ORDER BY call_date DESC NULLS LAST
+                     LIMIT 6
+                    """,
+                    (question, ticker, question),
+                )
+                for row in cur.fetchall() or []:
+                    calls.append(
+                        f"[Earnings call · {ticker} · {row.get('quarter') or 'Undated'} · {row.get('call_date') or ''}]\n"
+                        f"{(row.get('passage') or '').strip()}"
+                    )
+    except Exception as exc:
+        print(f"[transcript-ask] context failed: {exc!s:.180}", flush=True)
+    excerpts = [block for block in (interviews + calls) if block.strip()]
+    body = "\n\n".join(excerpts) if excerpts else "No stored transcript passages matched this question."
+    scope = f" The ticker in view is {ticker}." if ticker else ""
+    return {
+        "system": (
+            "You answer questions about stored interview and earnings-call transcripts. "
+            "Use only the excerpts in the user message. If they do not contain the answer, "
+            "say that the library does not have it. Do not invent quotes. When you use a "
+            "passage, name the show or the ticker and quarter."
+            + scope
+        ),
+        "user": f"Question: {question}\n\nExcerpts:\n{body}",
+        "ticker": ticker,
+        "excerpts": len(excerpts),
+    }
+
+
+@app.post("/api/transcripts/ask-context")
+def transcripts_ask_context(request: Request):
+    """Transcript passages for a question. The browser sends these to Ollama."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    try:
+        body = _request_json_sync(request) or {}
+    except Exception:
+        body = {}
+    question = str((body or {}).get("question") or "").strip()
+    if len(question) < 4:
+        raise HTTPException(400, "Ask a real question")
+    pack = _transcript_ask_pack(question, str((body or {}).get("ticker") or ""))
+    return {"ok": True, **pack}
+
+
+@app.post("/api/transcripts/ask")
+def transcripts_ask(request: Request):
+    """Answer from the library with a chosen paid provider. Never calls the local model."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    try:
+        body = _request_json_sync(request) or {}
+    except Exception:
+        body = {}
+    question = str((body or {}).get("question") or "").strip()
+    provider = str((body or {}).get("provider") or "").strip().lower()
+    if provider == "local":
+        raise HTTPException(400, "The local model is called from this Mac, not from this API")
+    if provider not in ("grok", "claude", "deepseek"):
+        raise HTTPException(400, "Choose Grok, Claude, or DeepSeek")
+    if len(question) < 4:
+        raise HTTPException(400, "Ask a real question")
+    pack = _transcript_ask_pack(question, str((body or {}).get("ticker") or ""))
+    try:
+        answer = analyst.call_llm(provider, pack["system"], pack["user"], live_search=False)
+    except Exception as exc:
+        raise HTTPException(502, str(exc)[:240]) from exc
+    model = {
+        "grok": getattr(analyst, "GROK_MODEL", "grok"),
+        "claude": getattr(analyst, "CLAUDE_MODEL", "claude"),
+        "deepseek": getattr(analyst, "DEEPSEEK_MODEL", "deepseek"),
+    }.get(provider, provider)
+    return {
+        "ok": True,
+        "answer": answer or "",
+        "provider": provider,
+        "model": model,
+        "via": "api",
+        "ticker": pack.get("ticker") or "",
+        "excerpts": pack.get("excerpts") or 0,
+    }
+
+
 @app.get("/api/transcripts/calls/read")
 def transcripts_call_read(ticker: str, quarter: str, request: Request):
     """One earnings-call transcript, stitched from stored chunks."""
@@ -35544,6 +35706,7 @@ def transcripts_calls_sync(req: Request, background_tasks: BackgroundTasks):
     max_names = max(5, min(int((body or {}).get("max_names") or 40), 120))
     missing_only = bool((body or {}).get("missing_only", True))
     prefer_stale = bool((body or {}).get("prefer_stale", True))
+    include_current = bool((body or {}).get("include_current", False))
     if not tickers:
         tickers = _call_index_universe()
     covered = _call_indexed_tickers()
@@ -35613,7 +35776,9 @@ def transcripts_calls_sync(req: Request, background_tasks: BackgroundTasks):
                                 "total": len(selected), "done": 0, "indexed": 0,
                                 "grok_calls": 0, "free_hits": 0, "cost_usd": 0.0,
                                 "cost_est": cost_est, "allow_grok": allow_grok}
-    background_tasks.add_task(_run_call_sync, job_id, selected, max_quarters, allow_grok)
+    background_tasks.add_task(
+        _run_call_sync, job_id, selected, max_quarters, allow_grok, include_current,
+    )
     print(f"📞 [call sync] queued {job_id}  {len(selected)} tickers  q={max_quarters}  "
           f"missing={len(missing)} deferred={len(deferred)} allow_grok={allow_grok}",
           flush=True)

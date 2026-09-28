@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api } from '@/lib/api'
 import { LibraryTree } from '@/components/transcripts/LibraryTree'
+import { TranscriptAsk } from '@/components/transcripts/TranscriptAsk'
 import page from './page.module.css'
 import styles from './TranscriptsPage.module.css'
 
@@ -273,6 +274,8 @@ export function TranscriptsPage() {
         <Spinner label="Loading transcript coverage…" />
       ) : (
         <>
+          <TranscriptAsk />
+
           <Panel title="Transcript library" badge="Interviews · Earnings calls" flush>
             <LibraryTree />
           </Panel>
