@@ -357,15 +357,19 @@ def render_report(
     price: str | float | None = None,
     rating_hint: str = "",
     engine_label: str = "",
+    scrub_engine_names: bool = True,
 ) -> str:
-    """Render Grok's markdown report into a polished .docx."""
-    markdown_text = (
-        (markdown_text or "")
-        .replace("Claude", "Laudia")
-        .replace("CLAUDE", "LAUDIA")
-        .replace("Grok", "Rock")
-        .replace("GROK", "ROCK")
-    )
+    """Render a markdown report into a polished .docx."""
+    if scrub_engine_names:
+        markdown_text = (
+            (markdown_text or "")
+            .replace("Claude", "Laudia")
+            .replace("CLAUDE", "LAUDIA")
+            .replace("Grok", "Rock")
+            .replace("GROK", "ROCK")
+        )
+    else:
+        markdown_text = markdown_text or ""
     doc = Document()
 
     # Global default font.

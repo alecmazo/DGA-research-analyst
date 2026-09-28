@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { SupportFab } from '@/components/support/SupportFab'
 import {
   api,
@@ -49,9 +49,11 @@ function deltaBits(dlt: ReportDelta | null | undefined): string[] {
 }
 
 export function ReportPage() {
+  const loc = useLocation()
   const [params, setParams] = useSearchParams()
   const ticker = (params.get('ticker') || '').toUpperCase()
-  const provider = (params.get('provider') || 'grok').toLowerCase()
+  const isolated = loc.pathname.replace(/\/$/, '').endsWith('/local-report')
+  const provider = isolated ? 'local' : (params.get('provider') || 'grok').toLowerCase()
 
   const [data, setData] = useState<ReportDetail | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
@@ -68,10 +70,15 @@ export function ReportPage() {
   const [pptBusy, setPptBusy] = useState(false)
 
   useEffect(() => {
-    document.title = ticker
-      ? `${ticker} · ${printEngineName(provider)} report · DGA`
-      : 'Report · DGA'
-  }, [ticker, provider])
+    if (isolated || provider !== 'local' || !ticker) return
+    const url = `/gp/local-report?ticker=${encodeURIComponent(ticker)}`
+    window.location.replace(url)
+  }, [isolated, provider, ticker])
+
+  useEffect(() => {
+    const engine = isolated ? 'local' : printEngineName(provider)
+    document.title = ticker ? `${ticker} · ${engine} report · DGA` : 'Report · DGA'
+  }, [ticker, provider, isolated])
 
   useEffect(() => {
     if (!ticker) {
@@ -156,21 +163,25 @@ export function ReportPage() {
 
   const currentMd = reportMarkdown(data)
   const md = viewId === 'current' ? currentMd : viewMd || ''
-  const html = useMemo(
-    () => (md ? scrubPrintEngineNames(renderMd(md)) : ''),
-    [md],
-  )
   const pct = quote?.pct ?? quote?.pct_change ?? null
-  const shownProvider = (data?.provider || provider).toLowerCase()
-  const printName = printEngineName(shownProvider)
+  const shownProvider = isolated ? 'local' : (data?.provider || provider).toLowerCase()
+  const localModel = (data?.model || 'gpt-oss-20b-finance').trim()
+  const localLabel = `local · ${localModel}`
+  const printName = isolated || shownProvider === 'local' ? localLabel : printEngineName(shownProvider)
+  const html = useMemo(() => {
+    if (!md) return ''
+    const rendered = renderMd(md)
+    if (isolated || shownProvider === 'local') return rendered
+    return scrubPrintEngineNames(rendered)
+  }, [md, isolated, shownProvider])
   const engines = new Set(
     (data?.providers || []).map((p) => String(p || '').toLowerCase()),
   )
   if (shownProvider) engines.add(shownProvider)
   const switchGrok = engines.has('grok')
   const switchClaude = engines.has('claude')
-  const switchLocal = engines.has('local') || shownProvider === 'local'
-  const showEngineSwitch = (switchGrok && switchClaude) || switchLocal
+  const switchLocal = !isolated && engines.has('local')
+  const showEngineSwitch = !isolated && switchGrok && switchClaude
 
   const switchEngine = (pv: string) => {
     if (!ticker || pv === shownProvider) return
@@ -182,11 +193,12 @@ export function ReportPage() {
     history?.current?.delta_from_prior ||
     history?.delta_from_prior ||
     null
-  const vc =
-    data?.version_count ||
-    history?.current?.version_count ||
-    history?.version_count ||
-    1
+  const vc = isolated
+    ? history?.current?.version_count || history?.version_count || 1
+    : data?.version_count ||
+      history?.current?.version_count ||
+      history?.version_count ||
+      1
   const bits = deltaBits(dlt)
   const showDelta =
     viewId === 'current' &&
@@ -356,7 +368,7 @@ export function ReportPage() {
   }
 
   return (
-    <div className={styles.page}>
+    <div className={isolated ? `${styles.page} ${styles.pageLocal}` : styles.page}>
       <PrintLetterhead
         doc="Research Report"
         meta={[
@@ -369,7 +381,7 @@ export function ReportPage() {
         <div className={styles.title}>
           <strong>{ticker || '—'}</strong>
           <span className={styles.prov} data-p={shownProvider}>
-            {shownProvider === 'local' ? 'local' : printName.toUpperCase()}
+            {isolated || shownProvider === 'local' ? localLabel : printName.toUpperCase()}
           </span>
           {vc > 1 && (
             <span className={styles.verBadge} title="Analyze re-run count for this ticker/engine">
@@ -565,8 +577,11 @@ export function openReportWindow(ticker: string, provider = 'grok') {
   const tk = ticker.trim().toUpperCase()
   if (!tk) return
   const pv = (provider || 'grok').toLowerCase()
-  const url = `/gp/report?ticker=${encodeURIComponent(tk)}&provider=${encodeURIComponent(pv)}`
-  const name = `dga-report-${tk}-${pv}`
+  const local = pv === 'local'
+  const url = local
+    ? `/gp/local-report?ticker=${encodeURIComponent(tk)}`
+    : `/gp/report?ticker=${encodeURIComponent(tk)}&provider=${encodeURIComponent(pv)}`
+  const name = local ? `dga-local-report-${tk}` : `dga-report-${tk}-${pv}`
   // Do not use noopener alone in a way that breaks same-origin localStorage —
   // omit noreferrer so the session token still works; popup is same-origin SPA.
   const win = window.open(

@@ -6877,6 +6877,29 @@ def _persist_analysis_text(
     except Exception:
         summary = {}
 
+    if provider == "local":
+        model = ""
+        if isinstance(result, dict):
+            model = str(result.get("model") or "").strip()
+        if not model:
+            model = (os.environ.get("LOCAL_LLM_MODEL") or "gpt-oss-20b-finance").strip()
+        summary["model"] = model or "gpt-oss-20b-finance"
+        try:
+            ok = _db_upsert_report(
+                ticker, text, summary,
+                has_docx=False, has_pptx=False, gamma_url=None,
+                pptx_stale=None, provider="local",
+            )
+            if ok:
+                print(f"✅ [persist] LOCAL report for {ticker} "
+                      f"({len(text):,} chars · model={summary.get('model')})")
+                return True, len(text)
+            print(f"❌ [persist] LOCAL DB write returned False for {ticker}")
+            return False, len(text)
+        except Exception as e:
+            print(f"❌ [persist] LOCAL DB write failed for {ticker}: {e!s:.300}")
+            return False, len(text)
+
     if provider in ("claude", "kimi", "deepseek"):
         try:
             ok = _db_upsert_report(
@@ -8601,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui678-20260928-transcript-tree"
+WEB_BUILD_VERSION = "ui679-20260928-local-window"
 
 
 @app.get("/api/build")
@@ -9686,7 +9709,8 @@ def local_save_report(body: LocalSaveRequest, request: Request):
             output_path=str(docx_path),
             price=(summary or {}).get("current_price"),
             rating_hint=str((summary or {}).get("rating") or ""),
-            engine_label="local",
+            engine_label=f"local · {os.environ.get('LOCAL_LLM_MODEL') or 'gpt-oss-20b-finance'}",
+            scrub_engine_names=False,
         )
     except Exception as exc:
         print(f"[local] word render failed for {ticker}: {exc!s:.160}", flush=True)
@@ -9702,6 +9726,8 @@ def local_save_report(body: LocalSaveRequest, request: Request):
         "cost_usd": 0,
         "tokens_per_sec": body.tokens_per_sec,
         "latency_ms": body.latency_ms,
+        "model": (os.environ.get("LOCAL_LLM_MODEL") or "gpt-oss-20b-finance").strip()
+                 or "gpt-oss-20b-finance",
     }
     persisted, chars = _persist_analysis_text(
         ticker=ticker, provider="local", result=result,
@@ -10117,7 +10143,7 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
     provider = (provider or "grok").lower().strip()
     if provider == "volume":
         provider = "kimi"
-    if provider not in ("grok", "claude", "kimi", "deepseek"):
+    if provider not in ("grok", "claude", "kimi", "deepseek", "local"):
         provider = "grok"
 
     def _present_md(md: str, *, row=None, payload: dict) -> dict:
@@ -10235,8 +10261,10 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                 engines.append("kimi")
             if (row.get("report_md_deepseek") or "").strip():
                 engines.append("deepseek")
-            if (row.get("report_md_local") or "").strip():
-                engines.append("local")
+            # Local notes stay off the desk report window. A local open
+            # lists only itself so it cannot switch into a Rock report.
+            if (payload.get("provider") or "") == "local":
+                engines = ["local"]
             payload["providers"] = engines
         try:
             gap = analyst.report_tail_gap(
@@ -10274,7 +10302,7 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                            report_md_claude, claude_generated_at,
                            report_md_kimi, kimi_generated_at,
                            report_md_deepseek, deepseek_generated_at,
-                           report_md_local, local_generated_at, local_gamma_url,
+                           report_md_local, local_generated_at, local_gamma_url, local_model,
                            rating, price_target, upside_pct,
                            claude_rating, claude_price_target, claude_upside_pct,
                            kimi_rating, kimi_price_target, kimi_upside_pct,
@@ -10361,13 +10389,10 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                         "has_pptx": (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Presentation_local.pptx").exists(),
                         "gamma_url": row.get("local_gamma_url"),
                         "gamma_generated_at": None,
-                        "rating": row.get("local_rating") or row.get("rating"),
-                        "price_target": _f(row.get("local_price_target"))
-                                         if row.get("local_price_target") is not None
-                                         else _f(row.get("price_target")),
-                        "upside_pct": _f(row.get("local_upside_pct"))
-                                       if row.get("local_upside_pct") is not None
-                                       else _f(row.get("upside_pct")),
+                        "model": row.get("local_model") or "gpt-oss-20b-finance",
+                        "rating": row.get("local_rating"),
+                        "price_target": _f(row.get("local_price_target")),
+                        "upside_pct": _f(row.get("local_upside_pct")),
                     })
                 if provider == "local":
                     row = None
@@ -10466,7 +10491,7 @@ def report_history(ticker: str, provider: str = "grok", request: Request = None)
     provider = (provider or "grok").lower().strip()
     if provider == "volume":
         provider = "kimi"
-    if provider not in ("grok", "claude", "kimi", "deepseek"):
+    if provider not in ("grok", "claude", "kimi", "deepseek", "local"):
         provider = "grok"
     try:
         _ensure_report_history_tables()
@@ -10511,6 +10536,7 @@ def report_history(ticker: str, provider: str = "grok", request: Request = None)
                     "claude": ("report_md_claude", "claude_generated_at", "claude_rating", "claude_price_target", "claude_upside_pct", "claude_report_date"),
                     "kimi": ("report_md_kimi", "kimi_generated_at", "kimi_rating", "kimi_price_target", "kimi_upside_pct", "kimi_report_date"),
                     "deepseek": ("report_md_deepseek", "deepseek_generated_at", "deepseek_rating", "deepseek_price_target", "deepseek_upside_pct", "deepseek_report_date"),
+                    "local": ("report_md_local", "local_generated_at", "local_rating", "local_price_target", "local_upside_pct", "local_report_date"),
                 }
                 cols = col_map[provider]
                 cur.execute(f"""
@@ -10657,7 +10683,7 @@ def email_saved_report_pdf(ticker: str, body: SavedReportEmailRequest, request: 
     if not tk or len(tk) > 12 or not re.fullmatch(r"[A-Z0-9.\-]+", tk):
         raise HTTPException(422, "Invalid ticker")
     provider = (body.provider or "grok").lower().strip()
-    if provider not in ("grok", "claude", "kimi", "deepseek"):
+    if provider not in ("grok", "claude", "kimi", "deepseek", "local"):
         provider = "grok"
     html_doc = _dga_saved_report_pdf_html(
         ticker=tk,
@@ -10966,7 +10992,7 @@ def download_xlsx(
     provider = (provider or "grok").lower().strip()
     if provider == "volume":
         provider = "kimi"
-    if provider not in ("grok", "claude", "kimi", "deepseek"):
+    if provider not in ("grok", "claude", "kimi", "deepseek", "local"):
         provider = "grok"
 
     payload: dict = {}
@@ -11006,7 +11032,12 @@ def download_xlsx(
     except Exception:
         quote = {}
 
-    engine = _print_engine_alias(payload.get("provider") or provider) or provider
+    local_xlsx = (payload.get("provider") or provider) == "local"
+    if local_xlsx:
+        model = str(payload.get("model") or "gpt-oss-20b-finance")
+        engine = f"local · {model}"
+    else:
+        engine = _print_engine_alias(payload.get("provider") or provider) or provider
     as_of = payload.get("generated_at") or datetime.utcnow().strftime("%Y-%m-%d")
     try:
         import excel_model as _em
@@ -11020,7 +11051,11 @@ def download_xlsx(
             entity_name=financials.get("entity_name") or tk,
             sector=summary.get("sector") or "",
             source=financials.get("source") or "company_financials",
-            dropbox_note=f"Replaces Dropbox /Apps/DGA Research/Excel/{tk}_DGA_Model.xlsx",
+            dropbox_note=(
+                f"Local model workbook in Dropbox /Apps/DGA Research/Local_Reports/{tk}_DGA_Model_local.xlsx"
+                if local_xlsx else
+                f"Replaces Dropbox /Apps/DGA Research/Excel/{tk}_DGA_Model.xlsx"
+            ),
             generated_at=str(as_of),
         )
     except Exception as e:
@@ -11031,7 +11066,7 @@ def download_xlsx(
     if not raw:
         raise HTTPException(status_code=500, detail="Excel model produced an empty file")
 
-    fname = f"{tk}_DGA_Model.xlsx"
+    fname = f"{tk}_DGA_Model_local.xlsx" if local_xlsx else f"{tk}_DGA_Model.xlsx"
     out_path: Path | None = None
     try:
         cand = analyst.STOCKS_FOLDER / fname
@@ -11054,7 +11089,10 @@ def download_xlsx(
         # Replace the Dropbox file now so the cloud copy is the latest
         # before we hand the browser a link to open it.
         try:
-            res = analyst.push_to_dropbox([out_path], dest_subfolder="Excel")
+            res = analyst.push_to_dropbox(
+                [out_path],
+                dest_subfolder="Local_Reports" if local_xlsx else "Excel",
+            )
             print(f"[xlsx-export] dropbox {out_path.name}: {res}", flush=True)
             if not res.get("ok"):
                 background_tasks.add_task(_bg_push_model_xlsx, str(out_path))
@@ -16172,7 +16210,9 @@ def _parse_delta_blob(raw, provider: str | None = None):
     for k in ("grok", "claude", "kimi", "deepseek"):
         if isinstance(raw.get(k), dict):
             return raw[k]
-    for v in raw.values():
+    for k, v in raw.items():
+        if k == "local":
+            continue
         if isinstance(v, dict) and ("rating" in v or "price_target" in v or "rating_changed" in v):
             return v
     return None
@@ -16197,8 +16237,11 @@ def _merge_delta_blob(existing, provider: str, delta: dict) -> dict:
     return base
 
 
-def _stamp_report_delta(cur, ticker: str, provider: str, delta: dict) -> None:
-    """Write per-provider delta + bump shared version_count (same txn as upsert)."""
+def _stamp_report_delta(cur, ticker: str, provider: str, delta: dict, *, bump_version: bool = True) -> None:
+    """Write per-provider delta. Desk engines also bump the shared version_count.
+
+    Local notes keep their own archive count and must not advance the desk's vN.
+    """
     import json as _json
     cur.execute(
         "SELECT delta_from_prior FROM analyst_reports WHERE ticker=%s",
@@ -16208,10 +16251,15 @@ def _stamp_report_delta(cur, ticker: str, provider: str, delta: dict) -> None:
     if row is not None:
         existing = row[0] if not isinstance(row, dict) else row.get("delta_from_prior")
     merged = _merge_delta_blob(existing, provider, delta)
-    cur.execute(
-        "UPDATE analyst_reports SET delta_from_prior=%s::jsonb, "
-        "version_count = COALESCE(version_count, 1) + 1 WHERE ticker=%s",
-        (_json.dumps(merged), ticker))
+    if bump_version and (provider or "").lower() != "local":
+        cur.execute(
+            "UPDATE analyst_reports SET delta_from_prior=%s::jsonb, "
+            "version_count = COALESCE(version_count, 1) + 1 WHERE ticker=%s",
+            (_json.dumps(merged), ticker))
+    else:
+        cur.execute(
+            "UPDATE analyst_reports SET delta_from_prior=%s::jsonb WHERE ticker=%s",
+            (_json.dumps(merged), ticker))
 
 
 def _archive_prior_report_version(cur, ticker: str, provider: str, new_summary: dict, new_md: str) -> dict | None:
@@ -16295,6 +16343,14 @@ def _archive_prior_report_version(cur, ticker: str, provider: str, new_summary: 
             "report_date": row[5],
         }
         vcount = int(row[6] or 1) if len(row) > 6 else 1
+
+    if provider == "local":
+        cur.execute(
+            "SELECT COUNT(*) FROM analyst_report_versions WHERE ticker=%s AND provider=%s",
+            (ticker, "local"),
+        )
+        counted = cur.fetchone()
+        vcount = int((counted[0] if counted else 0) or 0)
 
     if not (old_md and len(old_md.strip()) > 200):
         return None
@@ -16654,15 +16710,15 @@ def _db_upsert_report(
                         _stamp_report_delta(cur, ticker, provider, delta_from_prior)
 
                 elif provider == "local":
+                    local_model = str(summary.get("model") or "gpt-oss-20b-finance")[:80]
                     cur.execute("""
                         INSERT INTO analyst_reports
                             (ticker, generated_at, report_md, has_docx, has_pptx,
                              report_md_local, local_generated_at, local_report_date,
                              local_rating, local_price_target, local_upside_pct,
-                             last_attempt_at, last_attempt_status, last_attempt_error)
+                             local_model)
                         VALUES (%s, NOW(), '', FALSE, FALSE,
-                                %s, NOW(), %s, %s, %s, %s,
-                                NOW(), 'success', NULL)
+                                %s, NOW(), %s, %s, %s, %s, %s)
                         ON CONFLICT (ticker) DO UPDATE SET
                             report_md_local    = EXCLUDED.report_md_local,
                             local_generated_at = CASE WHEN %s THEN NOW()
@@ -16671,21 +16727,17 @@ def _db_upsert_report(
                             local_rating       = EXCLUDED.local_rating,
                             local_price_target = EXCLUDED.local_price_target,
                             local_upside_pct   = EXCLUDED.local_upside_pct,
-                            archived           = FALSE,
-                            last_attempt_at    = CASE WHEN %s THEN NOW()
-                                                      ELSE analyst_reports.last_attempt_at END,
-                            last_attempt_status = CASE WHEN %s THEN 'success'
-                                                       ELSE analyst_reports.last_attempt_status END,
-                            last_attempt_error  = CASE WHEN %s THEN NULL
-                                                       ELSE analyst_reports.last_attempt_error END
+                            local_model        = EXCLUDED.local_model
                     """, (
                         ticker, md_text, report_date,
                         summary.get("rating"), summary.get("price_target"),
-                        summary.get("upside_pct"),
-                        _touch, _touch, _touch, _touch,
+                        summary.get("upside_pct"), local_model,
+                        _touch,
                     ))
                     if delta_from_prior is not None:
-                        _stamp_report_delta(cur, ticker, provider, delta_from_prior)
+                        _stamp_report_delta(
+                            cur, ticker, provider, delta_from_prior, bump_version=False,
+                        )
 
                 elif provider == "deepseek":
                     cur.execute("""
@@ -17555,6 +17607,10 @@ def list_reports(request: Request = None):
                             provider_badge = providers[0].upper()
                         else:
                             provider_badge = "—"
+                        # A local-only note is not a desk report. HHH was
+                        # mis-filed onto this card once; do not list it here.
+                        if not providers:
+                            continue
 
                         _vc = int(r.get("version_count") or 1)
                         # List card shows the most relevant engine delta (prefer grok)
@@ -20516,6 +20572,7 @@ def _ensure_analyst_reports_table(conn) -> None:
         ("local_upside_pct",      "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_upside_pct NUMERIC"),
         ("local_report_date",     "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_report_date TEXT"),
         ("local_gamma_url",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_gamma_url TEXT"),
+        ("local_model",           "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_model TEXT"),
         # Desk style pill (VALUE / GROWTH / GARP / RICH / CORE)
         ("stock_style",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style VARCHAR(16)"),
         ("stock_style_note",  "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style_note TEXT"),
@@ -32597,6 +32654,7 @@ _PROVIDER_BADGE_BG = {
     "claude": "#d97706",
     "kimi": "#166534",
     "deepseek": "#1e3a8a",
+    "local": "#9f1239",
 }
 
 
@@ -32613,6 +32671,8 @@ def _print_engine_alias(provider_or_model: str | None) -> str:
         return "Kimi"
     if "deepseek" in m:
         return "DeepSeek"
+    if m == "local" or "gpt-oss" in m:
+        return "local"
     return (provider_or_model or "").strip()
 
 
@@ -32659,7 +32719,7 @@ def _dga_saved_report_pdf_html(
     if prov not in _PROVIDER_BADGE_BG:
         prov = "grok"
     alias = _print_engine_alias(prov) or "Rock"
-    prov_e = _html.escape(alias.upper())
+    prov_e = _html.escape(alias if prov == "local" else alias.upper())
     when_e = _html.escape((when or "").strip())
     ver_e = _html.escape((version_label or "").strip())
     note_e = _html.escape((note or "").strip())
@@ -32895,9 +32955,9 @@ def _dga_saved_report_pdf_html(
         'Page <pdf:pagenumber> of <pdf:pagecount>'
         '</div>'
     )
-    body = _scrub_print_engine_names(
-        _fix_md_table_widths(_sanitize_saved_report_html(body_html or ""))
-    )
+    body = _fix_md_table_widths(_sanitize_saved_report_html(body_html or ""))
+    if prov != "local":
+        body = _scrub_print_engine_names(body)
     return (
         f'<!doctype html><html><head><meta charset="utf-8">'
         f'<style>{css}</style></head><body>'

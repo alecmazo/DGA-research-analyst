@@ -6,6 +6,81 @@
   color: var(--text-primary);
 }
 
+/* Local notes are a separate window: warm grey, light red, not the desk blue. */
+.pageLocal {
+  background: #f3f0ee;
+}
+
+.pageLocal .head,
+.pageLocal .timeline {
+  background: #f7f4f2;
+  border-bottom-color: #e4ddd9;
+}
+
+.pageLocal .prov[data-p='local'] {
+  background: #9f1239;
+}
+
+.pageLocal .verBadge {
+  background: #fde8e8;
+  color: #9f1239;
+  border-color: #f3c1c1;
+}
+
+.pageLocal .deltaBanner {
+  background: linear-gradient(180deg, #fdf2f2 0%, #f8e8e6 100%);
+  border-bottom-color: #f0d0cb;
+}
+
+.pageLocal .deltaTitle {
+  color: #7f1d1d;
+}
+
+.pageLocal .deltaNote {
+  color: #6b5e5a;
+}
+
+.pageLocal .metrics {
+  background: #f6f3f1;
+  border-bottom-color: #e4ddd9;
+}
+
+.pageLocal .histChip {
+  background: #f7f4f2;
+  border-color: #ddd4cf;
+  color: #5c534f;
+}
+
+.pageLocal .histChip:hover {
+  border-color: #e4b4ae;
+  color: #7f1d1d;
+}
+
+.pageLocal .histChipOn {
+  background: #b45454;
+  border-color: #9f4548;
+  color: #fff;
+}
+
+.pageLocal .exportPull:hover:not(:disabled) {
+  border-color: #e4b4ae;
+  color: #7f1d1d;
+}
+
+.pageLocal .md :global(.md-h1) {
+  border-bottom-color: #e7b8b4;
+}
+
+.pageLocal .md :global(.md-h3),
+.pageLocal .md :global(.md-h4) {
+  color: #5c3a3a;
+}
+
+.pageLocal .md :global(code) {
+  background: #f3eeeb;
+  color: #4a3734;
+}
+
 .head {
   display: flex;
   align-items: center;

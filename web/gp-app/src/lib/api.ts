@@ -683,4 +683,6 @@ export type ReportDetail = {
   version_count?: number
   delta_from_prior?: ReportDelta | null
   providers?: string[]
+  /** Local window only. Exact model that wrote the note. */
+  model?: string
 }

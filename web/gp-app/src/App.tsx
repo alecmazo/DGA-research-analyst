@@ -105,6 +105,7 @@ export default function App() {
           <Routes>
             {/* Standalone report / research windows (no chrome) */}
             <Route path="report" element={<ReportPage />} />
+            <Route path="local-report" element={<ReportPage />} />
             <Route path="research" element={<ResearchAnswerPage />} />
             <Route path="valuation" element={<ValuationBridgePage />} />
             <Route path="comps" element={<CompsPage />} />
