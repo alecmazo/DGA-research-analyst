@@ -255,6 +255,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Munger page** | **`ui672-20260925-munger-page`** | A Munger page: morning card (one rule, one holding), the fifty as an index, and each rule across the watchlist from saved report citations. No model call on load. |
 | **Since cost** | **`ui673-20260926-since-cost`** | Open positions show percent change from average cost, between unrealized gain and weight. |
 | **Watchlist first** | **`ui674-20260928-wl-first`** | First open of the Pacific day finishes the watchlist before the SEC notice and the other desk polls. Later the same day the old stagger stays. |
+| **Local page** | **`ui675-20260928-local-page`** | A Local page on the GP site runs research, questions, and portfolio notes on the on-Mac finance model only. |
 
 ### One-click handoff (preferred)
 
@@ -444,4 +445,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-28 · Agent: Grok Build · Live: `ui674-20260928-wl-first` · Next: `ui675-YYYYMMDD-slug`*
+*Last updated: 2026-09-28 · Agent: Grok Build · Live: `ui675-20260928-local-page` · Next: `ui676-YYYYMMDD-slug`*
