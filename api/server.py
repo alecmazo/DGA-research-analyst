@@ -9529,6 +9529,65 @@ def local_llm_health(request: Request):
     return check_local_health()
 
 
+def _local_store_rows(ticker: str, period: str = "all"):
+    fn = globals().get("_fin_rows_for_ticker")
+    if not callable(fn):
+        raise RuntimeError("Financial store is not loaded.")
+    return fn(ticker, period)
+
+
+class LocalAskRequest(BaseModel):
+    question: str = ""
+
+
+class LocalPortfolioRequest(BaseModel):
+    portfolio: str = ""
+
+
+@app.get("/api/local/status")
+def local_page_status(request: Request):
+    """Ollama dot plus the worktree this page is running from."""
+    _claims_or_401(request)
+    from api.domains.local_desk import page_status
+    return page_status()
+
+
+@app.get("/api/local/portfolios")
+def local_page_portfolios(request: Request):
+    """Account list for the Local page. No model call."""
+    _claims_or_401(request)
+    raw = _agentic_exec_tool("list_portfolios", {})
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {"ok": False, "portfolios": [], "error": str(raw)[:300]}
+    return {"ok": True, "portfolios": data.get("portfolios") or []}
+
+
+@app.post("/api/local/ask")
+def local_page_ask(body: LocalAskRequest, request: Request):
+    """Question agent. Local model only."""
+    _claims_or_401(request)
+    from api.domains.local_desk import run_local_agent
+    return run_local_agent(
+        body.question,
+        rows_fn=_local_store_rows,
+        platform_fn=_agentic_exec_tool,
+    )
+
+
+@app.post("/api/local/portfolio")
+def local_page_portfolio(body: LocalPortfolioRequest, request: Request):
+    """Portfolio recommendations. Local model, store figures, Yahoo news."""
+    _claims_or_401(request)
+    from api.domains.local_desk import recommend_portfolio
+    return recommend_portfolio(
+        body.portfolio,
+        rows_fn=_local_store_rows,
+        platform_fn=_agentic_exec_tool,
+    )
+
+
 @app.post("/api/analyze", response_model=JobStatus)
 def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
                    request: Request = None):

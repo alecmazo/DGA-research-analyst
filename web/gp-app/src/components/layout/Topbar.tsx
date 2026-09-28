@@ -12,6 +12,7 @@ import styles from './Topbar.module.css'
 const WORK: { to: string; label: string }[] = [
   { to: '/', label: 'Desk' },
   { to: '/financials', label: 'Financials' },
+  { to: '/local', label: 'Local' },
   { to: '/munger', label: 'Munger' },
   { to: '/builder', label: 'Builder' },
   { to: '/gurus', label: 'Gurus' },

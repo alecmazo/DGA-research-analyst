@@ -211,9 +211,12 @@ def _delta_text(delta: dict) -> tuple[str, str]:
 
 
 def complete_local(system_prompt: str, user_content: str, *, on_delta=None,
-                   usage_capture=None, should_cancel=None, ticker: str = "") -> str:
+                   usage_capture=None, should_cancel=None, ticker: str = "",
+                   max_tokens: int | None = None) -> str:
     """Stream one completion from gpt-oss-20b-finance. Raises LocalLlmError."""
     cfg = local_settings()
+    if max_tokens:
+        cfg["max_tokens"] = max(256, min(int(max_tokens), 20000))
     if not cfg["enabled"]:
         raise LocalLlmError("Local finance model is disabled (LOCAL_LLM_ENABLED=false)")
     if should_cancel is not None and should_cancel():

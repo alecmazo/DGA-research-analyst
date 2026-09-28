@@ -20,13 +20,12 @@ const ENGINES: { id: LlmProvider; label: string }[] = [
   { id: 'claude', label: 'Claude' },
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'kimi', label: 'Kimi' },
-  { id: 'local', label: 'Local – GPT-OSS 20B Finance (free)' },
 ]
 
 const STORAGE_KEY = 'dga.hero.engines.v3'
 const ACTIVE_JOB_KEY = 'dga.analyze.active.v1'
 
-const ENGINE_ORDER: LlmProvider[] = ['grok', 'claude', 'kimi', 'deepseek', 'local']
+const ENGINE_ORDER: LlmProvider[] = ['grok', 'claude', 'kimi', 'deepseek']
 
 function formatRunCost(result: JobStatus['result'] | null | undefined): string {
   if (!result) return ''
@@ -157,7 +156,6 @@ export function AnalyzeCard({
   }
 
   const [engines, setEngines] = useState<LlmProvider[]>(() => loadEngines())
-  const [localOffline, setLocalOffline] = useState<string | null>(null)
   const costs = useCostCatalog()
   const [gamma, setGamma] = useState(false)
   const [running, setRunning] = useState(false)
@@ -191,25 +189,6 @@ export function AnalyzeCard({
     }
   }, [engines])
 
-  useEffect(() => {
-    if (!engines.includes('local')) {
-      setLocalOffline(null)
-      return
-    }
-    let alive = true
-    void api<{ ok?: boolean; message?: string }>('/api/llm/local/health')
-      .then((d) => {
-        if (!alive) return
-        setLocalOffline(d?.ok ? null : d?.message || 'Local model offline – start Ollama')
-      })
-      .catch(() => {
-        if (alive) setLocalOffline('Local model offline – start Ollama')
-      })
-    return () => {
-      alive = false
-    }
-  }, [engines])
-
   /** Instant toggle — flushSync so highlight paints before the next frame. */
   const toggleEngine = (id: LlmProvider) => {
     if (running) return
@@ -228,9 +207,6 @@ export function AnalyzeCard({
 
   const costLabel = useMemo(() => {
     if (!engines.length) return 'Select an engine'
-    if (engines.length === 1 && engines[0] === 'local') {
-      return gamma ? 'cost: $0 / report + deck' : 'cost: $0'
-    }
     const ranges = engines.map((e) => costMap[e] || DEFAULT_REPORT_COST[e])
     const [lo, hi] = sumRanges(ranges)
     const range = `$${fmtUsd(lo)}–${fmtUsd(hi)}`
@@ -243,7 +219,6 @@ export function AnalyzeCard({
 
   const costTitle = useMemo(() => {
     const parts = engines.map((e) => {
-      if (e === 'local') return 'local: cost $0 per report'
       const [a, b] = costMap[e] || DEFAULT_REPORT_COST[e]
       return `${e}: $${fmtUsd(a)}–${fmtUsd(b)} per report`
     })
@@ -545,10 +520,6 @@ export function AnalyzeCard({
             <pre className={styles.heroTrace}>{trace.join('\n')}</pre>
           )}
         </div>
-      )}
-
-      {localOffline && engines.includes('local') && (
-        <div className={`${styles.heroHint} ${styles.hintErr}`}>{localOffline}</div>
       )}
 
       {hint && (

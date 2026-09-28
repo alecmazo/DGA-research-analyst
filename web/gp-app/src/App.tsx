@@ -8,6 +8,7 @@ import { FundPage } from '@/pages/FundPage'
 import { BuilderPage } from '@/pages/BuilderPage'
 import { FinancialsPage } from '@/pages/FinancialsPage'
 import { MungerPage } from '@/pages/MungerPage'
+import { LocalPage } from '@/pages/LocalPage'
 import { PodcastsPage } from '@/pages/PodcastsPage'
 import { TranscriptsPage } from '@/pages/TranscriptsPage'
 import { MemosPage } from '@/pages/MemosPage'
@@ -121,6 +122,14 @@ export default function App() {
                 element={
                   <ErrorBoundary label="Munger">
                     <MungerPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="local"
+                element={
+                  <ErrorBoundary label="Local">
+                    <LocalPage />
                   </ErrorBoundary>
                 }
               />
