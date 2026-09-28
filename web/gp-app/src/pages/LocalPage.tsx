@@ -7,6 +7,7 @@ import {
   isModelRefusal,
   LOCAL_RETRY_SYSTEM,
   ollamaChat,
+  refusalDiagnosis,
   ollamaStatus,
   parseToolCall,
 } from '@/lib/localOllama'
@@ -146,7 +147,9 @@ export function LocalPage() {
         })
       }
       if (!chat.text || isModelRefusal(chat.text)) {
-        throw new Error('The local model refused this run. The previous note was kept.')
+        throw new Error(
+          `The local model refused this run. The previous note was kept. ${refusalDiagnosis(chat)}`,
+        )
       }
       setProgress('Saving…')
       await api('/api/local/save', {

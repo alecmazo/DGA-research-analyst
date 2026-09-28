@@ -38,6 +38,10 @@ export type LocalChat = {
   text: string
   tokensPerSec: number | null
   latencyMs: number
+  thinking: string
+  doneReason: string | null
+  promptTokens: number | null
+  evalTokens: number | null
 }
 
 type ChatOpts = {
@@ -133,7 +137,11 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
   const dec = new TextDecoder()
   let buf = ''
   let text = ''
+  let thinking = ''
   let tokensPerSec: number | null = null
+  let doneReason: string | null = null
+  let promptTokens: number | null = null
+  let evalTokens: number | null = null
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
@@ -143,10 +151,12 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
     for (const line of lines) {
       if (!line.trim()) continue
       let ev: {
-        message?: { content?: string }
+        message?: { content?: string; thinking?: string }
         done?: boolean
+        done_reason?: string
         eval_count?: number
         eval_duration?: number
+        prompt_eval_count?: number
       }
       try {
         ev = JSON.parse(line)
@@ -154,12 +164,19 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
         continue
       }
       const piece = ev.message?.content || ''
+      const thought = ev.message?.thinking || ''
+      if (thought) thinking += thought
       if (piece) {
         text += piece
         opts.onDelta?.(piece)
       }
-      if (ev.done && ev.eval_count && ev.eval_duration) {
-        tokensPerSec = ev.eval_count / (ev.eval_duration / 1e9)
+      if (ev.done) {
+        doneReason = ev.done_reason || doneReason
+        if (ev.prompt_eval_count) promptTokens = ev.prompt_eval_count
+        if (ev.eval_count) evalTokens = ev.eval_count
+        if (ev.eval_count && ev.eval_duration) {
+          tokensPerSec = ev.eval_count / (ev.eval_duration / 1e9)
+        }
       }
     }
   }
@@ -167,5 +184,29 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
     text: text.trim(),
     tokensPerSec,
     latencyMs: Math.round(performance.now() - started),
+    thinking: thinking.trim(),
+    doneReason,
+    promptTokens,
+    evalTokens,
   }
+}
+
+/** Why a one-line apology happened. Shown instead of hiding the model's reason. */
+export function refusalDiagnosis(chat: LocalChat): string {
+  const think = chat.thinking.replace(/\s+/g, ' ').trim()
+  const prompt = chat.promptTokens
+  const fit = prompt == null
+    ? 'Prompt size was not reported.'
+    : prompt < 32768
+      ? `It had read ${prompt.toLocaleString()} prompt tokens, inside the 32,768 window, so the filing was not cut off.`
+      : `It had read ${prompt.toLocaleString()} prompt tokens, which fills the 32,768 window.`
+  const reason = think
+    ? `Its own reasoning before the apology: “${think.slice(0, 500)}”`
+    : 'It left no reasoning note.'
+  return [
+    `The model stopped on purpose (${chat.doneReason || 'stop'}) after ${chat.evalTokens ?? 'a few'} output tokens.`,
+    fit,
+    reason,
+    'That is the model deciding the research note is too long to finish. Ollama was up, and this is not a missing filing.',
+  ].join(' ')
 }
