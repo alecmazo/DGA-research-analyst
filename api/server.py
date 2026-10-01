@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui697-20261001-local-cover"
+WEB_BUILD_VERSION = "ui698-20261001-deal-scan"
 
 
 @app.get("/api/build")
@@ -43015,7 +43015,16 @@ def _mount_merger_arb() -> None:
         print(f"[merger-arb] mount failed: {exc!r}", flush=True)
 
 
+def _mount_merger_arb_scanner() -> None:
+    try:
+        from api.domains.merger_arb_scanner import create_router
+        app.include_router(create_router(_claims_or_401))
+    except Exception as exc:
+        print(f"[merger-arb-scanner] mount failed: {exc!r}", flush=True)
+
+
 _mount_merger_arb()
+_mount_merger_arb_scanner()
 
 
 if BRANDING_DIR.exists():

@@ -1,0 +1,17 @@
+{
+  "hits": {
+    "total": {"value": 1},
+    "hits": [
+      {
+        "_id": "0001193125-26-000111:defm14a.htm",
+        "_source": {
+          "ciks": ["0001819928"],
+          "display_names": ["Acme Target, Inc.  (ACME)  (CIK 0001819928)"],
+          "form": "DEFM14A",
+          "file_date": "2026-09-28",
+          "adsh": "0001193125-26-000111"
+        }
+      }
+    ]
+  }
+}

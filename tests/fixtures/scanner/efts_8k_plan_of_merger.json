@@ -1,0 +1,19 @@
+{
+  "hits": {
+    "total": {"value": 1},
+    "hits": [
+      {
+        "_id": "0001140361-26-037453:ef20082596_8k.htm",
+        "_source": {
+          "ciks": ["0001819928"],
+          "display_names": ["Acme Target, Inc.  (ACME)  (CIK 0001819928)"],
+          "form": "8-K",
+          "root_forms": ["8-K"],
+          "file_date": "2026-09-20",
+          "adsh": "0001140361-26-037453",
+          "items": ["1.01", "9.01"]
+        }
+      }
+    ]
+  }
+}

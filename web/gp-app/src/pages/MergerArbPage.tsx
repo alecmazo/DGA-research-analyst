@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import page from './page.module.css'
 import styles from './MergerArbPage.module.css'
+import { DealScan } from './DealScan'
 
 type Deal = {
   id: string
@@ -251,6 +252,7 @@ export function MergerArbPage() {
 
       {!dealId && (
         <>
+          <DealScan />
           <Panel title="Deals">
             <ul className={styles.deals}>
               {deals.map((deal) => (

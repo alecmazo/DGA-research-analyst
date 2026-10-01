@@ -1,0 +1,7 @@
+Description:           Daily Index
+Form Type   Company Name                                                  CIK         Date Filed  File Name
+-----------------------------------------------------------------------------------------------------------
+8-K         Some Other Co                                                 0000000999  2026-09-30  edgar/data/999/0000000999-26-000001.txt
+DEFM14A     Acme Target, Inc.                                             0001819928  2026-09-30  edgar/data/1819928/0001193125-26-000111.txt
+25-NSE      Acme Target, Inc.                                             0001819928  2026-09-30  edgar/data/1819928/0001193125-26-000333.txt
+SC TO-I     Noise Fund                                                    0000000777  2026-09-30  edgar/data/777/0000000777-26-000001.txt

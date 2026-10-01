@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": "1",
+      "attributes": {
+        "title": "20262326: Acme Target, Inc.; Buyer Holdings, L.P.",
+        "acquiring-party": "Buyer Holdings, L.P.",
+        "acquired-party": "Acme Target, Inc.",
+        "acquired-entities": ["Acme Target, Inc."],
+        "date": "2026-09-29",
+        "transaction-number": "20262326",
+        "created": "2026-09-29T00:00:00Z"
+      }
+    }
+  ]
+}

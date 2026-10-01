@@ -38,6 +38,7 @@ textarea {
 }
 
 .toolbar select,
+.toolbar input,
 .form input,
 textarea {
   border: 1px solid var(--border-default);
@@ -73,6 +74,36 @@ textarea {
   align-items: flex-start;
   padding: 6px 0;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.scanWrap {
+  overflow-x: auto;
+}
+
+.scanTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.scanTable th,
+.scanTable td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.scanTable td .meta {
+  display: block;
+  white-space: normal;
+}
+
+.drawer {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .value {

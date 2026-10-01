@@ -1,0 +1,13 @@
+{
+  "cik": "0001819928",
+  "name": "Acme Target, Inc.",
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0001140361-26-037499", "0001140361-26-037453"],
+      "filingDate": ["2026-10-01", "2026-09-20"],
+      "form": ["8-K", "8-K"],
+      "items": ["2.01", "1.01"],
+      "primaryDocument": ["close.htm", "ef20082596_8k.htm"]
+    }
+  }
+}
