@@ -1,0 +1,1628 @@
+{
+  "packet_meta": {
+    "deal_id": "fixture-acme",
+    "version": 1,
+    "model": "fixture",
+    "created_at": "2026-10-01T15:00:00+00:00",
+    "stage": "deep_dive",
+    "parent_version": null,
+    "derived_by": "code"
+  },
+  "stage1_notes": [
+    {
+      "text": "Sample only. The break price uses the unaffected price plus the peer move.",
+      "field_ids": [
+        "downside.break_price"
+      ]
+    }
+  ],
+  "flags": [],
+  "confirmed_ids": [],
+  "sections": {
+    "overview": {
+      "target_name": {
+        "id": "overview.target_name",
+        "value": "Sample Target",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "static",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "target_ticker": {
+        "id": "overview.target_ticker",
+        "value": "ACME",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "static",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "acquirer_name": {
+        "id": "overview.acquirer_name",
+        "value": "Sample Buyer",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "static",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "acquirer_ticker": {
+        "id": "overview.acquirer_ticker",
+        "value": "BUYR",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "static",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "announced_date": {
+        "id": "overview.announced_date",
+        "value": "2026-06-01",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "static",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "offer_terms": {
+        "id": "overview.offer_terms",
+        "value": "$50.00 cash",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "target_price": {
+        "id": "overview.target_price",
+        "value": 47.5,
+        "unit": "USD",
+        "source": {
+          "type": "market_data",
+          "name": "SAMPLE market quote",
+          "url": "https://example.invalid/quote/acme",
+          "locator": "last"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "SAMPLE",
+        "unverified": false,
+        "dot": "green"
+      },
+      "acquirer_price": {
+        "id": "overview.acquirer_price",
+        "value": 20.0,
+        "unit": "USD",
+        "source": {
+          "type": "market_data",
+          "name": "SAMPLE market quote",
+          "url": "https://example.invalid/quote/acme",
+          "locator": "last"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "SAMPLE",
+        "unverified": false,
+        "dot": "green"
+      },
+      "status": {
+        "id": "overview.status",
+        "value": "pending",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "event",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "expected_close": {
+        "id": "overview.expected_close",
+        "value": "2027-04-01",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "event",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "years_to_close": {
+        "id": "overview.years_to_close",
+        "value": 0.5,
+        "unit": "years",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "event",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "outside_date": {
+        "id": "overview.outside_date",
+        "value": "2027-06-01",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "extensions": {
+        "id": "overview.extensions",
+        "value": "one 3-month extension",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "offer_value": {
+        "id": "overview.offer_value",
+        "value": 50.0,
+        "unit": "USD",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "structure.consideration, structure.cash_per_share, structure.exchange_ratio, overview.acquirer_price, structure.collar_type, structure.collar_low, structure.collar_high, structure.collar_value",
+          "input_ids": [
+            "structure.consideration",
+            "structure.cash_per_share",
+            "structure.exchange_ratio",
+            "overview.acquirer_price",
+            "structure.collar_type",
+            "structure.collar_low",
+            "structure.collar_high",
+            "structure.collar_value"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "structure.consideration",
+          "structure.cash_per_share",
+          "structure.exchange_ratio",
+          "overview.acquirer_price",
+          "structure.collar_type",
+          "structure.collar_low",
+          "structure.collar_high",
+          "structure.collar_value"
+        ],
+        "dot": "green"
+      }
+    },
+    "spread": {
+      "gross_dollars": {
+        "id": "spread.gross_dollars",
+        "value": 2.5,
+        "unit": "USD",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.offer_value, overview.target_price",
+          "input_ids": [
+            "overview.offer_value",
+            "overview.target_price"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "overview.offer_value",
+          "overview.target_price"
+        ],
+        "dot": "green"
+      },
+      "gross_percent": {
+        "id": "spread.gross_percent",
+        "value": 0.05263157894736842,
+        "unit": "pct",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.offer_value, overview.target_price",
+          "input_ids": [
+            "overview.offer_value",
+            "overview.target_price"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "overview.offer_value",
+          "overview.target_price"
+        ],
+        "dot": "green"
+      },
+      "annualized": {
+        "id": "spread.annualized",
+        "value": 0.11914127423822696,
+        "unit": "pct",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.offer_value, overview.target_price, overview.years_to_close, upside.dividends",
+          "input_ids": [
+            "overview.offer_value",
+            "overview.target_price",
+            "overview.years_to_close",
+            "upside.dividends"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "includes expected dividends 0.25",
+        "unverified": false,
+        "inputs": [
+          "overview.offer_value",
+          "overview.target_price",
+          "overview.years_to_close",
+          "upside.dividends"
+        ],
+        "dot": "green"
+      },
+      "annualized_simple": {
+        "id": "spread.annualized_simple",
+        "value": 0.11578947368421053,
+        "unit": "pct",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.offer_value, overview.target_price, overview.years_to_close, upside.dividends",
+          "input_ids": [
+            "overview.offer_value",
+            "overview.target_price",
+            "overview.years_to_close",
+            "upside.dividends"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "includes expected dividends 0.25",
+        "unverified": false,
+        "inputs": [
+          "overview.offer_value",
+          "overview.target_price",
+          "overview.years_to_close",
+          "upside.dividends"
+        ],
+        "dot": "green"
+      },
+      "implied_probability": {
+        "id": "spread.implied_probability",
+        "value": 0.75,
+        "unit": "pct",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.target_price, overview.offer_value, downside.break_price",
+          "input_ids": [
+            "overview.target_price",
+            "overview.offer_value",
+            "downside.break_price"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "overview.target_price",
+          "overview.offer_value",
+          "downside.break_price"
+        ],
+        "dot": "green"
+      },
+      "sensitivity": {
+        "id": "spread.sensitivity",
+        "value": [
+          {
+            "downside": "-10%",
+            "close": "-3m",
+            "implied_probability": 0.8214285714285714,
+            "annualized": 0.22773766315482513,
+            "annualized_simple": 0.21052631578947367
+          },
+          {
+            "downside": "-10%",
+            "close": "base",
+            "implied_probability": 0.8214285714285714,
+            "annualized": 0.10803324099722977,
+            "annualized_simple": 0.10526315789473684
+          },
+          {
+            "downside": "-10%",
+            "close": "+3m",
+            "implied_probability": 0.8214285714285714,
+            "annualized": 0.0707839665169483,
+            "annualized_simple": 0.07017543859649122
+          },
+          {
+            "downside": "base",
+            "close": "-3m",
+            "implied_probability": 0.75,
+            "annualized": 0.22773766315482513,
+            "annualized_simple": 0.21052631578947367
+          },
+          {
+            "downside": "base",
+            "close": "base",
+            "implied_probability": 0.75,
+            "annualized": 0.10803324099722977,
+            "annualized_simple": 0.10526315789473684
+          },
+          {
+            "downside": "base",
+            "close": "+3m",
+            "implied_probability": 0.75,
+            "annualized": 0.0707839665169483,
+            "annualized_simple": 0.07017543859649122
+          },
+          {
+            "downside": "+10%",
+            "close": "-3m",
+            "implied_probability": 0.5833333333333334,
+            "annualized": 0.22773766315482513,
+            "annualized_simple": 0.21052631578947367
+          },
+          {
+            "downside": "+10%",
+            "close": "base",
+            "implied_probability": 0.5833333333333334,
+            "annualized": 0.10803324099722977,
+            "annualized_simple": 0.10526315789473684
+          },
+          {
+            "downside": "+10%",
+            "close": "+3m",
+            "implied_probability": 0.5833333333333334,
+            "annualized": 0.0707839665169483,
+            "annualized_simple": 0.07017543859649122
+          }
+        ],
+        "unit": "table",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.target_price, overview.offer_value, downside.break_price, overview.years_to_close",
+          "input_ids": [
+            "overview.target_price",
+            "overview.offer_value",
+            "downside.break_price",
+            "overview.years_to_close"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "overview.target_price",
+          "overview.offer_value",
+          "downside.break_price",
+          "overview.years_to_close"
+        ],
+        "dot": "green"
+      }
+    },
+    "structure": {
+      "consideration": {
+        "id": "structure.consideration",
+        "value": "cash",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "cash_per_share": {
+        "id": "structure.cash_per_share",
+        "value": 50.0,
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "exchange_ratio": {
+        "id": "structure.exchange_ratio",
+        "value": null,
+        "unit": "ratio",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "collar_type": {
+        "id": "structure.collar_type",
+        "value": "none",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "collar_low": {
+        "id": "structure.collar_low",
+        "value": null,
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "collar_high": {
+        "id": "structure.collar_high",
+        "value": null,
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "collar_value": {
+        "id": "structure.collar_value",
+        "value": null,
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "walkaway_low": {
+        "id": "structure.walkaway_low",
+        "value": null,
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "walkaway_high": {
+        "id": "structure.walkaway_high",
+        "value": null,
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "proration_cash": {
+        "id": "structure.proration_cash",
+        "value": null,
+        "unit": "pct",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "cvr": {
+        "id": "structure.cvr",
+        "value": "none",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "special_dividend": {
+        "id": "structure.special_dividend",
+        "value": 0,
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "financing": {
+        "id": "structure.financing",
+        "value": "cash on hand",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "financing_condition": {
+        "id": "structure.financing_condition",
+        "value": "no",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "acquirer_cash": {
+        "id": "structure.acquirer_cash",
+        "value": 1200,
+        "unit": "USD millions",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "mac": {
+        "id": "structure.mac",
+        "value": "customary MAE, no financing out",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "minimum_tender": {
+        "id": "structure.minimum_tender",
+        "value": "not a tender",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "static",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "go_shop": {
+        "id": "structure.go_shop",
+        "value": "none",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "matching_rights": {
+        "id": "structure.matching_rights",
+        "value": "4 business days",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      }
+    },
+    "regulatory": [
+      {
+        "authority": {
+          "id": "regulatory.0.authority",
+          "value": "DOJ/FTC HSR",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "static",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "status": {
+          "id": "regulatory.0.status",
+          "value": "waiting period",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "filing_date": {
+          "id": "regulatory.0.filing_date",
+          "value": "2026-06-15",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "statutory_timeline": {
+          "id": "regulatory.0.statutory_timeline",
+          "value": "30 days",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "static",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "expected_timeline": {
+          "id": "regulatory.0.expected_timeline",
+          "value": "Q1 2027",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "risks": {
+          "id": "regulatory.0.risks",
+          "value": "horizontal overlap is small in this sample",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "remedies": {
+          "id": "regulatory.0.remedies",
+          "value": "none expected in this sample",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        }
+      }
+    ],
+    "votes": {
+      "companies": {
+        "id": "votes.companies",
+        "value": "target only",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "threshold": {
+        "id": "votes.threshold",
+        "value": "majority of outstanding shares",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "record_date": {
+        "id": "votes.record_date",
+        "value": "2026-11-01",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "event",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "meeting_date": {
+        "id": "votes.meeting_date",
+        "value": "2026-12-01",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "event",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "locked_up_pct": {
+        "id": "votes.locked_up_pct",
+        "value": 0.18,
+        "unit": "pct",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "iss": {
+        "id": "votes.iss",
+        "value": "not published",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "event",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "glass_lewis": {
+        "id": "votes.glass_lewis",
+        "value": "not published",
+        "unit": "",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "event",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      }
+    },
+    "catalysts": [
+      {
+        "date": {
+          "id": "catalysts.0.date",
+          "value": "2026-12-01",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "event": {
+          "id": "catalysts.0.event",
+          "value": "target shareholder meeting",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "impact": {
+          "id": "catalysts.0.impact",
+          "value": "+",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "reported",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        },
+        "confidence": {
+          "id": "catalysts.0.confidence",
+          "value": "reported",
+          "unit": "",
+          "source": {
+            "type": "sec_filing",
+            "name": "SAMPLE fixture 8-K, not a live filing",
+            "url": "https://example.invalid/sample-acme-8k",
+            "locator": "Item 1.01"
+          },
+          "pulled_at": "2026-10-01T15:00:00+00:00",
+          "as_of": "2026-10-01T11:00:00-04:00",
+          "freshness_class": "event",
+          "confidence": "confirmed",
+          "notes": "",
+          "unverified": false,
+          "dot": "green"
+        }
+      }
+    ],
+    "downside": {
+      "target_break_fee": {
+        "id": "downside.target_break_fee",
+        "value": 80,
+        "unit": "USD millions",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "reverse_break_fee": {
+        "id": "downside.reverse_break_fee",
+        "value": 120,
+        "unit": "USD millions",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "unaffected_price": {
+        "id": "downside.unaffected_price",
+        "value": 38.0,
+        "unit": "USD",
+        "source": {
+          "type": "market_data",
+          "name": "SAMPLE market quote",
+          "url": "https://example.invalid/quote/acme",
+          "locator": "last"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "static",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "peer_move": {
+        "id": "downside.peer_move",
+        "value": 0.0526,
+        "unit": "pct",
+        "source": {
+          "type": "market_data",
+          "name": "SAMPLE market quote",
+          "url": "https://example.invalid/quote/acme",
+          "locator": "last"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "peer_index": {
+        "id": "downside.peer_index",
+        "value": 100,
+        "unit": "index",
+        "source": {
+          "type": "market_data",
+          "name": "SAMPLE market quote",
+          "url": "https://example.invalid/quote/acme",
+          "locator": "last"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "break_price": {
+        "id": "downside.break_price",
+        "value": 40.0,
+        "unit": "USD",
+        "source": {
+          "type": "model_estimate",
+          "name": "SAMPLE break-price method",
+          "url": "",
+          "locator": "unaffected plus peer move"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "market",
+        "confidence": "estimate",
+        "notes": "labeled estimate",
+        "unverified": false,
+        "inputs": [
+          "downside.unaffected_price",
+          "downside.peer_move"
+        ],
+        "rationale": "unaffected 38 times 1.0526, rounded to 40",
+        "dot": "green"
+      },
+      "downside_dollars": {
+        "id": "downside.downside_dollars",
+        "value": -7.5,
+        "unit": "USD",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "downside.break_price, overview.target_price",
+          "input_ids": [
+            "downside.break_price",
+            "overview.target_price"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "downside.break_price",
+          "overview.target_price"
+        ],
+        "dot": "green"
+      },
+      "downside_percent": {
+        "id": "downside.downside_percent",
+        "value": -0.15789473684210525,
+        "unit": "pct",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "downside.break_price, overview.target_price",
+          "input_ids": [
+            "downside.break_price",
+            "overview.target_price"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "downside.break_price",
+          "overview.target_price"
+        ],
+        "dot": "green"
+      }
+    },
+    "upside": {
+      "dividends": {
+        "id": "upside.dividends",
+        "value": 0.25,
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "SAMPLE fixture 8-K, not a live filing",
+          "url": "https://example.invalid/sample-acme-8k",
+          "locator": "Item 1.01"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "terms",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "dot": "green"
+      },
+      "cvr_estimate": {
+        "id": "upside.cvr_estimate",
+        "value": 0,
+        "unit": "USD",
+        "source": {
+          "type": "model_estimate",
+          "name": "SAMPLE no CVR",
+          "url": "",
+          "locator": "none"
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "static",
+        "confidence": "estimate",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "structure.cvr"
+        ],
+        "rationale": "the sample agreement has no CVR",
+        "dot": "green"
+      },
+      "bump_talk": {
+        "id": "upside.bump_talk",
+        "value": "none in the sample",
+        "unit": "",
+        "source": {
+          "type": "news",
+          "name": "SAMPLE speculation label",
+          "url": "https://example.invalid/sample-news",
+          "locator": ""
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T11:00:00-04:00",
+        "freshness_class": "event",
+        "confidence": "estimate",
+        "notes": "speculation",
+        "unverified": false,
+        "dot": "green"
+      },
+      "upside_dollars": {
+        "id": "upside.upside_dollars",
+        "value": 2.5,
+        "unit": "USD",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.offer_value, overview.target_price",
+          "input_ids": [
+            "overview.offer_value",
+            "overview.target_price"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "overview.offer_value",
+          "overview.target_price"
+        ],
+        "dot": "green"
+      },
+      "upside_percent": {
+        "id": "upside.upside_percent",
+        "value": 0.05263157894736842,
+        "unit": "pct",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.offer_value, overview.target_price",
+          "input_ids": [
+            "overview.offer_value",
+            "overview.target_price"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "",
+        "unverified": false,
+        "inputs": [
+          "overview.offer_value",
+          "overview.target_price"
+        ],
+        "dot": "green"
+      },
+      "annualized": {
+        "id": "upside.annualized",
+        "value": 0.11914127423822696,
+        "unit": "pct",
+        "source": {
+          "type": "derived",
+          "name": "Computed from packet inputs",
+          "url": "",
+          "locator": "overview.offer_value, overview.target_price, overview.years_to_close, upside.dividends",
+          "input_ids": [
+            "overview.offer_value",
+            "overview.target_price",
+            "overview.years_to_close",
+            "upside.dividends"
+          ]
+        },
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "as_of": "2026-10-01T15:00:00+00:00",
+        "freshness_class": "market",
+        "confidence": "confirmed",
+        "notes": "includes expected dividends 0.25",
+        "unverified": false,
+        "inputs": [
+          "overview.offer_value",
+          "overview.target_price",
+          "overview.years_to_close",
+          "upside.dividends"
+        ],
+        "dot": "green"
+      }
+    },
+    "sources": [
+      {
+        "id": "src-filing",
+        "type": "sec_filing",
+        "name": "SAMPLE fixture 8-K, not a live filing",
+        "url": "https://example.invalid/sample-acme-8k",
+        "locator": "Item 1.01",
+        "published_at": "2026-06-01T20:00:00+00:00",
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "field_ids": [
+          "structure.cash_per_share",
+          "overview.announced_date"
+        ],
+        "refresh_priority": 2,
+        "time_limit_hours": 720
+      },
+      {
+        "id": "src-price",
+        "type": "market_data",
+        "name": "SAMPLE market quote",
+        "url": "https://example.invalid/quote/acme",
+        "locator": "last",
+        "published_at": "2026-10-01T11:00:00-04:00",
+        "pulled_at": "2026-10-01T15:00:00+00:00",
+        "field_ids": [
+          "overview.target_price"
+        ],
+        "refresh_priority": 1,
+        "time_limit_hours": 26
+      }
+    ]
+  },
+  "freshness": {
+    "badge": "Fresh",
+    "dots": {
+      "overview.target_name": "green",
+      "overview.target_ticker": "green",
+      "overview.acquirer_name": "green",
+      "overview.acquirer_ticker": "green",
+      "overview.announced_date": "green",
+      "overview.offer_terms": "green",
+      "overview.target_price": "green",
+      "overview.acquirer_price": "green",
+      "overview.status": "green",
+      "overview.expected_close": "green",
+      "overview.years_to_close": "green",
+      "overview.outside_date": "green",
+      "overview.extensions": "green",
+      "overview.offer_value": "green",
+      "spread.gross_dollars": "green",
+      "spread.gross_percent": "green",
+      "spread.annualized": "green",
+      "spread.annualized_simple": "green",
+      "spread.implied_probability": "green",
+      "spread.sensitivity": "green",
+      "structure.consideration": "green",
+      "structure.cash_per_share": "green",
+      "structure.exchange_ratio": "green",
+      "structure.collar_type": "green",
+      "structure.collar_low": "green",
+      "structure.collar_high": "green",
+      "structure.collar_value": "green",
+      "structure.walkaway_low": "green",
+      "structure.walkaway_high": "green",
+      "structure.proration_cash": "green",
+      "structure.cvr": "green",
+      "structure.special_dividend": "green",
+      "structure.financing": "green",
+      "structure.financing_condition": "green",
+      "structure.acquirer_cash": "green",
+      "structure.mac": "green",
+      "structure.minimum_tender": "green",
+      "structure.go_shop": "green",
+      "structure.matching_rights": "green",
+      "regulatory.0.authority": "green",
+      "regulatory.0.status": "green",
+      "regulatory.0.filing_date": "green",
+      "regulatory.0.statutory_timeline": "green",
+      "regulatory.0.expected_timeline": "green",
+      "regulatory.0.risks": "green",
+      "regulatory.0.remedies": "green",
+      "votes.companies": "green",
+      "votes.threshold": "green",
+      "votes.record_date": "green",
+      "votes.meeting_date": "green",
+      "votes.locked_up_pct": "green",
+      "votes.iss": "green",
+      "votes.glass_lewis": "green",
+      "catalysts.0.date": "green",
+      "catalysts.0.event": "green",
+      "catalysts.0.impact": "green",
+      "catalysts.0.confidence": "green",
+      "downside.target_break_fee": "green",
+      "downside.reverse_break_fee": "green",
+      "downside.unaffected_price": "green",
+      "downside.peer_move": "green",
+      "downside.peer_index": "green",
+      "downside.break_price": "green",
+      "downside.downside_dollars": "green",
+      "downside.downside_percent": "green",
+      "upside.dividends": "green",
+      "upside.cvr_estimate": "green",
+      "upside.bump_talk": "green",
+      "upside.upside_dollars": "green",
+      "upside.upside_percent": "green",
+      "upside.annualized": "green"
+    },
+    "scored_at": "2026-10-01T15:00:00+00:00"
+  }
+}

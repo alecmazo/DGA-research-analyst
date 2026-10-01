@@ -263,6 +263,19 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Transcript ask** | **`ui680-20260928-transcript-ask`** | Expanding an earnings-call company offers Refresh for that ticker only. Ask a question uses the on-Mac model unless another engine is chosen. |
 | **Local refusal** | **`ui681-20260928-local-refusal`** | A one-line local refusal is not saved over the note. HHH opens the stored research report. A refusal retries once, then keeps the previous note. |
 | **Refusal why** | **`ui682-20260928-refusal-why`** | When the local model quits, the Local page shows its reasoning, the stop reason, and the prompt token count. |
+| **Prompt split** | **`ui683-20260928-prompt-split`** | Grok and Claude both get a short Munger section. Neither is told it is Grok 4.20 or to run the other's news search. The local model writes the note, then the Munger section, and the opened report is both. |
+| **Call refresh** | **`ui684-20260928-call-refresh`** | Transcripts Refresh pulls new earnings-call quarters from Motley Fool for any company. The lookup includes early-next-month publish dates and slug shapes that omit "call" or the quarter. Free sources only. |
+| **Ask open transcript** | **`ui685-20260928-ask-open`** | Ask a question uses the transcript open in the library, not a search that has to match every word. If that transcript does not contain the answer, it says so. |
+| **Show finder** | **`ui686-20260929-show-finder`** | Opening a stored interview shows the transcript. A failed open says so in the reader instead of leaving it blank. Search finds a show and pulls one episode into the library. |
+| **Array period** | **`ui687-20260929-array-period`** | The Financials card has an Annual / Quarterly control. The statistical array switches with it. Quarterly is the latest quarters, and growth is versus the same quarter a year earlier. |
+| **Podcast cleanup** | **`ui688-20260929-podcast-cleanup`** | Transcripts has a Clean up button. Select stored shows and delete their transcripts. Earnings calls stay. |
+| **Call order** | **`ui689-20260930-call-order`** | The transcript library lists earnings calls from the watchlist first, then every other company in alphabetical order. |
+| **Portfolio window** | **`ui690-20260930-portfolio-window`** | A portfolio recommendation saves and opens in its own window. The Local page lists it on a card next to Portfolio instead of inside that card. |
+| **Mover headlines** | **`ui691-20260930-mover-headlines`** | Top Movers opens free headlines on the row. The ticker still opens the snapshot. |
+| **Show captions** | **`ui692-20260930-show-captions`** | Pull in reads the RSS transcript, then the publisher's transcript, then YouTube captions. A shorter channel name still matches the show. |
+| **Mac captions** | **`ui693-20260930-mac-captions`** | When the feed has no transcript, Pull asks this Mac for the YouTube captions and stores them. Spotify has no free transcript. |
+| **Ask scope** | **`ui694-20260930-ask-scope`** | The question card sits under the transcript library. A question uses the open transcript. Choose transcripts to give the engine more than one. |
+| **Lab nav** | **`ui695-20261001-lab-nav`** | Munger sits under Lab with Podcasts and Transcripts. Merger Arb is there too: the deal list and the analysis page. |
 
 ### One-click handoff (preferred)
 
@@ -306,24 +319,31 @@ first, then sets `WEB_BUILD_VERSION` to
 
 ## Nav layout (canonical — do not reshuffle casually)
 
-**Work surface** (left of divider):
+React topbar at `/gp` (`web/gp-app/src/components/layout/Topbar.tsx`). Paths are relative to basename `/gp`.
 
-1. Desk (`research`)
-2. Financials (`financials`)
-3. Builder (`builder`)
-4. Podcasts (`lab`) — *label only; internal tab id stays `lab`*
-5. Transcripts (`transcripts`)
-6. Positions (`positions`)
-7. Options (`options`)
+**Work:**
 
-**Firm ops** (right of divider):
+1. Desk (`/`)
+2. Financials (`/financials`)
+3. Local (`/local`)
+4. Builder (`/builder`)
+5. Gurus (`/gurus`)
 
-8. Accounts (`fund`) — *label only; route stays `/fund`*
-9. Memos (`memos`)
-10. Settings (`settings`)
-11. Sliw (`/sliw/` link, gated)
+**Lab** (Munger lives here, not under Work):
 
-Ideas tab still exists as `tab-ideas` for deep links / Desk actions; not in topbar.
+6. Podcasts (`/podcasts`)
+7. Transcripts (`/transcripts`)
+8. Munger (`/munger`)
+9. Merger Arb (`/merger-arb`, analysis at `/merger-arb/analysis/:dealId`)
+
+**Accounts:**
+
+10. Accounts (`/fund`) — *label only; route stays `/fund`*
+11. Positions (`/positions`)
+12. Options (`/options`)
+13. Memos (`/memos`)
+
+Settings stays in the account menu, not a top-level work tab. Sliw (`/sliw/`) stays a gated link, not a GP tab.
 
 ---
 
@@ -452,4 +472,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-09-28 · Agent: Grok Build · Live: `ui682-20260928-refusal-why` · Next: `ui683-YYYYMMDD-slug`*
+*Last updated: 2026-10-01 · Agent: Grok Build · Live: `ui695-20261001-lab-nav` · Next: `ui696-YYYYMMDD-slug`*
