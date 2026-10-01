@@ -1,3 +1,5 @@
+import { trackLoad } from './loadFlow'
+
 /** Talk to Ollama on this Mac from the browser. The live site cannot see it. */
 
 export const OLLAMA_HOST = 'http://127.0.0.1:11434'
@@ -28,6 +30,12 @@ export function isModelRefusal(text: string): boolean {
 export const LOCAL_RETRY_SYSTEM =
   "You are DGA Capital's research analyst. Write a full equity research note in markdown using only the figures in the user message. Use those figures exactly. Include an executive summary with a rating (Strong Buy, Buy, Hold, or Sell) and a 12-month price target, a business overview, financial tables, valuation, risks, and a sources line. Write the note. Do not refuse and do not stop after one sentence."
 
+/** The second local call wrote the Munger section, not another apology. */
+export function mungerSectionReady(text: string): boolean {
+  const raw = (text || '').trim()
+  return raw.includes('8.5.1') && raw.includes('8.5.7') && raw.length > 400 && !isModelRefusal(raw)
+}
+
 export type OllamaState = {
   ok: boolean
   message: string
@@ -54,6 +62,7 @@ type ChatOpts = {
 }
 
 export async function ollamaStatus(): Promise<OllamaState> {
+  const done = trackLoad('ollama://tags')
   try {
     const res = await fetch(`${OLLAMA_HOST}/api/tags`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -63,25 +72,33 @@ export async function ollamaStatus(): Promise<OllamaState> {
       (n) => n === LOCAL_MODEL || n.startsWith(`${LOCAL_MODEL}:`),
     )
     if (!present) {
+      done('fail', `Local model ${LOCAL_MODEL} is not installed in Ollama`)
       return { ok: false, message: `Local model ${LOCAL_MODEL} is not installed in Ollama`, model: LOCAL_MODEL }
     }
+    done('ok')
     return { ok: true, message: 'ok', model: LOCAL_MODEL }
   } catch {
+    done('fail', OFFLINE)
     return { ok: false, message: OFFLINE, model: LOCAL_MODEL }
   }
 }
 
 /** Ask the on-Mac helper to start Ollama, or restart it when the process is stuck. */
 export async function ensureOllama(): Promise<{ ok: boolean; message: string; action?: string }> {
+  const done = trackLoad('ollama://ensure')
   try {
     const res = await fetch(`${OLLAMA_DESK}/ensure`, { method: 'POST' })
     const data = (await res.json()) as { ok?: boolean; message?: string; action?: string }
+    const message = data.message || (data.ok ? 'Ollama is up' : 'Could not start Ollama')
+    if (data.ok) done('ok')
+    else done('fail', message)
     return {
       ok: Boolean(data.ok),
-      message: data.message || (data.ok ? 'Ollama is up' : 'Could not start Ollama'),
+      message,
       action: data.action,
     }
   } catch {
+    done('fail', 'Ollama is off, and the start helper on this Mac is not running.')
     return {
       ok: false,
       message: 'Ollama is off, and the start helper on this Mac is not running.',
@@ -107,6 +124,8 @@ export function parseToolCall(text: string): { tool: string; ticker?: string; po
 /** Stream one answer from the local finance model. Reasoning is ignored. */
 export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
   const started = performance.now()
+  const finish = trackLoad('ollama://chat')
+  try {
   let res: Response
   try {
     res = await fetch(`${OLLAMA_HOST}/api/chat`, {
@@ -180,7 +199,7 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
       }
     }
   }
-  return {
+  const result = {
     text: text.trim(),
     tokensPerSec,
     latencyMs: Math.round(performance.now() - started),
@@ -188,6 +207,12 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
     doneReason,
     promptTokens,
     evalTokens,
+  }
+  finish('ok')
+  return result
+  } catch (err) {
+    finish('fail', err instanceof Error ? err.message : 'failed')
+    throw err
   }
 }
 

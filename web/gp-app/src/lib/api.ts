@@ -1,4 +1,5 @@
 import { clearSession, getToken } from './auth'
+import { trackLoad } from './loadFlow'
 
 export class ApiError extends Error {
   status: number
@@ -10,56 +11,73 @@ export class ApiError extends Error {
   }
 }
 
+async function tracked<T>(path: string, run: () => Promise<T>): Promise<T> {
+  const done = trackLoad(path)
+  try {
+    const value = await run()
+    done('ok')
+    return value
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'failed'
+    done('fail', message)
+    throw err
+  }
+}
+
 export async function api<T = unknown>(
   path: string,
   opts: RequestInit = {},
 ): Promise<T> {
-  const headers = new Headers(opts.headers || {})
-  const token = getToken()
-  if (token) headers.set('x-auth-v2-token', token)
-  if (opts.body && !(opts.body instanceof FormData) && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json')
-  }
-  const res = await fetch(path, { ...opts, headers })
-  if (res.status === 401 && path.startsWith('/api/')) {
-    clearSession()
-    window.location.replace('/')
-    throw new ApiError(401, 'Unauthorized')
-  }
-  const text = await res.text()
-  let data: unknown = null
-  try {
-    data = text ? JSON.parse(text) : null
-  } catch {
-    data = text
-  }
-  if (!res.ok) {
-    const msg =
-      (data && typeof data === 'object' && 'detail' in data
-        ? String((data as { detail: unknown }).detail)
-        : null) ||
-      (data && typeof data === 'object' && 'error' in data
-        ? String((data as { error: unknown }).error)
-        : null) ||
-      `HTTP ${res.status}`
-    throw new ApiError(res.status, msg, data)
-  }
-  return data as T
+  return tracked(path, async () => {
+    const headers = new Headers(opts.headers || {})
+    const token = getToken()
+    if (token) headers.set('x-auth-v2-token', token)
+    if (opts.body && !(opts.body instanceof FormData) && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json')
+    }
+    const res = await fetch(path, { ...opts, headers })
+    if (res.status === 401 && path.startsWith('/api/')) {
+      clearSession()
+      window.location.replace('/')
+      throw new ApiError(401, 'Unauthorized')
+    }
+    const text = await res.text()
+    let data: unknown = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      data = text
+    }
+    if (!res.ok) {
+      const msg =
+        (data && typeof data === 'object' && 'detail' in data
+          ? String((data as { detail: unknown }).detail)
+          : null) ||
+        (data && typeof data === 'object' && 'error' in data
+          ? String((data as { error: unknown }).error)
+          : null) ||
+        `HTTP ${res.status}`
+      throw new ApiError(res.status, msg, data)
+    }
+    return data as T
+  })
 }
 
 /** Authenticated blob fetch (audio samples, etc.). */
 export async function apiBlob(path: string): Promise<Blob> {
-  const headers = new Headers()
-  const token = getToken()
-  if (token) headers.set('x-auth-v2-token', token)
-  const res = await fetch(path, { headers })
-  if (res.status === 401) {
-    clearSession()
-    window.location.replace('/')
-    throw new ApiError(401, 'Unauthorized')
-  }
-  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`)
-  return res.blob()
+  return tracked(path, async () => {
+    const headers = new Headers()
+    const token = getToken()
+    if (token) headers.set('x-auth-v2-token', token)
+    const res = await fetch(path, { headers })
+    if (res.status === 401) {
+      clearSession()
+      window.location.replace('/')
+      throw new ApiError(401, 'Unauthorized')
+    }
+    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`)
+    return res.blob()
+  })
 }
 
 /** Authenticated blob download (Excel/PDF exports). */
@@ -262,8 +280,16 @@ export async function downloadAuth(
     if (stored && (await handleCanWrite(stored))) destHandle = stored
   }
 
-  const res = await fetch(path, { headers })
+  const done = trackLoad(path)
+  let res: Response
+  try {
+    res = await fetch(path, { headers })
+  } catch (err) {
+    done('fail', err instanceof Error ? err.message : 'failed')
+    throw err
+  }
   if (res.status === 401) {
+    done('fail', 'Unauthorized')
     try {
       helper?.close()
     } catch {
@@ -274,6 +300,7 @@ export async function downloadAuth(
     throw new ApiError(401, 'Unauthorized')
   }
   if (!res.ok) {
+    done('fail', `Download failed (${res.status})`)
     try {
       helper?.close()
     } catch {
@@ -281,7 +308,14 @@ export async function downloadAuth(
     }
     throw new ApiError(res.status, `Download failed (${res.status})`)
   }
-  const blob = await res.blob()
+  let blob: Blob
+  try {
+    blob = await res.blob()
+  } catch (err) {
+    done('fail', err instanceof Error ? err.message : 'failed')
+    throw err
+  }
+  done('ok')
   const cd = res.headers.get('content-disposition') || ''
   const m = /filename\*?=(?:UTF-8''|")?([^\";]+)/i.exec(cd)
   const name = fileBaseName(
@@ -674,6 +708,8 @@ export type ReportDetail = {
   generated_at?: string
   price_target?: number | null
   upside_pct?: number | null
+  current_price?: number | null
+  pct_change?: number | null
   rating?: string | null
   provider?: string
   gamma_url?: string | null

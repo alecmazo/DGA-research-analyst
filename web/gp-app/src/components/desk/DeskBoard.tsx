@@ -21,6 +21,7 @@ export type CardId =
   | 'movers'
   | 'analyze'
   | 'health'
+  | 'flow'
 
 export type CardLayout = {
   x: number
@@ -55,6 +56,8 @@ const DEFAULT_LAYOUT: DeskLayoutMap = {
   analyze: { x: 772, y: 396, w: 400, h: 220 },
   movers: { x: 772, y: 632, w: 400, h: 460 },
   health: { x: 0, y: 1108, w: 340, h: 180 },
+  // Full width, first free row under Portfolio Strategist (health ends at 1288).
+  flow: { x: 0, y: 1304, w: 1172, h: 720 },
 }
 
 const ALL_IDS = Object.keys(DEFAULT_LAYOUT) as CardId[]
@@ -62,6 +65,9 @@ const ALL_IDS = Object.keys(DEFAULT_LAYOUT) as CardId[]
 const MIN_W = 260
 const MIN_H = 120
 const COLLAPSED_H = 44
+const BOARD_W = 1172
+/** Set once the load-flow card has been seated under Portfolio Strategist. */
+const FLOW_UNDER_KEY = 'dga.desk.flow-under-strategist'
 
 function isLayout(v: unknown): v is CardLayout {
   if (!v || typeof v !== 'object') return false
@@ -88,15 +94,56 @@ function readRawLayout(): Partial<DeskLayoutMap> | null {
   return null
 }
 
-function maxBottom(map: Partial<DeskLayoutMap>): number {
+function rectH(L: CardLayout): number {
+  return L.collapsed ? COLLAPSED_H : L.h
+}
+
+function maxBottom(ids: readonly CardId[], map: Partial<DeskLayoutMap>): number {
   let max = 0
-  for (const id of ALL_IDS) {
+  for (const id of ids) {
     const L = map[id]
     if (!isLayout(L)) continue
-    const h = L.collapsed ? COLLAPSED_H : L.h
-    max = Math.max(max, L.y + h)
+    max = Math.max(max, L.y + rectH(L))
   }
   return max
+}
+
+function overlapsLayout(a: CardLayout, b: CardLayout): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + rectH(b) && a.y + rectH(a) > b.y
+}
+
+/** Full-width strip in the first open row under Portfolio Strategist. Not the bottom of the board. */
+function flowUnderStrategist(strat: CardLayout, others: CardLayout[]): CardLayout {
+  const gap = 16
+  const card: CardLayout = {
+    x: 0,
+    y: strat.y + rectH(strat) + gap,
+    w: BOARD_W,
+    h: 720,
+    collapsed: false,
+  }
+  for (let n = 0; n < 40; n++) {
+    const hit = others.find((o) => overlapsLayout(card, o))
+    if (!hit) break
+    card.y = hit.y + rectH(hit) + gap
+  }
+  return card
+}
+
+function flowNeedsAnchor(): boolean {
+  try {
+    return localStorage.getItem(FLOW_UNDER_KEY) !== '1'
+  } catch {
+    return false
+  }
+}
+
+function markFlowAnchored(): void {
+  try {
+    localStorage.setItem(FLOW_UNDER_KEY, '1')
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -125,7 +172,10 @@ function withoutMarkets(saved: Partial<DeskLayoutMap> | null): Partial<DeskLayou
 
 function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
   saved = withoutMarkets(saved)
-  if (!saved) return { ...DEFAULT_LAYOUT }
+  if (!saved) {
+    markFlowAnchored()
+    return { ...DEFAULT_LAYOUT }
+  }
 
   const out: DeskLayoutMap = { ...DEFAULT_LAYOUT }
   const kept: CardId[] = []
@@ -133,7 +183,7 @@ function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
 
   for (const id of ALL_IDS) {
     if (isLayout(saved[id])) {
-      // User placement always wins — never re-apply DEFAULT positions for known cards.
+      // User placement wins. Load flow is the exception, seated once under Strategist below.
       out[id] = {
         x: Math.max(0, Number(saved[id]!.x)),
         y: Math.max(0, Number(saved[id]!.y)),
@@ -147,15 +197,28 @@ function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
     }
   }
 
-  // Place brand-new cards in a free strip below whatever the user already has,
-  // so an update that adds "analyst" never shoves it on top of their layout.
-  if (kept.length && missing.length) {
-    let y = maxBottom(out) + 16
-    for (const id of missing) {
+  // New cards other than load-flow stack below cards the user already placed.
+  // Do not measure the defaults of cards that are still missing — that used to
+  // drop Load flow hundreds of pixels under the desk.
+  const rest = missing.filter((id) => id !== 'flow')
+  if (kept.length && rest.length) {
+    let y = maxBottom(kept, out) + 16
+    for (const id of rest) {
       const def = DEFAULT_LAYOUT[id]
       out[id] = { ...def, x: def.x, y, w: def.w, h: def.h }
       y += def.h + 16
     }
+  }
+
+  // Seat Load flow under Portfolio Strategist the first time, and whenever it
+  // has no saved slot. After that, a drag sticks.
+  if (missing.includes('flow') || flowNeedsAnchor()) {
+    const others = ALL_IDS
+      .filter((id) => id !== 'flow' && id !== 'strategist')
+      .map((id) => out[id])
+      .filter(isLayout)
+    out.flow = flowUnderStrategist(out.strategist, others)
+    markFlowAnchored()
   }
 
   return out

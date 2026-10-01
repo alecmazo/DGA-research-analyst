@@ -10,6 +10,7 @@ import { StockPeek } from '@/components/layout/StockPeek'
 import { MarketWire } from '@/components/desk/MarketWire'
 import { MarketPulse } from '@/components/desk/MarketPulse'
 import { TopMovers } from '@/components/desk/TopMovers'
+import { FlowBadge, LoadFlowCard } from '@/components/desk/LoadFlowCard'
 import { SecUpdatePopup } from '@/components/desk/SecUpdatePopup'
 import {
   api,
@@ -756,6 +757,13 @@ export function DeskPage() {
       ),
       flush: true,
       children: <StrategistCard bare />,
+    },
+    {
+      id: 'flow' as const,
+      title: 'Load flow',
+      badge: <FlowBadge />,
+      flush: true,
+      children: <LoadFlowCard />,
     },
     {
       id: 'wire' as const,

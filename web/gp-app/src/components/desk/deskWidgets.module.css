@@ -1886,7 +1886,7 @@ a.pulseHeadline:hover {
 
 .moversRow {
   display: grid;
-  grid-template-columns: 22px 1fr auto;
+  grid-template-columns: 22px 1fr auto 14px;
   column-gap: 10px;
   align-items: center;
   width: 100%;
@@ -1902,6 +1902,32 @@ a.pulseHeadline:hover {
 
 .moversRow:hover {
   background: var(--bg-hover);
+}
+
+.moversRowOpen {
+  background: var(--bg-subtle);
+  border-bottom-color: transparent;
+}
+
+.moversTkBtn {
+  display: inline-block;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.moversTkBtn:hover .moversTk {
+  color: var(--brand-600);
+}
+
+.moversMore {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
 }
 
 .moversRank {
