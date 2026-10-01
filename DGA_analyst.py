@@ -9322,29 +9322,148 @@ _RATING_ANCHORED_RE = re.compile(
 )
 
 
+def _flatten_report_dashes(text: str) -> str:
+    """Local notes use Unicode hyphens in '12‑month target'. Regexes expect ASCII."""
+    return re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2212]", "-", text or "")
+
+
+def _money_cell(cell: str) -> float | None:
+    """A per-share dollar cell. Skip market-cap labels such as '$81.3 Bn'."""
+    raw = _flatten_report_dashes(cell or "")
+    if re.search(r"\b(bn|billion|mm|million)\b", raw, re.I):
+        return None
+    m = re.search(r"\$?\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)", raw)
+    if not m:
+        return None
+    try:
+        val = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    if val <= 0 or val > 100_000:
+        return None
+    return val
+
+
+def _pct_cell(cell: str) -> float | None:
+    raw = (cell or "").replace("\u202f", "").replace("\u00a0", "")
+    m = re.search(r"([+-]?\d+(?:\.\d+)?)\s*%", raw)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def _cover_table_quote(report_text: str) -> dict:
+    """First markdown table whose headers are Price / 12-month target columns.
+
+    Local notes put the last price and the target on the cover row, often
+    without a dollar sign and with a Unicode hyphen in the header.
+    """
+    lines = _flatten_report_dashes(report_text or "").replace("\r\n", "\n").split("\n")
+    start = next((i for i, line in enumerate(lines) if "|" in line), None)
+    if start is None:
+        return {}
+    rows: list[list[str]] = []
+    for line in lines[start:]:
+        if "|" not in line:
+            break
+        body = line.strip()
+        if body.startswith("|"):
+            body = body[1:]
+        if body.endswith("|"):
+            body = body[:-1]
+        cells = [re.sub(r"\*+", "", c).strip() for c in body.split("|")]
+        if cells and not re.search(r"[A-Za-z0-9]", "".join(cells)):
+            continue
+        rows.append(cells)
+    if len(rows) < 2:
+        return {}
+    header, data = rows[0], rows[1]
+
+    def kind(cell: str) -> str | None:
+        low = cell.lower().strip()
+        leftover = re.sub(r"12\s*-\s*m(?:onth)?", "", low)
+        if re.search(r"\d", leftover) or "$" in cell:
+            return None
+        if "target" in low:
+            return "target"
+        if "upside" in low or "implied return" in low:
+            return "upside"
+        if "prev" in low and "close" in low:
+            return "prev"
+        if low in ("price", "current price", "last", "last price"):
+            return "price"
+        return None
+
+    idx = {}
+    for i, cell in enumerate(header):
+        k = kind(cell)
+        if k and k not in idx:
+            idx[k] = i
+    if "target" not in idx and "price" not in idx:
+        return {}
+
+    def cell(key: str) -> str:
+        i = idx.get(key)
+        if i is None or i >= len(data):
+            return ""
+        return data[i]
+
+    out = {}
+    pt = _money_cell(cell("target"))
+    px = _money_cell(cell("price"))
+    prev = _money_cell(cell("prev"))
+    up = _pct_cell(cell("upside"))
+    if pt is not None:
+        out["price_target"] = pt
+    if px is not None:
+        out["current_price"] = px
+    if prev is not None:
+        out["prev_close"] = prev
+    if up is not None:
+        out["upside_pct"] = up
+    return out
+
+
+# "12-month target of **$54.40**" — the word "of" and bold markers sit
+# between the label and the dollar, which the older anchors skip.
+_PT_OF_RE = re.compile(
+    r"12\s*-\s*m(?:onth)?(?:\s+price)?\s+target"
+    r"(?:\s+of)?"
+    r"[^$\d]{0,30}"
+    r"\$\s*([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)",
+    re.IGNORECASE,
+)
+
+
 def extract_summary_from_report(report_text: str) -> dict:
     """Pull rating + 12-month price target + current price + upside + thesis.
 
     Uses strong anchors when present (the DGA report template is consistent),
     falls back to looser matching for older reports.
     """
+    flat = _flatten_report_dashes(report_text or "")
     # --- Rating: prefer anchored matches (Overall Rating / We rate XXX BUY).
     rating = None
-    m = _RATING_ANCHORED_RE.search(report_text[:6000])
+    m = _RATING_ANCHORED_RE.search(flat[:6000])
     if m:
         rating = m.group(1).title()
     else:
-        m2 = _RATING_RE.search(report_text[:4000])
+        m2 = _RATING_RE.search(flat[:4000])
         if m2:
             rating = m2.group(1).title()
 
     # --- 12M Price Target.
     price_target = None
-    m = _PT_STRONG_RE.search(report_text)
+    m = _PT_STRONG_RE.search(flat)
     if not m:
-        m = _PT_TABLE_RE.search(report_text)
+        m = _PT_TABLE_RE.search(flat)
     if not m:
-        m = _PRICE_TARGET_RE.search(report_text)
+        m = _PT_OF_RE.search(flat)
+    if not m:
+        m = _PRICE_TARGET_RE.search(flat)
     if m:
         try:
             price_target = float(m.group(1).replace(",", ""))
@@ -9353,13 +9472,13 @@ def extract_summary_from_report(report_text: str) -> dict:
 
     # --- Sector (from the report header table).
     sector = None
-    sm = _SECTOR_REPORT_RE.search(report_text[:4000])
+    sm = _SECTOR_REPORT_RE.search(flat[:4000])
     if sm:
         sector = sm.group(1).strip(" *|\t")
 
     # --- Current Price.
     current_price = None
-    m = _CURRENT_PRICE_RE.search(report_text)
+    m = _CURRENT_PRICE_RE.search(flat)
     if m:
         try:
             current_price = float(m.group(1).replace(",", ""))
@@ -9368,13 +9487,32 @@ def extract_summary_from_report(report_text: str) -> dict:
 
     # --- Upside / Implied Return.
     upside_pct = None
-    m = _UPSIDE_RE.search(report_text)
+    m = _UPSIDE_RE.search(flat)
     if m:
         try:
             upside_pct = float(m.group(1))
         except ValueError:
             pass
-    if upside_pct is None and price_target and current_price:
+
+    # Cover row fills gaps. Local notes label the column "12-M Target" and
+    # leave the dollar sign off the cell, so the prose anchors miss it.
+    cover = _cover_table_quote(flat)
+    had_target = price_target is not None
+    had_price = current_price is not None
+    if price_target is None and cover.get("price_target") is not None:
+        price_target = cover["price_target"]
+    if current_price is None and cover.get("current_price") is not None:
+        current_price = cover["current_price"]
+    if upside_pct is None and cover.get("upside_pct") is not None:
+        upside_pct = cover["upside_pct"]
+    # A sentence like "upside of ~59%" is not the cover target vs the cover
+    # price. Once the cover supplies the missing side, recompute.
+    if price_target and current_price and (not had_target or not had_price):
+        try:
+            upside_pct = round((price_target - current_price) / current_price * 100, 2)
+        except ZeroDivisionError:
+            pass
+    elif upside_pct is None and price_target and current_price:
         try:
             upside_pct = round((price_target - current_price) / current_price * 100, 2)
         except ZeroDivisionError:
@@ -9387,9 +9525,37 @@ def extract_summary_from_report(report_text: str) -> dict:
         "rating": rating,
         "price_target": price_target,
         "current_price": current_price,
+        "prev_close": cover.get("prev_close"),
         "upside_pct": upside_pct,
         "sector": sector,
         "thesis": thesis,
+    }
+
+
+def local_note_prices(md: str, stored_pt=None, stored_up=None) -> dict:
+    """Prices for the Local list. A saved column wins; a blank column is read from the note."""
+    summary = extract_summary_from_report(md or "") or {}
+    px = summary.get("current_price")
+    prev = summary.get("prev_close")
+    pct = None
+    if isinstance(px, (int, float)) and isinstance(prev, (int, float)) and prev > 0:
+        pct = round((float(px) - float(prev)) / float(prev) * 100, 2)
+    pt = float(stored_pt) if stored_pt is not None else summary.get("price_target")
+    up = float(stored_up) if stored_up is not None else summary.get("upside_pct")
+    # A blank stored target means the column never captured the cover.
+    # The saved percent is often a DCF sentence ("~59%", "over 200%"), not
+    # the cover target versus the cover price. Recompute from those two.
+    if stored_pt is None and pt is not None and isinstance(px, (int, float)) and float(px) > 0:
+        try:
+            up = round((float(pt) - float(px)) / float(px) * 100, 2)
+        except (TypeError, ValueError, ZeroDivisionError):
+            up = summary.get("upside_pct")
+    return {
+        "price_target": pt,
+        "current_price": px if isinstance(px, (int, float)) else None,
+        "upside_pct": up,
+        "pct_change": pct,
+        "rating": summary.get("rating"),
     }
 
 

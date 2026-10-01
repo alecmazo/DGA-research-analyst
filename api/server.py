@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui696-20261001-load-flow"
+WEB_BUILD_VERSION = "ui697-20261001-local-cover"
 
 
 @app.get("/api/build")
@@ -9796,6 +9796,24 @@ def local_gamma(body: LocalTickerRequest, request: Request):
     return {"ok": True, "gamma_url": url, "ticker": ticker}
 
 
+def _local_row_prices(stored_pt, stored_up, md: str) -> dict:
+    """Last price and 12-month target printed in a local note.
+
+    The list used to show a blank target when the note said "12-month target
+    of $54.40" or put 54.40 in the cover cell without a dollar sign.
+    """
+    try:
+        return analyst.local_note_prices(md, stored_pt, stored_up)
+    except Exception:
+        return {
+            "price_target": float(stored_pt) if stored_pt is not None else None,
+            "current_price": None,
+            "upside_pct": float(stored_up) if stored_up is not None else None,
+            "pct_change": None,
+            "rating": None,
+        }
+
+
 @app.get("/api/local/reports")
 def local_reports_list(request: Request):
     """Saved local reports for the Local page card."""
@@ -9808,6 +9826,7 @@ def local_reports_list(request: Request):
                 cur.execute("""
                     SELECT ticker, local_generated_at, local_rating,
                            local_price_target, local_upside_pct, local_report_date,
+                           report_md_local,
                            last_attempt_status, last_attempt_at, last_attempt_error,
                            COALESCE(version_count, 1) AS version_count,
                            delta_from_prior, stock_style, stock_style_note
@@ -9818,17 +9837,22 @@ def local_reports_list(request: Request):
                      ORDER BY local_generated_at DESC NULLS LAST
                 """)
                 for r in cur.fetchall() or []:
+                    prices = _local_row_prices(
+                        r.get("local_price_target"),
+                        r.get("local_upside_pct"),
+                        r.get("report_md_local") or "",
+                    )
                     rows.append({
                         "ticker": r.get("ticker"),
                         "generated_at": r.get("local_generated_at").isoformat()
                             if hasattr(r.get("local_generated_at"), "isoformat")
                             else r.get("local_generated_at"),
                         "report_date": r.get("local_report_date"),
-                        "rating": r.get("local_rating"),
-                        "price_target": float(r["local_price_target"])
-                            if r.get("local_price_target") is not None else None,
-                        "upside_pct": float(r["local_upside_pct"])
-                            if r.get("local_upside_pct") is not None else None,
+                        "rating": r.get("local_rating") or prices.get("rating"),
+                        "price_target": prices["price_target"],
+                        "upside_pct": prices["upside_pct"],
+                        "current_price": prices["current_price"],
+                        "pct_change": prices["pct_change"],
                         "providers": ["local"],
                         "last_attempt_status": r.get("last_attempt_status"),
                         "last_attempt_at": r.get("last_attempt_at").isoformat()
@@ -9847,9 +9871,19 @@ def local_reports_list(request: Request):
         if folder.exists():
             for path in sorted(folder.glob("*_DGA_Report_local.md")):
                 tk = path.name.replace("_DGA_Report_local.md", "")
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    text = ""
+                prices = _local_row_prices(None, None, text)
                 rows.append({
                     "ticker": tk,
                     "generated_at": datetime.utcfromtimestamp(path.stat().st_mtime).isoformat(),
+                    "rating": prices.get("rating"),
+                    "price_target": prices["price_target"],
+                    "upside_pct": prices["upside_pct"],
+                    "current_price": prices["current_price"],
+                    "pct_change": prices["pct_change"],
                     "providers": ["local"],
                     "version_count": 1,
                 })
@@ -10406,6 +10440,19 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                         "price_target": _f(row.get("local_price_target")),
                         "upside_pct": _f(row.get("local_upside_pct")),
                         }
+                        _lq = _local_row_prices(
+                            row.get("local_price_target"),
+                            row.get("local_upside_pct"),
+                            local_md,
+                        )
+                        if held_payload.get("price_target") is None:
+                            held_payload["price_target"] = _lq.get("price_target")
+                        if held_payload.get("upside_pct") is None or row.get("local_price_target") is None:
+                            held_payload["upside_pct"] = _lq.get("upside_pct")
+                        held_payload["current_price"] = _lq.get("current_price")
+                        held_payload["pct_change"] = _lq.get("pct_change")
+                        if not held_payload.get("rating"):
+                            held_payload["rating"] = _lq.get("rating")
                         held_local = held_payload
                         try:
                             return _present_md(local_md, row=row, payload=held_payload)
@@ -10592,6 +10639,12 @@ def report_history(ticker: str, provider: str = "grok", request: Request = None)
                         "delta_from_prior": dlt,
                         "is_current": True,
                     }
+                    if provider == "local" and current.get("price_target") is None:
+                        _lq = _local_row_prices(None, current.get("upside_pct"), str(row[0] or ""))
+                        current["price_target"] = _lq.get("price_target")
+                        current["upside_pct"] = _lq.get("upside_pct")
+                        if not current.get("rating"):
+                            current["rating"] = _lq.get("rating")
         except Exception as e:
             print(f"[report-history] list {ticker}: {e!s:.160}", flush=True)
     # Metric history for PT / score

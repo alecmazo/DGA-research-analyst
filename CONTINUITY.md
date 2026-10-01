@@ -277,6 +277,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Ask scope** | **`ui694-20260930-ask-scope`** | The question card sits under the transcript library. A question uses the open transcript. Choose transcripts to give the engine more than one. |
 | **Lab nav** | **`ui695-20261001-lab-nav`** | Munger sits under Lab with Podcasts and Transcripts. Merger Arb is there too: the deal list and the analysis page. |
 | **Load flow** | **`ui696-20261001-load-flow`** | The desk shows a Load flow card in the first open row under Portfolio Strategist. It stays expanded. Green is loaded, yellow is loading, red is a failed call. |
+| **Local cover** | **`ui697-20261001-local-cover`** | Saved local notes show the last price and the 12-month target from the cover when the stored target is blank. Upside is that target versus the price, not the DCF sentence. A target already saved is left as-is. |
 
 ### One-click handoff (preferred)
 
@@ -473,4 +474,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-01 · Agent: Grok Build · Live: `ui696-20261001-load-flow` · Next: `ui697-YYYYMMDD-slug`*
+*Last updated: 2026-10-01 · Agent: Grok Build · Live: `ui697-20261001-local-cover` · Next: `ui698-YYYYMMDD-slug`*

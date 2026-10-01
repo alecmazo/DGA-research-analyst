@@ -163,7 +163,10 @@ export function ReportPage() {
 
   const currentMd = reportMarkdown(data)
   const md = viewId === 'current' ? currentMd : viewMd || ''
-  const pct = quote?.pct ?? quote?.pct_change ?? null
+  const quotePx = quote?.price != null ? Number(quote.price) : null
+  const shownPrice =
+    quotePx != null && !Number.isNaN(quotePx) ? quotePx : (data?.current_price ?? null)
+  const pct = quote?.pct ?? quote?.pct_change ?? data?.pct_change ?? null
   const shownProvider = isolated ? 'local' : (data?.provider || provider).toLowerCase()
   const localModel = (data?.model || 'gpt-oss-20b-finance').trim()
   const localLabel = `local · ${localModel}`
@@ -477,7 +480,7 @@ export function ReportPage() {
       <div className={styles.metrics}>
         <div>
           <span>Price</span>
-          <strong>{fmtPx(quote?.price)}</strong>
+          <strong>{fmtPx(shownPrice)}</strong>
         </div>
         <div>
           <span>Day</span>
