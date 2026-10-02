@@ -20,6 +20,7 @@ import { ValuationBridgePage } from '@/pages/ValuationBridgePage'
 import { CompsPage } from '@/pages/CompsPage'
 import { GurusPage } from '@/pages/GurusPage'
 import { MergerArbPage } from '@/pages/MergerArbPage'
+import { CreditPage } from '@/pages/CreditPage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import {
@@ -182,6 +183,22 @@ export default function App() {
                 element={
                   <ErrorBoundary label="Transcripts">
                     <TranscriptsPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="credit"
+                element={
+                  <ErrorBoundary label="Credit">
+                    <CreditPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="credit/:issuer"
+                element={
+                  <ErrorBoundary label="Credit">
+                    <CreditPage />
                   </ErrorBoundary>
                 }
               />

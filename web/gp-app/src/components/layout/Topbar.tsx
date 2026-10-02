@@ -15,6 +15,7 @@ const WORK: { to: string; label: string }[] = [
   { to: '/local', label: 'Local' },
   { to: '/builder', label: 'Builder' },
   { to: '/gurus', label: 'Gurus' },
+  { to: '/credit', label: 'Credit' },
 ]
 
 const LAB: { to: string; label: string }[] = [

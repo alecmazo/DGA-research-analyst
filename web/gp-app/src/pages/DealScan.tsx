@@ -187,6 +187,24 @@ function flagNames(row: Candidate) {
   return new Set((row.fields || []).filter((field) => field.is_current !== false).map((field) => field.field_name))
 }
 
+export type OfferFilter = 'all' | 'cash' | 'mixed'
+
+/** Cash only, cash plus stock, stock only, or not enough terms to say. */
+export function offerKind(row: Candidate): 'cash' | 'mixed' | 'stock' | 'other' {
+  const stored = (row.consideration_type || '').trim().toLowerCase()
+  if (stored === 'cash' || stored === 'mixed' || stored === 'stock') return stored
+  const terms = (row.offer_terms || '').toLowerCase()
+  const fields = (row.fields || []).filter((field) => field.is_current !== false)
+  const hasCash = /\$[0-9]/.test(terms) || /\bcash\b/.test(terms)
+    || fields.some((field) => field.field_name === 'cash_per_share' && field.value != null && field.value !== '')
+  const hasStock = /\bshares?\b/.test(terms)
+    || fields.some((field) => field.field_name === 'exchange_ratio' && field.value != null && field.value !== '')
+  if (hasCash && hasStock) return 'mixed'
+  if (hasCash) return 'cash'
+  if (hasStock) return 'stock'
+  return 'other'
+}
+
 function dealLine(row: Candidate) {
   const who = subjectOf(row)
   const offer = offerSentence(row)
@@ -230,6 +248,7 @@ export function DealScan() {
   const [lastScan, setLastScan] = useState('')
   const [openId, setOpenId] = useState('')
   const [showIgnored, setShowIgnored] = useState(false)
+  const [offerFilter, setOfferFilter] = useState<OfferFilter>('all')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
 
@@ -350,6 +369,7 @@ export function DealScan() {
   }
 
   const running = run?.status === 'running'
+  const shown = candidates.filter((row) => offerFilter === 'all' || offerKind(row) === offerFilter)
 
   return (
     <>
@@ -443,9 +463,29 @@ export function DealScan() {
       )}
 
       <Panel title="Scan results">
+        <div className={styles.toolbar}>
+          <label>
+            Show
+            <select
+              aria-label="Offer type"
+              value={offerFilter}
+              onChange={(event) => setOfferFilter(event.target.value as OfferFilter)}
+            >
+              <option value="all">All offers</option>
+              <option value="cash">Cash only</option>
+              <option value="mixed">Cash and stock</option>
+            </select>
+          </label>
+          <span className={styles.muted}>
+            {shown.length} of {candidates.length} shown
+          </span>
+        </div>
         {!candidates.length && <p>No candidates yet. A scan does not add a deal by itself.</p>}
+        {candidates.length > 0 && !shown.length && (
+          <p>No {offerFilter === 'cash' ? 'cash-only' : 'cash-and-stock'} offers in this list. Choose All offers to see the other rows.</p>
+        )}
         <ul className={styles.dealList}>
-          {candidates.map((row) => {
+          {shown.map((row) => {
             const open = openId === row.id
             const line = dealLine(row)
             const listed = tickersFromName(row.target_name)

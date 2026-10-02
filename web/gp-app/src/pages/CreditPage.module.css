@@ -1,0 +1,131 @@
+.lead,
+.back {
+  margin: 0 0 8px;
+}
+
+.err {
+  color: #9b2c2c;
+}
+
+.warn {
+  color: #8a5a00;
+}
+
+.ok {
+  color: #1f6b3a;
+}
+
+.meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.sub {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list li,
+.scenario {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.toolbar input,
+.toolbar select {
+  font: inherit;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bases {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bases div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wall {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  overflow-x: auto;
+  padding-top: 8px;
+}
+
+.year {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  min-width: 28px;
+}
+
+.bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 120px;
+}
+
+.senior,
+.junior {
+  width: 8px;
+}
+
+.senior {
+  background: #5bb8d4;
+}
+
+.junior {
+  background: #c4a15a;
+}
+
+@media (max-width: 800px) {
+  .bases {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,3820 @@
+{
+  "packet_meta": {
+    "issuer_cik": "0002041610",
+    "version": 1,
+    "stage": "fixture",
+    "model": "",
+    "created_at": "2026-10-02T00:00:00+00:00",
+    "parent_version": null
+  },
+  "issuer": {
+    "cik": "0002041610",
+    "legal_name": "Paramount Skydance Corporation",
+    "status": "watch",
+    "fiscal_year_end": "12-31",
+    "tickers": [
+      {
+        "ticker": "PSKY",
+        "exchange": "Nasdaq",
+        "from": "2025-08-07",
+        "to": "2026-10-06"
+      },
+      {
+        "ticker": "SKYD",
+        "exchange": "NYSE",
+        "from": "2026-10-06",
+        "to": ""
+      }
+    ],
+    "related_ciks": [
+      "0001437107"
+    ],
+    "figi_equity": "BBG01VS5NK99"
+  },
+  "fields": [
+    {
+      "id": "identity.legal_name",
+      "value": "Paramount Skydance Corporation",
+      "unit": "text",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-10-02",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926113076/tm2626659d3_8k.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "static",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "identity.name_change",
+      "value": "Skydance Corporation",
+      "unit": "text",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-10-02",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926113076/tm2626659d3_8k.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "Expected effective 2026-10-06."
+    },
+    {
+      "id": "identity.ticker_now",
+      "value": "PSKY",
+      "unit": "text",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-10-02",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926113076/tm2626659d3_8k.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "Nasdaq until on or about 2026-10-06, then SKYD on the NYSE."
+    },
+    {
+      "id": "identity.ticker_next",
+      "value": "SKYD",
+      "unit": "text",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-10-02",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926113076/tm2626659d3_8k.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "deal.expected_close",
+      "value": "2026-10-06",
+      "unit": "date",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K filed 2026-10-01",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926112829/tm2626659d2_8k.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "deal.cash_per_wbd_share",
+      "value": "31.00",
+      "unit": "USD",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K filed 2026-10-01",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926112829/tm2626659d2_8k.htm",
+        "locator": "Item 8.01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "Plus $0.00277778 per calendar day after 2026-09-30."
+    },
+    {
+      "id": "notes.settlement",
+      "value": "2026-10-05",
+      "unit": "date",
+      "source": {
+        "type": "press_release",
+        "name": "Pricing release 2026-09-30",
+        "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "pf.cash",
+      "value": "7803",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-09-28 Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "pf.current_debt",
+      "value": "2158",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-09-28 Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "pf.long_term_debt",
+      "value": "80277",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-09-28 Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "pf.interest_fy2025",
+      "value": "6413",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-09-28 Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "Interest expense, net. Shown as a positive cost."
+    },
+    {
+      "id": "pf.interest_6m",
+      "value": "3088",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-09-28 Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "pf.revenue_fy2025",
+      "value": "66132",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-09-28 Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "pf.oi_fy2025",
+      "value": "-2592",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-09-28 Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "pf.da_fy2025",
+      "value": "8454",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-09-28 Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "Operating income plus D&A is an illustration. Do not call it Adjusted EBITDA."
+    },
+    {
+      "id": "standalone.debt_face",
+      "value": "16430",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "PSKY companyfacts",
+        "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0002041610.json",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "standalone.cash",
+      "value": "1627",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "PSKY companyfacts",
+        "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0002041610.json",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "standalone.revolver_drawn",
+      "value": "1800",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "PSKY companyfacts",
+        "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0002041610.json",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "standalone.interest_q2",
+      "value": "255",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "PSKY companyfacts",
+        "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0002041610.json",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "standalone.ocf_h1",
+      "value": "504",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "PSKY companyfacts",
+        "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0002041610.json",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "standalone.capex_h1",
+      "value": "150",
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "PSKY companyfacts",
+        "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0002041610.json",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-06-30",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "target.ebitda_with_synergies",
+      "value": "18000",
+      "unit": "USD millions",
+      "source": {
+        "type": "company_ir",
+        "name": "Paramount IR deck, March 2026",
+        "url": "https://ir.paramount.com/static-files/fbfeaf79-6c14-46b8-aa63-de846c6c75e1",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "Company says 2026E Adjusted EBITDA including $6B synergies. A promise, not a fact."
+    },
+    {
+      "id": "target.synergies",
+      "value": "6000",
+      "unit": "USD millions",
+      "source": {
+        "type": "company_ir",
+        "name": "Paramount IR deck, March 2026",
+        "url": "https://ir.paramount.com/static-files/fbfeaf79-6c14-46b8-aa63-de846c6c75e1",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "Run-rate synergies the company says it will reach. Implied EBITDA without synergies is derived."
+    },
+    {
+      "id": "target.net_debt",
+      "value": "79000",
+      "unit": "USD millions",
+      "source": {
+        "type": "company_ir",
+        "name": "Paramount IR deck, March 2026",
+        "url": "https://ir.paramount.com/static-files/fbfeaf79-6c14-46b8-aa63-de846c6c75e1",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "Company says about $79B net debt at close."
+    },
+    {
+      "id": "curve.1M",
+      "value": "4.06",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.3M",
+      "value": "4.17",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.6M",
+      "value": "4.27",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.1Y",
+      "value": "4.44",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.2Y",
+      "value": "4.78",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.3Y",
+      "value": "4.91",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.5Y",
+      "value": "5.01",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.7Y",
+      "value": "5.12",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.10Y",
+      "value": "5.24",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.20Y",
+      "value": "5.64",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "curve.30Y",
+      "value": "5.61",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "Treasury par yield curve",
+        "url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/2026/all?type=daily_treasury_yield_curve&field_tdr_date_value=2026&page&_format=csv",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "oas.hy",
+      "value": "3.24",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "FRED ICE BofA OAS",
+        "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLH0A0HYM2",
+        "locator": "2026-10-01"
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "oas.ig",
+      "value": "0.86",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "FRED BAMLC0A0CM",
+        "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLC0A0CM",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "oas.bbb",
+      "value": "1.06",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "FRED BAMLC0A4CBBB",
+        "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLC0A4CBBB",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "oas.bb",
+      "value": "2.04",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "FRED BAMLH0A1HYBB",
+        "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLH0A1HYBB",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "oas.b",
+      "value": "3.29",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "FRED BAMLH0A2HYB",
+        "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLH0A2HYB",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "oas.ccc",
+      "value": "12.15",
+      "unit": "percent",
+      "source": {
+        "type": "market_data",
+        "name": "FRED BAMLH0A3HYC",
+        "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLH0A3HYC",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-01",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "rating.1l_sp",
+      "value": "BBB-",
+      "unit": "text",
+      "source": {
+        "type": "news",
+        "name": "Livemint citing Bloomberg",
+        "url": "https://www.livemint.com/companies/news/paramounts-30-billion-bond-sale-draws-109-billion-demand-for-warner-bros-deal-11790735235267.html",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "medium",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "rating.1l_fitch",
+      "value": "BBB-",
+      "unit": "text",
+      "source": {
+        "type": "news",
+        "name": "Livemint citing Bloomberg",
+        "url": "https://www.livemint.com/companies/news/paramounts-30-billion-bond-sale-draws-109-billion-demand-for-warner-bros-deal-11790735235267.html",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "medium",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "rating.1l_moodys",
+      "value": "Ba1",
+      "unit": "text",
+      "source": {
+        "type": "news",
+        "name": "Livemint citing Bloomberg",
+        "url": "https://www.livemint.com/companies/news/paramounts-30-billion-bond-sale-draws-109-billion-demand-for-warner-bros-deal-11790735235267.html",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "medium",
+      "status": "ok",
+      "notes": ""
+    },
+    {
+      "id": "rating.2l_fitch",
+      "value": "BB-",
+      "unit": "text",
+      "source": {
+        "type": "news",
+        "name": "Search summary only",
+        "url": "",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "low",
+      "status": "ok",
+      "notes": "Kept out of the math."
+    },
+    {
+      "id": "rating.issuer_sp",
+      "value": "BB",
+      "unit": "text",
+      "source": {
+        "type": "news",
+        "name": "Arabian Post",
+        "url": "https://thearabianpost.com/paramount-outlines-6-billion-savings-for-warner-financing/",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "event",
+      "confidence": "unconfirmed",
+      "status": "ok",
+      "notes": "Kept out of the math."
+    },
+    {
+      "id": "spread.2066_talk",
+      "value": "330",
+      "unit": "bp",
+      "source": {
+        "type": "news",
+        "name": "Bloomberg Law 2026-09-30",
+        "url": "https://news.bloomberglaw.com/daily-labor-report/paramount-cuts-pricing-on-30-billion-high-grade-bond-sale",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "market",
+      "confidence": "medium",
+      "status": "ok",
+      "notes": "About T+330 at pricing. Not a live secondary price."
+    },
+    {
+      "id": "bond.prices",
+      "value": null,
+      "unit": "price",
+      "source": {
+        "type": "press_release",
+        "name": "Pricing release 2026-09-30",
+        "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2026-10-02",
+      "freshness_class": "market",
+      "confidence": "high",
+      "status": "not_found",
+      "notes": "No free per-bond price. Enter a clean price from FINRA."
+    },
+    {
+      "id": "xbrl.maturities",
+      "value": {
+        "2026": "433",
+        "2027": "584",
+        "2028": "1000",
+        "2029": "500",
+        "2030": "827",
+        "after_2030": "11632"
+      },
+      "unit": "USD millions",
+      "source": {
+        "type": "sec_filing",
+        "name": "PSKY companyfacts",
+        "url": "https://data.sec.gov/api/xbrl/companyfacts/CIK0002041610.json",
+        "locator": ""
+      },
+      "pulled_at": "2026-10-02T00:00:00+00:00",
+      "as_of": "2025-12-31",
+      "freshness_class": "terms",
+      "confidence": "high",
+      "status": "ok",
+      "notes": "PSKY standalone 10-K schedule. This is before the Warner financing."
+    }
+  ],
+  "instruments": [
+    {
+      "id": "psky_1l_2028",
+      "issuer_cik": "0002041610",
+      "group": "new_1l",
+      "name": "6.30% Sr Sec 1L Notes due 2028",
+      "type": "secured_note",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_1l_2028.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_1l_2028.amount",
+        "value": "3500",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_1l_2028.coupon",
+        "value": "6.30",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_1l_2028.maturity",
+        "value": "2028-10-05",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HYZYQ2"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HYZYQ2",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_1l_2028.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_1l_2029",
+      "issuer_cik": "0002041610",
+      "group": "new_1l",
+      "name": "6.55% Sr Sec 1L Notes due 2029",
+      "type": "secured_note",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_1l_2029.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_1l_2029.amount",
+        "value": "3500",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_1l_2029.coupon",
+        "value": "6.55",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_1l_2029.maturity",
+        "value": "2029-10-05",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HZDGJ0"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HZDGJ0",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_1l_2029.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_1l_2031",
+      "issuer_cik": "0002041610",
+      "group": "new_1l",
+      "name": "7.05% Sr Sec 1L Notes due 2031",
+      "type": "secured_note",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_1l_2031.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_1l_2031.amount",
+        "value": "6500",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_1l_2031.coupon",
+        "value": "7.05",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_1l_2031.maturity",
+        "value": "2031-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HZ2ZW5"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HZ2ZW5",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_1l_2031.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_1l_2033",
+      "issuer_cik": "0002041610",
+      "group": "new_1l",
+      "name": "7.55% Sr Sec 1L Notes due 2033",
+      "type": "secured_note",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_1l_2033.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_1l_2033.amount",
+        "value": "5250",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_1l_2033.coupon",
+        "value": "7.55",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_1l_2033.maturity",
+        "value": "2033-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HYZM33"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HYZM33",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_1l_2033.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_1l_2036",
+      "issuer_cik": "0002041610",
+      "group": "new_1l",
+      "name": "7.90% Sr Sec 1L Notes due 2036",
+      "type": "secured_note",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_1l_2036.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_1l_2036.amount",
+        "value": "5250",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_1l_2036.coupon",
+        "value": "7.90",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_1l_2036.maturity",
+        "value": "2036-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HZDT75"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HZDT75",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_1l_2036.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_1l_2046",
+      "issuer_cik": "0002041610",
+      "group": "new_1l",
+      "name": "8.65% Sr Sec 1L Notes due 2046",
+      "type": "secured_note",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_1l_2046.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_1l_2046.amount",
+        "value": "1250",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_1l_2046.coupon",
+        "value": "8.65",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_1l_2046.maturity",
+        "value": "2046-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HZF156"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HZF156",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_1l_2046.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_1l_2056",
+      "issuer_cik": "0002041610",
+      "group": "new_1l",
+      "name": "8.75% Sr Sec 1L Notes due 2056",
+      "type": "secured_note",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_1l_2056.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_1l_2056.amount",
+        "value": "3500",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_1l_2056.coupon",
+        "value": "8.75",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_1l_2056.maturity",
+        "value": "2056-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HZRJL6"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HZRJL6",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_1l_2056.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_1l_2066",
+      "issuer_cik": "0002041610",
+      "group": "new_1l",
+      "name": "8.90% Sr Sec 1L Notes due 2066",
+      "type": "secured_note",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_1l_2066.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_1l_2066.amount",
+        "value": "1250",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_1l_2066.coupon",
+        "value": "8.90",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_1l_2066.maturity",
+        "value": "2066-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HZV3R0"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HZV3R0",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_1l_2066.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_2l_2031_usd",
+      "issuer_cik": "0002041610",
+      "group": "new_2l",
+      "name": "8.250% Sr Sec 2L Notes due 2031",
+      "type": "secured_note",
+      "priority_rank": 2,
+      "lien": {
+        "id": "psky_2l_2031_usd.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_2l_2031_usd.amount",
+        "value": "6000",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_2l_2031_usd.coupon",
+        "value": "8.250",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_2l_2031_usd.maturity",
+        "value": "2031-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HXGH64"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HXGH64",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_2l_2031_usd.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_2l_2031_eur",
+      "issuer_cik": "0002041610",
+      "group": "new_2l",
+      "name": "7.000% Sr Sec 2L Notes due 2031 (EUR)",
+      "type": "secured_note",
+      "priority_rank": 2,
+      "lien": {
+        "id": "psky_2l_2031_eur.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "EUR",
+      "amount": {
+        "id": "psky_2l_2031_eur.amount",
+        "value": "885",
+        "unit": "EUR",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_2l_2031_eur.coupon",
+        "value": "7.000",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_2l_2031_eur.maturity",
+        "value": "2031-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HYQZR8"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HYQZR8",
+      "frequency": 1,
+      "day_count": "ACT/ACT",
+      "call_schedule": {
+        "id": "psky_2l_2031_eur.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_2l_2034",
+      "issuer_cik": "0002041610",
+      "group": "new_2l",
+      "name": "8.875% Sr Sec 2L Notes due 2034",
+      "type": "secured_note",
+      "priority_rank": 2,
+      "lien": {
+        "id": "psky_2l_2034.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_2l_2034.amount",
+        "value": "4000",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_2l_2034.coupon",
+        "value": "8.875",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_2l_2034.maturity",
+        "value": "2034-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HXJ1Q4"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HXJ1Q4",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_2l_2034.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_2l_2036",
+      "issuer_cik": "0002041610",
+      "group": "new_2l",
+      "name": "9.125% Sr Sec 2L Notes due 2036",
+      "type": "secured_note",
+      "priority_rank": 2,
+      "lien": {
+        "id": "psky_2l_2036.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_2l_2036.amount",
+        "value": "1400",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_2l_2036.coupon",
+        "value": "9.125",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "fixed",
+      "maturity": {
+        "id": "psky_2l_2036.maturity",
+        "value": "2036-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": "BBG025HXFYN9"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "BBG025HXFYN9",
+      "frequency": 2,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_2l_2036.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "",
+      "floor": null,
+      "oid": null
+    },
+    {
+      "id": "psky_tlb_usd",
+      "issuer_cik": "0002041610",
+      "group": "tlb",
+      "name": "Incremental Term B, USD",
+      "type": "term_loan_b",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_tlb_usd.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "unconfirmed",
+        "status": "ok",
+        "notes": "Lien versus the 1L notes is NOT PUBLIC. Shown as pari passu 1L until the credit agreement is filed. UNCONFIRMED."
+      },
+      "currency": "USD",
+      "amount": {
+        "id": "psky_tlb_usd.amount",
+        "value": "8500",
+        "unit": "USD",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_tlb_usd.coupon",
+        "value": "2.75",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "floating",
+      "maturity": {
+        "id": "psky_tlb_usd.maturity",
+        "value": "2033-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": ""
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year 2033 is from the pricing release. Day and month are not public."
+      },
+      "figi": "",
+      "frequency": 4,
+      "day_count": "30/360",
+      "call_schedule": {
+        "id": "psky_tlb_usd.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": "275",
+      "index": "Term SOFR",
+      "floor": "0",
+      "oid": "99.75"
+    },
+    {
+      "id": "psky_tlb_eur",
+      "issuer_cik": "0002041610",
+      "group": "tlb",
+      "name": "Incremental Term B, EUR",
+      "type": "term_loan_b",
+      "priority_rank": 1,
+      "lien": {
+        "id": "psky_tlb_eur.lien",
+        "value": "1L",
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "unconfirmed",
+        "status": "ok",
+        "notes": "Same lien assumption as the dollar term loan. UNCONFIRMED."
+      },
+      "currency": "EUR",
+      "amount": {
+        "id": "psky_tlb_eur.amount",
+        "value": "850",
+        "unit": "EUR",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon": {
+        "id": "psky_tlb_eur.coupon",
+        "value": "2.75",
+        "unit": "percent",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "coupon_type": "floating",
+      "maturity": {
+        "id": "psky_tlb_eur.maturity",
+        "value": "2033-10-15",
+        "unit": "date",
+        "source": {
+          "type": "market_data",
+          "name": "OpenFIGI",
+          "url": "https://api.openfigi.com/v3/search",
+          "locator": ""
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Day and month are UNCONFIRMED until the indenture. Year is from the pricing release."
+      },
+      "figi": "",
+      "frequency": 4,
+      "day_count": "ACT/ACT",
+      "call_schedule": {
+        "id": "psky_tlb_eur.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "press_release",
+          "name": "Paramount Skydance pricing release",
+          "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+          "locator": "2026-09-30 18:02 PT"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": "Call schedule is not public until the offering memorandum or S-4."
+      },
+      "spread_bp": null,
+      "index": "EURIBOR",
+      "floor": "0",
+      "oid": "100"
+    },
+    {
+      "id": "wbd_dcl_2029",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "6.250% Sr Sec 2L 2029",
+      "obligor": "DCL",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dcl_2029.amount",
+        "value": "655.825",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 4.125% Sr Notes 2029."
+      },
+      "coupon": {
+        "id": "wbd_dcl_2029.coupon",
+        "value": "6.250",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dcl_2029.maturity",
+        "value": "2029-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dcl_2029.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dcl_2029.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dcl_2030",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "4.875% Sr Sec 2L 2030",
+      "obligor": "DCL",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dcl_2030.amount",
+        "value": "914.183",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 3.625% Sr Notes 2030."
+      },
+      "coupon": {
+        "id": "wbd_dcl_2030.coupon",
+        "value": "4.875",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dcl_2030.maturity",
+        "value": "2030-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dcl_2030.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dcl_2030.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dcl_2037",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "5.000% Sr Sec 2L 2037",
+      "obligor": "DCL",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dcl_2037.amount",
+        "value": "453.281",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 5.000% Sr Notes 2037."
+      },
+      "coupon": {
+        "id": "wbd_dcl_2037.coupon",
+        "value": "5.000",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dcl_2037.maturity",
+        "value": "2037-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dcl_2037.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dcl_2037.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dcl_2040",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "6.350% Sr Sec 2L 2040",
+      "obligor": "DCL",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dcl_2040.amount",
+        "value": "438.102",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 6.350% Sr Notes 2040."
+      },
+      "coupon": {
+        "id": "wbd_dcl_2040.coupon",
+        "value": "6.350",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dcl_2040.maturity",
+        "value": "2040-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dcl_2040.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dcl_2040.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dcl_2042",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "4.950% Sr Sec 2L 2042",
+      "obligor": "DCL",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dcl_2042.amount",
+        "value": "130.366",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 4.950% Sr Notes 2042."
+      },
+      "coupon": {
+        "id": "wbd_dcl_2042.coupon",
+        "value": "4.950",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dcl_2042.maturity",
+        "value": "2042-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dcl_2042.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dcl_2042.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dcl_2043",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "4.875% Sr Sec 2L 2043",
+      "obligor": "DCL",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dcl_2043.amount",
+        "value": "141.584",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 4.875% Sr Notes 2043."
+      },
+      "coupon": {
+        "id": "wbd_dcl_2043.coupon",
+        "value": "4.875",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dcl_2043.maturity",
+        "value": "2043-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dcl_2043.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dcl_2043.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dcl_2047",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "5.200% Sr Sec 2L 2047",
+      "obligor": "DCL",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dcl_2047.amount",
+        "value": "3.161",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 5.200% Sr Notes 2047."
+      },
+      "coupon": {
+        "id": "wbd_dcl_2047.coupon",
+        "value": "5.200",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dcl_2047.maturity",
+        "value": "2047-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dcl_2047.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dcl_2047.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dcl_2049",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "5.300% Sr Sec 2L 2049",
+      "obligor": "DCL",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dcl_2049.amount",
+        "value": "247.860",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 5.300% Sr Notes 2049."
+      },
+      "coupon": {
+        "id": "wbd_dcl_2049.coupon",
+        "value": "5.300",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dcl_2049.maturity",
+        "value": "2049-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dcl_2049.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dcl_2049.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dgh_2029",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "6.304% Sr Sec 2L 2029",
+      "obligor": "DGH",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dgh_2029.amount",
+        "value": "1353.828",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 4.054% Sr Notes 2029."
+      },
+      "coupon": {
+        "id": "wbd_dgh_2029.coupon",
+        "value": "6.304",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dgh_2029.maturity",
+        "value": "2029-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dgh_2029.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dgh_2029.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dgh_2032",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "4.904% Sr Sec 2L 2032",
+      "obligor": "DGH",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dgh_2032.amount",
+        "value": "2691.764",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 4.279% Sr Notes 2032."
+      },
+      "coupon": {
+        "id": "wbd_dgh_2032.coupon",
+        "value": "4.904",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dgh_2032.maturity",
+        "value": "2032-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dgh_2032.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dgh_2032.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dgh_2042",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "5.050% Sr Sec 2L 2042",
+      "obligor": "DGH",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dgh_2042.amount",
+        "value": "4104.687",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 5.050% Sr Notes 2042."
+      },
+      "coupon": {
+        "id": "wbd_dgh_2042.coupon",
+        "value": "5.050",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dgh_2042.maturity",
+        "value": "2042-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dgh_2042.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dgh_2042.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dgh_2052",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "5.141% Sr Sec 2L 2052",
+      "obligor": "DGH",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "USD",
+      "amount": {
+        "id": "wbd_dgh_2052.amount",
+        "value": "949.883",
+        "unit": "USD",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 5.141% Sr Notes 2052."
+      },
+      "coupon": {
+        "id": "wbd_dgh_2052.coupon",
+        "value": "5.141",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dgh_2052.maturity",
+        "value": "2052-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dgh_2052.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dgh_2052.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 2,
+      "day_count": "30/360",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dgh_2030_eur",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "5.802% Sr Sec 2L 2030",
+      "obligor": "DGH",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "EUR",
+      "amount": {
+        "id": "wbd_dgh_2030_eur.amount",
+        "value": "234.382",
+        "unit": "EUR",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 4.302% Sr Notes 2030."
+      },
+      "coupon": {
+        "id": "wbd_dgh_2030_eur.coupon",
+        "value": "5.802",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dgh_2030_eur.maturity",
+        "value": "2030-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dgh_2030_eur.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dgh_2030_eur.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 1,
+      "day_count": "ACT/ACT",
+      "coupon_type": "fixed"
+    },
+    {
+      "id": "wbd_dgh_2033_eur",
+      "issuer_cik": "0002041610",
+      "group": "exchange",
+      "name": "5.068% Sr Sec 2L 2033",
+      "obligor": "DGH",
+      "type": "exchange_note",
+      "priority_rank": 2,
+      "currency": "EUR",
+      "amount": {
+        "id": "wbd_dgh_2033_eur.amount",
+        "value": "316.641",
+        "unit": "EUR",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Validly delivered of 4.693% Sr Notes 2033."
+      },
+      "coupon": {
+        "id": "wbd_dgh_2033_eur.coupon",
+        "value": "5.068",
+        "unit": "percent",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": ""
+      },
+      "maturity": {
+        "id": "wbd_dgh_2033_eur.maturity",
+        "value": "2033-01-01",
+        "unit": "date",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "medium",
+        "status": "ok",
+        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+      },
+      "lien": {
+        "id": "wbd_dgh_2033_eur.lien",
+        "value": "2L",
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "ok",
+        "notes": "Liens release automatically if two of three agencies rate the notes investment grade."
+      },
+      "call_schedule": {
+        "id": "wbd_dgh_2033_eur.call",
+        "value": null,
+        "unit": "text",
+        "source": {
+          "type": "sec_filing",
+          "name": "8-K/A 2026-08-04 exchange table",
+          "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+          "locator": "validly delivered"
+        },
+        "pulled_at": "2026-10-02T00:00:00+00:00",
+        "as_of": "2026-10-02",
+        "freshness_class": "terms",
+        "confidence": "high",
+        "status": "not_public",
+        "notes": ""
+      },
+      "frequency": 1,
+      "day_count": "ACT/ACT",
+      "coupon_type": "fixed"
+    }
+  ],
+  "covenants": [
+    {
+      "key": "debt_incurrence",
+      "label": "Debt incurrence",
+      "status": "not_public",
+      "summary": "New-note baskets are in the private 144A offering memorandum.",
+      "source": {
+        "type": "press_release",
+        "name": "Pricing release",
+        "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+        "locator": ""
+      }
+    },
+    {
+      "key": "restricted_payments",
+      "label": "Restricted payments",
+      "status": "not_public",
+      "summary": "Not in a filed description of notes yet.",
+      "source": {
+        "type": "press_release",
+        "name": "Pricing release",
+        "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+        "locator": ""
+      }
+    },
+    {
+      "key": "liens",
+      "label": "Liens / permitted liens",
+      "status": "not_public",
+      "summary": "New-note lien covenant is not public.",
+      "source": {
+        "type": "press_release",
+        "name": "Pricing release",
+        "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+        "locator": ""
+      }
+    },
+    {
+      "key": "asset_sale",
+      "label": "Asset-sale sweep",
+      "status": "not_public",
+      "summary": "Not public.",
+      "source": {
+        "type": "press_release",
+        "name": "Pricing release",
+        "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+        "locator": ""
+      }
+    },
+    {
+      "key": "change_of_control",
+      "label": "Change of control",
+      "status": "not_public",
+      "summary": "Whether there is a 101% put is not public.",
+      "source": {
+        "type": "press_release",
+        "name": "Pricing release",
+        "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+        "locator": ""
+      }
+    },
+    {
+      "key": "call_schedule",
+      "label": "Make-whole and call schedule",
+      "status": "not_public",
+      "summary": "Not public until the indenture or S-4.",
+      "source": {
+        "type": "press_release",
+        "name": "Pricing release",
+        "url": "https://www.prnewswire.com/news-releases/paramount-skydance-corporation-announces-41-4-billion-and-885-million-senior-secured-notes-offerings-and-8-5-billion-and-850-million-term-loan-b-facility-pricing-302895161.html",
+        "locator": ""
+      }
+    },
+    {
+      "key": "lien_release_ig",
+      "label": "Lien release on investment grade",
+      "status": "found",
+      "summary": "Exchange-note liens release if two of three agencies rate the notes investment grade.",
+      "source": {
+        "type": "sec_filing",
+        "name": "Pro forma 8-K Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      }
+    },
+    {
+      "key": "guarantors",
+      "label": "Guarantor coverage",
+      "status": "found",
+      "summary": "Notes and exchange-note guarantors are the obligors under the Pro Rata Credit Agreement.",
+      "source": {
+        "type": "sec_filing",
+        "name": "Pro forma 8-K Ex. 99.2",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926111174/tm2610616d13_ex99-2.htm",
+        "locator": ""
+      }
+    },
+    {
+      "key": "priming",
+      "label": "Priming / J.Crew / Chewy / Serta",
+      "status": "not_found",
+      "summary": "No filed covenant text yet. Moody's said the plan primes existing unsecured holders. That is commentary, not a covenant.",
+      "source": {
+        "type": "news",
+        "name": "Livemint citing Bloomberg",
+        "url": "https://www.livemint.com/companies/news/paramounts-30-billion-bond-sale-draws-109-billion-demand-for-warner-bros-deal-11790735235267.html",
+        "locator": ""
+      }
+    },
+    {
+      "key": "wbd_amendments",
+      "label": "WBD legacy indenture amendments",
+      "status": "found",
+      "summary": "If the acquisition closes, junior-lien exchange notes carry no restrictive-liens or restricted-debt-prepayment covenant.",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K 2026-05-19 Ex. 99.1",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926063952/tm2610616d3_ex99-1.htm",
+        "locator": ""
+      }
+    },
+    {
+      "key": "exchange_table",
+      "label": "WBD notes validly delivered",
+      "status": "found",
+      "summary": "Delivered principal is in the 8-K/A. Full exchange results are not found.",
+      "source": {
+        "type": "sec_filing",
+        "name": "8-K/A 2026-08-04",
+        "url": "https://www.sec.gov/Archives/edgar/data/2041610/000110465926090460/tm2610616d9_8ka.htm",
+        "locator": ""
+      }
+    }
+  ],
+  "flags": [
+    {
+      "flag_type": "unconfirmed_openfigi",
+      "details": "PSKY 0 09/30/34 RegS (BBG025HZQKJ7) does not match a priced tranche. It is stored and left out of the capital structure."
+    }
+  ],
+  "prices": [],
+  "confirmed_ids": []
+}

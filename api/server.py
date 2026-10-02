@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui702-20261002-grok-desk"
+WEB_BUILD_VERSION = "ui703-20261002-credit"
 
 
 @app.get("/api/build")
@@ -43651,6 +43651,17 @@ def _mount_grok_bot() -> None:
 
 
 _mount_grok_bot()
+
+
+def _mount_credit() -> None:
+    try:
+        from api.domains.credit_analysis import create_router
+        app.include_router(create_router(_claims_or_401))
+    except Exception as exc:
+        print(f"[credit] mount failed: {exc!r}", flush=True)
+
+
+_mount_credit()
 
 
 if BRANDING_DIR.exists():
