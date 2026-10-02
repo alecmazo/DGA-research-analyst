@@ -110,3 +110,30 @@ def group_calls(rows: list[dict]) -> list[dict]:
         )
         folders.append({"label": ticker, "count": len(items), "items": items})
     return folders
+
+
+def split_calls(folders: list[dict], watchlist: list[str]) -> tuple[list[dict], list[dict]]:
+    """Watchlist companies first, in watchlist order. Everyone else stays as given.
+
+    `group_calls` already sorts the full list A–Z, so the remainder stays
+    alphabetical. A watchlist name with no indexed call is left out.
+    """
+    order: list[str] = []
+    seen: set[str] = set()
+    for raw in watchlist or []:
+        ticker = str(raw or "").strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        order.append(ticker)
+    by_label: dict[str, dict] = {}
+    for folder in folders or []:
+        label = str(folder.get("label") or "").strip().upper()
+        if label and label not in by_label:
+            by_label[label] = folder
+    watch = [by_label[ticker] for ticker in order if ticker in by_label]
+    rest = [
+        folder for folder in (folders or [])
+        if str(folder.get("label") or "").strip().upper() not in seen
+    ]
+    return watch, rest

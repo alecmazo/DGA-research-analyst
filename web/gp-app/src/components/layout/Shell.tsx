@@ -2,7 +2,7 @@ import { Outlet } from 'react-router-dom'
 import type { GpUser } from '@/lib/auth'
 import { Topbar } from './Topbar'
 import { MarketRibbon } from './MarketRibbon'
-import { SupportFab } from '@/components/support/SupportFab'
+import { FabDock } from '@/components/support/FabDock'
 import { AnalysisSceneHost } from '@/components/ui/AnalysisScene'
 import styles from './Shell.module.css'
 
@@ -36,7 +36,7 @@ export function Shell({ user, build }: Props) {
         {build && <span className={styles.build}>{build}</span>}
       </footer>
       <div data-print="hide">
-        <SupportFab />
+        <FabDock />
       </div>
       <AnalysisSceneHost />
     </div>

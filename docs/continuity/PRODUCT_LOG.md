@@ -73,7 +73,8 @@ Copy these into every new agent session:
 - **Cash / money-markets:** always $1 par. Never Yahoo-price CASH.
 - **Support:** GP sees the inbox; LPs can **file** only. Desk ticket **dot** is GP-only.
 - **iOS:** do not App Store-submit without explicit confirmation. TestFlight is OK when asked.
-- **Do not commit:** `api/domains/grok_bot.py`, `ticket_*.jpg`, `GrokBot.tsx` / `FabDock.tsx`, `mobile/logo-options/`.
+- **Grok desk bot:** part of the site, stacked above Support on the main desk (`api/domains/grok_bot.py`, `GrokBot.tsx`, `FabDock.tsx`). GP/admin only. Demo cannot use it.
+- **Do not commit:** `ticket_*.jpg`, `mobile/logo-options/`.
 
 ---
 
@@ -142,7 +143,7 @@ Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status do
 | Analyze Ticker | Multi-engine Analyze (Grok / Claude / DeepSeek / Kimi). Overlay while running. |
 | Desk health | Quote / report / pulse counts. |
 
-Support FAB files tickets with screenshot. Do not resurrect GrokBot/FabDock (untracked).
+Support FAB files tickets with screenshot. The Grok desk bot sits above it on the main desk.
 
 ### 5.2 Financials (`/financials`)
 

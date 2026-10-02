@@ -1974,74 +1974,37 @@ def _munger_fifty_prompt_list() -> str:
         return ""
 
 
-def build_munger_system_appendix() -> str:
-    """Grok-only mandatory SECTION 8.5 + full core context."""
-    ctx = load_munger_core_context()
-    if not ctx:
-        ctx = (
-            "(Munger core context file missing — still write SECTION 8.5 using "
-            "circle of competence, invert, margin of safety, incentives, "
-            "lollapalooza, too-hard pile, and sit-on-your-ass investing.)"
+def engine_news_addendum(provider: str) -> str:
+    """News rules that match the engine. Grok can search; this call does not attach it."""
+    p = (provider or "").lower()
+    if p == "grok":
+        return (
+            "\n\nNEWS COLLECTION — GROK\n"
+            "Grok can call live web search and X search. This Analyze call does not "
+            "attach those tools. A full search pass made the note too slow and too "
+            "expensive. The FREE CATALYST HEADLINES block in the user message is the "
+            "news collected for you. Write Section 2 only from that block. Do not "
+            "narrate a search, do not say you will search, and do not add events from "
+            "memory. If the block says no headlines were attached, write that.\n"
         )
-    header = """
+    if p in ("claude", "kimi", "deepseek"):
+        name = {"claude": "Claude", "kimi": "Kimi", "deepseek": "DeepSeek"}[p]
+        return (
+            f"\n\nNEWS COLLECTION — {name}\n"
+            f"{name} does not have web search or X search on this call. Do not imitate "
+            "a search procedure, do not list queries, and do not add events from memory "
+            "marked (verify). The FREE CATALYST HEADLINES block in the user message is "
+            "the only news. Write Section 2 only from that block. Skip headlines that "
+            "are not about this ticker. If the block says no headlines were attached, "
+            "write that.\n"
+        )
+    return ""
 
-================================================================================
-SECTION 8.5 — CHARLIE MUNGER LATTICEWORK ASSESSMENT  (GROK ONLY — REQUIRED)
-================================================================================
 
-This section is MANDATORY on **Grok** full equity reports only (never omit).
-Claude reports skip this section entirely (avoids duplication on multi-provider runs).
-
-Place **after** the Verdict / risk-reward framework and **before** institutional
-activity / holders. Make it a real, standalone core of the report — not a stub.
-
-Write in Munger's intellectual tradition: direct, rational, anti-narrative,
-prefer avoiding stupidity over brilliance. Use the CORE CONTEXT below as the
-authoritative persona.
-
-Required subsections (use these headings):
-
-### 8.5.1 Circle of Competence
-Is this business inside a disciplined investor's circle? What is hard to
-understand? Should any part go in the **too-hard pile**?
-
-### 8.5.2 Invert — How This Loses Money
-Invert always: permanent capital impairment scenarios, failure modes, and what
-would make Munger walk away.
-
-### 8.5.3 Moat, Incentives & Two-Track Analysis
-Durable competitive advantage? Map management / employee / customer incentives.
-Rational economics track + psychological track.
-
-### 8.5.4 Latticework & Lollapalooza
-Which mental models interact? Where do multiple forces (including psychology)
-align into a lollapalooza outcome — good or bad?
-
-### 8.5.5 Psychology Checklist (selected)
-Name 3–5 of the 25 standard misjudgment tendencies most relevant here and how
-they may be operating on management, the market, or the analyst.
-
-### 8.5.6 Investment Labels (explicit tags)
-Assign **one primary** label and any secondary labels from:
-**TOO HARD · HOMERUN · SIT-ON-YOUR-ASS · WONDERFUL BUSINESS AT FAIR PRICE ·
-FAIR BUSINESS AT WONDERFUL PRICE · AVOID · MARGIN OF SAFETY ADEQUATE ·
-MARGIN OF SAFETY INADEQUATE**
-
-### 8.5.7 What Munger Would Likely Do
-Plain-spoken conclusion: buy / pass / too-hard — with the single best reason
-and the single biggest stupidity to avoid. No soft-pedaling.
-
-Inside 8.5, cite 3 to 5 rules from the list below. Each citation is its own
-line, exactly `Rule N — Title`, then two to four sentences on THIS company.
-Use the number and title as written. Do not cite a rule you do not apply.
-
-""" + _munger_fifty_prompt_list() + """
-
-================================================================================
-MUNGER CORE CONTEXT (authoritative — follow strictly)
-================================================================================
-"""
-    return header + ctx + "\n"
+def build_munger_system_appendix() -> str:
+    """Section 8.5 for Grok and Claude. Compact: seven headings and the rule titles."""
+    from api.domains.local_finance_llm import munger_section_instructions
+    return "\n\n" + munger_section_instructions(standalone=False)
 
 
 # ============================================================================
@@ -2579,17 +2542,17 @@ def free_ticker_catalyst_headlines(
 
 
 def format_catalyst_headlines_block(ticker: str, items: list[dict], *, days: int = 90) -> str:
-    """Markdown block injected into Analyze user_msg for Grok."""
+    """Prefetched headlines. The model writes from this block. It does not search."""
     tk = (ticker or "").strip().upper()
     out: list[str] = [
         f"=== FREE CATALYST HEADLINES — {tk} (past ~{days} days, free RSS ground truth) ===",
-        "These headlines are pre-fetched by the pipeline. Treat material items as FACTS to",
-        "verify/expand with live web_search + x_search — do NOT invent beyond them without",
-        "search, and do NOT erase M&A/deal items that appear here.",
+        "These headlines were fetched before the call. They are the only news.",
+        "Do not invent items beyond them. Do not drop an M&A or deal headline that appears here.",
+        "Skip a headline that is not about this ticker.",
         "",
     ]
     if not items:
-        out.append("(no free headlines fetched — you MUST still live-search aggressively)")
+        out.append("(no headlines were attached)")
         out.append("")
         return "\n".join(out)
     for it in items:
@@ -2603,10 +2566,8 @@ def format_catalyst_headlines_block(ticker: str, items: list[dict], *, days: int
         out.append(row)
     out.append("")
     out.append(
-        "MANDATORY SEARCHES (live tools): "
-        f'1) "{tk} acquisition OR merger OR definitive agreement"  '
-        f'2) "{tk} news"  3) "{tk} earnings guidance"  '
-        "Never write 'No major M&A announced' if any headline above mentions a deal."
+        "Never write 'No major M&A announced' if any headline above mentions a deal. "
+        "Do not add a search query list."
     )
     out.append("")
     return "\n".join(out)
@@ -7962,7 +7923,7 @@ def report_tail_gap(text: str | None, provider: str = "grok") -> str | None:
     if len(t.strip()) < 800:
         return None
     up = t.upper()
-    if (provider or "grok").lower() in ("grok", "local"):
+    if (provider or "grok").lower() in ("grok", "claude"):
         missing = _munger_missing(t)
         if "MUNGER" not in up and "8.5.1" not in t:
             return "missing the Munger section"
@@ -10764,8 +10725,8 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             "write FY2025 ended 2023-12-31 with 2023 revenue).\n"
             "3. If MULTI-YEAR TREND (SECONDARY) conflicts on year labels or magnitudes, "
             "ignore it for tables; use PRIMARY only. Secondary is for narrative trend.\n"
-            "4. Live web/X search (if enabled) is ONLY for news, catalysts, filings "
-            "headlines, and sentiment — NEVER to fill or override financial tables.\n"
+            "4. The headline block is the only news. Never use it, or a search you "
+            "did not run, to fill or override financial tables.\n"
             "5. EPS, Revenue, FCF, Debt, Cash must appear as numeric figures investors "
             "can audit (e.g. 1288.0, 4.49, 5.7%), not prose descriptors.\n"
         )
@@ -10827,39 +10788,39 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     # x_search, then we wrote the report again. The SEC tables and market
     # snapshot are already in the prompt. One low-effort chat call.
     _live = False
-    # Grok-only: 90-day free catalyst headlines + Munger latticework section.
-    # Claude skips both (no live search; Munger would duplicate multi-provider runs).
+    # Live web/X search stays off. One Grok search pass took ~14 minutes and
+    # ~$25. Headlines are prefetched instead. Grok is told the tools are off.
+    # Claude, Kimi, and DeepSeek are told they have no search, so they do not
+    # copy Grok's old search list. Munger 8.5 is on Grok and Claude. The local
+    # model gets a short note prompt; its Munger section is a second call.
     _search_from = None
-    if _prov == "grok":
-        try:
-            from datetime import date as _date, timedelta as _td
-            _search_from = (_date.today() - _td(days=90)).isoformat()
-        except Exception:
-            _search_from = None
+    system_prompt = system_prompt or load_system_prompt()
+    if _prov in ("grok", "claude", "kimi", "deepseek"):
         try:
             _heads = free_ticker_catalyst_headlines(ticker, days=90, limit=24)
             _news_blk = format_catalyst_headlines_block(ticker, _heads, days=90)
             user_msg = user_msg.rstrip() + "\n\n" + _news_blk
             print(
                 f"   📰 Injected {len(_heads)} free catalyst headline(s) "
-                f"(90d) into Grok user_msg",
+                f"(90d) into {_prov} user_msg",
                 flush=True,
             )
         except Exception as _ne:
             print(f"   ⚠️  Catalyst headline inject failed: {_ne!s:.120}", flush=True)
-        try:
-            _mung = build_munger_system_appendix()
-            if _mung:
-                system_prompt = (system_prompt or load_system_prompt()).rstrip() + "\n" + _mung
-                print(
-                    f"   🧠 Munger SECTION 8.5 appendix attached ({len(_mung):,} chars)",
-                    flush=True,
-                )
-        except Exception as _me:
-            print(f"   ⚠️  Munger appendix failed: {_me!s:.120}", flush=True)
+        system_prompt = system_prompt.rstrip() + engine_news_addendum(_prov)
+        if _prov in ("grok", "claude"):
+            try:
+                _mung = build_munger_system_appendix()
+                if _mung:
+                    system_prompt = system_prompt.rstrip() + "\n" + _mung
+                    print(
+                        f"   🧠 Munger SECTION 8.5 attached for {_prov} ({len(_mung):,} chars)",
+                        flush=True,
+                    )
+            except Exception as _me:
+                print(f"   ⚠️  Munger appendix failed: {_me!s:.120}", flush=True)
     elif _prov == "local":
-        # Same system prompt and filing context as Grok. News is Yahoo Finance
-        # only — Grok's Google News mix is left unchanged.
+        # Yahoo only. The desk manual is not sent. Munger is the browser's second call.
         try:
             from api.domains.yahoo_finance_news import (
                 fetch_yahoo_finance_news, format_yahoo_news_block,
@@ -10874,16 +10835,8 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             from api.domains.yahoo_finance_news import EMPTY_NOTE, format_yahoo_news_block
             user_msg = user_msg.rstrip() + "\n\n" + format_yahoo_news_block(ticker, [])
             print(f"   ⚠️  Yahoo news failed ({_ye!s:.120}); {EMPTY_NOTE}", flush=True)
-        try:
-            _mung = build_munger_system_appendix()
-            if _mung:
-                system_prompt = (system_prompt or load_system_prompt()).rstrip() + "\n" + _mung
-                print(
-                    f"   🧠 Munger SECTION 8.5 appendix attached ({len(_mung):,} chars)",
-                    flush=True,
-                )
-        except Exception as _me:
-            print(f"   ⚠️  Munger appendix failed: {_me!s:.120}", flush=True)
+        from api.domains.local_finance_llm import LOCAL_NOTE_SYSTEM
+        system_prompt = LOCAL_NOTE_SYSTEM
 
     # ── Thesis continuity: prior Analyze on same ticker ────────────────────
     # Re-runs archive the previous version in Postgres; the model still needs
@@ -10910,7 +10863,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         print(f"   ⚠️  Prior thesis inject failed: {_pe!s:.120}", flush=True)
 
     if prepare_only:
-        return {
+        out = {
             "ok": True,
             "prepare_only": True,
             "ticker": ticker,
@@ -10918,6 +10871,10 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             "user_msg": user_msg,
             "model": _model_label,
         }
+        if _prov == "local":
+            from api.domains.local_finance_llm import munger_section_instructions
+            out["munger_system"] = munger_section_instructions(standalone=True)
+        return out
 
     print(f"   🧠 Calling {_prov.upper()} ({_model_label})"
           + (" with live X/news/web search (90d)…" if _live else "…"))
@@ -10993,9 +10950,9 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         _ck()
         _emit_progress(on_progress, "grok", 0.72,
                        f"{_prov.title()} — finishing the verdict"
-                       + (" and Munger" if _prov in ("grok", "local") else ""))
+                       + (" and Munger" if _prov in ("grok", "claude") else ""))
         tail = (report_text or "")[-7000:]
-        missing = _munger_missing(report_text or "") if _prov in ("grok", "local") else []
+        missing = _munger_missing(report_text or "") if _prov in ("grok", "claude") else []
         if missing and any(s in (report_text or "") for s in ("8.5.1", "8.5.2", "8.5.3")):
             ask = (
                 "The report was cut off inside SECTION 8.5. Continue from the "
@@ -11009,7 +10966,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         else:
             extra = (
                 " and SECTION 8.5 — Charlie Munger Latticework through ### 8.5.7"
-                if _prov == "grok" else ""
+                if _prov in ("grok", "claude") else ""
             )
             ask = (
                 "The report was cut off by the length limit. Continue from the "

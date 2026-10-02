@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui701-20261002-denser-page"
+WEB_BUILD_VERSION = "ui702-20261002-grok-desk"
 
 
 @app.get("/api/build")
@@ -8764,8 +8764,8 @@ def _continuity_pack() -> dict:
         f"6. Never persist Grok live-search tool dumps as `report_md`.\n"
         f"7. Demo (`demo@dgacapital.com` / `demo123`) must never see live LP/GP PII.\n"
         f"8. Do not App Store-submit iOS without explicit confirmation.\n"
-        f"9. Do not commit `grok_bot.py`, `ticket_*.jpg`, GrokBot/FabDock, "
-        f"`mobile/logo-options/`.\n"
+        f"9. The Grok desk bot is part of the site (`api/domains/grok_bot.py`, "
+        f"FabDock). Do not commit `ticket_*.jpg` or `mobile/logo-options/`.\n"
         f"10. Financials print CSS stays scoped to `.shell` — never `body *`.\n"
         f"11. Accounts rebalance = **Grok** 12m PT vs **live last**.\n"
         f"12. Saved Reports: Grok and Claude each show their own TGT + live upside.\n"
@@ -8851,8 +8851,8 @@ def _continuity_speed_prompt() -> str:
         f"edit run `npm run build` in `web/gp-app/` and commit `dist/`; one "
         f"uvicorn worker; do not auto-send email; do not publish a mobile "
         f"update unless Alec asks; do not re-upload wedding videos already "
-        f"on `/data/sliw-media`; do not commit `grok_bot.py`, `ticket_*.jpg`, "
-        f"GrokBot, FabDock, or `mobile/logo-options/`.\n\n"
+        f"on `/data/sliw-media`; the Grok desk bot stays in the repo; do not "
+        f"commit `ticket_*.jpg` or `mobile/logo-options/`.\n\n"
         f"## Then do the speed audit\n\n"
         f"1. Read `docs/mobile-speed/CHECKLIST.md`. The budgets are the steps "
         f"table. Older limits are under **Budget revisions**. Do not renumber "
@@ -9655,6 +9655,7 @@ def local_research_prompt(body: LocalTickerRequest, request: Request):
         "ticker": ticker,
         "system": result.get("system_prompt") or "",
         "user": result.get("user_msg") or "",
+        "munger_system": result.get("munger_system") or "",
         "model": "gpt-oss-20b-finance",
     }
 
@@ -9744,6 +9745,178 @@ def local_save_report(body: LocalSaveRequest, request: Request):
         "chars": chars,
         "ticker": ticker,
         "has_docx": docx_path.exists(),
+    }
+
+
+_LOCAL_PORTFOLIO_READY = False
+_PORTFOLIO_REPORT_ID = re.compile(r"^[a-f0-9]{16}$")
+
+
+def _ensure_local_portfolio_reports_table(conn) -> None:
+    """Portfolio reviews are not ticker notes. They stay out of analyst_reports."""
+    global _LOCAL_PORTFOLIO_READY
+    if _LOCAL_PORTFOLIO_READY:
+        return
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS local_portfolio_reports (
+                id         TEXT PRIMARY KEY,
+                lp_id      TEXT NOT NULL,
+                portfolio  TEXT NOT NULL,
+                report_md  TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS local_portfolio_reports_lp_created
+                ON local_portfolio_reports (lp_id, created_at DESC)
+        """)
+    conn.commit()
+    _LOCAL_PORTFOLIO_READY = True
+
+
+def _local_portfolio_name(raw: str) -> str:
+    name = re.sub(r"\s+", " ", (raw or "").strip())
+    if not name or len(name) > 80 or any(ord(ch) < 32 for ch in name):
+        raise HTTPException(status_code=422, detail="Invalid portfolio name")
+    return name
+
+
+def _local_portfolio_report_id(raw: str) -> str:
+    report_id = (raw or "").strip().lower()
+    if not _PORTFOLIO_REPORT_ID.fullmatch(report_id):
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+    return report_id
+
+
+def _portfolio_report_iso(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return str(value)
+
+
+def _local_portfolio_lp(request: Request) -> str:
+    claims = _claims_or_401(request)
+    lp_id = str(claims.get("lp_id") or "").strip()[:80]
+    if not lp_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return lp_id
+
+
+class LocalPortfolioSaveRequest(BaseModel):
+    portfolio: str = ""
+    text: str = ""
+
+
+@app.post("/api/local/portfolio-save")
+def local_portfolio_save(body: LocalPortfolioSaveRequest, request: Request):
+    """Store one portfolio recommendation for the signed-in user."""
+    lp_id = _local_portfolio_lp(request)
+    name = _local_portfolio_name(body.portfolio)
+    text = (body.text or "").strip()
+    if len(text) < 20:
+        raise HTTPException(status_code=400, detail="Recommendation is too short to save")
+    if len(text) > 200_000:
+        raise HTTPException(status_code=400, detail="Recommendation is too long to save")
+    from api.domains.local_finance_llm import is_model_refusal
+    if is_model_refusal(text):
+        raise HTTPException(
+            status_code=422,
+            detail="The local model refused this review. Nothing was saved.",
+        )
+    report_id = uuid.uuid4().hex[:16]
+    try:
+        with _fund_conn() as conn:
+            _ensure_local_portfolio_reports_table(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO local_portfolio_reports (id, lp_id, portfolio, report_md)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (report_id, lp_id, name, text),
+                )
+            conn.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[local] portfolio save failed: {exc!s:.160}", flush=True)
+        raise HTTPException(status_code=503, detail="Could not save the recommendation")
+    return {"ok": True, "id": report_id, "portfolio": name}
+
+
+@app.get("/api/local/portfolio-reports")
+def local_portfolio_reports(request: Request):
+    """Saved portfolio recommendations for the signed-in user. No report text."""
+    lp_id = _local_portfolio_lp(request)
+    try:
+        with _fund_conn() as conn:
+            _ensure_local_portfolio_reports_table(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, portfolio, created_at
+                      FROM local_portfolio_reports
+                     WHERE lp_id = %s
+                     ORDER BY created_at DESC
+                     LIMIT 40
+                    """,
+                    (lp_id,),
+                )
+                rows = cur.fetchall() or []
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[local] portfolio list failed: {exc!s:.160}", flush=True)
+        raise HTTPException(status_code=503, detail="Could not load recommendations")
+    return {
+        "ok": True,
+        "reports": [
+            {
+                "id": row[0],
+                "portfolio": row[1],
+                "created_at": _portfolio_report_iso(row[2]),
+            }
+            for row in rows
+        ],
+    }
+
+
+@app.get("/api/local/portfolio-reports/{report_id}")
+def local_portfolio_report_one(report_id: str, request: Request):
+    """One saved recommendation. Other users' rows are not found."""
+    lp_id = _local_portfolio_lp(request)
+    report_id = _local_portfolio_report_id(report_id)
+    try:
+        with _fund_conn() as conn:
+            _ensure_local_portfolio_reports_table(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, portfolio, report_md, created_at
+                      FROM local_portfolio_reports
+                     WHERE id = %s AND lp_id = %s
+                    """,
+                    (report_id, lp_id),
+                )
+                row = cur.fetchone()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[local] portfolio open failed: {exc!s:.160}", flush=True)
+        raise HTTPException(status_code=503, detail="Could not open the recommendation")
+    if not row:
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+    return {
+        "ok": True,
+        "id": row[0],
+        "portfolio": row[1],
+        "text": row[2],
+        "created_at": _portfolio_report_iso(row[3]),
     }
 
 
@@ -20231,24 +20404,16 @@ def _fund_conn():
                 if getattr(raw, "closed", 1):
                     pool.putconn(raw, close=True)
                     continue
-                import socket as _sock
-                _ping_sock = None
-                try:
-                    _ping_sock = _sock.socket(fileno=raw.fileno())
-                    _ping_sock.settimeout(2.0)
-                except Exception:
-                    _ping_sock = None
-                try:
-                    with raw.cursor() as _c:
-                        _c.execute("SELECT 1")
-                    raw.rollback()
-                finally:
-                    if _ping_sock is not None:
-                        try:
-                            _ping_sock.settimeout(None)
-                            _ping_sock.detach()
-                        except Exception:
-                            pass
+                # Do not wrap raw.fileno() in socket.socket(). On Linux that
+                # left a large transcript unread, Postgres treated the
+                # transaction as idle, and closed it after 15s.
+                with raw.cursor() as _c:
+                    try:
+                        _c.execute("SET LOCAL statement_timeout = 2000")
+                    except Exception:
+                        raw.rollback()
+                    _c.execute("SELECT 1")
+                raw.rollback()
                 return _PooledConn(raw)
             except Exception as e:
                 last_err = e
@@ -21125,6 +21290,7 @@ def _apply_self_migrations() -> None:
             # support_tickets_table is optional — only if helper exists
             if callable(globals().get("_ensure_support_tickets_table")):
                 _step("support_tickets_table", lambda: _ensure_support_tickets_table(conn))
+            _step("local_portfolio_reports", lambda: _ensure_local_portfolio_reports_table(conn))
 
             def _tax_lots_open_idx():
                 with conn.cursor() as cur:
@@ -33742,104 +33908,41 @@ def _html_to_paragraphs(html: str) -> list[str]:
     return out
 
 
-def _slugify_company(name: str) -> str:
-    s = (name or "").lower()
-    s = re.sub(r"&", " and ", s)
-    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
-    s = re.sub(r"-(inc|incorporated|corp|corporation|company|co|ltd|plc|the)$",
-               "", s)
-    s = re.sub(r"-+", "-", s).strip("-")
-    return s
+def _fool_company_name(ticker: str) -> str | None:
+    """Name for a Fool slug. SEC title first; Yahoo only if the SEC map misses."""
+    tk = (ticker or "").upper().strip()
+    if not tk:
+        return None
+    try:
+        import sec_edgar_xbrl as _edgar
+        title = _edgar.company_title(tk)
+        if title:
+            return title
+    except Exception:
+        pass
+    try:
+        from market_data import _bounded
+        import yfinance as yf
+
+        def _info():
+            info = yf.Ticker(tk).info or {}
+            if not isinstance(info, dict):
+                return None
+            return info.get("shortName") or info.get("longName")
+
+        name = _bounded(_info, 2.5, default=None)
+        if name and str(name).strip():
+            return str(name).strip()
+    except Exception:
+        pass
+    return None
 
 
-def _fool_slug_candidates(ticker: str, year: int, quarter: int,
-                          company_name: str | None = None) -> list[str]:
-    """Likely Motley Fool URL slugs for a ticker/quarter."""
-    tk = (ticker or "").lower().strip()
-    tail = f"{tk}-q{int(quarter)}-{int(year)}-earnings-call-transcript"
-    out: list[str] = []
-    seen: set[str] = set()
-
-    def _add(slug: str) -> None:
-        slug = (slug or "").strip("-")
-        if slug and slug not in seen:
-            seen.add(slug)
-            out.append(slug)
-
-    if company_name:
-        base = _slugify_company(company_name)
-        if base:
-            _add(f"{base}-{tail}")
-            # shorter first token (e.g. wells-fargo from wells-fargo-and-company)
-            parts = base.split("-")
-            if len(parts) >= 2:
-                _add(f"{'-'.join(parts[:2])}-{tail}")
-            if len(parts) >= 1:
-                _add(f"{parts[0]}-{tail}")
-    _add(tail)  # wfc-q1-2026-earnings-call-transcript
-    # Common bank/tech patterns without needing name lookup
-    _KNOWN = {
-        "WFC": ["wells-fargo"], "JPM": ["jpmorgan", "jp-morgan"],
-        "BAC": ["bank-of-america"], "C": ["citigroup", "citi"],
-        "GS": ["goldman-sachs"], "MS": ["morgan-stanley"],
-        "AAPL": ["apple"], "MSFT": ["microsoft"], "GOOGL": ["alphabet"],
-        "GOOG": ["alphabet"], "AMZN": ["amazon"], "META": ["meta"],
-        "NVDA": ["nvidia"], "TSLA": ["tesla"], "NKE": ["nike"],
-        "UBER": ["uber"], "PLTR": ["palantir"], "V": ["visa"],
-        "MA": ["mastercard"], "XOM": ["exxon-mobil", "exxonmobil"],
-        "CVX": ["chevron"], "UNH": ["unitedhealth"], "JNJ": ["johnson-johnson"],
-        "BRK-B": ["berkshire-hathaway"], "BRKB": ["berkshire-hathaway"],
-        "TSM": ["taiwan-semiconductor", "tsmc"], "AVGO": ["broadcom"],
-        "AMD": ["amd", "advanced-micro-devices"], "INTC": ["intel"],
-        "QCOM": ["qualcomm"], "CRM": ["salesforce"], "ORCL": ["oracle"],
-        "NFLX": ["netflix"], "DIS": ["disney", "walt-disney"],
-        "BA": ["boeing"], "CAT": ["caterpillar"], "GE": ["ge", "general-electric"],
-        "WMT": ["walmart"], "COST": ["costco"], "HD": ["home-depot"],
-        "PG": ["procter-gamble"], "KO": ["coca-cola"], "PEP": ["pepsico"],
-        "MRK": ["merck"], "PFE": ["pfizer"], "ABBV": ["abbvie"],
-        "LLY": ["eli-lilly"], "VST": ["vistra"], "VRT": ["vertiv"],
-        "VMC": ["vulcan-materials"], "NET": ["cloudflare"],
-        "MRVL": ["marvell"], "CIEN": ["ciena"], "FLEX": ["flex"],
-        "FLR": ["fluor"], "QSR": ["restaurant-brands"], "CART": ["maplebear", "instacart"],
-        "CAKE": ["cheesecake-factory"], "BN": ["brookfield"],
-        "HHH": ["howard-hughes"], "TLN": ["talen-energy"],
-        "VALE": ["vale"], "POWL": ["powell-industries"],
-        "OKLO": ["oklo"], "SMR": ["nuscale-power"], "RKLB": ["rocket-lab"],
-        "LUNR": ["intuitive-machines"], "IBRX": ["immunitybio"],
-    }
-    for prefix in _KNOWN.get((ticker or "").upper(), []):
-        _add(f"{prefix}-{tail}")
-    return out
-
-
-def _estimate_call_date_window(ticker: str, year: int, quarter: int) -> list:
-    """Likely calendar dates the earnings call occurred (for Fool URL paths)."""
-    from datetime import date, timedelta
-    dates: list = []
+def _known_earnings_dates(ticker: str) -> list:
+    """Report dates from Nasdaq and Yahoo. Unfiltered; the planner picks the quarter."""
+    from podcast_intel.call_refresh import parse_day
+    out: list = []
     seen: set = set()
-
-    def _add(d) -> None:
-        if d and d not in seen:
-            seen.add(d)
-            dates.append(d)
-
-    # Typical large-cap print windows by fiscal quarter:
-    # Q1→mid Apr, Q2→mid Jul, Q3→mid Oct, Q4→late Jan next year
-    q = int(quarter)
-    if q == 1:
-        center = date(int(year), 4, 15)
-        months_ok = {4, 5}
-    elif q == 2:
-        center = date(int(year), 7, 15)
-        months_ok = {7, 8}
-    elif q == 3:
-        center = date(int(year), 10, 15)
-        months_ok = {10, 11}
-    else:
-        center = date(int(year) + 1, 1, 25)
-        months_ok = {1, 2}
-
-    # 1) Free earnings history (Nasdaq / yfinance) — real print dates first
     try:
         from market_data import nasdaq_earnings_surprise, yfinance_earnings_surprise
         for src in (nasdaq_earnings_surprise, yfinance_earnings_surprise):
@@ -33848,23 +33951,27 @@ def _estimate_call_date_window(ticker: str, year: int, quarter: int) -> list:
             except Exception:
                 hist = []
             for row in hist:
-                ds = str(row.get("date_reported") or row.get("date") or "")[:10]
-                if len(ds) < 10:
+                day = parse_day(row.get("date_reported") or row.get("date"))
+                if day is None or day in seen:
                     continue
-                try:
-                    d = date.fromisoformat(ds)
-                except Exception:
-                    continue
-                if d.month in months_ok and abs((d - center).days) <= 45:
-                    _add(d)
+                seen.add(day)
+                out.append(day)
     except Exception:
         pass
+    return out
 
-    # 2) Dense window around the typical center (search engines often blocked)
-    for delta in range(-10, 14):
-        _add(center + timedelta(days=delta))
 
-    return dates[:36]
+def _fool_slug_candidates(ticker: str, year: int, quarter: int,
+                          company_name: str | None = None) -> list[str]:
+    """Likely Motley Fool URL slugs for a ticker/quarter."""
+    from podcast_intel.call_refresh import slug_candidates
+    return slug_candidates(ticker, year, quarter, company_name)
+
+
+def _estimate_call_date_window(ticker: str, year: int, quarter: int) -> list:
+    """Likely calendar dates the earnings call occurred (for Fool URL paths)."""
+    from podcast_intel.call_refresh import candidate_dates
+    return candidate_dates(int(year), int(quarter), _known_earnings_dates(ticker))
 
 
 def _discover_fool_transcript_urls(ticker: str, year: int, quarter: int) -> list[str]:
@@ -33890,34 +33997,19 @@ def _discover_fool_transcript_urls(ticker: str, year: int, quarter: int) -> list
             found.append(u)
 
     # ── 1) Direct URL construction + probe (primary — works when DDG blocked) ──
-    company_name = None
+    from podcast_intel.call_refresh import page_matches, plan_fool_urls, window_is_future
+    if window_is_future(yr, qn):
+        print(f"📞 [fool] {tk} {yr}Q{qn}: print window has not started", flush=True)
+        return []
+    company_name = _fool_company_name(tk)
     try:
-        import yfinance as yf
-        info = yf.Ticker(tk).info or {}
-        if isinstance(info, dict):
-            company_name = info.get("shortName") or info.get("longName")
-    except Exception:
-        company_name = None
-    try:
-        slugs = _fool_slug_candidates(tk, yr, qn, company_name)
+        urls = plan_fool_urls(
+            tk, yr, qn, company_name=company_name,
+            known_dates=_known_earnings_dates(tk),
+        )
     except Exception as e:
-        print(f"[fool] slug candidates: {e!s:.100}", flush=True)
-        slugs = [f"{tk.lower()}-q{qn}-{yr}-earnings-call-transcript"]
-    try:
-        date_window = _estimate_call_date_window(tk, yr, qn)
-    except Exception as e:
-        print(f"[fool] date window: {e!s:.100}", flush=True)
-        from datetime import date as _date, timedelta as _td
-        # Fall back to mid-quarter window
-        if qn == 1:
-            c = _date(yr, 4, 15)
-        elif qn == 2:
-            c = _date(yr, 7, 15)
-        elif qn == 3:
-            c = _date(yr, 10, 15)
-        else:
-            c = _date(yr + 1, 1, 25)
-        date_window = [c + _td(days=d) for d in range(-10, 14)]
+        print(f"[fool] probe plan: {e!s:.100}", flush=True)
+        urls = []
 
     import requests as _req
     sess = _req.Session()
@@ -33929,29 +34021,36 @@ def _discover_fool_transcript_urls(ticker: str, year: int, quarter: int) -> list
         "Accept": "text/html,application/xhtml+xml",
     })
     probes = 0
-    max_probes = 36
-    for d in date_window:
-        if found or probes >= max_probes:
+    net_errs = 0
+    import time as _time
+    for url in urls:
+        if found:
             break
-        for slug in slugs[:4]:
-            if probes >= max_probes:
-                break
-            url = (f"https://www.fool.com/earnings/call-transcripts/"
-                   f"{d.year}/{d.month:02d}/{d.day:02d}/{slug}/")
-            probes += 1
-            try:
-                r = sess.get(url, timeout=10, allow_redirects=True)
+        probes += 1
+        if probes > 1:
+            _time.sleep(0.2)
+        try:
+            r = sess.get(url, timeout=8, allow_redirects=True)
+            net_errs = 0
+            code = int(getattr(r, "status_code", 0) or 0)
+            body = getattr(r, "text", "") or ""
+            if code == 429:
+                _time.sleep(2.0)
+                r = sess.get(url, timeout=8, allow_redirects=True)
                 code = int(getattr(r, "status_code", 0) or 0)
                 body = getattr(r, "text", "") or ""
-                if code == 200 and len(body) > 5000:
-                    head = body[:12000].lower()
-                    if ("earnings call transcript" in head
-                            or "operator:" in head
-                            or re.search(r"[A-Z][a-z]+ [A-Z][a-z]+:\s", body[:20000])):
-                        _push(url)
-                        break
-            except Exception:
-                continue
+                if code == 429:
+                    print(f"📞 [fool] {tk} {yr}Q{qn}: rate limited after {probes} tries",
+                          flush=True)
+                    break
+            if code == 200 and page_matches(body, tk, yr, qn):
+                _push(str(getattr(r, "url", None) or url))
+                break
+        except Exception:
+            net_errs += 1
+            if net_errs >= 4:
+                break
+            continue
     if found:
         print(f"📞 [fool] {tk} {yr}Q{qn}: discovered via probe ({probes} tries)",
               flush=True)
@@ -34026,10 +34125,16 @@ def _parse_fool_transcript_page(html: str, ticker: str, year: int, quarter: int)
         if m:
             date = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
     qtag = f"{int(year)}Q{int(quarter)}"
-    # Prefer quarter from headline if present
-    m = re.search(r"\b(20[0-9]{2})\s*Q\s*([1-4])\b", html[:4000], re.I)
+    # Title is "Q2 2026", not "2026 Q2". The first 4k of the page is scripts.
+    tm = re.search(r"<title>(.*?)</title>", html[:40000], re.I | re.S)
+    title = tm.group(1) if tm else ""
+    m = re.search(r"\bQ\s*([1-4])\s*(20[0-9]{2})\b", title, re.I)
     if m:
-        qtag = f"{m.group(1)}Q{m.group(2)}"
+        qtag = f"{m.group(2)}Q{m.group(1)}"
+    else:
+        m = re.search(r"\b(20[0-9]{2})\s*Q\s*([1-4])\b", title, re.I)
+        if m:
+            qtag = f"{m.group(1)}Q{m.group(2)}"
     return {
         "ok": True, "status": 200, "transcript": body, "date": date,
         "quarter": qtag, "source": "motley_fool",
@@ -34788,21 +34893,32 @@ def _run_call_sync(job_id: str, tickers: list[str], max_quarters: int,
         for trow in trail_all:
             if trow.get("ok"):
                 by_src[trow.get("source") or "?"] = by_src.get(trow.get("source") or "?", 0) + 1
+        new_qs: list[str] = []
+        seen_q: set[str] = set()
+        for trow in trail_all:
+            qlabel = str(trow.get("quarter") or "")
+            if trow.get("ok") and qlabel and qlabel not in seen_q:
+                seen_q.add(qlabel)
+                new_qs.append(qlabel)
+        who = tickers[0] if len(tickers) == 1 else (
+            f"{names_with_calls or len(tickers)} names")
+        paid = f" · ~${cost_usd:.2f} Grok" if grok_calls else " · $0 Grok"
         if canceled:
             label = (f"⏹ Stopped · indexed {total_indexed} passages · "
                      f"{names_with_calls} names · free hits {free_hits}"
                      + (f" · ~${cost_usd:.2f} Grok" if grok_calls else " · $0 Grok"))
             st = "canceled"
-        elif total_indexed > 0:
-            label = (f"✓ Indexed {total_indexed} passages across {names_with_calls} names"
-                     f" · free hits {free_hits}"
-                     + (f" · ~${cost_usd:.2f} ({grok_calls} Grok)" if grok_calls
-                        else " · $0 Grok")
+        elif new_qs:
+            label = (f"✓ {who} indexed {', '.join(new_qs[:8])}"
+                     f" · {total_indexed} passages{paid}"
                      + (f" · via {', '.join(sources_all)}" if sources_all else ""))
+            st = "done"
+        elif names_with_calls:
+            label = f"No new quarter for {who}{paid}"
             st = "done"
         else:
             reason = all_errors[0] if all_errors else f"no transcripts via {mode}"
-            label = f"⚠ Indexed 0 passages — {reason[:160]}"
+            label = f"No new quarter for {who} — {reason[:140]}"
             if grok_calls:
                 label += f" · ~${cost_usd:.2f} spent"
             st = "done"
@@ -35457,9 +35573,13 @@ def transcripts_library(request: Request):
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
-    from podcast_intel.tree import enabled, group_calls, group_interviews
+    from podcast_intel.tree import enabled, group_calls, group_interviews, split_calls
     if not enabled():
-        return {"ok": True, "enabled": False, "interviews": [], "calls": []}
+        return {
+            "ok": True, "enabled": False,
+            "interviews": [], "calls": [],
+            "watchlist_calls": [], "other_calls": [],
+        }
     _ensure_transcripts_tables()
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
@@ -35488,14 +35608,299 @@ def transcripts_library(request: Request):
                  ORDER BY ticker
             """)
             calls = [dict(row) for row in cur.fetchall() or []]
+        grouped = group_calls(calls)
+        try:
+            watchlist = list(_wl_get_db(claims.get("lp_id") or "") or [])
+        except Exception:
+            watchlist = []
+        watch_calls, other_calls = split_calls(grouped, watchlist)
         return {
             "ok": True,
             "enabled": True,
             "interviews": group_interviews(interviews),
-            "calls": group_calls(calls),
+            "calls": grouped,
+            "watchlist_calls": watch_calls,
+            "other_calls": other_calls,
         }
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+
+
+@app.get("/api/transcripts/cleanup")
+def transcripts_cleanup_list(request: Request):
+    """Stored podcast shows and how much transcript text they use."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    from podcast_intel.cleanup import CHANNEL_EXPR, shape_show
+    _ensure_transcripts_tables()
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute(f"""
+                SELECT {CHANNEL_EXPR} AS channel,
+                       COUNT(*) AS episodes,
+                       COALESCE(SUM(octet_length(full_text)), 0) AS bytes
+                  FROM transcripts
+                 GROUP BY 1
+                 ORDER BY 3 DESC, 1
+                 LIMIT 200
+            """)
+            shows = [
+                shape_show(r.get("channel") or "Unlabeled", r.get("episodes") or 0, r.get("bytes") or 0)
+                for r in (cur.fetchall() or [])
+            ]
+        return {"ok": True, "shows": shows}
+    except Exception as e:
+        print(f"[transcripts] cleanup list failed: {type(e).__name__}: {e!s:.180}", flush=True)
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+
+
+@app.post("/api/transcripts/cleanup")
+def transcripts_cleanup_delete(request: Request):
+    """Delete the stored transcripts for the selected podcast shows.
+
+    Earnings-call chunks are a different table and are not touched.
+    """
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    from podcast_intel.cleanup import CHANNEL_EXPR, CleanupError, clean_channels
+    try:
+        body = _request_json_sync(request)
+    except Exception:
+        body = {}
+    raw = body.get("channels") if isinstance(body, dict) else None
+    try:
+        channels = clean_channels(raw)
+    except CleanupError as exc:
+        raise HTTPException(400, str(exc))
+    _ensure_transcripts_tables()
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
+                DELETE FROM transcripts
+                 WHERE {CHANNEL_EXPR} = ANY(%s)
+                RETURNING COALESCE(octet_length(full_text), 0)
+                """,
+                (channels,),
+            )
+            gone = cur.fetchall() or []
+            conn.commit()
+        return {
+            "ok": True,
+            "episodes": len(gone),
+            "bytes": sum(int(row[0] or 0) for row in gone),
+            "channels": channels,
+        }
+    except Exception as e:
+        print(f"[transcripts] cleanup delete failed: {type(e).__name__}: {e!s:.180}", flush=True)
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+
+
+def _stored_transcript_rows(cur, episodes: list[dict]) -> list[dict]:
+    titles = [str(ep.get("title") or "")[:500] for ep in episodes if ep.get("title")]
+    links = [str(ep.get("link") or "") for ep in episodes if ep.get("link")]
+    if titles and links:
+        cur.execute(
+            """
+            SELECT id, title, channel, video_url
+              FROM transcripts
+             WHERE title = ANY(%s)
+                OR video_url = ANY(%s)
+            """,
+            (titles, links),
+        )
+    elif titles:
+        cur.execute(
+            """
+            SELECT id, title, channel, video_url
+              FROM transcripts
+             WHERE title = ANY(%s)
+            """,
+            (titles,),
+        )
+    elif links:
+        cur.execute(
+            """
+            SELECT id, title, channel, video_url
+              FROM transcripts
+             WHERE video_url = ANY(%s)
+            """,
+            (links,),
+        )
+    else:
+        return []
+    return [dict(row) for row in cur.fetchall() or []]
+
+
+@app.get("/api/transcripts/shows/search")
+def transcripts_show_search(request: Request, q: str = ""):
+    """Find shows in the public podcast directory. Does not download transcripts."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    from podcast_intel.finder import ShowFinderError, search_shows
+    try:
+        shows = search_shows(q)
+    except ShowFinderError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=400)
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "error": "Show search did not respond. Try again."},
+            status_code=502,
+        )
+    return {"ok": True, "shows": shows}
+
+
+@app.get("/api/transcripts/shows/{collection_id}/episodes")
+def transcripts_show_episodes(collection_id: str, request: Request):
+    """Recent episodes for one show, and which of them are already in the library."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    from podcast_intel.finder import ShowFinderError, load_show, shape_episodes
+    try:
+        found = load_show(collection_id)
+    except ShowFinderError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=400)
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "error": "That show's feed did not load. Try again."},
+            status_code=502,
+        )
+    stored: list[dict] = []
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            stored = _stored_transcript_rows(cur, found["episodes"])
+    except Exception:
+        stored = []
+    return {
+        "ok": True,
+        "name": found["name"],
+        "author": found["author"],
+        "episodes": shape_episodes(found["name"], found["episodes"], stored),
+    }
+
+
+@app.post("/api/transcripts/shows/{collection_id}/pull")
+def transcripts_show_pull(collection_id: str, req: Request):
+    """Store one chosen episode in the library. One episode, not a batch."""
+    claims = _claims_or_401(req)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    from podcast_intel.finder import (
+        ShowFinderError,
+        choose_channel,
+        episode_by_key,
+        load_show,
+        pull_text,
+        stored_hit,
+    )
+    from podcast_intel.ingest import _insert
+    try:
+        body = _request_json_sync(req)
+    except Exception:
+        body = {}
+    key = str((body or {}).get("key") or "")
+    supplied = str((body or {}).get("captions") or "").strip()
+    supplied_id = str((body or {}).get("video_id") or "").strip()
+    try:
+        found = load_show(collection_id)
+        episode = episode_by_key(found["episodes"], key)
+    except ShowFinderError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=400)
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "error": "That show's feed did not load. Try again."},
+            status_code=502,
+        )
+    if not episode:
+        return JSONResponse(
+            {"ok": False, "error": "That episode is no longer in the feed."},
+            status_code=404,
+        )
+    title = str(episode.get("title") or "Untitled")[:500]
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            hit = stored_hit(found["name"], episode, _stored_transcript_rows(cur, [episode]))
+            if hit and hit.get("id"):
+                return {
+                    "ok": True,
+                    "already": True,
+                    "id": str(hit["id"]),
+                    "title": title,
+                    "channel": str(hit.get("channel") or found["name"]),
+                }
+            cur.execute("SELECT DISTINCT channel FROM transcripts WHERE coalesce(channel, '') <> ''")
+            channel = choose_channel(
+                found["name"],
+                [str(row.get("channel") or "") for row in cur.fetchall() or []],
+            )
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "error": "The library could not be checked. Try again."},
+            status_code=503,
+        )
+    mac_captions = (
+        bool(re.fullmatch(r"[A-Za-z0-9_-]{11}", supplied_id))
+        and 800 <= len(supplied) <= 200_000
+    )
+    try:
+        if mac_captions:
+            fetched = {
+                "ok": True,
+                "text": supplied,
+                "tier": "T3",
+                "url": f"https://www.youtube.com/watch?v={supplied_id}",
+            }
+        else:
+            fetched = pull_text(channel, episode)
+    except ShowFinderError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=502)
+    if not fetched.get("ok"):
+        payload = {
+            "ok": False,
+            "error": fetched.get("error") or "No published transcript for this episode.",
+        }
+        if fetched.get("video_id"):
+            payload["video_id"] = fetched["video_id"]
+        return JSONResponse(payload, status_code=404)
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            hit = stored_hit(found["name"], episode, _stored_transcript_rows(cur, [episode]))
+            if hit and hit.get("id"):
+                return {
+                    "ok": True,
+                    "already": True,
+                    "id": str(hit["id"]),
+                    "title": title,
+                    "channel": str(hit.get("channel") or channel),
+                }
+            new_id = _insert(
+                cur,
+                channel=channel,
+                title=title,
+                link=str(fetched.get("url") or ""),
+                published=str(episode.get("published") or ""),
+                text=str(fetched.get("text") or ""),
+                tier=str(fetched.get("tier") or "T3"),
+            )
+            conn.commit()
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "error": "The transcript was fetched but could not be saved."},
+            status_code=500,
+        )
+    return {
+        "ok": True,
+        "already": False,
+        "id": new_id,
+        "title": title,
+        "channel": channel,
+        "tier": fetched.get("tier") or "",
+        "chars": len(str(fetched.get("text") or "")),
+    }
 
 
 _ASK_TICKER_STOP = {
@@ -35508,22 +35913,183 @@ _ASK_TICKER_STOP = {
 }
 
 
-def _transcript_ask_pack(question: str, ticker: str = "") -> dict:
-    """Passages from the stored library. No model call."""
+def _ask_clean_id(value: str) -> str:
+    value = (value or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", value):
+        return value
+    return ""
+
+
+def _ask_sources(raw) -> list[dict]:
+    """At most eight interviews or earnings calls. Anything else is dropped."""
+    if not isinstance(raw, list):
+        return []
+    sources: list[dict] = []
+    for item in raw:
+        if len(sources) >= 8 or not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "")
+        label = re.sub(r"\s+", " ", str(item.get("label") or "").strip())[:180]
+        if kind == "interview":
+            interview_id = _ask_clean_id(str(item.get("id") or ""))
+            if interview_id:
+                sources.append({"kind": "interview", "id": interview_id, "label": label})
+        elif kind == "call":
+            ticker = re.sub(r"[^A-Z0-9.\-]", "", str(item.get("ticker") or "").strip().upper())[:12]
+            quarter = str(item.get("quarter") or "").strip()
+            if quarter and not re.fullmatch(r"[A-Za-z0-9]{2,16}", quarter):
+                quarter = ""
+            if ticker and quarter:
+                sources.append({
+                    "kind": "call",
+                    "ticker": ticker,
+                    "quarter": quarter,
+                    "label": label or f"{ticker} · {quarter}",
+                })
+    return sources
+
+
+def _ask_call_pieces(cur, ticker: str, quarter: str) -> list[str]:
+    cur.execute(
+        """
+        SELECT speaker, chunk_text
+          FROM call_chunks
+         WHERE upper(ticker) = %s
+           AND COALESCE(NULLIF(quarter, ''), 'Undated') = %s
+         ORDER BY chunk_idx
+         LIMIT 400
+        """,
+        (ticker, quarter),
+    )
+    pieces = []
+    for row in cur.fetchall() or []:
+        speaker = (row.get("speaker") or "").strip()
+        text = (row.get("chunk_text") or "").strip()
+        if text:
+            pieces.append(f"{speaker}: {text}" if speaker else text)
+    return pieces
+
+
+def _transcript_ask_pack(
+    question: str,
+    ticker: str = "",
+    quarter: str = "",
+    interview_id: str = "",
+    open_label: str = "",
+    scope: str = "open",
+    sources: list | None = None,
+) -> dict:
+    """Passages for one question. No model call.
+
+    An open transcript is the only context. Chosen transcripts replace it
+    when the user picked more than one. The rest of the library is searched
+    only when nothing is open.
+    """
+    from podcast_intel.ask_context import (
+        content_words,
+        or_tsquery,
+        pack_chosen,
+        select_passages,
+        system_prompt,
+        user_message,
+    )
     question = (question or "").strip()
-    ticker = (ticker or "").strip().upper()
+    ticker = re.sub(r"[^A-Z0-9.\-]", "", (ticker or "").strip().upper())[:12]
+    quarter = (quarter or "").strip()
+    if quarter and not re.fullmatch(r"[A-Za-z0-9]{2,16}", quarter):
+        quarter = ""
+    interview_id = _ask_clean_id(interview_id)
+    open_label = re.sub(r"\s+", " ", (open_label or "").strip())[:180]
+    scope = "chosen" if (scope or "").strip().lower() == "chosen" else "open"
+    chosen = _ask_sources(sources)
     interviews: list[str] = []
     calls: list[str] = []
+    open_text = ""
+    chosen_text = ""
+    chosen_labels: list[str] = []
+    shown_label = ""
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        labels = [row.get("label") or "Transcript" for row in chosen] if scope == "chosen" else []
         return {
-            "system": "You answer only from the excerpts. None were stored.",
-            "user": f"Question: {question}\n\nNo transcript database is available.",
+            "system": system_prompt(open_label, ticker, labels or None),
+            "user": user_message(question, "", "", "No text was stored for the chosen transcripts." if labels else ""),
             "ticker": ticker,
+            "quarter": quarter,
+            "interview_id": interview_id,
+            "scope": scope,
+            "excerpts": 0,
         }
     _ensure_transcripts_tables()
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            if not ticker:
+            if scope == "chosen" and chosen:
+                interview_ids = [row["id"] for row in chosen if row["kind"] == "interview"]
+                stored = {}
+                if interview_ids:
+                    cur.execute(
+                        """
+                        SELECT id::text AS id, title, channel, person, full_text
+                          FROM transcripts
+                         WHERE id::text = ANY(%s)
+                        """,
+                        (interview_ids,),
+                    )
+                    for row in cur.fetchall() or []:
+                        stored[str(row.get("id") or "")] = row
+                documents: list[tuple[str, str]] = []
+                for source in chosen:
+                    if source["kind"] == "interview":
+                        row = stored.get(source["id"]) or {}
+                        body = str(row.get("full_text") or "").strip()
+                        if not body:
+                            continue
+                        who = " · ".join(
+                            p for p in (row.get("channel"), row.get("person"), row.get("title")) if p
+                        )
+                        documents.append((source.get("label") or who or "Interview", body))
+                        continue
+                    pieces = _ask_call_pieces(cur, source["ticker"], source["quarter"])
+                    if not pieces:
+                        continue
+                    documents.append((
+                        source.get("label") or f"{source['ticker']} · {source['quarter']}",
+                        "\n\n".join(pieces),
+                    ))
+                chosen_labels = [label for label, _text in documents] or [
+                    row.get("label") or "Transcript" for row in chosen
+                ]
+                chosen_text = pack_chosen(documents, question) or "No text was stored for the chosen transcripts."
+            elif interview_id:
+                cur.execute(
+                    """
+                    SELECT title, channel, person, full_text
+                      FROM transcripts
+                     WHERE id = %s
+                    """,
+                    (interview_id,),
+                )
+                row = cur.fetchone()
+                body = str((row or {}).get("full_text") or "").strip()
+                if body:
+                    who = " · ".join(
+                        p for p in (
+                            (row or {}).get("channel"),
+                            (row or {}).get("person"),
+                            (row or {}).get("title"),
+                        ) if p
+                    )
+                    shown_label = open_label or who or "Interview"
+                    open_text = (
+                        f"[Open transcript · {shown_label}]\n{select_passages([body], question)}"
+                    )
+            elif ticker and quarter:
+                pieces = _ask_call_pieces(cur, ticker, quarter)
+                if pieces:
+                    shown_label = open_label or f"{ticker} · {quarter}"
+                    open_text = (
+                        f"[Open transcript · {shown_label}]\n{select_passages(pieces, question)}"
+                    )
+            if scope != "chosen" and not open_text and not ticker:
                 words = [
                     w.upper() for w in re.findall(r"[A-Za-z]{1,5}", question)
                     if w.upper() not in _ASK_TICKER_STOP
@@ -35536,69 +36102,88 @@ def _transcript_ask_pack(question: str, ticker: str = "") -> dict:
                     hit = cur.fetchone()
                     if hit and hit.get("ticker"):
                         ticker = str(hit["ticker"]).upper()
-            try:
-                cur.execute(
-                    """
-                    SELECT title, channel, person,
-                           ts_headline(
-                             'english', coalesce(full_text, ''),
-                             plainto_tsquery('english', %s),
-                             'MaxFragments=2, MaxWords=36, MinWords=12'
-                           ) AS passage
-                      FROM transcripts
-                     WHERE to_tsvector('english', coalesce(full_text, ''))
-                           @@ plainto_tsquery('english', %s)
-                     ORDER BY created_at DESC
-                     LIMIT 4
-                    """,
-                    (question, question),
-                )
-                for row in cur.fetchall() or []:
-                    who = " · ".join(
-                        p for p in (row.get("channel"), row.get("person"), row.get("title")) if p
+            query = "" if (scope == "chosen" or open_text) else or_tsquery(content_words(question))
+            if query:
+                try:
+                    cur.execute(
+                        """
+                        SELECT title, channel, person,
+                               ts_headline(
+                                 'english', coalesce(full_text, ''),
+                                 to_tsquery('english', %s),
+                                 'MaxFragments=2, MaxWords=36, MinWords=12'
+                               ) AS passage
+                          FROM transcripts
+                         WHERE to_tsvector('english', coalesce(full_text, ''))
+                               @@ to_tsquery('english', %s)
+                           AND (%s = '' OR id::text <> %s)
+                         ORDER BY ts_rank(
+                               to_tsvector('english', coalesce(full_text, '')),
+                               to_tsquery('english', %s)
+                           ) DESC
+                         LIMIT 4
+                        """,
+                        (query, query, interview_id, interview_id, query),
                     )
-                    interviews.append(f"[Interview · {who}]\n{(row.get('passage') or '').strip()}")
-            except Exception:
-                conn.rollback()
-            if ticker:
-                cur.execute(
-                    """
-                    SELECT quarter, call_date,
-                           ts_headline(
-                             'english', coalesce(chunk_text, ''),
-                             plainto_tsquery('english', %s),
-                             'MaxFragments=1, MaxWords=48, MinWords=16'
-                           ) AS passage
-                      FROM call_chunks
-                     WHERE ticker = %s
-                       AND to_tsvector('english', coalesce(chunk_text, ''))
-                           @@ plainto_tsquery('english', %s)
-                     ORDER BY call_date DESC NULLS LAST
-                     LIMIT 6
-                    """,
-                    (question, ticker, question),
-                )
-                for row in cur.fetchall() or []:
-                    calls.append(
-                        f"[Earnings call · {ticker} · {row.get('quarter') or 'Undated'} · {row.get('call_date') or ''}]\n"
-                        f"{(row.get('passage') or '').strip()}"
-                    )
+                    for row in cur.fetchall() or []:
+                        who = " · ".join(
+                            p for p in (row.get("channel"), row.get("person"), row.get("title")) if p
+                        )
+                        interviews.append(f"[Interview · {who}]\n{(row.get('passage') or '').strip()}")
+                except Exception:
+                    conn.rollback()
+                if ticker:
+                    try:
+                        cur.execute(
+                            """
+                            SELECT quarter, call_date,
+                                   ts_headline(
+                                     'english', coalesce(chunk_text, ''),
+                                     to_tsquery('english', %s),
+                                     'MaxFragments=1, MaxWords=48, MinWords=16'
+                                   ) AS passage
+                              FROM call_chunks
+                             WHERE ticker = %s
+                               AND (%s = '' OR COALESCE(NULLIF(quarter, ''), 'Undated') <> %s)
+                               AND to_tsvector('english', coalesce(chunk_text, ''))
+                                   @@ to_tsquery('english', %s)
+                             ORDER BY ts_rank(
+                                   to_tsvector('english', coalesce(chunk_text, '')),
+                                   to_tsquery('english', %s)
+                               ) DESC,
+                               call_date DESC NULLS LAST
+                             LIMIT 6
+                            """,
+                            (query, ticker, quarter, quarter, query, query),
+                        )
+                        for row in cur.fetchall() or []:
+                            calls.append(
+                                f"[Earnings call · {ticker} · {row.get('quarter') or 'Undated'} · {row.get('call_date') or ''}]\n"
+                                f"{(row.get('passage') or '').strip()}"
+                            )
+                    except Exception:
+                        conn.rollback()
     except Exception as exc:
         print(f"[transcript-ask] context failed: {exc!s:.180}", flush=True)
-    excerpts = [block for block in (interviews + calls) if block.strip()]
-    body = "\n\n".join(excerpts) if excerpts else "No stored transcript passages matched this question."
-    scope = f" The ticker in view is {ticker}." if ticker else ""
+    other = [block for block in (interviews + calls) if block.strip()]
+    if scope == "chosen":
+        return {
+            "system": system_prompt("", ticker, chosen_labels),
+            "user": user_message(question, "", "", chosen_text),
+            "ticker": ticker,
+            "quarter": quarter,
+            "interview_id": interview_id,
+            "scope": "chosen",
+            "excerpts": len(chosen_labels),
+        }
     return {
-        "system": (
-            "You answer questions about stored interview and earnings-call transcripts. "
-            "Use only the excerpts in the user message. If they do not contain the answer, "
-            "say that the library does not have it. Do not invent quotes. When you use a "
-            "passage, name the show or the ticker and quarter."
-            + scope
-        ),
-        "user": f"Question: {question}\n\nExcerpts:\n{body}",
+        "system": system_prompt(shown_label, ticker),
+        "user": user_message(question, open_text, "\n\n".join(other)),
         "ticker": ticker,
-        "excerpts": len(excerpts),
+        "quarter": quarter,
+        "interview_id": interview_id,
+        "scope": "open",
+        "excerpts": (1 if open_text else 0) + len(other),
     }
 
 
@@ -35615,7 +36200,19 @@ def transcripts_ask_context(request: Request):
     question = str((body or {}).get("question") or "").strip()
     if len(question) < 4:
         raise HTTPException(400, "Ask a real question")
-    pack = _transcript_ask_pack(question, str((body or {}).get("ticker") or ""))
+    scope = str((body or {}).get("scope") or "open").strip().lower()
+    sources = _ask_sources((body or {}).get("sources"))
+    if scope == "chosen" and not sources:
+        raise HTTPException(400, "Choose at least one transcript")
+    pack = _transcript_ask_pack(
+        question,
+        ticker=str((body or {}).get("ticker") or ""),
+        quarter=str((body or {}).get("quarter") or ""),
+        interview_id=str((body or {}).get("interview_id") or ""),
+        open_label=str((body or {}).get("open_label") or ""),
+        scope=scope,
+        sources=sources,
+    )
     return {"ok": True, **pack}
 
 
@@ -35637,7 +36234,19 @@ def transcripts_ask(request: Request):
         raise HTTPException(400, "Choose Grok, Claude, or DeepSeek")
     if len(question) < 4:
         raise HTTPException(400, "Ask a real question")
-    pack = _transcript_ask_pack(question, str((body or {}).get("ticker") or ""))
+    scope = str((body or {}).get("scope") or "open").strip().lower()
+    sources = _ask_sources((body or {}).get("sources"))
+    if scope == "chosen" and not sources:
+        raise HTTPException(400, "Choose at least one transcript")
+    pack = _transcript_ask_pack(
+        question,
+        ticker=str((body or {}).get("ticker") or ""),
+        quarter=str((body or {}).get("quarter") or ""),
+        interview_id=str((body or {}).get("interview_id") or ""),
+        open_label=str((body or {}).get("open_label") or ""),
+        scope=scope,
+        sources=sources,
+    )
     try:
         answer = analyst.call_llm(provider, pack["system"], pack["user"], live_search=False)
     except Exception as exc:
@@ -35733,6 +36342,7 @@ def transcripts_detail(transcript_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"[transcripts] detail failed: {type(e).__name__}: {e!s:.180}", flush=True)
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
 
 
@@ -43025,6 +43635,22 @@ def _mount_merger_arb_scanner() -> None:
 
 _mount_merger_arb()
 _mount_merger_arb_scanner()
+
+
+def _mount_grok_bot() -> None:
+    try:
+        from api.domains import grok_bot
+        grok_bot.mount({
+            "app": app,
+            "_claims_or_401": _claims_or_401,
+            "_request_json_sync": _request_json_sync,
+            "analyst": analyst,
+        })
+    except Exception as exc:
+        print(f"[grok-bot] mount failed: {exc!r}", flush=True)
+
+
+_mount_grok_bot()
 
 
 if BRANDING_DIR.exists():

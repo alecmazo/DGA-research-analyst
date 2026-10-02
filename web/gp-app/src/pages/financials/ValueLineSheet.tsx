@@ -3,7 +3,7 @@ import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
 import { api, downloadAuth } from '@/lib/api'
-import type { SheetData, SheetLink, StatementLine, StatementPack } from './types'
+import type { PeriodType, SheetBlock, SheetData, SheetLink, StatementLine, StatementPack } from './types'
 import { vlMoney } from './format'
 import styles from '../FinancialsPage.module.css'
 import { BizBlurb } from './BizBlurb'
@@ -12,9 +12,42 @@ import { HoverTip } from './HoverTip'
 type Props = {
   ticker: string
   onSelectTicker: (tk: string) => void
+  period: PeriodType
+  setPeriod: (p: PeriodType) => void
 }
 
-export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
+function PeriodSeg({
+  period,
+  setPeriod,
+}: {
+  period: PeriodType
+  setPeriod: (p: PeriodType) => void
+}) {
+  return (
+    <div className={styles.seg} role="group" aria-label="Annual or quarterly">
+      <button
+        type="button"
+        className={period === 'annual' ? styles.segOn : styles.segBtn}
+        onClick={() => setPeriod('annual')}
+      >
+        Annual
+      </button>
+      <button
+        type="button"
+        className={period === 'quarter' ? styles.segOn : styles.segBtn}
+        onClick={() => setPeriod('quarter')}
+      >
+        Quarterly
+      </button>
+    </div>
+  )
+}
+
+function blockReady(block?: SheetBlock | null) {
+  return !!((block?.labels?.length || 0) > 0 && (block?.rows?.length || 0) > 0)
+}
+
+export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Props) {
   const [input, setInput] = useState(ticker)
   const [links, setLinks] = useState<SheetLink[]>([])
   const [sheet, setSheet] = useState<SheetData | null>(null)
@@ -158,6 +191,7 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
       >
         {pdfBusy ? '…' : '⬇ PDF'}
       </Button>
+      <PeriodSeg period={period} setPeriod={setPeriod} />
     </div>
   )
 
@@ -270,13 +304,20 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
                 ['Total debt *', vlMoney(cap.total_debt as number | null)],
                 ['Book / sh', vlMoney(cap.book_value_ps as number | null, '$/sh')],
                 ['Shares', vlMoney(cap.shares as number | null, 'sh')],
-                [
-                  'FY end',
-                  cap.period_end
-                    ? String(cap.period_end).slice(0, 10)
-                    : '—',
-                ],
-              ] as const
+                period === 'quarter'
+                  ? [
+                      'Q end',
+                      cap.quarter_period_end
+                        ? String(cap.quarter_period_end).slice(0, 10)
+                        : '—',
+                    ]
+                  : [
+                      'FY end',
+                      cap.period_end
+                        ? String(cap.period_end).slice(0, 10)
+                        : '—',
+                    ],
+              ] as [string, string][]
             ).map(([k, v]) => (
               <div key={k}>
                 <div className={styles.vlCapK}>{k}</div>
@@ -285,9 +326,14 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
             ))}
           </div>
 
-          {sheet.annual && (
+          <div className={styles.arrayHead}>
+            <div className={styles.vlSection}>
+              Statistical array ({period === 'quarter' ? 'quarterly' : 'annual'})
+            </div>
+            <PeriodSeg period={period} setPeriod={setPeriod} />
+          </div>
+          {period === 'annual' && sheet.annual && blockReady(sheet.annual) && (
             <>
-              <div className={styles.vlSection}>Statistical array (annual)</div>
               <div className={styles.stmtBar}>
                 {(
                   [
@@ -359,11 +405,14 @@ export function ValueLineSheet({ ticker, onSelectTicker }: Props) {
               )}
             </>
           )}
-          {sheet.quarterly && (
-            <>
-              <div className={styles.vlSection}>Recent quarters</div>
-              <VlTable block={sheet.quarterly} title="Quarterly" />
-            </>
+          {period === 'annual' && !blockReady(sheet.annual) && (
+            <div className={styles.mutedSm}>No annual figures stored.</div>
+          )}
+          {period === 'quarter' && sheet.quarterly && blockReady(sheet.quarterly) && (
+            <VlTable block={sheet.quarterly} title="Quarterly" />
+          )}
+          {period === 'quarter' && !blockReady(sheet.quarterly) && (
+            <div className={styles.mutedSm}>No quarterly figures stored.</div>
           )}
           <div className={styles.mutedSm}>
             {(sheet.footnotes || []).map((fn) => (

@@ -94,6 +94,55 @@ def test_cutoff_report_is_not_complete():
         + ("Pass. The price does not clear a margin of safety.\n" * 4)
     )
     assert analyst.report_tail_gap(done, "grok") is None
+    assert analyst.report_tail_gap(body, "claude") == "missing the Munger section"
+    assert analyst.report_tail_gap(done, "claude") is None
+
+
+def test_engine_prompts_match_the_model():
+    """Grok is not told it is 4.20. Claude is not told to run Grok's search."""
+    import DGA_analyst as analyst
+    from api.domains.local_finance_llm import LOCAL_NOTE_SYSTEM, munger_section_instructions
+
+    desk = (ROOT / "stocks" / "dga_system_prompt.txt").read_text(encoding="utf-8")
+    assert "Grok 4.20" not in desk
+    assert "You are Grok" not in desk
+    assert "web_search" not in desk
+    assert "x_search" not in desk
+    assert "SECTION 8.5" in desk
+    assert "holders table" in desk.lower() or "holders" in desk.lower()
+
+    grok_news = analyst.engine_news_addendum("grok")
+    claude_news = analyst.engine_news_addendum("claude")
+    assert "does not attach those tools" in grok_news
+    assert "do not say you will search" in grok_news.lower()
+    assert "does not have web search" in claude_news
+    assert "web_search" not in claude_news
+    assert "x_search" not in claude_news
+
+    munger = analyst.build_munger_system_appendix()
+    assert "GROK ONLY" not in munger
+    assert "Claude reports skip" not in munger
+    assert "8.5.1" in munger and "8.5.7" in munger
+    assert "MUNGER CORE CONTEXT" not in munger
+    assert len(munger) < 8000
+
+    local_munger = munger_section_instructions(standalone=True)
+    assert "already written" in local_munger
+    assert "8.5.7" in local_munger
+    assert "Do not write a Munger section" in LOCAL_NOTE_SYSTEM
+    assert "holders" in LOCAL_NOTE_SYSTEM.lower()
+    assert "You are Grok" not in LOCAL_NOTE_SYSTEM
+
+    block = analyst.format_catalyst_headlines_block("AAPL", [], days=90)
+    assert "MANDATORY SEARCHES" not in block
+    assert "no headlines were attached" in block
+    filled = analyst.format_catalyst_headlines_block(
+        "AAPL",
+        [{"title": "Apple buys a studio", "published_at": "2026-09-01", "publisher": "Yahoo", "url": "https://example.test"}],
+        days=90,
+    )
+    assert "web_search" not in filled
+    assert "Apple buys a studio" in filled
 
 
 def test_failed_analyze_files_an_auto_ticket():

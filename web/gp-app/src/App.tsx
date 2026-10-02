@@ -14,6 +14,7 @@ import { TranscriptsPage } from '@/pages/TranscriptsPage'
 import { MemosPage } from '@/pages/MemosPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { ReportPage } from '@/pages/ReportPage'
+import { LocalPortfolioPage } from '@/pages/LocalPortfolioPage'
 import { ResearchAnswerPage } from '@/pages/ResearchAnswerPage'
 import { ValuationBridgePage } from '@/pages/ValuationBridgePage'
 import { CompsPage } from '@/pages/CompsPage'
@@ -107,6 +108,7 @@ export default function App() {
             {/* Standalone report / research windows (no chrome) */}
             <Route path="report" element={<ReportPage />} />
             <Route path="local-report" element={<ReportPage />} />
+            <Route path="local-portfolio" element={<LocalPortfolioPage />} />
             <Route path="research" element={<ResearchAnswerPage />} />
             <Route path="valuation" element={<ValuationBridgePage />} />
             <Route path="comps" element={<CompsPage />} />

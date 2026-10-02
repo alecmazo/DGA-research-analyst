@@ -173,6 +173,18 @@ def test_desk_actions_are_one_pulldown():
     assert "@keyframes deskRefreshDots" in css
 
 
+def test_movers_row_opens_free_headlines_ticker_opens_snapshot():
+    src = (ROOT / "web/gp-app/src/components/desk/TopMovers.tsx").read_text()
+    assert "/api/market/pulse?limit=8&merge=true" in src
+    assert "stopPropagation" in src
+    assert "Snapshot for" in src
+    assert "Click for latest headlines" in src
+    assert "onPeek?.(tk)" in src
+    assert "styles.moversTkBtn" in src
+    assert "styles.moversRow" in src
+    assert 'role="button"' in src
+
+
 def test_pulse_row_shows_cap_rev_ni_fcf():
     pulse = (ROOT / "web/gp-app/src/components/desk/MarketPulse.tsx").read_text()
     assert "PulseFundLine" in pulse

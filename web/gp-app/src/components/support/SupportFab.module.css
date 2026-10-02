@@ -1,3 +1,20 @@
+.stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9990;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.stack .fab {
+  position: relative;
+  right: auto;
+  bottom: auto;
+}
+
 .fab {
   position: fixed;
   right: 16px;
@@ -28,7 +45,8 @@
 }
 
 @media print {
-  .fab {
+  .fab,
+  .stack {
     display: none !important;
   }
 }

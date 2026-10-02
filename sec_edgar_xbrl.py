@@ -311,6 +311,7 @@ def _get_text(sess: requests.Session, url: str, *, retries: int = 4) -> str | No
 # company_tickers.json once *per uncached ticker*, stampeding SEC into 429s
 # (each retry sleeps 5–20s × 8). One process-wide map load fills the cache.
 _TICKER_CACHE: dict[str, str] = {}
+_TICKER_TITLES: dict[str, str] = {}  # ticker → legal name from the same map
 _CIK_CACHE: dict[str, str] = {}  # zero-padded CIK → ticker
 _TICKER_MAP_LOADED_AT: float = 0.0
 _TICKER_MAP_LOCK = __import__("threading").Lock()
@@ -348,9 +349,29 @@ def _ensure_ticker_map(user_agent: str | None = None) -> None:
                 continue
             _TICKER_CACHE[tk] = cik
             _CIK_CACHE.setdefault(cik, tk)
+            title = str(entry.get("title") or "").strip()
+            if title:
+                _TICKER_TITLES[tk] = title
             n += 1
         _TICKER_MAP_LOADED_AT = _time.time()
         print(f"[sec] ticker map loaded: {n} symbols", flush=True)
+
+
+def company_title(ticker: str, user_agent: str | None = None) -> str | None:
+    """Legal name from SEC company_tickers.json, or None.
+
+    Does not call edgartools. Used when a quote vendor has no company name.
+    """
+    t = (ticker or "").strip().upper()
+    if not t:
+        return None
+    if t not in _TICKER_TITLES:
+        try:
+            _ensure_ticker_map(user_agent)
+        except Exception:
+            return None
+    title = _TICKER_TITLES.get(t)
+    return title if isinstance(title, str) and title else None
 
 
 def resolve_ticker_for_cik(cik, user_agent: str | None = None) -> str | None:

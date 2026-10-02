@@ -5737,18 +5737,78 @@ def _vl_cash(r) -> float | None:
     return _dash_cash_of(r)
 
 
-def _vl_series_from_annuals(annuals: list) -> dict:
-    """Build Value Line–style row series (oldest → newest) from annual store rows."""
-    labels = []
-    for r in annuals:
-        fy = r.get("fy")
-        pe = r.get("period_end")
-        if fy:
-            labels.append(f"FY{fy}")
-        elif pe is not None:
-            labels.append(str(pe)[:4])
-        else:
-            labels.append("—")
+def _vl_period_label(r, kind: str) -> str:
+    fy = r.get("fy")
+    pe = r.get("period_end")
+    if kind == "quarter":
+        fp = (r.get("fp") or "").strip()
+        if fp and fy:
+            return f"{fp}'{str(fy)[-2:]}"
+        if pe is not None:
+            return str(pe)[:10]
+        return "—"
+    if fy:
+        return f"FY{fy}"
+    if pe is not None:
+        return str(pe)[:4]
+    return "—"
+
+
+def _vl_yoy(series, lag: int):
+    """Percent change versus `lag` periods earlier.
+
+    Annual uses the prior year (lag 1). Quarterly uses the same fiscal
+    quarter a year ago (lag 4), not the adjacent quarter.
+    """
+    step = lag if lag and lag > 0 else 1
+    out = [None] * len(series)
+    for i in range(step, len(series)):
+        a, b = series[i - step], series[i]
+        if a and a != 0 and b is not None:
+            out[i] = (b / a - 1.0) * 100.0
+    return out
+
+
+def _vl_slice_block(block: dict, n: int) -> dict:
+    """Keep the newest n columns. Growth is already computed on the longer window."""
+    labels = list((block or {}).get("labels") or [])
+    if n <= 0 or len(labels) <= n:
+        return block
+    rows = []
+    for r in block.get("rows") or []:
+        item = dict(r)
+        item["values"] = list(r.get("values") or [])[-n:]
+        rows.append(item)
+    out = dict(block)
+    out["labels"] = labels[-n:]
+    out["rows"] = rows
+    out["n_years"] = len(out["labels"])
+    return out
+
+
+def _vl_series_from_rows(annuals: list, *, kind: str = "annual") -> dict:
+    """Build the Value Line statistical array (oldest → newest).
+
+    kind 'annual' labels FY{year}. kind 'quarter' labels Q2'26.
+    """
+    lag = 4 if kind == "quarter" else 1
+    labels = [_vl_period_label(r, kind) for r in annuals]
+    if kind == "quarter":
+        # FICO stores two different quarter-ends under the same fp+fy.
+        # Keep both columns and stamp the period end so the headers differ.
+        counts: dict[str, int] = {}
+        for lab in labels:
+            counts[lab] = counts.get(lab, 0) + 1
+        if any(n > 1 and lab != "—" for lab, n in counts.items()):
+            stamped = []
+            for r, lab in zip(annuals, labels):
+                if counts.get(lab, 0) > 1 and lab != "—":
+                    pe = r.get("period_end")
+                    stamp = str(pe)[:7] if pe is not None else ""
+                    stamped.append(f"{lab} {stamp}".strip())
+                else:
+                    stamped.append(lab)
+            labels = stamped
 
     def col(key):
         return [_vl_f(r.get(key)) for r in annuals]
@@ -5806,7 +5866,7 @@ def _vl_series_from_annuals(annuals: list) -> dict:
     # ROIC ≈ NOPAT / invested capital (book, else assets − cash)
     roic = []
     for r in annuals:
-        v, _ = _dash_roic_of(r)
+        v, _ = _dash_roic_of(r, quarterly=(kind == "quarter"))
         roic.append(v)
 
     bvps = []
@@ -5819,17 +5879,6 @@ def _vl_series_from_annuals(annuals: list) -> dict:
             dps.append(abs(div[i]) / sh)
         else:
             dps.append(None)
-
-    # YoY growth %
-    def yoy(series):
-        out = [None]
-        for i in range(1, len(series)):
-            a, b = series[i - 1], series[i]
-            if a and a != 0 and b is not None:
-                out.append((b / a - 1.0) * 100.0)
-            else:
-                out.append(None)
-        return out
 
     de = [_vl_ratio(debt[i], equity[i]) for i in range(len(annuals))]
     c2d = []
@@ -5880,10 +5929,10 @@ def _vl_series_from_annuals(annuals: list) -> dict:
         {"id": "debt_equity", "label": "Debt / Equity", "unit": "x", "values": de},
         {"id": "cash_debt", "label": "Cash / Debt", "unit": "x", "values": c2d},
         {"id": "section_growth", "label": "— Growth (YoY) —", "unit": "section", "values": [None] * len(annuals)},
-        {"id": "rev_yoy", "label": "Revenue Growth", "unit": "%", "values": yoy(rev)},
-        {"id": "eps_yoy", "label": "EPS Growth", "unit": "%", "values": yoy(eps)},
-        {"id": "ni_yoy", "label": "Net Income Growth", "unit": "%", "values": yoy(ni)},
-        {"id": "fcf_yoy", "label": "FCF Growth", "unit": "%", "values": yoy(fcf)},
+        {"id": "rev_yoy", "label": "Revenue Growth", "unit": "%", "values": _vl_yoy(rev, lag)},
+        {"id": "eps_yoy", "label": "EPS Growth", "unit": "%", "values": _vl_yoy(eps, lag)},
+        {"id": "ni_yoy", "label": "Net Income Growth", "unit": "%", "values": _vl_yoy(ni, lag)},
+        {"id": "fcf_yoy", "label": "FCF Growth", "unit": "%", "values": _vl_yoy(fcf, lag)},
     ]
     footnotes = []
     if any((x or 0) > 0 for x in leases):
@@ -5898,6 +5947,17 @@ def _vl_series_from_annuals(annuals: list) -> dict:
             "footnotes": footnotes}
 
 
+def _vl_series_from_annuals(annuals: list) -> dict:
+    """Annual statistical array. Kept so existing callers stay on lag-1 FY labels."""
+    return _vl_series_from_rows(annuals, kind="annual")
+
+
+def _vl_iso(v):
+    if v is None:
+        return None
+    return v.isoformat() if hasattr(v, "isoformat") else v
+
+
 def _build_fin_sheet(ticker: str) -> dict:
     """Value Line–style sheet payload from company_financials + quotes + meta.
     Pure DB — no SEC, no LLM, no peer scans."""
@@ -5907,8 +5967,9 @@ def _build_fin_sheet(ticker: str) -> dict:
     _ensure_financials_table()
     annuals = [r for r in _fin_rows_for_ticker(tk, "annual")][::-1]  # oldest→newest
     annuals = annuals[-12:]  # last 12 FYs like Value Line statistical array
+    # 16 quarters: show the latest 8, and keep the prior year so YoY (lag 4) fills them.
     quarters = [r for r in _fin_rows_for_ticker(tk, "quarter")][::-1]
-    quarters = quarters[-12:]
+    quarters = quarters[-16:]
     if not annuals and not quarters:
         return {"ok": False, "error": f"No financials stored for {tk}. Pull SEC data first."}
 
@@ -5948,37 +6009,17 @@ def _build_fin_sheet(ticker: str) -> dict:
     ev_eb = (ev / ebitda) if (ev is not None and ebitda and ebitda > 0) else None
     fcf_y = (fcf / mktcap * 100.0) if (fcf is not None and mktcap and mktcap > 0) else None
 
-    annual_block = _vl_series_from_annuals(annuals) if annuals else {"labels": [], "rows": [], "n_years": 0}
-
-    # Quarterly compact block (last 8)
-    q_labels, q_rev, q_ni, q_eps, q_fcf, q_om = [], [], [], [], [], []
-    for r in quarters[-8:]:
-        pe = r.get("period_end")
-        fp = r.get("fp") or ""
-        fy = r.get("fy")
-        lab = f"{fp}'{str(fy)[-2:]}" if (fp and fy) else (str(pe)[:10] if pe else "—")
-        q_labels.append(lab)
-        q_rev.append(_vl_f(r.get("revenue")))
-        q_ni.append(_vl_f(r.get("net_income")))
-        e = _vl_f(r.get("diluted_eps"))
-        sh = _vl_f(r.get("shares_outstanding")) or _vl_f(r.get("diluted_shares"))
-        niq = _vl_f(r.get("net_income"))
-        if e is None and niq is not None and sh:
-            e = niq / sh
-        q_eps.append(e)
-        q_fcf.append(_vl_f(r.get("free_cash_flow")))
-        q_om.append(_vl_pct(r.get("operating_income"), r.get("revenue")))
-
-    quarterly = {
-        "labels": q_labels,
-        "rows": [
-            {"id": "q_rev", "label": "Revenue", "unit": "$", "values": q_rev},
-            {"id": "q_ni", "label": "Net Income", "unit": "$", "values": q_ni},
-            {"id": "q_eps", "label": "Diluted EPS", "unit": "$/sh", "values": q_eps},
-            {"id": "q_fcf", "label": "Free Cash Flow", "unit": "$", "values": q_fcf},
-            {"id": "q_om", "label": "Op. Margin", "unit": "%", "values": q_om},
-        ],
-    }
+    annual_block = (
+        _vl_series_from_annuals(annuals)
+        if annuals else {"labels": [], "rows": [], "n_years": 0, "footnotes": []}
+    )
+    # Same row set as the annual array. Compute YoY on the longer window, then
+    # show the latest 8 quarters so the table stays the width it already was.
+    quarterly = (
+        _vl_slice_block(_vl_series_from_rows(quarters, kind="quarter"), 8)
+        if quarters else {"labels": [], "rows": [], "n_years": 0, "footnotes": []}
+    )
+    Q = quarters[-1] if quarters else {}
 
     return {
         "ok": True,
@@ -6007,13 +6048,18 @@ def _build_fin_sheet(ticker: str) -> dict:
             "revenue_ltm_or_fy": rev,
             "net_income_fy": ni,
             "fcf_fy": fcf,
-            "period_end": (L.get("period_end").isoformat()
-                           if hasattr(L.get("period_end"), "isoformat") else L.get("period_end")),
+            "period_end": _vl_iso(L.get("period_end")),
             "fy": L.get("fy"),
+            "quarter_period_end": _vl_iso(Q.get("period_end")) if Q else None,
+            "quarter_fp": Q.get("fp") if Q else None,
+            "quarter_fy": Q.get("fy") if Q else None,
         },
         "annual": annual_block,
         "quarterly": quarterly,
-        "footnotes": list(annual_block.get("footnotes") or []),
+        "footnotes": list(dict.fromkeys(
+            list(annual_block.get("footnotes") or [])
+            + list(quarterly.get("footnotes") or [])
+        )),
         "source": "Postgres company_financials + market_quotes (SEC XBRL pull)",
         "cost": "DB read only · zero LLM · zero SEC on view",
     }
@@ -6160,37 +6206,7 @@ def _fin_sheet_pdf_bytes(sheet: dict) -> bytes:
         ]))
         story.append(t)
 
-    qtr = sheet.get("quarterly") or {}
-    ql, qr = qtr.get("labels") or [], qtr.get("rows") or []
-    if ql and qr:
-        story.append(Spacer(1, 10))
-        story.append(Paragraph("Recent quarters", sec_s))
-        story.append(Spacer(1, 3))
-        header = [Paragraph("<b>Quarterly</b>", lab_s)] + [
-            Paragraph(f"<b>{l}</b>", cell_s) for l in ql]
-        data = [header]
-        for r in qr:
-            unit = r.get("unit") or "$"
-            data.append(
-                [Paragraph(r.get("label") or "", lab_s)] +
-                [Paragraph(money(v, unit), cell_s) for v in (r.get("values") or [])]
-            )
-        label_w = 1.4 * inch
-        rest = max(0.55 * inch, (10.2 * inch - label_w) / max(len(ql), 1))
-        t2 = Table(data, colWidths=[label_w] + [rest] * len(ql))
-        t2.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-             [colors.white, colors.HexColor("#f1f5f9")]),
-            ("FONTSIZE", (0, 0), (-1, -1), 6.5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 3),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ]))
-        story.append(t2)
+    # The download stays the annual array. Quarterly is chosen on the card.
 
     story.append(Spacer(1, 8))
     story.append(Paragraph(

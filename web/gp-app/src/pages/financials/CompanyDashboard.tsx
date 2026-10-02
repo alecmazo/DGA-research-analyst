@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
@@ -166,6 +166,19 @@ export function CompanyDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- driven by ticker + reloadKey
   }, [ticker, reloadKey])
 
+  // Sheet and dashboard share `period`. Skip the mount run — the effect above
+  // already loaded — then reload once when the period actually changes.
+  const skipPeriodLoad = useRef(true)
+  useEffect(() => {
+    if (skipPeriodLoad.current) {
+      skipPeriodLoad.current = false
+      return
+    }
+    const t = (ticker || input).trim()
+    if (t) void load(t, period)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- period only; mount load stays above
+  }, [period])
+
   const refreshSec = async () => {
     const tk = (dash?.ticker || ticker || input).trim().toUpperCase()
     if (!tk) return
@@ -240,20 +253,14 @@ export function CompanyDashboard({
         <button
           type="button"
           className={period === 'annual' ? styles.segOn : styles.segBtn}
-          onClick={() => {
-            setPeriod('annual')
-            if (ticker || input) void load(ticker || input, 'annual')
-          }}
+          onClick={() => setPeriod('annual')}
         >
           Annual
         </button>
         <button
           type="button"
           className={period === 'quarter' ? styles.segOn : styles.segBtn}
-          onClick={() => {
-            setPeriod('quarter')
-            if (ticker || input) void load(ticker || input, 'quarter')
-          }}
+          onClick={() => setPeriod('quarter')}
         >
           Quarterly
         </button>

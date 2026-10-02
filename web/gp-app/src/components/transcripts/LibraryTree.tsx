@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from '@/lib/api'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import styles from './LibraryTree.module.css'
@@ -31,12 +31,16 @@ type Library = {
   enabled?: boolean
   interviews?: Folder<InterviewItem>[]
   calls?: Folder<CallItem>[]
+  watchlist_calls?: Folder<CallItem>[]
+  other_calls?: Folder<CallItem>[]
   error?: string
 }
 
-type Selection =
+export type OpenTranscript =
   | { kind: 'interview'; id: string; label: string }
   | { kind: 'call'; ticker: string; quarter: string; label: string }
+
+type Selection = OpenTranscript
 
 type Detail = {
   title?: string
@@ -54,18 +58,47 @@ function matches(hay: string, q: string): boolean {
   return hay.toLowerCase().includes(q)
 }
 
-export function LibraryTree() {
+function readFailure(error: unknown): string {
+  const msg = error instanceof Error ? error.message : 'Could not open that transcript'
+  if (msg.toLowerCase().includes('connection already closed')) {
+    return 'The transcript is stored, but the reader lost the connection. Open it again.'
+  }
+  return msg
+}
+
+function interviewPresent(data: Library | null, id: string): boolean {
+  return (data?.interviews || []).some((folder) =>
+    (folder.items || []).some((item) => item.id === id),
+  )
+}
+
+export function LibraryTree({
+  onOpen,
+  focusId,
+  focusNonce = 0,
+  reloadKey = 0,
+}: {
+  onOpen?: (next: OpenTranscript) => void
+  focusId?: string | null
+  focusNonce?: number
+  reloadKey?: number
+}) {
   const [lib, setLib] = useState<Library | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<Record<string, boolean>>({
     interviews: true,
+    watchCalls: true,
     calls: true,
   })
   const [sel, setSel] = useState<Selection | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [reading, setReading] = useState(false)
+  const [readErr, setReadErr] = useState<string | null>(null)
+  const readGen = useRef(0)
+  const selRef = useRef<Selection | null>(null)
+  selRef.current = sel
   const [busyTk, setBusyTk] = useState<string | null>(null)
   const [refreshTk, setRefreshTk] = useState<string | null>(null)
   const [refreshNote, setRefreshNote] = useState('')
@@ -73,6 +106,7 @@ export function LibraryTree() {
   const load = useCallback(async () => {
     const data = await api<Library>('/api/transcripts/library')
     setLib(data)
+    return data
   }, [])
 
   useEffect(() => {
@@ -89,12 +123,34 @@ export function LibraryTree() {
     }
   }, [load])
 
+  useEffect(() => {
+    if (!reloadKey) return
+    let cancel = false
+    load()
+      .then((data) => {
+        if (cancel) return
+        const cur = selRef.current
+        if (cur?.kind === 'interview' && !interviewPresent(data, cur.id)) {
+          setSel(null)
+          setDetail(null)
+          setReadErr(null)
+        }
+      })
+      .catch((e) => {
+        if (!cancel) setErr(e instanceof Error ? e.message : 'Could not load the library')
+      })
+    return () => {
+      cancel = true
+    }
+  }, [reloadKey, load])
+
   const refreshCalls = async (ticker: string) => {
     setBusyTk(ticker)
     setRefreshTk(ticker)
     setErr(null)
     setRefreshNote(`Refreshing ${ticker}…`)
-    let finalNote = `${ticker} updated`
+    let finalNote = ''
+    let settled = false
     try {
       const job = await api<{ job_id?: string; error?: string }>('/api/transcripts/calls/sync', {
         method: 'POST',
@@ -109,7 +165,7 @@ export function LibraryTree() {
         }),
       })
       if (!job.job_id) throw new Error(job.error || 'Could not start the refresh')
-      for (let i = 0; i < 90; i++) {
+      for (let i = 0; i < 150; i++) {
         await new Promise((r) => setTimeout(r, 2000))
         const st = await api<{ status?: string; label?: string; error?: string }>(
           `/api/transcripts/calls/sync/${encodeURIComponent(job.job_id)}`,
@@ -117,10 +173,14 @@ export function LibraryTree() {
         setRefreshNote(st.label || `Refreshing ${ticker}…`)
         const status = st.status || ''
         if (status === 'done' || status === 'failed' || status === 'error' || status === 'canceled') {
+          settled = true
           if (status !== 'done') setErr(st.error || st.label || `${ticker} refresh failed`)
-          finalNote = st.label || finalNote
+          finalNote = st.label || `${ticker} refresh finished`
           break
         }
+      }
+      if (!settled) {
+        finalNote = `${ticker} refresh is still running. New quarters show up here when it finishes.`
       }
       await load()
       setRefreshNote(finalNote)
@@ -134,11 +194,21 @@ export function LibraryTree() {
 
   const q = query.trim().toLowerCase()
   const interviews = useMemo(() => filterFolders(lib?.interviews || [], q), [lib, q])
-  const calls = useMemo(() => filterFolders(lib?.calls || [], q), [lib, q])
+  const watchCalls = useMemo(
+    () => filterFolders(lib?.watchlist_calls || [], q),
+    [lib, q],
+  )
+  const otherCalls = useMemo(
+    () => filterFolders(lib?.other_calls || (lib?.watchlist_calls ? [] : lib?.calls || []), q),
+    [lib, q],
+  )
 
   const openItem = (next: Selection) => {
+    const gen = ++readGen.current
     setSel(next)
+    onOpen?.(next)
     setDetail(null)
+    setReadErr(null)
     setReading(true)
     const path =
       next.kind === 'interview'
@@ -146,6 +216,7 @@ export function LibraryTree() {
         : `/api/transcripts/calls/read?ticker=${encodeURIComponent(next.ticker)}&quarter=${encodeURIComponent(next.quarter)}`
     api<Record<string, unknown>>(path)
       .then((data) => {
+        if (readGen.current !== gen) return
         if (next.kind === 'interview') {
           const t = (data.transcript || {}) as Record<string, unknown>
           setDetail({
@@ -164,14 +235,88 @@ export function LibraryTree() {
         }
       })
       .catch((e) => {
-        setErr(e instanceof Error ? e.message : 'Could not open that transcript')
+        if (readGen.current !== gen) return
+        setReadErr(readFailure(e))
       })
-      .finally(() => setReading(false))
+      .finally(() => {
+        if (readGen.current === gen) setReading(false)
+      })
   }
+  const openRef = useRef(openItem)
+  openRef.current = openItem
+
+  useEffect(() => {
+    if (!focusNonce || !focusId) return
+    let cancel = false
+    load()
+      .then((data) => {
+        if (cancel) return
+        let label = focusId
+        let folder = ''
+        for (const group of data?.interviews || []) {
+          const hit = (group.items || []).find((item) => item.id === focusId)
+          if (hit) {
+            label = hit.label || focusId
+            folder = group.label
+            break
+          }
+        }
+        if (folder) {
+          setOpen((prev) => ({ ...prev, interviews: true, [`i:${folder}`]: true }))
+        }
+        openRef.current({ kind: 'interview', id: focusId, label })
+      })
+      .catch(() => {})
+    return () => {
+      cancel = true
+    }
+  }, [focusNonce, focusId, load])
 
   const toggle = (key: string) => {
     setOpen((prev) => ({ ...prev, [key]: !prev[key] }))
   }
+
+  const callFolders = (folders: Folder<CallItem>[], prefix: string) =>
+    folders.map((folder) => (
+      <FolderBlock
+        key={`${prefix}-${folder.label}`}
+        folderKey={`${prefix}:${folder.label}`}
+        label={folder.label}
+        count={folder.items.length}
+        open={!!open[`${prefix}:${folder.label}`]}
+        onToggle={() => toggle(`${prefix}:${folder.label}`)}
+        onRefresh={() => void refreshCalls(folder.label)}
+        refreshing={busyTk === folder.label}
+        note={refreshTk === folder.label ? refreshNote : ''}
+      >
+        {folder.items.map((item) => {
+          const on =
+            sel?.kind === 'call' &&
+            sel.ticker === item.ticker &&
+            sel.quarter === item.quarter
+          return (
+            <button
+              key={`${item.ticker}-${item.quarter}`}
+              type="button"
+              className={styles.item}
+              data-on={on ? '1' : '0'}
+              onClick={() =>
+                item.ticker &&
+                item.quarter &&
+                openItem({
+                  kind: 'call',
+                  ticker: item.ticker,
+                  quarter: item.quarter,
+                  label: `${item.ticker} · ${item.label || item.quarter}`,
+                })
+              }
+            >
+              {item.label}
+            </button>
+          )
+        })}
+      </FolderBlock>
+    ))
 
   return (
     <div className={styles.library} id="library">
@@ -227,54 +372,30 @@ export function LibraryTree() {
               ))}
             </Section>
             <Section
+              title="Earnings calls from watchlist"
+              count={countItems(lib.watchlist_calls)}
+              open={open.watchCalls !== false}
+              onToggle={() => toggle('watchCalls')}
+            >
+              {watchCalls.length === 0 && (
+                <p className={styles.empty}>
+                  {q ? 'No match in the watchlist.' : 'No earnings calls indexed for the watchlist yet.'}
+                </p>
+              )}
+              {callFolders(watchCalls, 'w')}
+            </Section>
+            <Section
               title="Earnings calls"
-              count={countItems(lib.calls)}
+              count={countItems(lib.other_calls ?? lib.calls)}
               open={open.calls !== false}
               onToggle={() => toggle('calls')}
             >
-              {calls.length === 0 && (
-                <p className={styles.empty}>No earnings calls indexed yet.</p>
+              {otherCalls.length === 0 && (
+                <p className={styles.empty}>
+                  {q ? 'No match in the other calls.' : 'No other earnings calls indexed yet.'}
+                </p>
               )}
-              {calls.map((folder) => (
-                <FolderBlock
-                  key={`c-${folder.label}`}
-                  folderKey={`c:${folder.label}`}
-                  label={folder.label}
-                  count={folder.items.length}
-                  open={!!open[`c:${folder.label}`]}
-                  onToggle={() => toggle(`c:${folder.label}`)}
-                  onRefresh={() => void refreshCalls(folder.label)}
-                  refreshing={busyTk === folder.label}
-                  note={refreshTk === folder.label ? refreshNote : ''}
-                >
-                  {folder.items.map((item) => {
-                    const on =
-                      sel?.kind === 'call' &&
-                      sel.ticker === item.ticker &&
-                      sel.quarter === item.quarter
-                    return (
-                      <button
-                        key={`${item.ticker}-${item.quarter}`}
-                        type="button"
-                        className={styles.item}
-                        data-on={on ? '1' : '0'}
-                        onClick={() =>
-                          item.ticker &&
-                          item.quarter &&
-                          openItem({
-                            kind: 'call',
-                            ticker: item.ticker,
-                            quarter: item.quarter,
-                            label: `${item.ticker} · ${item.label || item.quarter}`,
-                          })
-                        }
-                      >
-                        {item.label}
-                      </button>
-                    )
-                  })}
-                </FolderBlock>
-              ))}
+              {callFolders(otherCalls, 'c')}
             </Section>
           </>
         )}
@@ -283,10 +404,16 @@ export function LibraryTree() {
         {!sel && (
           <Empty
             title="Pick a transcript"
-            sub="Interviews are grouped by show. Earnings calls are grouped by ticker."
+            sub="Interviews are grouped by show. Watchlist earnings calls are listed first, then every other company."
           />
         )}
         {sel && reading && <Spinner label="Opening…" />}
+        {sel && !reading && !detail && readErr && (
+          <>
+            <h3>{sel.label}</h3>
+            <p className={styles.err}>{readErr}</p>
+          </>
+        )}
         {sel && !reading && detail && (
           <>
             <h3>{detail.title || sel.label}</h3>

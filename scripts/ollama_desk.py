@@ -9,11 +9,23 @@ but not answering is quit and opened again.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import parse_qs, urlparse
 from urllib.request import urlopen
+
+ROOT = Path(__file__).resolve().parents[1]
+if not (ROOT / "podcast_intel").is_dir():
+    extra = os.environ.get("DGA_REPO", "")
+    if extra:
+        ROOT = Path(extra)
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 HOST = "127.0.0.1"
 PORT = 8766
@@ -90,6 +102,22 @@ def _wait_ready(seconds: float = 25) -> bool:
     return False
 
 
+def captions_for(path: str) -> dict:
+    """Public YouTube captions from this Mac. The server's IP is blocked."""
+    query = parse_qs(urlparse(path).query)
+    video_id = (query.get("v") or [""])[0].strip()
+    if len(video_id) != 11:
+        return {"ok": False, "message": "Missing video."}
+    try:
+        from podcast_intel.youtube_caps import caption_text
+        text = caption_text(video_id)
+    except Exception:
+        return {"ok": False, "message": "Captions could not be read on this Mac."}
+    if len(text) < 800:
+        return {"ok": False, "message": "No English captions on this video."}
+    return {"ok": True, "text": text, "chars": len(text)}
+
+
 def ensure() -> dict:
     action = decide(serve_ok(), process_running())
     if action == "up":
@@ -140,10 +168,14 @@ class Handler(BaseHTTPRequestHandler):
         self._preflight()
 
     def do_GET(self):  # noqa: N802
-        if self.path.split("?", 1)[0] != "/health":
-            self._send(404, {"ok": False, "message": "Not found"})
+        path = self.path.split("?", 1)[0]
+        if path == "/health":
+            self._send(200, {"ok": True, "ollama": serve_ok()})
             return
-        self._send(200, {"ok": True, "ollama": serve_ok()})
+        if path == "/captions":
+            self._send(200, captions_for(self.path))
+            return
+        self._send(404, {"ok": False, "message": "Not found"})
 
     def do_POST(self):  # noqa: N802
         path = self.path.split("?", 1)[0]

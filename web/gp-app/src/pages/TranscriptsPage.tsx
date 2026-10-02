@@ -3,7 +3,9 @@ import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api } from '@/lib/api'
-import { LibraryTree } from '@/components/transcripts/LibraryTree'
+import { LibraryTree, type OpenTranscript } from '@/components/transcripts/LibraryTree'
+import { ShowFinder } from '@/components/transcripts/ShowFinder'
+import { PodcastCleanup } from '@/components/transcripts/PodcastCleanup'
 import { TranscriptAsk } from '@/components/transcripts/TranscriptAsk'
 import page from './page.module.css'
 import styles from './TranscriptsPage.module.css'
@@ -80,6 +82,10 @@ export function TranscriptsPage() {
   const [syncQuarters, setSyncQuarters] = useState(4)
   const [syncMax, setSyncMax] = useState(80)
   const [jobBusy, setJobBusy] = useState(false)
+  const [openDoc, setOpenDoc] = useState<OpenTranscript | null>(null)
+  const [focus, setFocus] = useState<{ id: string; nonce: number } | null>(null)
+  const [cleanupOpen, setCleanupOpen] = useState(false)
+  const [libraryReload, setLibraryReload] = useState(0)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -261,6 +267,14 @@ export function TranscriptsPage() {
           </p>
         </div>
         <div className={page.heroActions}>
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-expanded={cleanupOpen}
+            onClick={() => setCleanupOpen((open) => !open)}
+          >
+            Clean up
+          </Button>
           <Button size="sm" variant="secondary" onClick={() => void load()}>
             Refresh
           </Button>
@@ -274,11 +288,29 @@ export function TranscriptsPage() {
         <Spinner label="Loading transcript coverage…" />
       ) : (
         <>
-          <TranscriptAsk />
+          {cleanupOpen && (
+            <PodcastCleanup
+              onChanged={() => {
+                setLibraryReload((n) => n + 1)
+                setOpenDoc(null)
+              }}
+            />
+          )}
+
+          <ShowFinder
+            onOpen={(id) => setFocus({ id, nonce: Date.now() })}
+          />
 
           <Panel title="Transcript library" badge="Interviews · Earnings calls" flush>
-            <LibraryTree />
+            <LibraryTree
+              onOpen={setOpenDoc}
+              focusId={focus?.id}
+              focusNonce={focus?.nonce || 0}
+              reloadKey={libraryReload}
+            />
           </Panel>
+
+          <TranscriptAsk openDoc={openDoc} />
 
           <div className={styles.grid2}>
             <Panel title="Ingest a YouTube transcript" badge="~$0.02–0.05">

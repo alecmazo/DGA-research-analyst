@@ -2,15 +2,17 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { openReportWindow } from '@/pages/ReportPage'
+import { openPortfolioReport } from '@/pages/LocalPortfolioPage'
 import {
   ensureOllama,
   isModelRefusal,
-  LOCAL_RETRY_SYSTEM,
+  mungerSectionReady,
   ollamaChat,
   refusalDiagnosis,
   ollamaStatus,
   parseToolCall,
 } from '@/lib/localOllama'
+import { relativeTime } from '@/lib/format'
 import { renderMd } from '@/lib/md'
 import { Button } from '@/components/ui/Button'
 import { Panel } from '@/components/ui/Panel'
@@ -43,6 +45,12 @@ type Answer = {
   steps?: { tool?: string; ticker?: string }[]
 }
 
+type PortfolioReview = {
+  id: string
+  portfolio?: string
+  created_at?: string
+}
+
 export function LocalPage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [ticker, setTicker] = useState('AAPL')
@@ -56,7 +64,10 @@ export function LocalPage() {
   const [books, setBooks] = useState<Portfolio[]>([])
   const [book, setBook] = useState('')
   const [reviewing, setReviewing] = useState(false)
-  const [review, setReview] = useState<Answer | null>(null)
+  const [reviewErr, setReviewErr] = useState<string | null>(null)
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviews, setReviews] = useState<PortfolioReview[]>([])
+  const [reviewsErr, setReviewsErr] = useState<string | null>(null)
   const [reportsKey, setReportsKey] = useState(0)
   const [launching, setLaunching] = useState(false)
   const [deskMsg, setDeskMsg] = useState<string | null>(null)
@@ -106,6 +117,22 @@ export function LocalPage() {
       .catch(() => setBooks([]))
   }, [])
 
+  const loadReviews = useCallback(() => {
+    void api<{ reports?: PortfolioReview[] }>('/api/local/portfolio-reports')
+      .then((d) => {
+        setReviews(d.reports || [])
+        setReviewsErr(null)
+      })
+      .catch((e) => {
+        setReviews([])
+        setReviewsErr(e instanceof Error ? e.message : 'Could not load saved recommendations')
+      })
+  }, [])
+
+  useEffect(() => {
+    loadReviews()
+  }, [loadReviews])
+
   const online = Boolean(status?.ok)
 
   const startOllama = async () => {
@@ -129,12 +156,20 @@ export function LocalPage() {
     setDoneTicker(null)
     setProgress('Gathering the filing and Yahoo news…')
     try {
-      const prep = await api<{ ok?: boolean; system?: string; user?: string; detail?: string }>(
+      const prep = await api<{
+        ok?: boolean
+        system?: string
+        user?: string
+        munger_system?: string
+        detail?: string
+      }>(
         '/api/local/research-prompt',
         { method: 'POST', body: JSON.stringify({ ticker: tk }) },
       )
-      if (!prep.system || !prep.user) throw new Error(prep.detail || 'Could not build the prompt')
-      setProgress('Writing on this Mac…')
+      if (!prep.system || !prep.user || !prep.munger_system) {
+        throw new Error(prep.detail || 'Could not build the prompt')
+      }
+      setProgress('Writing the note on this Mac…')
       let chat = await ollamaChat({
         system: prep.system,
         user: prep.user,
@@ -142,7 +177,7 @@ export function LocalPage() {
       if (isModelRefusal(chat.text)) {
         setProgress('Writing the note again…')
         chat = await ollamaChat({
-          system: LOCAL_RETRY_SYSTEM,
+          system: prep.system,
           user: prep.user,
         })
       }
@@ -151,20 +186,42 @@ export function LocalPage() {
           `The local model refused this run. The previous note was kept. ${refusalDiagnosis(chat)}`,
         )
       }
+      setProgress('Writing the Munger section…')
+      const mungerUser =
+        `The equity note is below. Write only Section 8.5 from it. Do not repeat the note.\n\n${chat.text}`
+      let munger = await ollamaChat({
+        system: prep.munger_system,
+        user: mungerUser,
+      })
+      if (!mungerSectionReady(munger.text)) {
+        setProgress('Writing the Munger section again…')
+        munger = await ollamaChat({
+          system: prep.munger_system,
+          user: mungerUser,
+        })
+      }
+      if (!mungerSectionReady(munger.text)) {
+        throw new Error(
+          `The note was written, but the Munger section was not, so the previous report was kept. ${refusalDiagnosis(munger)}`,
+        )
+      }
+      const full = `${chat.text.trim()}\n\n${munger.text.trim()}\n`
       setProgress('Saving…')
+      const latency = chat.latencyMs + munger.latencyMs
+      const speedSrc = munger.tokensPerSec ?? chat.tokensPerSec
       await api('/api/local/save', {
         method: 'POST',
         body: JSON.stringify({
           ticker: tk,
-          text: chat.text,
-          tokens_per_sec: chat.tokensPerSec,
-          latency_ms: chat.latencyMs,
+          text: full,
+          tokens_per_sec: speedSrc,
+          latency_ms: latency,
         }),
       })
-      const speed = chat.tokensPerSec != null ? ` · ${chat.tokensPerSec.toFixed(1)} tok/s` : ''
+      const speed = speedSrc != null ? ` · ${speedSrc.toFixed(1)} tok/s` : ''
       setDoneTicker(tk)
       setReportsKey((n) => n + 1)
-      setProgress(`Saved · ${Math.round(chat.latencyMs / 1000)}s${speed} · cost: $0`)
+      setProgress(`Saved · ${Math.round(latency / 1000)}s${speed} · cost: $0`)
       openReportWindow(tk, 'local')
     } catch (e) {
       setRunErr(e instanceof Error ? e.message : 'Could not start')
@@ -216,7 +273,8 @@ export function LocalPage() {
   const reviewBook = async () => {
     if (!book) return
     setReviewing(true)
-    setReview(null)
+    setReviewErr(null)
+    setReviewNote('Writing the recommendation…')
     try {
       const prep = await api<{ ok?: boolean; system?: string; user?: string; error?: string }>(
         '/api/local/portfolio-prompt',
@@ -228,9 +286,23 @@ export function LocalPage() {
         user: prep.user,
         maxTokens: 4000,
       })
-      setReview({ ok: true, answer: chat.text })
+      if (!chat.text || isModelRefusal(chat.text)) {
+        throw new Error(
+          `The local model refused this review. Nothing was saved. ${refusalDiagnosis(chat)}`,
+        )
+      }
+      setReviewNote('Saving…')
+      const saved = await api<{ id?: string }>('/api/local/portfolio-save', {
+        method: 'POST',
+        body: JSON.stringify({ portfolio: book, text: chat.text }),
+      })
+      if (!saved.id) throw new Error('Could not save the recommendation')
+      setReviewNote('Saved. Opened in a new window.')
+      loadReviews()
+      openPortfolioReport(saved.id)
     } catch (e) {
-      setReview({ ok: false, error: e instanceof Error ? e.message : 'Review failed' })
+      setReviewNote('')
+      setReviewErr(e instanceof Error ? e.message : 'Review failed')
     } finally {
       setReviewing(false)
     }
@@ -344,37 +416,6 @@ export function LocalPage() {
           <div className={styles.answer} dangerouslySetInnerHTML={{ __html: renderMd(ask.answer) }} />
         )}
       </section>
-
-      <section className={styles.card}>
-        <h2>Portfolio</h2>
-        <p>Recommendations from the account’s holdings, the financial store, and Yahoo updates.</p>
-        <div className={styles.row}>
-          <select
-            value={book}
-            onChange={(e) => setBook(e.target.value)}
-            aria-label="Portfolio"
-            disabled={reviewing}
-          >
-            {books.length === 0 && <option value="">No portfolios loaded</option>}
-            {books.map((b) => {
-              const label = b.short_name || b.name || 'Account'
-              return (
-                <option key={label} value={label}>
-                  {label}
-                  {b.market_value != null ? ` · $${Math.round(b.market_value).toLocaleString()}` : ''}
-                </option>
-              )
-            })}
-          </select>
-          <Button variant="primary" disabled={reviewing || !online || !book} onClick={() => void reviewBook()}>
-            {reviewing ? 'Reviewing…' : 'Recommend'}
-          </Button>
-        </div>
-        {review?.error && <p className={styles.warn}>{review.error}</p>}
-        {review?.answer && (
-          <div className={styles.answer} dangerouslySetInnerHTML={{ __html: renderMd(review.answer) }} />
-        )}
-      </section>
       </div>
       <Panel title="Saved Local Reports" badge="local" flush className={styles.saved}>
         <SavedReports
@@ -384,6 +425,64 @@ export function LocalPage() {
           onAnalyze={(tk) => setTicker(tk)}
         />
       </Panel>
+      </div>
+
+      <div className={styles.pair}>
+        <section className={styles.card}>
+          <h2>Portfolio</h2>
+          <p>
+            Recommendations from the account’s holdings, the financial store, and Yahoo updates.
+            A finished review opens in its own window.
+          </p>
+          <div className={styles.row}>
+            <select
+              value={book}
+              onChange={(e) => setBook(e.target.value)}
+              aria-label="Portfolio"
+              disabled={reviewing}
+            >
+              {books.length === 0 && <option value="">No portfolios loaded</option>}
+              {books.map((b) => {
+                const label = b.short_name || b.name || 'Account'
+                return (
+                  <option key={label} value={label}>
+                    {label}
+                    {b.market_value != null ? ` · $${Math.round(b.market_value).toLocaleString()}` : ''}
+                  </option>
+                )
+              })}
+            </select>
+            <Button variant="primary" disabled={reviewing || !online || !book} onClick={() => void reviewBook()}>
+              {reviewing ? 'Reviewing…' : 'Recommend'}
+            </Button>
+          </div>
+          {reviewNote && <p className={styles.meta}>{reviewNote}</p>}
+          {reviewErr && <p className={styles.warn}>{reviewErr}</p>}
+        </section>
+
+        <section className={styles.card}>
+          <h2>Portfolio recommendations</h2>
+          <p>Saved reviews for this sign-in. Open one to read it. The table stays out of this card.</p>
+          {reviewsErr && <p className={styles.warn}>{reviewsErr}</p>}
+          {!reviewsErr && reviews.length === 0 && (
+            <p className={styles.meta}>No saved recommendations yet.</p>
+          )}
+          {reviews.length > 0 && (
+            <ul className={styles.reviews}>
+              {reviews.map((row) => (
+                <li key={row.id}>
+                  <div>
+                    <strong>{row.portfolio || 'Portfolio'}</strong>
+                    <span>{relativeTime(row.created_at) || 'Saved'}</span>
+                  </div>
+                  <button type="button" className={styles.openBtn} onClick={() => openPortfolioReport(row.id)}>
+                    Open
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
     </div>
   )

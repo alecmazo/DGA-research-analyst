@@ -32,7 +32,9 @@ def test_munger_page_does_not_call_a_model():
     assert "This morning" in page
     assert "Not cited" in page or "not cited" in page
     appendix = (ROOT / "DGA_analyst.py").read_text()
-    assert "Rule N — Title" in appendix
+    assert "munger_section_instructions" in appendix
+    instructions = (ROOT / "api/domains/local_finance_llm.py").read_text()
+    assert "Rule N — Title" in instructions
 
 
 def test_continuity_files_exist():

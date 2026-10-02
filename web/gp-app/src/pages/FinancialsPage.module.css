@@ -1077,6 +1077,19 @@
   margin: 12px 0 6px;
 }
 
+.arrayHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0 6px;
+}
+
+.arrayHead .vlSection {
+  margin: 0;
+}
+
 .vlScroll {
   overflow: auto;
   max-height: 62vh;

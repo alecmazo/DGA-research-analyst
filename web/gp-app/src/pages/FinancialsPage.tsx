@@ -99,7 +99,12 @@ export function FinancialsPage() {
         reloadKey={reloadKey}
       />
 
-      <ValueLineSheet ticker={ticker} onSelectTicker={selectTicker} />
+      <ValueLineSheet
+        ticker={ticker}
+        onSelectTicker={selectTicker}
+        period={period}
+        setPeriod={setPeriod}
+      />
 
       <FinancialsStore
         coverage={coverage}

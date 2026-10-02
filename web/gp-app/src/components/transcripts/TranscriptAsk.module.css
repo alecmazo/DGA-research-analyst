@@ -7,7 +7,8 @@
 }
 
 .via,
-.used {
+.used,
+.about {
   color: var(--text-secondary);
 }
 
@@ -15,8 +16,77 @@
   color: #9b2c2c;
 }
 
+.scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.scope label,
+.check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.check {
+  display: flex;
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.picker {
+  max-height: 280px;
+  overflow: auto;
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+}
+
+.group {
+  margin: 8px 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.filter,
+.addOpen {
+  font: inherit;
+}
+
+.filter {
+  width: 100%;
+  box-sizing: border-box;
+  height: 34px;
+  margin-bottom: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  color: inherit;
+}
+
+.addOpen {
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand-700, var(--text-secondary));
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
@@ -42,7 +112,8 @@ textarea {
 .lbl select {
   height: 34px;
   padding: 0 8px;
-  min-width: 240px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 textarea {

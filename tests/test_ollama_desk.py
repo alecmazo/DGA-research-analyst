@@ -21,3 +21,4 @@ def test_red_pill_starts_when_nothing_is_running_and_restarts_a_glitch():
     assert desk.decide(False, True) == "restart"
     assert desk.PORT == 8766
     assert desk.HOST == "127.0.0.1"
+    assert desk.captions_for("/captions?v=short")["ok"] is False

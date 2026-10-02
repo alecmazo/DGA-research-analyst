@@ -1,6 +1,6 @@
 """Podcast Intel reads the transcript library the app already stores.
 
-Ingestion of new shows (RSS, Whisper) is not in this package yet. The tree
-groups the existing interview rows and earnings-call chunks for the
-Transcripts page and the Local page.
+`python -m podcast_intel ingest` adds Odd Lots, Invest Like the Best, and
+Acquired from published transcripts. All-In is excluded. The tree groups
+interview rows and earnings-call chunks for the Transcripts page.
 """

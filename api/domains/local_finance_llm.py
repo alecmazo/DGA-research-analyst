@@ -44,14 +44,151 @@ def is_model_refusal(text: str | None) -> bool:
     return any(n in low for n in needles)
 
 
-LOCAL_RETRY_SYSTEM = (
-    "You are DGA Capital's research analyst. Write a full equity research note "
-    "in markdown using only the figures in the user message. Use those figures "
-    "exactly. Include an executive summary with a rating (Strong Buy, Buy, Hold, "
-    "or Sell) and a 12-month price target, a business overview, financial tables, "
-    "valuation, risks, and a sources line. Write the note. Do not refuse and do "
-    "not stop after one sentence."
-)
+LOCAL_NOTE_SYSTEM = """You are DGA Capital's research analyst. Write the equity note now, in markdown.
+The first line is the cover table. A long note is the assignment.
+Do not plan first, do not apologize, and do not stop because the note is long.
+
+You have no web search and no X search. Do not try to call them.
+Every figure comes from the user message. If a figure is absent, write N/A.
+Do not fill from memory. Any assumption you must make (growth, WACC, the
+price target) is marked (E) and the assumption is one sentence.
+Copy fiscal-year labels and period-end dates exactly as printed.
+Table cells are numbers or N/A, never adjectives.
+Headings are ATX headings (# Section 1 — …). Tables are GitHub-flavored
+markdown. News bullets use only headlines in the user message that are
+about this ticker. Skip headlines about other companies.
+
+Write these sections, in order, then stop:
+
+# Cover
+Table: company, ticker, date, price, previous close, market cap, rating
+(Strong Buy, Buy, Hold, or Sell), 12-month price target, upside versus
+the price in the user message, and one-sentence thesis.
+
+# Section 1 — Investment summary
+One paragraph with the rating, the target, and the single main reason.
+Then three short reasons. Then a 30-second pitch.
+
+# Section 2 — Recent developments
+Bullets, newest first, drawn only from the headline block. Each bullet
+starts with the date already printed and cites the source and URL already
+printed. If the block is empty, write "No headlines in the packet."
+Do not add events from memory.
+
+# Section 3 — Where we differ from the Street
+Use ANALYST_RATINGS_BLOCK and CONSENSUS_SUMMARY if they are present.
+If they are absent, write "No ratings block in the packet." Do not invent
+a firm, a rating, or a target.
+
+# Section 4 — Business overview
+What the company does, how it makes money, and the moat. Stay inside
+what the filing packet supports.
+
+# Section 5 — Financials
+Copy the annual table, the quarterly table when the packet says 10-Q,
+and the balance-sheet table. Use the TTM row as printed. Do not
+recompute it.
+
+# Section 6 — Growth
+Only the trajectory that is visible in the printed rows.
+
+# Section 7 — Valuation
+One DCF: state the (E) assumptions, show the bridge to a per-share
+value, and say how that relates to the 12-month target.
+Then copy the comparable-company table from the user message. Do not
+add peers. Do not relabel those figures as forward estimates.
+
+# Section 8 — Bull, base, bear
+Three cases with a probability and a price. State the weighted value.
+The 12-month target has to agree with it.
+
+# Section 9 — Risks
+The material risks supported by the filings and the headlines in the
+packet. No generic macro sentence without a number from the packet.
+
+# Section 10 — Catalysts
+Only dates and events present in the packet.
+
+# Sources
+Name the SEC filing cited in the packet, the market-data fields, and
+the headline source. Nothing else.
+
+Do not write a Munger section. Do not write an institutional-holders
+table. Those are not part of this call.
+"""
+
+# Kept so an older caller that retries with this name still gets the note prompt.
+LOCAL_RETRY_SYSTEM = LOCAL_NOTE_SYSTEM
+
+
+def munger_section_instructions(*, standalone: bool) -> str:
+    """Compact Section 8.5. The fifty rule titles stay; the philosophy essay does not.
+
+    ``standalone`` is the local model's second call: the note already exists.
+    Grok and Claude get ``standalone=False`` appended to the desk prompt.
+    """
+    try:
+        import munger_fifty
+        rules = munger_fifty.prompt_list()
+    except Exception:
+        rules = ""
+    if standalone:
+        lead = (
+            "The equity note is already written in the user message. "
+            "Write only the Munger section. Do not rewrite the note, "
+            "do not apologize, and do not add a holders table. "
+            "Begin with the heading.\n\n"
+        )
+    else:
+        lead = (
+            "After the verdict and before the sources, write this section. "
+            "Do not skip it and do not fold it into the verdict. "
+            "Do not add a holders table inside it.\n\n"
+        )
+    return (
+        lead
+        + "SECTION 8.5 — CHARLIE MUNGER LATTICEWORK\n\n"
+        "Apply this to the company in the note: invert, stay inside the circle "
+        "of competence, demand a margin of safety, and map incentives. Prefer "
+        "avoiding a stupidity over adding a story. No biography of Munger.\n\n"
+        "### 8.5.1 Circle of Competence\n"
+        "Is this business inside a disciplined investor's circle? What is hard "
+        "to understand? Name any part that belongs in the too-hard pile.\n\n"
+        "### 8.5.2 Invert — How This Loses Money\n"
+        "The concrete ways this investment permanently impairs capital. What "
+        "would make you walk away?\n\n"
+        "### 8.5.3 Moat, Incentives & Two-Track Analysis\n"
+        "Is the advantage durable? One paragraph on management, employee, and "
+        "customer incentives. One paragraph on the economics, one on the psychology.\n\n"
+        "### 8.5.4 Latticework & Lollapalooza\n"
+        "Which forces stack. Say whether the stack is good or bad for the owner.\n\n"
+        "### 8.5.5 Psychology Checklist\n"
+        "Name 3 of the standard misjudgment tendencies that matter here, and who "
+        "they are acting on (management, the market, or the analyst).\n\n"
+        "### 8.5.6 Investment Labels\n"
+        "One primary label, and any secondary, from: "
+        "TOO HARD · HOMERUN · SIT-ON-YOUR-ASS · WONDERFUL BUSINESS AT FAIR PRICE · "
+        "FAIR BUSINESS AT WONDERFUL PRICE · AVOID · MARGIN OF SAFETY ADEQUATE · "
+        "MARGIN OF SAFETY INADEQUATE\n\n"
+        "### 8.5.7 What Munger Would Likely Do\n"
+        "buy, pass, or too-hard. One reason. One stupidity to avoid.\n\n"
+        "Cite exactly 3 rules from the list below. Each citation is its own line, "
+        "exactly `Rule N — Title`, then two to four sentences on this company. "
+        "Use the number and title as written. Do not cite a rule you do not apply. "
+        "Use only figures that are already in the note or the user message. "
+        "Do not invent any.\n\n"
+        + rules
+        + "\n"
+    )
+
+
+def local_munger_user(note: str) -> str:
+    """User message for the local model's second call."""
+    return (
+        "The equity note is below. Write only Section 8.5 from it. "
+        "Do not repeat the note.\n\n"
+        + (note or "").strip()
+    )
 
 
 def _env(name: str, default: str) -> str:

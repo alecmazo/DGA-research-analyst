@@ -119,6 +119,12 @@
   padding-left: 8px;
 }
 
+.library section + section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
 .items {
   padding-left: 18px;
 }

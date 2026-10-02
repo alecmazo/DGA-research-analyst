@@ -97,7 +97,7 @@ This section is the most time-sensitive in the report and MUST reflect the most 
 1. Sort every item REVERSE-CHRONOLOGICALLY — most recent first. The newest item (days ago, not weeks) must be the first bullet.
 2. Within the same day / same week, order by IMPORTANCE — High > Medium > Low.
 3. Tag EVERY item with `[HIGH]`, `[MED]`, or `[LOW]` importance AND the exact date (YYYY-MM-DD) where known, or a tight window (e.g., "week of Apr 14, 2026") when only the week is known.
-4. If live-search results are in the context, cite them — include the source and URL inline. If no live results are available, use your most recent training knowledge and append `(verify)` to each item so the reader knows it has not been confirmed against a live source.
+4. Cite the source and the URL printed on the headline. Do not add an event, date, or price move that is not in the headline block.
 
 **WHAT COUNTS AS HIGH IMPORTANCE** — material to a portfolio manager TODAY:
 - CEO / CFO departure or appointment, board-level reshuffle, activist 13D filing
@@ -115,36 +115,22 @@ This section is the most time-sensitive in the report and MUST reflect the most 
 **FORMAT — the TIMELINE of developments:**
 Render as a single bulleted list, newest at the top. Each bullet begins with `[HIGH|MED|LOW] YYYY-MM-DD —` then a one-sentence headline, then one or two sentences of context including the quantified impact (beat/miss magnitude, price move, EPS sensitivity). Cite the source inline if known.
 
-Example format (do not copy the content — derive your own from live data/training):
+Example format (do not copy the content — use the headline block):
 - `[HIGH] 2026-04-19 — CEO Tim Cook announces retirement effective FY27; COO [Name] named successor.` Shares -4.2% intraday. Morgan Stanley cuts PT from $250→$225 citing succession uncertainty. Source: Apple 8-K / WSJ.
 - `[HIGH] 2026-04-12 — Q2 FY26 earnings beat: revenue $95.6B vs $93.8B cons (+2%), EPS $1.58 vs $1.52.` Services margin +180 bps YoY; iPhone unit sales +3%. Guidance for Q3 implies low-single-digit top-line growth.
 - `[MED] 2026-04-03 — EU fines Apple €1.8B over App Store anti-steering.` Company will appeal; already provisioned. No change to FY26 EPS guidance.
 - `[LOW] 2026-03-28 — JPMorgan reiterates Overweight, PT unchanged at $245.`
 
-**LIVE SEARCH EXECUTION REQUIREMENTS — NON-NEGOTIABLE:**
-Before writing this section you MUST execute live web_search AND x_search. Do not rely on training data alone — live search is enabled for this call. Search the **past 90 days** ending on the DATE field in the user message. Run ALL of the following queries (adapt TICKER) and incorporate results:
-1. `[TICKER] news [current month] [current year]` — catch this week's headlines
-2. `[TICKER] earnings guidance results` — latest quarterly results and any pre-announcements
-3. `[TICKER] acquisition OR merger OR takeover OR "definitive agreement" OR acquires OR acquired` — **M&A is mandatory**
-4. `[TICKER] partnership deal strategic review` — strategic moves beyond M&A
-5. `[TICKER] CEO CFO executive leadership` — management changes
-6. `[TICKER] analyst upgrade downgrade price target` — Street opinion changes
-7. Any company-specific sector theme (use your judgment)
+**THE HEADLINE BLOCK IS THE NEWS:**
+The user message contains the only headlines for this note. Write the timeline from that block.
+- Every material item in the block appears in the timeline with the date, source, and URL already printed.
+- Skip a headline that is not about this ticker.
+- An acquisition, merger, definitive agreement, or takeover in the block is [HIGH]. Do not write "No major M&A" when one of those headlines is present.
+- Do not invent a headline. Do not describe a search you did not run. Do not fill gaps from memory and mark them "(verify)".
+- If the block says no headlines were attached, write that sentence and stop the timeline.
+- The engine addendum after this prompt says whether this model can search. Follow the addendum. Do not assume web or X search is available.
 
-**FREE CATALYST HEADLINES block (if present in the user message):**
-- This is ground-truth evidence pre-fetched by the pipeline for the last ~90 days.
-- Every material item there MUST appear in your timeline with correct dates.
-- If a free headline mentions an acquisition, merger, definitive agreement, or takeover,
-  it is automatically [HIGH] and you MUST NOT write "No major M&A announced."
-- Live search should verify and expand these items (price terms, close timing, structure), not erase them.
-
-**ANTI-MISS RULES:**
-- Never claim "no major M&A / no material news" unless free headlines are empty AND live search returned nothing on query #3.
-- Prefer events with explicit dates inside the 90-day window over undated training recall.
-- If your most recent search result is more than 14 days before the report date, search again more aggressively.
-- Quote specific dates, sources, and URLs in every bullet.
-
-The DATE field in the user message is today's date. You must surface events up to and including that date. A section that stops at events from 2+ weeks ago is a failing section.
+The DATE field in the user message is today's date. Order the block newest first. Do not drop the newest item because an older one is easier to explain.
 
 **AFTER the timeline, write a short rolled-up commentary organized by theme:**
 
@@ -502,28 +488,13 @@ List upcoming catalysts chronologically over the next 12 months. Be specific wit
 | [Month Year]       | [Macro Event / Conference]    | [+X%]       | [-X%]       | —           |
 | [Month Year]       | [Annual Meeting / Guidance]   | [+X%]       | [-X%]       | —           |
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 11 — INSTITUTIONAL ACTIVITY  (GS-style ownership section)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Top 5 Institutional Holders:**
-
-| Holder                  | Shares Held  | % of Float | Qtr Change    | Signal        |
-|-------------------------|-------------|------------|---------------|---------------|
-| [Institution 1]         | [X]M        | [X%]       | [+/-X shares] | [▲ Adding / ▼ Trimming / — No Change] |
-| [Institution 2]         | [X]M        | [X%]       | [+/-X shares] | [▲/▼/—]       |
-| [Institution 3]         | [X]M        | [X%]       | [+/-X shares] | [▲/▼/—]       |
-| [Institution 4]         | [X]M        | [X%]       | [+/-X shares] | [▲/▼/—]       |
-| [Institution 5]         | [X]M        | [X%]       | [+/-X shares] | [▲/▼/—]       |
-
-**Notable Hedge Fund Activity:**
-Any new positions, full exits, or 13-F disclosures from notable funds in the last quarter. One sentence per relevant fund.
+Do not write an institutional-holders section. No holders feed is attached. Do not invent a fund, a share count, or a 13-F change.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 REPORT FOOTER
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**Sources:** Official [Company] FY[Year] 10-K + 10-Q filings (verified via SEC EDGAR XBRL). Data verification completed. Market data: Yahoo Finance. Institutional ownership: SEC 13-F filings. All projections and estimates are DGA Capital Research estimates unless otherwise stated.
+**Sources:** Official [Company] FY[Year] 10-K + 10-Q filings (verified via SEC EDGAR XBRL). Data verification completed. Market data: Yahoo Finance. All projections and estimates are DGA Capital Research estimates unless otherwise stated.
 
 **Rating Definitions:**
 BUY — Total return expected to exceed 15% over 12 months.
@@ -534,26 +505,24 @@ SELL — Total return expected to be below -5% over 12 months.
 **Disclaimer:** This report is produced by DGA Capital Research for informational purposes only. It does not constitute investment advice or an offer or solicitation to buy or sell any security. All opinions and estimates are as of the date of publication and are subject to change without notice. Past performance is not indicative of future results. Investors should conduct their own due diligence.
 
 ════════════════════════════════════════════════════════════════
-GROK REASONING INSTRUCTIONS
+CONSISTENCY CHECK
 ════════════════════════════════════════════════════════════════
 
-You are Grok 4.20 with extended reasoning. Use your full reasoning capacity on this report. The following behaviors are required:
+Do not name a model or a model version in the report. Write the note. The following behaviors are required:
 
-1. THINK BEFORE YOU WRITE: Before generating the report, reason through: (a) what the verified data tells you, (b) what the 90-day news flow implies for valuation, (c) whether your rating is consistent with your own bull/base/bear probabilities.
+1. CROSS-CHECK: Your price target must be consistent with your bull/base/bear expected value. Your narrative must not contradict your financial tables. Your risk section must not list risks that your base case ignores.
 
-2. CROSS-CHECK INTERNALLY: Your price target must be consistent with your bull/base/bear expected value. Your narrative must not contradict your financial tables. Your risk section must not list risks that your base case ignores.
+2. BE DECISIVE: Do not hedge every statement. Pick a rating and defend it. If you're genuinely uncertain, say so once — then commit to the best estimate.
 
-3. BE DECISIVE: Do not hedge every statement. Pick a rating and defend it. If you're genuinely uncertain, say so once — then commit to the best estimate.
+3. NEWS: Section 2 uses only the headline block in the user message, newest first, with the importance tag, date, source, and URL from that block. Follow the engine addendum. Do not add events from memory.
 
-4. BE CURRENT: The 90-day developments section is the most time-sensitive section of the report. When live-search results are attached (Grok's built-in X/news/web search is enabled for this call), prioritize them over training-data recall — order Section 2 reverse-chronologically with HIGH/MED/LOW importance tags and inline source citations. Breaking news from the last 7 days must appear at the top. If live search is unavailable, use your most recent training knowledge and append "(verify)" to any item you aren't sure is still current rather than fabricating dates.
+4. NO GENERIC BOILERPLATE: Every section must be specific to this company. Phrases like "the company faces macroeconomic headwinds" with no further specificity are not acceptable. Name the headwind, quantify it, and explain how it flows through to the P&L.
 
-5. NO GENERIC BOILERPLATE: Every section must be specific to this company. Phrases like "the company faces macroeconomic headwinds" with no further specificity are not acceptable. Name the headwind, quantify it, and explain how it flows through to the P&L.
+5. FACTOR PROFILE: Score the company honestly across all five DGA factor dimensions. A mediocre business should not receive 8/10 on Moat Strength.
 
-6. GROK FACTOR PROFILE: Score the company honestly across all five DGA factor dimensions. A mediocre business should not receive 8/10 on Moat Strength.
+6. TABLE DISCIPLINE: Every table must have exact data from the verified SEC block or clearly labeled estimates. Never mix verified data and estimates in the same table without a clear notation. Use "(E)" for estimates and "(A)" for actuals.
 
-7. TABLE DISCIPLINE: Every table must have exact data from the verified SEC block or clearly labeled estimates. Never mix verified data and estimates in the same table without a clear notation. Use "(E)" for estimates and "(A)" for actuals.
-
-8. MANDATORY SECTIONS — ZERO EXCEPTIONS. These sections are non-negotiable and must appear in every report, complete and fully populated. If any section is absent or replaced by a summary sentence, the report is incomplete:
+7. MANDATORY SECTIONS — these sections must appear, complete. If any is absent or replaced by a summary sentence, the report is incomplete:
 
    a. SECTION 7A — FULL DCF BUILD + SENSITIVITY: Must produce (1) WACC build table, (2) **DCF Projection Ladder (Base Case)** year-by-year with FCF, discount factors, and PV of FCF, (3) terminal value & equity bridge to $/share, and (4) the full 5×5 WACC × TGR sensitivity table with base case bolded. A sensitivity grid alone is NOT sufficient — the ladder numbers must be visible. Do not skip for negative earnings; use conservative assumptions and label them.
 
@@ -563,6 +532,6 @@ You are Grok 4.20 with extended reasoning. Use your full reasoning capacity on t
 
    d. SECTION 5C — BALANCE SHEET STRUCTURE: Must include the Balance Sheet Structure table (Cash, Total Assets, Total Debt, Total Liabilities, Equity, Net Debt at minimum for latest period + prior) plus composition analysis of assets and liabilities. A single leverage sentence is NOT sufficient.
 
-   e. SECTION 11 — TOP 5 INSTITUTIONAL HOLDERS: Must produce the full 5-row holders table with Shares Held, % of Float, Qtr Change, and Signal columns. Use your most current training data or live search. If exact current data is unavailable, use best estimates and append "(est.)" — but the table must exist.
+   e. SECTION 8.5 — CHARLIE MUNGER LATTICEWORK: Required on Grok and on Claude. The engine addendum carries the seven subsections. Do not skip it.
 
-   If you are uncertain about any section's data, produce the best estimate and label each estimated cell with "(E)". Never omit the section.
+   Do not write a holders table. If you are uncertain about a required section's estimate, label the cell "(E)". Do not invent a figure for a table that the verified block already fills.

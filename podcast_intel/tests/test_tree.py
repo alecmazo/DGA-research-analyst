@@ -1,4 +1,13 @@
-from podcast_intel.tree import call_label, group_calls, group_interviews, interview_folder, interview_label
+from pathlib import Path
+
+from podcast_intel.tree import (
+    call_label,
+    group_calls,
+    group_interviews,
+    interview_folder,
+    interview_label,
+    split_calls,
+)
 
 
 def test_interview_folders_prefer_channel_then_person():
@@ -27,3 +36,19 @@ def test_call_labels_name_the_source():
     assert folders["AAPL"]["count"] == 2
     assert folders["AAPL"]["items"][0]["label"] == "Q3 2026 · 2026-07-30 · Motley Fool"
     assert call_label(rows[2]) == "Undated"
+
+
+def test_watchlist_calls_come_first_and_the_rest_stay_alphabetical():
+    rows = [
+        {"ticker": "MSFT", "quarter": "Q1 2026", "call_date": "2026-01-01", "chunks": 2},
+        {"ticker": "AAPL", "quarter": "Q1 2026", "call_date": "2026-01-02", "chunks": 2},
+        {"ticker": "NVDA", "quarter": "Q1 2026", "call_date": "2026-01-03", "chunks": 2},
+        {"ticker": "COST", "quarter": "Q1 2026", "call_date": "2026-01-04", "chunks": 2},
+    ]
+    watch, rest = split_calls(group_calls(rows), ["nvda", "AAPL", "AAPL", "TSLA", ""])
+    assert [folder["label"] for folder in watch] == ["NVDA", "AAPL"]
+    assert [folder["label"] for folder in rest] == ["COST", "MSFT"]
+    page = Path(__file__).resolve().parents[2] / "web/gp-app/src/components/transcripts/LibraryTree.tsx"
+    src = page.read_text()
+    assert 'title="Earnings calls from watchlist"' in src
+    assert 'title="Earnings calls"' in src
