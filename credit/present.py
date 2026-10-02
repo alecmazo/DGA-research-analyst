@@ -22,6 +22,7 @@ from credit.calc import (
     yield_to_worst,
 )
 from credit.fixture import structure_totals
+from credit.market import current_benchmarks, next_business_settlement
 from credit.scenarios import seed_scenarios
 
 FINRA = "https://www.finra.org/finra-data/fixed-income/corp-and-agency"
@@ -43,6 +44,7 @@ def _text(packet: dict, fid: str, fallback: str = "not found") -> str:
 
 
 def curve_of(packet: dict) -> dict[str, Decimal]:
+    """Curve rows already stored on a packet. Pricing uses the daily curve in credit.market."""
     found = {}
     for row in packet.get("fields") or []:
         if row["id"].startswith("curve.") and usable(row):
@@ -52,11 +54,65 @@ def curve_of(packet: dict) -> dict[str, Decimal]:
     return found
 
 
+def _maturity_text(row: dict) -> tuple[str, str]:
+    """A January 1 exchange-note date is a placeholder. Keep the year only."""
+    maturity = row.get("maturity") or {}
+    value = "" if maturity.get("value") in (None, "") else str(maturity.get("value"))
+    notes = maturity.get("notes") or ""
+    if row.get("group") == "exchange" and len(value) >= 10 and value[5:10] == "01-01":
+        year = value[:4]
+        if year.isdigit():
+            extra = "Month and day were not in the filing, so no maturity day is stored."
+            if extra not in notes:
+                notes = f"{notes} {extra}".strip()
+            return year, notes
+    return value, notes
+
+
+def _priced_maturity(row: dict) -> date | None:
+    raw = str(row.get("maturity") or "")
+    if len(raw) < 10:
+        return None
+    try:
+        found = date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+    if row.get("group") == "exchange" and found.month == 1 and found.day == 1:
+        return None
+    return found
+
+
+def _as_date(value) -> date | None:
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _benchmarks(overrides: dict) -> dict:
+    given = overrides.get("benchmarks")
+    if isinstance(given, dict):
+        return given
+    return current_benchmarks()
+
+
+def _curve_points(benchmarks: dict) -> dict:
+    curve = {}
+    for key, value in (benchmarks.get("curve") or {}).items():
+        number = value if isinstance(value, D) else money(value)
+        if number is not None:
+            curve[str(key)] = number
+    return curve
+
+
 def _instrument_row(row: dict) -> dict:
     amount = row.get("amount") or {}
     coupon = row.get("coupon") or {}
-    maturity = row.get("maturity") or {}
     lien = row.get("lien") or {}
+    maturity_value, maturity_notes = _maturity_text(row)
+    maturity = row.get("maturity") or {}
     return {
         "id": row["id"],
         "name": row.get("name"),
@@ -69,9 +125,9 @@ def _instrument_row(row: dict) -> dict:
         "coupon": coupon.get("value"),
         "coupon_type": row.get("coupon_type") or "fixed",
         "index": row.get("index") or "",
-        "maturity": maturity.get("value"),
+        "maturity": maturity_value,
         "maturity_confidence": maturity.get("confidence"),
-        "maturity_notes": maturity.get("notes") or "",
+        "maturity_notes": maturity_notes,
         "lien": lien.get("value") if usable(lien) else "assumption",
         "lien_notes": lien.get("notes") or "",
         "source_url": (amount.get("source") or {}).get("url") or "",
@@ -143,8 +199,9 @@ def build_view(packet: dict, overrides: dict | None = None) -> dict:
     overrides = overrides or {}
     instruments = [_instrument_row(row) for row in packet.get("instruments") or []]
     prices = overrides.get("prices") or {}
-    curve = curve_of(packet)
-    settlement = date(2026, 10, 5)
+    benchmarks = _benchmarks(overrides)
+    curve = _curve_points(benchmarks)
+    settlement = _as_date(overrides.get("settlement")) or next_business_settlement(_as_date(overrides.get("as_of")))
     quotes = []
     for row in instruments:
         if row["coupon_type"] != "fixed" or row["currency"] != "USD":
@@ -152,13 +209,17 @@ def build_view(packet: dict, overrides: dict | None = None) -> dict:
             continue
         clean = money((prices.get(row["id"]) or {}).get("clean_price"))
         if clean is None:
-            quotes.append({**row, "ytm": None, "g_spread_bp": None, "note": "not found"})
+            quotes.append({**row, "clean_price": None, "ytm": None, "g_spread_bp": None, "note": "not found"})
             continue
-        maturity_raw = str(row.get("maturity") or "")
-        try:
-            maturity = date.fromisoformat(maturity_raw[:10])
-        except ValueError:
-            quotes.append({**row, "ytm": None, "note": "maturity day is not public"})
+        maturity = _priced_maturity(row)
+        if maturity is None:
+            quotes.append({
+                **row,
+                "clean_price": str(clean),
+                "ytm": None,
+                "g_spread_bp": None,
+                "note": "maturity day is not public",
+            })
             continue
         coupon = (money(row.get("coupon")) or D("0")) / D("100")
         solved = yield_to_worst(
@@ -211,15 +272,27 @@ def build_view(packet: dict, overrides: dict | None = None) -> dict:
         fall = waterfall(stressed_ebitda=stressed, multiple=multiple, admin_pct=admin, classes=classes, draw_revolver=True)
     else:
         fall = {"ev": None, "rows": [], "reason": "stressed EBITDA is missing"}
+    oas_values = benchmarks.get("oas") or {}
     oas = {
-        key.replace("oas.", ""): _text(packet, key)
-        for key in ("oas.ig", "oas.bbb", "oas.bb", "oas.b", "oas.hy", "oas.ccc")
+        key: str(oas_values.get(key) or "not loaded")
+        for key in ("ig", "bbb", "bb", "b", "hy", "ccc")
     }
+    curve_as_of = str(benchmarks.get("treasury_as_of") or "")
+    oas_as_of = str(benchmarks.get("oas_as_of") or "")
+    curve_note = str(benchmarks.get("note") or "Treasury curve is not loaded.")
+    if benchmarks.get("ok") and curve_as_of:
+        curve_bit = f"Treasury curve as of {curve_as_of}."
+    else:
+        curve_bit = "Treasury curve is not loaded."
     issuer = packet.get("issuer") or {}
     return {
         "issuer": issuer,
         "badge": "Partly stale",
-        "badge_reason": "Bond prices are not found and most new-note covenants are not public. The Treasury curve is the 2026-10-01 close.",
+        "badge_reason": "Bond prices are not found and most new-note covenants are not public. " + curve_bit,
+        "settlement": settlement.isoformat(),
+        "curve_as_of": curve_as_of,
+        "oas_as_of": oas_as_of,
+        "curve_note": curve_note,
         "totals": structure_totals(packet),
         "instruments": instruments,
         "maturity_wall": maturity_wall(instruments),
@@ -227,7 +300,7 @@ def build_view(packet: dict, overrides: dict | None = None) -> dict:
         "covenants": packet.get("covenants") or [],
         "quotes": quotes,
         "oas": oas,
-        "oas_note": "The bond spread is a G-spread, not OAS. The bucket is the FRED ICE BofA series for 2026-10-01. A 3-year percentile is not loaded.",
+        "oas_note": "The bond spread is a G-spread, not OAS. " + curve_note + " A 3-year percentile is not loaded.",
         "waterfall": fall,
         "pd": {
             "rating": "reference table not loaded",

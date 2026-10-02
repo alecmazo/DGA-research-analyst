@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from credit.fixture import CIK, build_fixture
 from credit.present import build_view
+from credit.prices import priced_packet_body
 from credit.screen import book_rows, screen_view
 from credit.store import MemoryStore, PostgresStore
 from credit.universe import by_cik
@@ -71,12 +72,13 @@ def _saved_packet(cik: str) -> dict | None:
     return saved
 
 
-def _view_for(cik: str, body: dict | None = None) -> dict:
+def _view_for(cik: str, body: dict | None = None, entered_by: str = "") -> dict:
     saved = _saved_packet(cik)
     if saved:
-        return build_view(saved, body)
+        return build_view(saved, priced_packet_body(get_store(), saved, body, entered_by))
     if cik == CIK:
-        return build_view(build_fixture(), body)
+        packet = build_fixture()
+        return build_view(packet, priced_packet_body(get_store(), packet, body, entered_by))
     row = by_cik(cik)
     if row:
         return screen_view(row, body)
@@ -112,12 +114,13 @@ def create_router(claims_fn) -> APIRouter:
 
     @router.post("/issuers/{cik}/compute")
     def compute(cik: str, request: Request):
-        gp(request)
+        claims = gp(request)
         from api.server import _request_json_sync
         body = _request_json_sync(request) or {}
         if not isinstance(body, dict):
             body = {}
-        return {"ok": True, **_plain(_view_for(_cik(cik), body))}
+        who = str(claims.get("email") or claims.get("sub") or "")
+        return {"ok": True, **_plain(_view_for(_cik(cik), body, who))}
 
     @router.post("/issuers/{cik}/deep-dive")
     def deep_dive(cik: str, request: Request):

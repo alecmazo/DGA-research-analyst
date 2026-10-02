@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
@@ -87,6 +87,9 @@ type View = {
   flags?: { flag_type?: string; details?: string }[]
   finra_url?: string
   xbrl_maturities?: unknown
+  settlement?: string
+  curve_as_of?: string
+  oas_as_of?: string
 }
 
 const GROUPS = [
@@ -97,6 +100,9 @@ const GROUPS = [
 ] as const
 
 const DESK_KEY = 'dga.credit.hy.v1'
+const STRUCTURE_KEY = 'dga.credit.structure.v1'
+
+type StructureBook = Record<string, { prices: Record<string, string>; quotes: Quote[] }>
 
 function money(value?: string | null, currency = 'USD') {
   if (value == null || value === '') return '—'
@@ -120,6 +126,33 @@ function saveDesk(desk: Desk) {
   } catch {
     /* the book still works for this page view */
   }
+}
+
+function loadStructure(): StructureBook {
+  try {
+    const raw = localStorage.getItem(STRUCTURE_KEY)
+    const parsed = raw ? JSON.parse(raw) as StructureBook : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeStructure(cik: string, prices: Record<string, string>, quotes: Quote[]) {
+  try {
+    const book = loadStructure()
+    book[cik] = { prices, quotes }
+    localStorage.setItem(STRUCTURE_KEY, JSON.stringify(book))
+  } catch {
+    /* the typed price still shows for this visit */
+  }
+}
+
+function maturityLabel(row: Instrument) {
+  const value = row.maturity || ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  if (/^\d{4}$/.test(value)) return `${value} (month and day not in the filing)`
+  return value || 'not found'
 }
 
 function blankBond(): Draft {
@@ -170,8 +203,11 @@ export function CreditPage() {
   const [issuers, setIssuers] = useState<IssuerRow[]>([])
   const [view, setView] = useState<View | null>(null)
   const [err, setErr] = useState('')
-  const [priceId, setPriceId] = useState('psky_1l_2031')
-  const [price, setPrice] = useState('')
+  const [typed, setTyped] = useState<Record<string, string>>({})
+  const [localQuotes, setLocalQuotes] = useState<Record<string, Quote>>({})
+  const edited = useRef(false)
+  const hasLocal = useRef(false)
+  const localQuotesRef = useRef<Record<string, Quote>>({})
   const [multiple, setMultiple] = useState('6')
   const [busy, setBusy] = useState(false)
   const [desk, setDesk] = useState<Desk>({})
@@ -198,11 +234,45 @@ export function CreditPage() {
     }
     const saved = loadDesk()[issuer]
     setDrafts(saved?.bonds?.length ? saved.bonds : [blankBond()])
+    const structure = loadStructure()[issuer]
+    hasLocal.current = !!structure
+    edited.current = false
+    setTyped(structure?.prices || {})
+    const remembered: Record<string, Quote> = {}
+    for (const row of structure?.quotes || []) {
+      if (row?.id) remembered[row.id] = row
+    }
+    localQuotesRef.current = remembered
+    setLocalQuotes(remembered)
     setErr('')
     setView(null)
+    let cancelled = false
     api<View>(`/api/credit/issuers/${issuer}`)
-      .then(setView)
-      .catch((error) => setErr(error instanceof Error ? error.message : 'Could not load this issuer'))
+      .then((next) => {
+        if (cancelled) return
+        if (next.mode !== 'screen' && !edited.current) {
+          const seeded: Record<string, string> = { ...(hasLocal.current ? (loadStructure()[issuer]?.prices || {}) : {}) }
+          let filled = false
+          for (const row of next.quotes || []) {
+            if (row.id && row.clean_price && !(row.id in seeded)) {
+              seeded[row.id] = String(row.clean_price)
+              filled = true
+            }
+          }
+          if (filled) {
+            hasLocal.current = true
+            setTyped(seeded)
+            writeStructure(issuer, seeded, next.quotes || [])
+          }
+        }
+        setView(next)
+      })
+      .catch((error) => {
+        if (!cancelled) setErr(error instanceof Error ? error.message : 'Could not load this issuer')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [issuer])
 
   const fixedNotes = useMemo(
@@ -210,7 +280,26 @@ export function CreditPage() {
     [view],
   )
 
-  const compute = async () => {
+  const setClean = (id: string, value: string) => {
+    edited.current = true
+    hasLocal.current = true
+    setTyped((prev) => {
+      const next = { ...prev, [id]: value }
+      if (issuer) writeStructure(issuer, next, Object.values(localQuotesRef.current))
+      return next
+    })
+  }
+
+  const shownQuote = (row: Quote) => {
+    const clean = (typed[row.id] || '').trim()
+    if (!clean) return undefined
+    if (sameNumber(row.clean_price, clean)) return row
+    const local = localQuotes[row.id]
+    if (local && sameNumber(local.clean_price, clean)) return local
+    return undefined
+  }
+
+  const compute = async (includePrices: boolean) => {
     if (!issuer) return
     setBusy(true)
     setErr('')
@@ -218,12 +307,31 @@ export function CreditPage() {
       const body: { prices?: Record<string, { clean_price: string }>; ev_multiple?: string } = {
         ev_multiple: multiple,
       }
-      if (price.trim()) body.prices = { [priceId]: { clean_price: price.trim() } }
+      if (includePrices) {
+        const prices: Record<string, { clean_price: string }> = {}
+        for (const row of fixedNotes) {
+          if (Object.prototype.hasOwnProperty.call(typed, row.id)) {
+            prices[row.id] = { clean_price: (typed[row.id] || '').trim() }
+          }
+        }
+        body.prices = prices
+      }
       const next = await api<View>(`/api/credit/issuers/${issuer}/compute`, {
         method: 'POST',
         body: JSON.stringify(body),
       })
       setView(next)
+      if (includePrices && next.mode !== 'screen') {
+        const quotes = next.quotes || []
+        const remembered: Record<string, Quote> = {}
+        for (const row of quotes) {
+          if (row.id) remembered[row.id] = row
+        }
+        localQuotesRef.current = remembered
+        setLocalQuotes(remembered)
+        hasLocal.current = true
+        writeStructure(issuer, typed, quotes)
+      }
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not recompute')
     } finally {
@@ -375,6 +483,7 @@ export function CreditPage() {
           </div>
           <p className={styles.meta}>
             Look the bond up on <a href={view.finra_url} target="_blank" rel="noreferrer">FINRA</a> and type the clean price.
+            Settlement {view.settlement || 'the next business day'}.
             Filings are on <a href={view.sec_url} target="_blank" rel="noreferrer">EDGAR</a>.
             {view.curve_note} {view.recovery_note}
           </p>
@@ -462,7 +571,7 @@ export function CreditPage() {
                     <td>{row.name}</td>
                     <td>{money(row.amount, row.currency)}</td>
                     <td>{row.coupon_type === 'floating' ? `${row.index || 'index'} + ${row.coupon}%` : `${row.coupon}%`}</td>
-                    <td>{row.maturity || 'not public'}</td>
+                    <td>{maturityLabel(row)}</td>
                     <td>{row.lien === 'assumption' ? 'assumed 1L' : row.lien}{row.lien_notes ? ` — ${row.lien_notes}` : ''}</td>
                     <td>{row.source_url ? <a href={row.source_url} target="_blank" rel="noreferrer">{row.source_name || 'Source'}</a> : 'not found'}</td>
                   </tr>
@@ -515,44 +624,49 @@ export function CreditPage() {
 
       <Panel title="Pricing versus the market">
         <p className={styles.meta}>
-          There is no free per-bond price. Look the bond up on <a href={view?.finra_url} target="_blank" rel="noreferrer">FINRA</a> and enter the clean price.
-          {view?.oas_note}
+          There is no free per-bond price. Look the bond up on <a href={view?.finra_url} target="_blank" rel="noreferrer">FINRA</a> and type the clean price. It stays on this card.
+          Settlement for the yield is {view?.settlement || 'the next business day'}, the next business day.
+          {view?.curve_note || view?.oas_note}
         </p>
         <p className={styles.meta}>
-          OAS buckets, 2026-10-01: IG {view?.oas?.ig || '—'} · BBB {view?.oas?.bbb || '—'} · BB {view?.oas?.bb || '—'} · B {view?.oas?.b || '—'} · HY {view?.oas?.hy || '—'} · CCC {view?.oas?.ccc || '—'}.
+          OAS buckets{view?.oas_as_of ? `, ${view.oas_as_of}` : ''}: IG {view?.oas?.ig || '—'} · BBB {view?.oas?.bbb || '—'} · BB {view?.oas?.bb || '—'} · B {view?.oas?.b || '—'} · HY {view?.oas?.hy || '—'} · CCC {view?.oas?.ccc || '—'}.
         </p>
         <div className={styles.toolbar}>
-          <label>
-            Bond
-            <select aria-label="Bond to price" value={priceId} onChange={(event) => setPriceId(event.target.value)}>
-              {fixedNotes.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-            </select>
-          </label>
-          <label>
-            Clean price
-            <input aria-label="Clean price" value={price} onChange={(event) => setPrice(event.target.value)} placeholder="100" />
-          </label>
-          <Button size="sm" variant="primary" disabled={busy} onClick={() => void compute()}>
+          <Button size="sm" variant="primary" disabled={busy} onClick={() => void compute(true)}>
             {busy ? 'Computing…' : 'Recompute'}
           </Button>
         </div>
-        <table className={styles.table}>
-          <thead>
-            <tr><th>Bond</th><th>YTM</th><th>G-spread</th><th>Treasury</th><th>Call</th><th>Verdict</th></tr>
-          </thead>
-          <tbody>
-            {fixedNotes.map((row) => (
-              <tr key={row.id}>
-                <td>{row.name}</td>
-                <td>{row.ytm ? `${row.ytm}%` : 'not found'}</td>
-                <td>{row.g_spread_bp ? `${row.g_spread_bp} bp` : '—'}</td>
-                <td>{row.treasury ? `${row.treasury}%` : '—'}</td>
-                <td>{row.ytw_note || 'not public'}</td>
-                <td>{row.verdict || '—'}{row.verdict_reason ? ` — ${row.verdict_reason}` : ''}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className={styles.scroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr><th>Bond</th><th>Clean</th><th>YTM</th><th>G-spread</th><th>Treasury</th><th>Call</th><th>Verdict</th></tr>
+            </thead>
+            <tbody>
+              {fixedNotes.map((row) => {
+                const shown = shownQuote(row)
+                return (
+                  <tr key={row.id}>
+                    <td>{row.name}</td>
+                    <td>
+                      <input
+                        aria-label={`Clean price ${row.name || row.id}`}
+                        className={styles.price}
+                        value={typed[row.id] || ''}
+                        placeholder="100"
+                        onChange={(event) => setClean(row.id, event.target.value)}
+                      />
+                    </td>
+                    <td>{shown?.ytm ? `${shown.ytm}%` : (shown?.note || 'not found')}</td>
+                    <td>{shown?.g_spread_bp ? `${shown.g_spread_bp} bp` : '—'}</td>
+                    <td>{shown?.treasury ? `${shown.treasury}%` : '—'}</td>
+                    <td>{shown?.ytw_note || row.ytw_note || 'not public'}</td>
+                    <td>{shown?.verdict || '—'}{shown?.verdict_reason ? ` — ${shown.verdict_reason}` : ''}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </Panel>
 
       <Panel title="Documents and covenants">
@@ -574,7 +688,7 @@ export function CreditPage() {
             EV multiple
             <input aria-label="EV multiple" value={multiple} onChange={(event) => setMultiple(event.target.value)} />
           </label>
-          <Button size="sm" disabled={busy} onClick={() => void compute()}>Update waterfall</Button>
+          <Button size="sm" disabled={busy} onClick={() => void compute(false)}>Update waterfall</Button>
         </div>
         <p className={styles.meta}>
           Stressed EBITDA starts at the 2026 target without synergies. Admin claims default to 5%. The term loan lien is an assumption.
@@ -622,17 +736,20 @@ export function CreditPage() {
           Deep dive stays off until the model call is attested. It will not pick Grok or Claude for you.
         </p>
         <ul className={styles.list}>
-          {fixedNotes.filter((row) => row.verdict).map((row) => (
-            <li key={row.id}>
-              <strong>{row.name}: {row.verdict}</strong>
-              <span className={styles.meta}>
-                {row.verdict_reason}
-                {row.buy_spread_bp ? ` Buy needs about ${row.buy_spread_bp} bp.` : ''}
-                {row.market_pd?.['1'] ? ` One-year market PD ${row.market_pd['1']}.` : ''}
-              </span>
-            </li>
-          ))}
-          {!fixedNotes.some((row) => row.verdict) && <li>Enter a clean price to see a verdict.</li>}
+          {fixedNotes.filter((row) => shownQuote(row)?.verdict).map((row) => {
+            const shown = shownQuote(row)
+            return (
+              <li key={row.id}>
+                <strong>{row.name}: {shown?.verdict}</strong>
+                <span className={styles.meta}>
+                  {shown?.verdict_reason}
+                  {shown?.buy_spread_bp ? ` Buy needs about ${shown.buy_spread_bp} bp.` : ''}
+                  {shown?.market_pd?.['1'] ? ` One-year market PD ${shown.market_pd['1']}.` : ''}
+                </span>
+              </li>
+            )
+          })}
+          {!fixedNotes.some((row) => shownQuote(row)?.verdict) && <li>Enter a clean price to see a verdict.</li>}
         </ul>
       </Panel>
     </>

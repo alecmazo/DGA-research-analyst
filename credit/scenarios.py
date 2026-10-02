@@ -126,7 +126,7 @@ def seed_scenarios() -> list[dict]:
          {**base, "one_year_shock": "-0.20"},
          ["Advertising revenue growth"]),
         ("higher_rates", "Higher-for-longer refinancing",
-         "The 2033 term loan is refinanced 200 bp wider. The 10-year Treasury was 5.24% on 2026-10-01.",
+         "The 2033 term loan is refinanced 200 bp wider.",
          {**base, "interest_rate": "0.095"},
          ["Treasury 5-year and 10-year", "1L and 2L prices"]),
         ("asset_sales_blocked", "Settlement limits asset sales",

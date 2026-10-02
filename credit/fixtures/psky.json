@@ -149,7 +149,7 @@
       "freshness_class": "event",
       "confidence": "high",
       "status": "ok",
-      "notes": ""
+      "notes": "Expected closing date of the new-issue sale in the September 30, 2026 pricing release. A typed secondary price settles on the next business day, not this date."
     },
     {
       "id": "pf.cash",
@@ -455,7 +455,7 @@
       "freshness_class": "market",
       "confidence": "high",
       "status": "ok",
-      "notes": ""
+      "notes": "Historical pull. The desk does not price off this row."
     },
     {
       "id": "curve.3M",
@@ -2347,8 +2347,8 @@
       },
       "maturity": {
         "id": "wbd_dcl_2029.maturity",
-        "value": "2029-01-01",
-        "unit": "date",
+        "value": "2029",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -2360,7 +2360,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dcl_2029.lien",
@@ -2445,8 +2445,8 @@
       },
       "maturity": {
         "id": "wbd_dcl_2030.maturity",
-        "value": "2030-01-01",
-        "unit": "date",
+        "value": "2030",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -2458,7 +2458,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dcl_2030.lien",
@@ -2543,8 +2543,8 @@
       },
       "maturity": {
         "id": "wbd_dcl_2037.maturity",
-        "value": "2037-01-01",
-        "unit": "date",
+        "value": "2037",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -2556,7 +2556,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dcl_2037.lien",
@@ -2641,8 +2641,8 @@
       },
       "maturity": {
         "id": "wbd_dcl_2040.maturity",
-        "value": "2040-01-01",
-        "unit": "date",
+        "value": "2040",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -2654,7 +2654,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dcl_2040.lien",
@@ -2739,8 +2739,8 @@
       },
       "maturity": {
         "id": "wbd_dcl_2042.maturity",
-        "value": "2042-01-01",
-        "unit": "date",
+        "value": "2042",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -2752,7 +2752,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dcl_2042.lien",
@@ -2837,8 +2837,8 @@
       },
       "maturity": {
         "id": "wbd_dcl_2043.maturity",
-        "value": "2043-01-01",
-        "unit": "date",
+        "value": "2043",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -2850,7 +2850,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dcl_2043.lien",
@@ -2935,8 +2935,8 @@
       },
       "maturity": {
         "id": "wbd_dcl_2047.maturity",
-        "value": "2047-01-01",
-        "unit": "date",
+        "value": "2047",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -2948,7 +2948,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dcl_2047.lien",
@@ -3033,8 +3033,8 @@
       },
       "maturity": {
         "id": "wbd_dcl_2049.maturity",
-        "value": "2049-01-01",
-        "unit": "date",
+        "value": "2049",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -3046,7 +3046,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dcl_2049.lien",
@@ -3131,8 +3131,8 @@
       },
       "maturity": {
         "id": "wbd_dgh_2029.maturity",
-        "value": "2029-01-01",
-        "unit": "date",
+        "value": "2029",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -3144,7 +3144,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dgh_2029.lien",
@@ -3229,8 +3229,8 @@
       },
       "maturity": {
         "id": "wbd_dgh_2032.maturity",
-        "value": "2032-01-01",
-        "unit": "date",
+        "value": "2032",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -3242,7 +3242,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dgh_2032.lien",
@@ -3327,8 +3327,8 @@
       },
       "maturity": {
         "id": "wbd_dgh_2042.maturity",
-        "value": "2042-01-01",
-        "unit": "date",
+        "value": "2042",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -3340,7 +3340,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dgh_2042.lien",
@@ -3425,8 +3425,8 @@
       },
       "maturity": {
         "id": "wbd_dgh_2052.maturity",
-        "value": "2052-01-01",
-        "unit": "date",
+        "value": "2052",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -3438,7 +3438,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dgh_2052.lien",
@@ -3523,8 +3523,8 @@
       },
       "maturity": {
         "id": "wbd_dgh_2030_eur.maturity",
-        "value": "2030-01-01",
-        "unit": "date",
+        "value": "2030",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -3536,7 +3536,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dgh_2030_eur.lien",
@@ -3621,8 +3621,8 @@
       },
       "maturity": {
         "id": "wbd_dgh_2033_eur.maturity",
-        "value": "2033-01-01",
-        "unit": "date",
+        "value": "2033",
+        "unit": "year",
         "source": {
           "type": "sec_filing",
           "name": "8-K/A 2026-08-04 exchange table",
@@ -3634,7 +3634,7 @@
         "freshness_class": "terms",
         "confidence": "medium",
         "status": "ok",
-        "notes": "Year is in the exchange note name. Day and month were not in the 8-K/A table."
+        "notes": "The year is in the exchange note name. The month and day were not in the 8-K/A table, so no maturity day is stored."
       },
       "lien": {
         "id": "wbd_dgh_2033_eur.lien",

@@ -234,7 +234,7 @@ Opened from the Market Pulse **Comps** chip.
 
 ### 5.16 Credit (`/credit`)
 
-High-yield book. About 80 public issuers, keyed by SEC CIK, plus the Paramount Skydance structure. Filter by name, sector, and a minimum yield that starts at 6%. A priced bond under that floor drops off. Coupons and clean prices are typed on the issuer blotter. The call is code. Investment-grade 3–4% coupons are not the book.
+High-yield book. About 80 public issuers, keyed by SEC CIK, plus the Paramount Skydance structure. Filter by name, sector, and a minimum yield that starts at 6%. A priced bond under that floor drops off. Coupons and clean prices are typed on the issuer blotter. The call is code. Investment-grade 3–4% coupons are not the book. A clean price typed on the Paramount pricing card stays on that card. The Treasury curve and ICE BofA spread benchmarks load daily. Yield settlement is the next business day. WBD exchange notes keep the year from the filing and do not store a January 1 maturity.
 
 ### 5.17 Merger arb (`/merger-arb`)
 

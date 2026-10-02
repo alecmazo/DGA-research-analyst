@@ -92,8 +92,19 @@ class MemoryStore:
         self.prices.append(deepcopy(row))
         return row
 
+    def forget_price(self, instrument_id: str) -> None:
+        self.prices = [row for row in self.prices if row.get("instrument_id") != instrument_id]
+
     def prices_for(self, instrument_id: str) -> list[dict]:
         return [deepcopy(row) for row in self.prices if row.get("instrument_id") == instrument_id]
+
+    def latest_prices(self) -> dict[str, dict]:
+        found: dict[str, dict] = {}
+        for row in self.prices:
+            iid = row.get("instrument_id")
+            if iid:
+                found[str(iid)] = deepcopy(row)
+        return found
 
     def save_reference(self, name: str, version: str, source_url: str, pulled_at: str, rows: list) -> None:
         self.references[(name, version)] = {
@@ -199,6 +210,16 @@ class PostgresStore:
             conn.commit()
         return row
 
+    def forget_price(self, instrument_id: str) -> None:
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM credit_bond_prices WHERE instrument_id = %s",
+                    (instrument_id,),
+                )
+            conn.commit()
+
     def prices_for(self, instrument_id: str) -> list[dict]:
         with self._connect() as conn, conn.cursor() as cur:
             ensure_tables(conn)
@@ -211,6 +232,20 @@ class PostgresStore:
             )
             cols = ["instrument_id", "clean_price", "trade_date", "source_note", "entered_by"]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def latest_prices(self) -> dict[str, dict]:
+        with self._connect() as conn, conn.cursor() as cur:
+            ensure_tables(conn)
+            cur.execute(
+                """
+                SELECT DISTINCT ON (instrument_id)
+                       instrument_id, clean_price::text, trade_date::text, source_note, entered_by
+                  FROM credit_bond_prices
+                 ORDER BY instrument_id, created_at DESC
+                """
+            )
+            cols = ["instrument_id", "clean_price", "trade_date", "source_note", "entered_by"]
+            return {row[0]: dict(zip(cols, row)) for row in cur.fetchall()}
 
     def save_reference(self, name: str, version: str, source_url: str, pulled_at: str, rows: list) -> None:
         import json

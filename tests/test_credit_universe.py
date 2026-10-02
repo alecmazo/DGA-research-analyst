@@ -1,7 +1,18 @@
 """High-yield book is a real issuer list. Low coupons leave the screen."""
 
+from decimal import Decimal
+
 from credit.screen import book_rows, screen_view
 from credit.universe import UNIVERSE, by_cik
+
+CURVE = {
+    "ok": True,
+    "curve": {"10Y": Decimal("1.00")},
+    "oas": {},
+    "treasury_as_of": "2026-10-02",
+    "oas_as_of": "",
+    "note": "Test curve as of 2026-10-02.",
+}
 
 
 def test_book_is_high_yield_names_with_real_ciks():
@@ -26,28 +37,40 @@ def test_book_is_high_yield_names_with_real_ciks():
 def test_screen_keeps_a_high_yield_and_drops_a_low_coupon():
     issuer = by_cik("0001108109")
     assert issuer is not None
-    high = screen_view(issuer, {"bonds": [{
-        "id": "cyh-1",
-        "name": "Senior notes",
-        "coupon": "8.00",
-        "maturity": "2031-10-15",
-        "clean_price": "100",
-    }]})
+    high = screen_view(issuer, {
+        "bonds": [{
+            "id": "cyh-1",
+            "name": "Senior notes",
+            "coupon": "8.00",
+            "maturity": "2031-10-15",
+            "clean_price": "100",
+        }],
+        "settlement": "2026-10-05",
+        "benchmarks": CURVE,
+    })
     assert high["mode"] == "screen"
     assert high["badge"] == "High yield"
+    assert high["curve_as_of"] == "2026-10-02"
+    assert high["settlement"] == "2026-10-05"
+    assert "2026-10-01" not in high["curve_note"]
     quote = high["quotes"][0]
     assert quote["on_book"] is True
     assert float(quote["ytm"]) > 7
+    assert float(quote["g_spread_bp"]) > 400
     assert quote["verdict"] in {"Buy", "Watch", "Avoid"}
     assert "not an agency rating" in high["recovery_note"]
 
-    low = screen_view(issuer, {"bonds": [{
-        "id": "ig-1",
-        "name": "Low coupon",
-        "coupon": "3.40",
-        "maturity": "2031-10-15",
-        "clean_price": "100",
-    }]})
+    low = screen_view(issuer, {
+        "bonds": [{
+            "id": "ig-1",
+            "name": "Low coupon",
+            "coupon": "3.40",
+            "maturity": "2031-10-15",
+            "clean_price": "100",
+        }],
+        "settlement": "2026-10-05",
+        "benchmarks": CURVE,
+    })
     assert low["badge"] == "Off the book"
     assert low["quotes"][0]["off_book"] is True
     assert float(low["quotes"][0]["ytm"]) < 6

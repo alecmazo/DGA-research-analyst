@@ -17,20 +17,37 @@ from credit.calc import (
     yield_to_worst,
 )
 from credit.fixture import CIK, build_fixture
-from credit.present import FINRA, curve_of
+from credit.market import current_benchmarks, next_business_settlement
+from credit.present import FINRA
 from credit.universe import BOOK, UNIVERSE, YIELD_FLOOR_PCT
 
-SETTLEMENT = date(2026, 10, 5)
 FLOOR = D(YIELD_FLOOR_PCT)
-_CURVE: dict[str, Decimal] | None = None
 _PSKY_COUPON: str | None = None
 
 
-def _curve() -> dict[str, Decimal]:
-    global _CURVE
-    if _CURVE is None:
-        _CURVE = curve_of(build_fixture())
-    return _CURVE
+def _benchmarks(body: dict) -> dict:
+    given = body.get("benchmarks")
+    if isinstance(given, dict):
+        return given
+    return current_benchmarks()
+
+
+def _curve_points(benchmarks: dict) -> dict[str, Decimal]:
+    curve: dict[str, Decimal] = {}
+    for key, value in (benchmarks.get("curve") or {}).items():
+        number = value if isinstance(value, Decimal) else money(value)
+        if number is not None:
+            curve[str(key)] = number
+    return curve
+
+
+def _day(value) -> date | None:
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 def psky_coupon_high() -> str:
@@ -95,7 +112,7 @@ def book_rows(extra: list[dict] | None = None) -> list[dict]:
     return rows
 
 
-def _price_one(raw: dict, index: int) -> dict:
+def _price_one(raw: dict, index: int, settlement: date, curve: dict[str, Decimal]) -> dict:
     name = str(raw.get("name") or "").strip() or "Bond"
     coupon_pct = money(raw.get("coupon"))
     clean = money(raw.get("clean_price"))
@@ -137,21 +154,21 @@ def _price_one(raw: dict, index: int) -> dict:
         base["note"] = "Maturity must be a day, YYYY-MM-DD."
         base["off_book"] = not on_coupon
         return base
-    if maturity <= SETTLEMENT:
-        base["note"] = "Maturity is not after the settlement day used here, 2026-10-05."
+    if maturity <= settlement:
+        base["note"] = f"Maturity is not after the settlement day used here, {settlement.isoformat()}."
         return base
     solved = yield_to_worst(
         clean=clean,
         coupon=coupon_pct / D("100"),
         maturity=maturity,
-        settlement=SETTLEMENT,
-        issue=SETTLEMENT,
+        settlement=settlement,
+        issue=settlement,
         frequency=2,
         call_status="not_public",
     )
     ytm = solved["ytm"]
-    years = years_to_maturity(SETTLEMENT, maturity)
-    treasury = interpolate_treasury(_curve(), years)
+    years = years_to_maturity(settlement, maturity)
+    treasury = interpolate_treasury(curve, years)
     spread_bp = g_spread_bp(ytm, treasury)
     spread_decimal = None if spread_bp is None else spread_bp / D("10000")
     recovery = D("0.40")
@@ -176,8 +193,15 @@ def _price_one(raw: dict, index: int) -> dict:
 
 def screen_view(issuer: dict, body: dict | None = None) -> dict:
     body = body or {}
+    benchmarks = _benchmarks(body)
+    settlement = _day(body.get("settlement")) or next_business_settlement(_day(body.get("as_of")))
+    curve = _curve_points(benchmarks)
     incoming = body.get("bonds") if isinstance(body.get("bonds"), list) else []
-    quotes = [_price_one(raw, index) for index, raw in enumerate(incoming) if isinstance(raw, dict)]
+    quotes = [
+        _price_one(raw, index, settlement, curve)
+        for index, raw in enumerate(incoming)
+        if isinstance(raw, dict)
+    ]
     on_book = [row for row in quotes if row.get("on_book")]
     priced = [row for row in quotes if row.get("ytm")]
     off = [row for row in quotes if row.get("off_book")]
@@ -209,10 +233,8 @@ def screen_view(issuer: dict, body: dict | None = None) -> dict:
         "sec_url": f"https://www.sec.gov/edgar/browse/?CIK={cik}&owner=exclude",
         "finra_url": FINRA,
         "quotes": quotes,
-        "curve_as_of": "2026-10-01",
-        "curve_note": (
-            "G-spread uses the Treasury close stored on the credit fixture for 2026-10-01. "
-            "It is not a live TRACE print."
-        ),
+        "settlement": settlement.isoformat(),
+        "curve_as_of": str(benchmarks.get("treasury_as_of") or ""),
+        "curve_note": str(benchmarks.get("note") or "Treasury curve is not loaded."),
         "recovery_note": "The call assumes 40% recovery until a capital structure is loaded. It is not an agency rating.",
     }
