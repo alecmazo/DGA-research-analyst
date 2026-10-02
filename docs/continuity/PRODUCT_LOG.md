@@ -74,7 +74,7 @@ Copy these into every new agent session:
 - **Support:** GP sees the inbox; LPs can **file** only. Desk ticket **dot** is GP-only.
 - **iOS:** do not App Store-submit without explicit confirmation. TestFlight is OK when asked.
 - **Desk bot:** GPT-oss, stacked above Support on the main desk (`GrokBot.tsx`, `FabDock.tsx`). The browser calls `gpt-oss-20b-finance` on this Mac. It does not call xAI. Demo cannot use it.
-- **Do not commit:** `ticket_*.jpg`, `mobile/logo-options/`.
+- **Keep in the repo:** `ticket_*.jpg` and `mobile/logo-options/`. The next model needs the screenshots and the logo studies. Do not delete them.
 
 ---
 

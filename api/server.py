@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui704-20261002-gpt-oss"
+WEB_BUILD_VERSION = "ui705-20261002-handoff"
 
 
 @app.get("/api/build")
@@ -8758,7 +8758,13 @@ def _continuity_pack() -> dict:
         f"`BUILD_VERSION` and append a row to `CONTINUITY.md`.\n"
         f"2. After UI edits: `npm run build` in `web/gp-app/` and **commit `dist/`** "
         f"(Railway Nixpacks does not run Node).\n"
-        f"3. After push, poll `/api/build` until the new string is live.\n"
+        f"3. Ship by pushing `main`. That deploys Railway service `web` only. "
+        f"The web service is set to Nixpacks, `/health` (300s), and the "
+        f"memory-capped start command in `railway.toml`. Poll `/api/build` "
+        f"until it matches. Do not deploy `sliw` or Postgres unless Alec asks. "
+        f"On this Mac the folder is "
+        f"`/Users/dplvideo/.grok/worktrees/DGA-Research-Portal`. The GitHub "
+        f"repo name stays `DGA-research-analyst`.\n"
         f"4. Do **not** auto-send email. Share prompts for a recipient.\n"
         f"5. Sliw is Alec/Edyta only. CRM in shared Postgres.\n"
         f"6. Never persist Grok live-search tool dumps as `report_md`.\n"
@@ -8766,7 +8772,8 @@ def _continuity_pack() -> dict:
         f"8. Do not App Store-submit iOS without explicit confirmation.\n"
         f"9. The desk bot above Support is GPT-oss on this Mac "
         f"(`gpt-oss-20b-finance` in the browser). It does not call xAI. "
-        f"Do not commit `ticket_*.jpg` or `mobile/logo-options/`.\n"
+        f"Ticket screenshots (`ticket_*.jpg`) and `mobile/logo-options/` "
+        f"stay in the repo so the next model can see them.\n"
         f"10. Financials print CSS stays scoped to `.shell` — never `body *`.\n"
         f"11. Accounts rebalance = **Grok** 12m PT vs **live last**.\n"
         f"12. Saved Reports: Grok and Claude each show their own TGT + live upside.\n"
@@ -8852,8 +8859,9 @@ def _continuity_speed_prompt() -> str:
         f"edit run `npm run build` in `web/gp-app/` and commit `dist/`; one "
         f"uvicorn worker; do not auto-send email; do not publish a mobile "
         f"update unless Alec asks; do not re-upload wedding videos already "
-        f"on `/data/sliw-media`; the desk bot is GPT-oss on this Mac and does not call xAI; do not "
-        f"commit `ticket_*.jpg` or `mobile/logo-options/`.\n\n"
+        f"on `/data/sliw-media`; the desk bot is GPT-oss on this Mac and does not call xAI; "
+        f"ticket screenshots and `mobile/logo-options/` stay in the repo; "
+        f"the local folder on this Mac is `DGA-Research-Portal`.\n\n"
         f"## Then do the speed audit\n\n"
         f"1. Read `docs/mobile-speed/CHECKLIST.md`. The budgets are the steps "
         f"table. Older limits are under **Budget revisions**. Do not renumber "

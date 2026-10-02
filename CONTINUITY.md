@@ -285,6 +285,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Grok desk** | **`ui702-20261002-grok-desk`** | The Grok desk bot sits above Support on the main desk. GitHub `main` is the code the site runs. |
 | **Credit** | **`ui703-20261002-credit`** | Credit is in the Work menu. The issuer page is keyed by CIK. Paramount Skydance is the seed. Bond prices are typed in. The verdict is code, not a model. |
 | **GPT-oss** | **`ui704-20261002-gpt-oss`** | The bottom-right desk button is GPT-oss. It calls `gpt-oss-20b-finance` on this Mac and does not call the paid API. |
+| **Handoff** | **`ui705-20261002-handoff`** | Credit is on the site. GitHub `main` is the full folder, including ticket screenshots and logo options. Pushing `main` deploys Railway service `web` with the Nixpacks start command. On this Mac the folder is `DGA-Research-Portal`. The GitHub repo name stays `DGA-research-analyst`. |
 
 ### One-click handoff (preferred)
 
@@ -321,7 +322,7 @@ first, then sets `WEB_BUILD_VERSION` to
    WEB_BUILD_VERSION = "uiNNN-YYYYMMDD-slug"
    ```
 3. Update the table in this file (append a row under Current sequence).
-4. Commit + push `main` (Railway auto-deploys).
+4. Commit + push `main` (deploys Railway service `web` only).
 5. Poll until `/api/build` shows the new string.
 
 ---
@@ -402,7 +403,7 @@ Settings stays in the account menu, not a top-level work tab. Sliw (`/sliw/`) st
 
 ### Known systems
 
-- **Repo:** `https://github.com/alecmazo/DGA-research-analyst` · branch `main` · Railway auto-deploys
+- **Repo:** `https://github.com/alecmazo/DGA-research-analyst` · branch `main` · pushing `main` deploys Railway service `web` (Nixpacks, `/health`, memory-capped start). Do not deploy `sliw` or Postgres unless asked. On this Mac the folder is `/Users/dplvideo/.grok/worktrees/DGA-Research-Portal`.
 - **Railway:** project `upbeat-ambition`, GP service **`web`**, Postgres plugin, Sliw service `sliw`
 - **GP login:** `/api/auth/v2/login` · header `x-auth-v2-token`
 - **Support tickets:** `/api/support/tickets` + agent inbox; mark fixed with PATCH + trail
@@ -481,4 +482,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui704-20261002-gpt-oss` · Live until the next upload: `ui702-20261002-grok-desk` · Next: `ui705-YYYYMMDD-slug`*
+*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui705-20261002-handoff` · Live until the next upload: `ui704-20261002-gpt-oss` · Next: `ui706-YYYYMMDD-slug`*

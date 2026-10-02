@@ -50,4 +50,4 @@ unavailable. It is not how a new agent catches up — GitHub has the live docs.
 
 Live site: `https://portfolio.dgacapital.com/gp`  
 Repo: `https://github.com/alecmazo/DGA-research-analyst` (`main`)  
-Railway: project `upbeat-ambition`, service `web` (auto-deploys on push).
+Railway: project `upbeat-ambition`. Pushing `main` deploys service `web` (Nixpacks, `/health`, memory-capped start). Do not deploy `sliw` or Postgres unless asked. On this Mac the folder is `/Users/dplvideo/.grok/worktrees/DGA-Research-Portal`.

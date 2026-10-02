@@ -46,13 +46,13 @@ ask him to open Terminal or clone anything himself.
 
 1. Never decrease `WEB_BUILD_VERSION` in `api/server.py`. Also bump `BUILD_VERSION` and append a CONTINUITY.md row.
 2. After UI edits: `npm run build` in `web/gp-app/` and **commit `dist/`**.
-3. After push, poll `/api/build` until the new string is live.
+3. Ship by pushing `main`. That deploys Railway service `web`. The web service uses Nixpacks, `/health` (300s), and the memory-capped start command in `railway.toml`. Poll `/api/build` until it matches. Do not deploy `sliw` or Postgres unless Alec asks. On this Mac the folder is `/Users/dplvideo/.grok/worktrees/DGA-Research-Portal`. The GitHub repo name stays `DGA-research-analyst`.
 4. Do **not** auto-send email. Share/report mail prompts for a recipient.
 5. Sliw is Alec/Edyta only. CRM in shared Postgres.
 6. Never persist Grok live-search tool dumps as `report_md`.
 7. Demo login must never see live LP/GP PII (`demo@dgacapital.com` / `demo123`).
 8. Do not App Store-submit iOS without explicit confirmation.
-9. The desk bot above Support is GPT-oss on this Mac (`gpt-oss-20b-finance` in the browser, `GrokBot.tsx`). It does not call xAI. Do not commit `ticket_*.jpg` or `mobile/logo-options/`.
+9. The desk bot above Support is GPT-oss on this Mac (`gpt-oss-20b-finance` in the browser, `GrokBot.tsx`). It does not call xAI. Ticket screenshots (`ticket_*.jpg`) and `mobile/logo-options/` stay in the repo so the next model can see them.
 10. Support tickets: `GET /api/support/agent-inbox` (or Settings). Close with PATCH + trail.
 
 ## 4. If the paste is the mobile speed prompt

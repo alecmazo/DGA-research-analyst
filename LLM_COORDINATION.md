@@ -3,6 +3,17 @@
 **Purpose:** Keep Grok, Fable, Claude/Opus, and any other agents working **in concert**, not on top of each other.  
 **Owner of this file:** whoever last edited the **Active claims** section (update when you start or finish work).
 
+## Ship path (2026-10-02)
+
+This is the path. Do not invent a second one.
+
+1. Edit `/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445` on this Mac. Older names (`desktop-DGA-research-analyst`, `desktop-claude-research-analyst`, `desktop-research-analyst`) are symlinks to that folder. Do not rename the GitHub repo.
+2. When desk pages change, `npm run build --prefix web/gp-app` and commit `web/gp-app/dist`. Railway does not run Node.
+3. Commit everything the next model needs, including `ticket_*.jpg`, `mobile/logo-options/`, and `stocks/AAPL_user_msg.txt`. Do not commit `.env` or generated `stocks/*` reports.
+4. Push `main` on `https://github.com/alecmazo/DGA-research-analyst`. That push deploys Railway service **web** (`6aac66bc-eea5-45a1-b808-ff4275886491`) in project `upbeat-ambition`. The service is set to Nixpacks, a `/health` check, and the memory-capped start command in `railway.toml`.
+5. Poll `https://portfolio.dgacapital.com/api/build` until it matches `BUILD_VERSION`. A push does not deploy `sliw` unless the commit touches `apps/sliw-agent/**`, `railway.toml`, `nixpacks.toml`, `Procfile`, or `requirements.txt`. Never deploy Postgres unless Alec asks.
+6. Credit (`/gp/credit`) and the GPT-oss desk button are already part of this tree. The button calls `gpt-oss-20b-finance` on this Mac and does not call xAI.
+
 ---
 
 ## Sync snapshot (2026-07-13)

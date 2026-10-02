@@ -1,0 +1,97 @@
+DATE: 2026-09-28
+TICKER: AAPL
+ENTITY: Apple Inc.
+CURRENT_PRICE: 338.2749938964844
+PREVIOUS_CLOSE: 341.4603
+MARKET_CAP: $4936.8Bn
+ENTERPRISE_VALUE: N/A
+52_WEEK_RANGE: $243.42–$345.34
+LATEST_FILING_TYPE: 10-Q
+
+=== VERIFIED FINANCIAL DATA FOR AAPL ===
+Entity: Apple Inc. (source: SEC EDGAR XBRL)
+LATEST_FILING_TYPE: 10-Q
+Latest 10-K: filed 2025-10-31, reportDate 2025-09-27, accession 0000320193-25-000079
+Latest 10-Q: filed , reportDate 2026-06-27, accession 
+
+[ANNUAL DATA - source=db_annuals+company_financials_db, $ in millions unless noted]
+FY | PeriodEnd | Revenue | GrossProfit | GrossMargin% | EBITDA | EBITDAMargin% | OpInc | OpMargin% | NetInc | NetMargin% | DilEPS | OCF | CapEx | FCF | Cash | TotalDebt | TotalAssets | Equity
+TTM (bridge: FY2025 + Q3 YTD delta) | 2026-06-27 | 344,901.0 | 167,826.0 | 48.7% | 123,761.0 | 35.9% | 114,412.0 | 33.2% | 95,697.0 | 27.7% | 6.50 | 86,504.0 | 8,373.0 | 78,131.0 | 39,544.0 | 82,347.0 | 383,266.0 | 107,520.0
+FY2025 | 2025-09-27 | 416,161.0 | 195,201.0 | 46.9% | 144,748.0 | 34.8% | 133,050.0 | 32.0% | 112,010.0 | 26.9% | 7.46 | 111,482.0 | 12,715.0 | 98,767.0 | 35,934.0 | 90,678.0 | 359,241.0 | 73,733.0
+FY2024 | 2024-09-28 | 391,035.0 | 180,683.0 | 46.2% | 134,661.0 | 34.4% | 123,216.0 | 31.5% | 93,736.0 | 24.0% | 6.08 | 118,254.0 | 9,447.0 | 108,807.0 | 29,943.0 | 96,662.0 | 364,980.0 | 56,950.0
+FY2023 | 2023-09-30 | 383,285.0 | 169,148.0 | 44.1% | 125,820.0 | 32.8% | 114,301.0 | 29.8% | 96,995.0 | 25.3% | 6.13 | 110,543.0 | 10,959.0 | 99,584.0 | N/A | N/A | N/A | N/A
+FY2022 | 2022-09-24 | 394,328.0 | 170,782.0 | 43.3% | 130,541.0 | 33.1% | 119,437.0 | 30.3% | 99,803.0 | 25.3% | 6.11 | 122,151.0 | 10,708.0 | 111,443.0 | 23,646.0 | 121,557.0 | 352,755.0 | 50,672.0
+FY2021 | 2021-09-25 | 365,817.0 | 152,836.0 | 41.8% | 120,233.0 | 32.9% | 108,949.0 | 29.8% | 94,680.0 | 25.9% | 5.61 | 104,038.0 | 11,085.0 | 92,953.0 | 34,940.0 | 129,674.0 | 351,002.0 | 63,090.0
+
+[QUARTERLY DATA - from latest 10-Q, $ in millions unless noted]
+Period | FY | FP | PeriodEnd | Revenue | GrossProfit | GrossMargin% | EBITDA | EBITDAMargin% | OpInc | OpMargin% | NetInc | NetMargin% | DilEPS | OCF | FCF
+Latest Quarter (3mo) | FY2026 | Q3 | 2026-06-27 | 109,417.0 | 54,770.0 | 50.1% | N/A | N/A | 35,695.0 | 32.6% | 29,789.0 | 27.2% | 2.02 | N/A | N/A
+Same Q Prior Year (3mo) | FY2025 | Q3 | 2025-09-27 | 102,466.0 | 48,341.0 | 47.2% | 35,554.0 | 34.7% | 32,427.0 | 31.6% | 27,466.0 | 26.8% | N/A | 29,728.0 | 26,486.0
+Current YTD | FY2026 | Q3 | 2026-06-27 | 220,601.0 | 109,551.0 | 49.7% | 39,324.0 | N/A | 71,580.0 | 32.4% | 59,367.0 | 26.9% | N/A | 28,702.0 | 26,731.0
+Prior YTD | FY2025 | Q3 | 2025-09-27 | 291,861.0 | 136,926.0 | 46.9% | 67,804.0 | N/A | 90,218.0 | 30.9% | 75,680.0 | 25.9% | N/A | 53,680.0 | 47,367.0
+Note: 10-Q Cash Flow statements report YTD only (no 3-month breakdown), so 'Latest Quarter' OCF/FCF will be blank — this is expected. TTM cash metrics are pre-computed above using the bridge formula and must be used directly.
+
+[BALANCE SHEET STRUCTURE — point-in-time, $ in millions | source=company_financials_db]
+Use this table for Section 5C (Balance Sheet Structure). Do not invent line items not shown; write N/A.
+Line | Q end 2026-06-27 (Q3) | FY2025 end 2025-09-27
+Cash & Equivalents | 39,544.0 | 35,934.0
+Short-term Investments | 22,855.0 | 18,763.0
+Total Assets | 383,266.0 | 359,241.0
+Short-term Debt | 11,007.0 | 12,350.0
+Long-term Debt | 71,340.0 | 78,328.0
+Total Debt | 82,347.0 | 90,678.0
+Total Liabilities | 275,746.0 | 285,508.0
+Stockholders' Equity | 107,520.0 | 73,733.0
+Net Debt / (Net Cash) | 42,803.0 | 54,744.0
+
+Instruction: use ONLY these numbers for all tables and calculations. (source=db_annuals+company_financials_db) The TTM row is pre-computed via the bridge formula (last FY + current YTD delta) — use it directly for the TTM column; do NOT attempt to recompute it. GrossProfit may be derived (Revenue - CostOfRevenue) if not directly tagged. Banks/thrifts: Revenue = Total Interest Income + Noninterest Income (never ASC-606 fee-only contract revenue). Net interest income is used as GrossProfit when GAAP GrossProfit is absent. EBITDA is always derived (OperatingIncome + D&A) and is non-GAAP. If CapEx tag was absent for a period, FCF = OCF (CapEx treated as 0). If a cell is 'N/A', write 'N/A' — do NOT write a long disclaimer phrase. NEVER put qualitative words (Elevated, Improving, Turning positive, Solid, Manageable, Higher, ~7+) in table cells — numbers or N/A only. CRITICAL YEAR LABELS: Copy FY{year} and PeriodEnd EXACTLY as printed in the ANNUAL/QUARTERLY rows above. If a row says FY2023 | 2023-12-31, write FY2023 (ended 2023-12-31) — NEVER relabel older years as the current fiscal year while keeping old numbers. This PRIMARY block wins over any multi-year trend block or live web/news.
+
+=== HARD RULES FOR THIS REPORT (NON-NEGOTIABLE) ===
+1. Key Metrics / Financial tables: copy EXACT numbers from the PRIMARY VERIFIED FINANCIAL DATA block above. Numbers or N/A only — never 'Elevated', 'Improving', 'Turning positive', 'Solid', 'Manageable', 'Higher', '~7+', or any adjective in a table cell.
+2. FY LABELS + PERIOD ENDS are part of the data. Copy them exactly (e.g. if PRIMARY shows 'FY2025 | 2025-12-31 | 4737.3' write 'FY2025 (ended 2025-12-31)' with 4737.3). NEVER re-label an older year as the current FY while keeping old magnitudes (e.g. do not write FY2025 ended 2023-12-31 with 2023 revenue).
+3. If MULTI-YEAR TREND (SECONDARY) conflicts on year labels or magnitudes, ignore it for tables; use PRIMARY only. Secondary is for narrative trend.
+4. Live web/X search (if enabled) is ONLY for news, catalysts, filings headlines, and sentiment — NEVER to fill or override financial tables.
+5. EPS, Revenue, FCF, Debt, Cash must appear as numeric figures investors can audit (e.g. 1288.0, 4.49, 5.7%), not prose descriptors.
+
+## VERIFIED COMPS (company_financials — last reported FY + live last)
+
+Use these EXACT figures in Section 7B Comparable Companies. They are reported actuals (and live last price), **not NTM and not (E)**. If a cell is —, leave it blank. Do not invent a multiple. Do not label these rows as estimates.
+
+**Comparable companies (last reported FY + live last — company_financials)**
+
+Peers matched on GICS industry in store + size Figures are last reported fiscal year from company_financials and live last price — not NTM, not (E).
+
+| Ticker | Price | Mkt cap ($m) | EV ($m) | P/E | EV/EBITDA | EV/Sales | FCF yield | Rev YoY | FY |
+|--------|------:|-------------:|--------:|----:|----------:|---------:|----------:|--------:|:--:|
+| **AAPL** | $338 | 5,075,789 | 5,111,770 | 45.3x | 35.3x | 12.3x | 1.9% | +6.4% | 2025 |
+| NVDA | $228 | 5,599,120 | 5,596,983 | 46.6x | 42.0x | 25.9x | 1.7% | +65.5% | 2026 |
+| MSFT | $509 | 3,794,397 | 3,757,848 | 28.4x | — | 11.3x | 1.8% | +17.8% | 2026 |
+| META | $717 | 1,845,455 | 1,822,607 | 30.5x | 17.9x | 9.1x | 2.5% | +22.2% | 2025 |
+| AVGO | $349 | 1,693,988 | 1,739,794 | 73.2x | 66.8x | 27.2x | 1.6% | +23.9% | 2025 |
+| MU | $1,053 | 1,184,985 | 1,189,360 | 138.8x | 65.6x | 31.8x | 0.1% | +48.9% | 2025 |
+| AMD | $606 | 991,832 | 984,502 | 228.8x | — | 28.4x | 0.7% | +34.3% | 2025 |
+| DELL | $541 | — | — | 62.4x | — | — | — | +18.8% | 2026 |
+| GOOGL | $342 | — | — | 31.7x | — | — | — | +15.1% | 2025 |
+
+_Blanks are missing filings, not estimates. Do not fill with NTM or (E)._
+
+ANALYST_RATINGS_BLOCK (source: Yahoo Finance — ratings within last 6 months only, cutoff 2026-03-29 — use these exact values in Section 7.5):
+| Firm | Rating | 12M Price Target | Date | Action |
+|------|--------|-----------------|------|--------|
+| Goldman Sachs | Buy | $360.00 | 2026-07-31 | main |
+| Morgan Stanley | Overweight | $360.00 | 2026-09-02 | reit |
+| BofA Securities | Buy | $370.00 | 2026-09-23 | reit |
+| JPMorgan | Overweight | $340.00 | 2026-07-31 | main |
+| Wells Fargo | Overweight | $350.00 | 2026-07-31 | main |
+| Jefferies | Underperform | $263.66 | 2026-08-10 | down |
+| Citi | Buy | $365.00 | 2026-07-13 | main |
+| Barclays | Underweight | $245.00 | 2026-07-31 | main |
+| UBS | Neutral | $296.00 | 2026-05-01 | main |
+| Evercore ISI | Outperform | $380.00 | 2026-09-18 | main |
+
+CONSENSUS_SUMMARY (Yahoo Finance aggregate across ALL covering analysts):
+- Analysts covering: 39
+- Consensus rating: BUY (mean 2.20/5, 1=Strong Buy)
+- 12M price target: mean $328.22, median $340.00, high $405.00, low $215.00
+
+Generate the full research report for AAPL following every rule in your system prompt.
