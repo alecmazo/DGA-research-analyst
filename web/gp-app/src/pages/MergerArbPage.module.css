@@ -76,28 +76,74 @@ textarea {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.scanWrap {
-  overflow-x: auto;
+.dealList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
-.scanTable {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.scanTable th,
-.scanTable td {
-  text-align: left;
-  vertical-align: top;
-  padding: 6px 8px;
+.dealRow {
+  padding: 10px 0;
   border-bottom: 1px solid var(--border-subtle);
-  white-space: nowrap;
 }
 
-.scanTable td .meta {
+.dealTop {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.hideBox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.dealHit {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dealHit:hover .dealLine {
+  text-decoration: underline;
+}
+
+.dealHit:focus-visible {
+  outline: 2px solid var(--border-default);
+  outline-offset: 2px;
+}
+
+.dealLine {
   display: block;
   white-space: normal;
+  line-height: 1.45;
+}
+
+.dealDetail {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.dealDetail .meta a {
+  margin-right: 10px;
+}
+
+@media (max-width: 640px) {
+  .dealTop {
+    flex-wrap: wrap;
+  }
 }
 
 .drawer {

@@ -18,10 +18,11 @@ _SUFFIXES = (
     "co",
 )
 _DISPLAY = re.compile(
-    r"^(?P<title>.*?)\s*\((?P<ticker>[A-Z]{1,6})\)\s*\(CIK\s+(?P<cik>\d+)\)\s*$",
+    r"^(?P<title>.*?)\s*\((?P<tickers>[A-Z]{1,6}(?:\s*,\s*[A-Z]{1,6})*)\)\s*\(CIK\s+(?P<cik>\d+)\)\s*$",
     re.I,
 )
-_TICKER_PAREN = re.compile(r"\(([A-Z]{1,5})\)")
+# A one-letter parenthesis is a clause marker, "(A)", not a ticker.
+_TICKER_PAREN = re.compile(r"\(([A-Z]{2,5})\)")
 _ACQUIRED_BY = re.compile(
     r"([A-Z][\w.&,'\-]+(?:\s+[A-Z][\w.&,'\-]+){0,8})\s+will be acquired by\s+"
     r"([A-Z][\w.&,'\-]+(?:\s+[A-Z][\w.&,'\-]+){0,8})"
@@ -101,9 +102,10 @@ def parse_display_name(value: str) -> dict:
     match = _DISPLAY.match(text)
     if not match:
         return {"title": text, "ticker": "", "cik": ""}
+    tickers = [part.strip().upper() for part in match.group("tickers").split(",") if part.strip()]
     return {
         "title": match.group("title").strip(" ,"),
-        "ticker": match.group("ticker").upper(),
+        "ticker": tickers[0] if tickers else "",
         "cik": pad_cik(match.group("cik")),
     }
 

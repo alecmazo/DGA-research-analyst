@@ -43,6 +43,7 @@ type Candidate = {
   confidence?: number
   confidence_breakdown?: { points: number; reason: string }[]
   needs_manual_terms?: boolean
+  ignored?: boolean
   sources?: SourceBadge[]
   fields?: Field[]
 }
@@ -83,10 +84,135 @@ type Latest = {
   run?: Run | null
 }
 
-function money(value?: string, manual?: boolean) {
-  if (manual) return '—'
-  if (!value) return '—'
-  return value.startsWith('$') ? value : `$${value}`
+const FIELD_LABELS: Record<string, string> = {
+  cash_per_share: 'Cash per share',
+  exchange_ratio: 'Shares per share',
+  exchange_stock: 'Stock received',
+  cvr: 'Contingent value right',
+  collar: 'Collar',
+  election: 'Cash or stock election',
+  proration: 'Proration',
+  expected_close: 'Expected close',
+  outside_date: 'Outside date',
+  announce_date: 'Announced',
+  termination_fee: 'Termination fee',
+  vote_date: 'Shareholder vote',
+}
+
+const GENERIC_BUYER = /^(the company|company|merger sub(?:sidiary)?|the buyer|buyer|the acquirer|acquirer|the purchaser|purchaser)$/i
+
+function fieldLabel(name: string) {
+  if (FIELD_LABELS[name]) return FIELD_LABELS[name]
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
+}
+
+function dollars(value?: string) {
+  const text = (value || '').trim()
+  if (!text) return ''
+  if (text.startsWith('$')) return text
+  if (text.startsWith('-')) return `-$${text.slice(1)}`
+  return `$${text}`
+}
+
+function tickersFromName(name?: string) {
+  const text = (name || '').replace(/\s+/g, ' ')
+  const match = text.match(/\(([A-Z]{1,6}(?:\s*,\s*[A-Z]{1,6})*)/i)
+  if (!match) return []
+  return match[1].split(',').map((part) => part.trim().toUpperCase()).filter((part) => /^[A-Z]{2,6}$/.test(part))
+}
+
+function spokenCompany(name?: string) {
+  let text = (name || '').replace(/\s+/g, ' ').trim()
+  text = text.replace(/\s*\([^)]*$/, '').trim()
+  for (let i = 0; i < 3; i += 1) {
+    const next = text.replace(/\s*\((?:CIK\s+\d+|[A-Z]{1,6}(?:\s*,\s*[A-Z]{1,6})*)\)\s*$/i, '').trim()
+    if (next === text) break
+    text = next
+  }
+  return text
+}
+
+function currentValue(row: Candidate, name: string) {
+  const field = (row.fields || []).find((item) => item.field_name === name && item.is_current !== false)
+  if (!field || field.value == null || field.value === '') return ''
+  return String(field.value)
+}
+
+function offerSentence(row: Candidate) {
+  const terms = (row.offer_terms || '').trim()
+  if (terms) {
+    return terms
+      .replace(/\$([0-9][0-9,]*(?:\.[0-9]+)?)\s+cash/gi, '$$$1 cash per share')
+      .replace(/([0-9]+(?:\.[0-9]+)?)\s+shares\b/gi, '$1 shares per share')
+      .replace(/\s\+\s/g, ' plus ')
+  }
+  const parts: string[] = []
+  const cash = currentValue(row, 'cash_per_share').replace(/^\$/, '')
+  const ratio = currentValue(row, 'exchange_ratio')
+  if (cash) parts.push(`${dollars(cash)} cash per share`)
+  if (ratio) parts.push(`${ratio} shares per share`)
+  return parts.join(' plus ')
+}
+
+function buyerPhrase(row: Candidate) {
+  const name = spokenCompany(row.acquirer_name)
+  const ticker = (row.acquirer_ticker || '').toUpperCase()
+  const usableTicker = /^[A-Z]{1,5}$/.test(ticker) ? ticker : ''
+  if (!name || GENERIC_BUYER.test(name) || /^merger sub\b/i.test(name)) {
+    return usableTicker
+  }
+  if (usableTicker && !name.toUpperCase().includes(usableTicker)) return `${name} (${usableTicker})`
+  return name
+}
+
+function subjectOf(row: Candidate) {
+  const name = spokenCompany(row.target_name)
+  const listed = tickersFromName(row.target_name)
+  const stored = (row.target_ticker || '').toUpperCase()
+  const ticker = listed.length ? (listed.includes(stored) ? stored : listed[0]) : stored
+  if (name && ticker && !name.toUpperCase().includes(ticker)) return `${name} (${ticker})`
+  return name || ticker || 'This company'
+}
+
+function lastSale(row: Candidate) {
+  const price = dollars(row.current_price)
+  if (!price) return ''
+  const listed = tickersFromName(row.target_name)
+  const stored = (row.target_ticker || '').toUpperCase()
+  if (listed.length && !listed.includes(stored)) return ''
+  return price
+}
+
+function flagNames(row: Candidate) {
+  return new Set((row.fields || []).filter((field) => field.is_current !== false).map((field) => field.field_name))
+}
+
+function dealLine(row: Candidate) {
+  const who = subjectOf(row)
+  const offer = offerSentence(row)
+  const buyer = buyerPhrase(row)
+  const bits: string[] = []
+  if (offer) bits.push(`${who} is offered ${offer}${buyer ? ` by ${buyer}` : ''}.`)
+  else if (buyer) bits.push(`${who}: no cash or share price was extracted. Buyer: ${buyer}.`)
+  else bits.push(`${who}: no cash or share price was extracted.`)
+  const sale = lastSale(row)
+  if (sale) bits.push(`Last sale ${sale}.`)
+  const flags = flagNames(row)
+  if (flags.has('cvr') && offer) bits.push('A contingent value right is also included.')
+  if (row.needs_manual_terms && offer) {
+    const why: string[] = []
+    if (flags.has('collar')) why.push('a collar')
+    if (flags.has('election')) why.push('a cash or stock election')
+    if (flags.has('proration')) why.push('proration')
+    bits.push(why.length
+      ? `The spread was not computed because of ${why.join(', ')}.`
+      : 'The spread was not computed because the terms need a manual check.')
+  } else if (!row.needs_manual_terms && (row.gross_spread || row.gross_spread_pct)) {
+    const spread = [dollars(row.gross_spread), row.gross_spread_pct || ''].filter(Boolean).join(' / ')
+    bits.push(`Spread ${spread}.`)
+    if (row.annualized_pct) bits.push(`Annualized ${row.annualized_pct}.`)
+  }
+  return bits.join(' ')
 }
 
 function cikHref(cik?: string) {
@@ -103,7 +229,6 @@ export function DealScan() {
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [lastScan, setLastScan] = useState('')
   const [openId, setOpenId] = useState('')
-  const [confirmId, setConfirmId] = useState('')
   const [showIgnored, setShowIgnored] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
@@ -175,9 +300,11 @@ export function DealScan() {
         method: 'POST',
         body: JSON.stringify({ confirm: true }),
       })
-      setConfirmId('')
-      if (path === 'open-analysis') navigate(data.path)
-      else await load()
+      if (path === 'open-analysis') {
+        const next = data.path || ''
+        if (!next) throw new Error('The analysis page did not open')
+        navigate(next.includes('?') ? `${next}&local=1` : `${next}?local=1`)
+      } else await load()
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Nothing was written')
     } finally {
@@ -222,8 +349,6 @@ export function DealScan() {
     }
   }
 
-  const selected = candidates.find((row) => row.id === openId)
-  const confirming = candidates.find((row) => row.id === confirmId)
   const running = run?.status === 'running'
 
   return (
@@ -267,7 +392,9 @@ export function DealScan() {
             Show ignored
           </label>
         </div>
-        <p className={styles.muted}>Nothing is added to the desk until you click Add or Open in analysis.</p>
+        <p className={styles.muted}>
+          Click a deal for the terms. Hide removes it from this list. Analyze runs on the local model on this computer and does not call Grok or Claude. Nothing is added until you click Analyze or Save on the desk.
+        </p>
         {err && <p className={styles.err}>{err}</p>}
         {run?.sources?.length ? (
           <ul className={styles.rows}>
@@ -316,123 +443,115 @@ export function DealScan() {
       )}
 
       <Panel title="Scan results">
-        <div className={styles.scanWrap}>
-          <table className={styles.scanTable}>
-            <thead>
-              <tr>
-                <th>Target</th>
-                <th>Acquirer</th>
-                <th>Terms</th>
-                <th>Announced</th>
-                <th>Close</th>
-                <th>Status</th>
-                <th>HSR</th>
-                <th>Vote</th>
-                <th>Price</th>
-                <th>Offer</th>
-                <th>Spread</th>
-                <th>Annualized</th>
-                <th>Confidence</th>
-                <th>Sources</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {candidates.map((row) => (
-                <tr key={row.id} onClick={() => setOpenId(openId === row.id ? '' : row.id)}>
-                  <td>
-                    <strong>{row.target_ticker || '—'}</strong>
-                    <span className={styles.meta}>{row.target_name}</span>
-                    {row.target_cik && (
-                      <a href={cikHref(row.target_cik)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
-                        {row.target_cik}
-                      </a>
+        {!candidates.length && <p>No candidates yet. A scan does not add a deal by itself.</p>}
+        <ul className={styles.dealList}>
+          {candidates.map((row) => {
+            const open = openId === row.id
+            const line = dealLine(row)
+            const listed = tickersFromName(row.target_name)
+            const stored = (row.target_ticker || '').toUpperCase()
+            const priceHidden = Boolean(dollars(row.current_price) && listed.length && !listed.includes(stored))
+            const buyer = buyerPhrase(row)
+            const genericBuyer = !buyer && GENERIC_BUYER.test(spokenCompany(row.acquirer_name))
+            return (
+              <li key={row.id} className={styles.dealRow}>
+                <div className={styles.dealTop}>
+                  <label className={styles.hideBox}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Hide ${subjectOf(row)}`}
+                      checked={!!row.ignored}
+                      disabled={!!row.ignored || busy === row.id}
+                      onChange={() => { if (!row.ignored) void ignore(row) }}
+                    />
+                    Hide
+                  </label>
+                  <button
+                    type="button"
+                    className={styles.dealHit}
+                    aria-expanded={open}
+                    onClick={() => setOpenId(open ? '' : row.id)}
+                  >
+                    <span className={styles.dealLine}>{line}</span>
+                  </button>
+                </div>
+                {open && (
+                  <div className={styles.dealDetail}>
+                    <p className={styles.meta}>
+                      Announced {row.announce_date || '—'}
+                      {' · '}Expected close {row.expected_close || '—'}
+                      {' · '}Status {row.status || '—'}
+                      {row.hsr ? ` · HSR ${row.hsr}` : ''}
+                      {row.vote_date ? ` · Vote ${row.vote_date}` : ''}
+                      {row.confidence != null ? ` · Confidence ${row.confidence}` : ''}
+                    </p>
+                    {priceHidden && (
+                      <p className={styles.meta}>
+                        Last sale is hidden. The stored ticker {stored} is not one of the tickers on the filing name ({listed.join(', ')}).
+                      </p>
                     )}
-                  </td>
-                  <td>{row.acquirer_ticker || row.acquirer_name || '—'}</td>
-                  <td>{row.offer_terms || row.consideration_type || '—'}</td>
-                  <td>{row.announce_date || '—'}</td>
-                  <td>{row.expected_close || '—'}</td>
-                  <td>{row.status || '—'}</td>
-                  <td>{row.hsr || '—'}</td>
-                  <td>{row.vote_date || '—'}</td>
-                  <td>{money(row.current_price)}</td>
-                  <td>{money(row.offer_value, row.needs_manual_terms)}</td>
-                  <td>{row.needs_manual_terms ? '—' : `${row.gross_spread ? '$' + row.gross_spread : '—'} / ${row.gross_spread_pct || '—'}`}</td>
-                  <td title={row.annualized_assumption || ''}>{row.needs_manual_terms ? '—' : (row.annualized_pct || '—')}</td>
-                  <td title={(row.confidence_breakdown || []).map((item) => `${item.points}: ${item.reason}`).join('\n')}>
-                    {row.confidence ?? '—'}
-                  </td>
-                  <td>{(row.sources || []).map((source) => source.name).filter(Boolean).join(', ') || '—'}</td>
-                  <td>
-                    <div className={styles.toolbar} onClick={(event) => event.stopPropagation()}>
-                      <Button size="sm" variant="primary" onClick={() => setConfirmId(row.id)}>Add</Button>
-                      <Button size="sm" onClick={() => void ignore(row)}>Ignore</Button>
-                      <Button size="sm" onClick={() => setConfirmId(row.id)}>Open</Button>
+                    {genericBuyer && row.acquirer_name && (
+                      <p className={styles.meta}>
+                        The filing names the buyer as “{row.acquirer_name.trim()}”, which is not a specific acquirer.
+                      </p>
+                    )}
+                    {(row.sources || []).some((source) => source.url) && (
+                      <p className={styles.meta}>
+                        {(row.sources || []).filter((source) => source.url).map((source, index) => (
+                          <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer">{source.name || 'Source'}</a>
+                        ))}
+                      </p>
+                    )}
+                    <ul className={styles.rows}>
+                      {(row.fields || []).map((field, index) => (
+                        <li key={`${field.field_name}-${index}`}>
+                          <div>
+                            <strong>{fieldLabel(field.field_name)}</strong>
+                            <span className={styles.value}>
+                              {String(field.value ?? '—')}{field.is_current === false ? ' (alternate)' : ''}
+                            </span>
+                            <span className={styles.meta}>
+                              {field.source_url ? (
+                                <a href={field.source_url} target="_blank" rel="noreferrer">{field.source_name || 'Source'}</a>
+                              ) : (field.source_name || 'No source')}
+                              {field.pulled_at_pt ? ` · pulled ${field.pulled_at_pt}` : ''}
+                              {field.method ? ` · ${field.method}` : ''}
+                              {field.conflict ? ' · conflict' : ''}
+                            </span>
+                            {field.evidence && <span className={styles.meta}>{field.evidence}</span>}
+                            {field.raw && <span className={styles.meta}>{field.raw}</span>}
+                          </div>
+                        </li>
+                      ))}
+                      {!row.fields?.length && <li>No extracted fields.</li>}
+                    </ul>
+                    {row.target_cik && (
+                      <p className={styles.meta}>
+                        <a href={cikHref(row.target_cik)} target="_blank" rel="noreferrer">Filing company {row.target_cik}</a>
+                      </p>
+                    )}
+                    <div className={styles.toolbar}>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={!!busy}
+                        onClick={() => void write(row, 'open-analysis')}
+                      >
+                        {busy === row.id ? 'Opening…' : 'Analyze on this Mac (free)'}
+                      </Button>
+                      <Button size="sm" disabled={!!busy} onClick={() => void write(row, 'add')}>
+                        Save on the desk
+                      </Button>
                     </div>
-                  </td>
-                </tr>
-              ))}
-              {!candidates.length && (
-                <tr>
-                  <td colSpan={15}>No candidates yet. A scan does not add a deal by itself.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {selected && (
-          <div className={styles.drawer}>
-            <h3>Where these numbers came from</h3>
-            <ul className={styles.rows}>
-              {(selected.fields || []).map((field, index) => (
-                <li key={`${field.field_name}-${index}`}>
-                  <div>
-                    <strong>{field.field_name}</strong>
-                    <span className={styles.value}>{String(field.value ?? '—')}{field.is_current === false ? ' (alternate)' : ''}</span>
-                    <span className={styles.meta}>
-                      {field.source_url ? (
-                        <a href={field.source_url} target="_blank" rel="noreferrer">{field.source_name || 'Source'}</a>
-                      ) : (field.source_name || 'No source')}
-                      {field.pulled_at_pt ? ` · pulled ${field.pulled_at_pt}` : ''}
-                      {field.method ? ` · ${field.method}` : ''}
-                      {field.conflict ? ' · conflict' : ''}
-                    </span>
-                    {field.evidence && <span className={styles.meta}>{field.evidence}</span>}
-                    {field.raw && <span className={styles.meta}>{field.raw}</span>}
+                    <p className={styles.muted}>
+                      Analyze uses the local model. It does not call Grok or Claude. Deep dive stays a separate choice on the analysis page.
+                    </p>
                   </div>
-                </li>
-              ))}
-              {!selected.fields?.length && <li>No extracted fields.</li>}
-            </ul>
-          </div>
-        )}
-        {confirming && (
-          <div className={styles.drawer}>
-            <h3>Write {confirming.target_ticker || 'this candidate'} to the desk?</h3>
-            <p className={styles.muted}>
-              {confirming.needs_manual_terms
-                ? 'Collar, election, or proration is flagged. The scan does not compute that spread. The analysis page still uses its own math after you add it.'
-                : 'These are the fields that will be saved. Nothing is written until you confirm.'}
-            </p>
-            <ul>
-              {(confirming.fields || []).filter((field) => field.is_current !== false).map((field) => (
-                <li key={field.field_name}>
-                  {field.field_name}: {String(field.value ?? '—')} · {field.source_name} · {field.pulled_at_pt || field.method}
-                </li>
-              ))}
-            </ul>
-            <div className={styles.toolbar}>
-              <Button size="sm" variant="primary" disabled={!!busy} onClick={() => void write(confirming, 'add')}>
-                Add to desk
-              </Button>
-              <Button size="sm" variant="primary" disabled={!!busy} onClick={() => void write(confirming, 'open-analysis')}>
-                Open in analysis
-              </Button>
-              <Button size="sm" onClick={() => setConfirmId('')}>Cancel</Button>
-            </div>
-          </div>
-        )}
+                )}
+              </li>
+            )
+          })}
+        </ul>
       </Panel>
     </>
   )

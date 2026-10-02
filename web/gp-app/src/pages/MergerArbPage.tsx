@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -140,6 +140,8 @@ function Rows({ rows, onConfirm }: { rows: Row[]; onConfirm: (id: string) => voi
 export function MergerArbPage() {
   const { dealId = '' } = useParams()
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  const localOnce = useRef('')
   const [deals, setDeals] = useState<Deal[]>([])
   const [view, setView] = useState<View | null>(null)
   const [err, setErr] = useState('')
@@ -209,6 +211,15 @@ export function MergerArbPage() {
       setBusy('')
     }
   }
+
+  useEffect(() => {
+    if (!dealId || !view || view.empty) return
+    if (params.get('local') !== '1') return
+    if (localOnce.current === dealId) return
+    localOnce.current = dealId
+    setParams({}, { replace: true })
+    void run(`/api/merger-arb/analysis/${encodeURIComponent(dealId)}/refresh`, {}, 'refresh')
+  }, [dealId, view, params, setParams, run])
 
   const confirm = (fieldId: string) => {
     if (!dealId) return

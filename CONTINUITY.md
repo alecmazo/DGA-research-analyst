@@ -279,6 +279,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Load flow** | **`ui696-20261001-load-flow`** | The desk shows a Load flow card in the first open row under Portfolio Strategist. It stays expanded. Green is loaded, yellow is loading, red is a failed call. |
 | **Local cover** | **`ui697-20261001-local-cover`** | Saved local notes show the last price and the 12-month target from the cover when the stored target is blank. Upside is that target versus the price, not the DCF sentence. A target already saved is left as-is. |
 | **Deal scan** | **`ui698-20261001-deal-scan`** | Merger Arb has a Scan for deals button on the deal list. A scan does not add a deal. Add and Open write a desk deal only after you confirm. |
+| **Deal lines** | **`ui699-20261002-deal-lines`** | A scan row opens that deal. Hide removes it. The line states the offer, the price, and what is being bought. Analyze runs on the local model and does not start a paid deep dive. |
 
 ### One-click handoff (preferred)
 
@@ -475,4 +476,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-01 · Agent: Grok Build · Live: `ui698-20261001-deal-scan` · Next: `ui699-YYYYMMDD-slug`*
+*Last updated: 2026-10-02 · Agent: Grok Build · Live: `ui699-20261002-deal-lines` · Next: `ui700-YYYYMMDD-slug`*

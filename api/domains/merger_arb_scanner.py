@@ -76,6 +76,7 @@ def _public_candidate(row: dict) -> dict:
         "confidence": row.get("confidence") or 0,
         "confidence_breakdown": row.get("confidence_breakdown") or [],
         "needs_manual_terms": bool(row.get("needs_manual_terms")),
+        "ignored": bool(row.get("ignored")),
         "news_only": bool(row.get("news_only")),
         "sources": row.get("sources") or [],
         "fields": fields,

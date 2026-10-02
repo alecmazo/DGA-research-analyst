@@ -22,7 +22,13 @@ from merger_arb.scanner.llm_extract import LlmUrlError, extract_llm_fields, reso
 from merger_arb.scanner.merge import merge_records
 from merger_arb.scanner.models import FetchResult, SourceRecord
 from merger_arb.scanner.pricing import compute_spread
-from merger_arb.scanner.resolve import TickerMap, document_url, normalize_acquirer
+from merger_arb.scanner.resolve import (
+    TickerMap,
+    document_url,
+    normalize_acquirer,
+    parse_display_name,
+    tickers_in_text,
+)
 from merger_arb.scanner.runner import ScanRunner, _price_candidate, daily_due
 from merger_arb.scanner.sources.fmp import FmpSource
 from merger_arb.scanner.sources.ftc_et import parse_ftc
@@ -133,6 +139,34 @@ def test_extract_cash_ratio_cvr_dates_and_conflict():
     assert len(cash) == 2 and all(row.conflict for row in cash)
     collar = extract_terms("The exchange ratio is subject to a collar.", source_name="SEC 8-K", source_url="u", pulled_at=PULLED)
     assert any(row.field_name == "collar" for row in collar)
+    vwap = extract_terms(
+        "The price is the volume-weighted average price, or VWAP.",
+        source_name="SEC 8-K", source_url="u", pulled_at=PULLED,
+    )
+    assert not any(row.field_name == "collar" for row in vwap)
+    directors = extract_terms(
+        "The election of directors is next week. The company may pay cash or stock.",
+        source_name="SEC 8-K", source_url="u", pulled_at=PULLED,
+    )
+    assert not any(row.field_name == "election" for row in directors)
+    chosen = extract_terms(
+        "Holders may elect to receive cash or stock.",
+        source_name="SEC 8-K", source_url="u", pulled_at=PULLED,
+    )
+    assert any(row.field_name == "election" for row in chosen)
+
+
+def test_display_name_and_clause_markers():
+    parsed = parse_display_name(
+        "Bleichroeder Acquisition Corp. II (BBCQ, BBCQU, BBCQW) (CIK 0001819928)"
+    )
+    assert parsed["ticker"] == "BBCQ"
+    assert parsed["cik"] == "0001819928"
+    assert parsed["title"] == "Bleichroeder Acquisition Corp. II"
+    single = parse_display_name("Acme Corp (ACME) (CIK 123)")
+    assert single["ticker"] == "ACME"
+    assert single["cik"] == "0000000123"
+    assert tickers_in_text("See clause (A) and Nasdaq:ACME") == ["ACME"]
 
 
 def test_parsers_from_fixtures():

@@ -19,7 +19,7 @@ _RATIO = re.compile(
 )
 _CVR = re.compile(r"contingent value right", re.I)
 _CVR_MAX = re.compile(r"up to\s+\$\s?(\d+(?:\.\d+)?)", re.I)
-_COLLAR = re.compile(r"collar|volume[- ]weighted average price|VWAP", re.I)
+_COLLAR = re.compile(r"\bcollar\b", re.I)
 _CLOSE = re.compile(
     r"expected to close (?:in|by|during) (?:the )?"
     r"(first|second|third|fourth|1st|2nd|3rd|4th) (quarter|half) of (\d{4})",
@@ -40,7 +40,13 @@ _FEE = re.compile(
     re.I,
 )
 _REPORT_DATE = re.compile(r"Date of Report[:\s]+(\w+ \d{1,2}, \d{4})", re.I)
-_ELECTION = re.compile(r"\belection\b", re.I)
+# "election of directors" plus a distant "cash or stock" is not a consideration election.
+_ELECTION = re.compile(
+    r"\b(?:elect to receive|may elect(?: to receive)?)\b[^.]{0,80}?\b(?:cash|stock)\b"
+    r"|\bcash or stock election\b"
+    r"|\belection of (?:cash|stock)\b",
+    re.I,
+)
 _PRORATION = re.compile(r"proration", re.I)
 
 _MONTHS = {
@@ -189,11 +195,11 @@ def extract_terms(
         found.append(_field(
             "collar", "flagged", collar.group(0), source_name, source_url, pulled_at, _snip(body, collar),
         ))
-    if _ELECTION.search(body) and re.search(r"cash or stock", body, re.I):
-        match = _ELECTION.search(body)
+    election = _ELECTION.search(body)
+    if election:
         found.append(_field(
-            "election", "flagged", match.group(0) if match else "election",
-            source_name, source_url, pulled_at, _snip(body, match) if match else "",
+            "election", "flagged", election.group(0),
+            source_name, source_url, pulled_at, _snip(body, election),
         ))
     pror = _PRORATION.search(body)
     if pror:
