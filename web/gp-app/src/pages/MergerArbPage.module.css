@@ -161,6 +161,78 @@ textarea {
   display: block;
 }
 
+.factGrid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 18px;
+}
+
+.fact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.factLabel {
+  flex: 1 1 72px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.factValue {
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.fact .dot {
+  margin-top: 0;
+}
+
+.factMore {
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.factMore[open] {
+  flex: 1 0 100%;
+}
+
+.factMore summary {
+  cursor: pointer;
+  color: var(--text-tertiary);
+  list-style: none;
+}
+
+.factMore summary::-webkit-details-marker {
+  display: none;
+}
+
+.factGrid + .table {
+  margin-top: 8px;
+}
+
+@media (max-width: 1100px) {
+  .factGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .factGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .dot {
   width: 10px;
   height: 10px;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
@@ -100,6 +100,59 @@ function Sensitivity({ value }: { value: unknown }) {
         ))}
       </tbody>
     </table>
+  )
+}
+
+function SourceNote({ row }: { row: Row }) {
+  const bits: { key: string; node: ReactNode }[] = []
+  if (row.source_url) {
+    bits.push({
+      key: 'source',
+      node: <a href={row.source_url} target="_blank" rel="noreferrer">{row.source_name || 'Source'}</a>,
+    })
+  } else if (row.source_name) {
+    bits.push({ key: 'source', node: row.source_name })
+  }
+  if (row.locator) bits.push({ key: 'locator', node: row.locator })
+  if (row.pulled_at_pt) bits.push({ key: 'pulled', node: `pulled ${row.pulled_at_pt}` })
+  if (row.as_of_pt) bits.push({ key: 'asof', node: `as of ${row.as_of_pt}` })
+  if (row.notes) bits.push({ key: 'notes', node: row.notes })
+  if (!bits.length) return null
+  return (
+    <details className={styles.factMore}>
+      <summary>Source</summary>
+      <span className={styles.meta}>
+        {bits.map((bit, index) => (
+          <span key={bit.key}>{index ? ' · ' : ''}{bit.node}</span>
+        ))}
+      </span>
+    </details>
+  )
+}
+
+function CompactFacts({ rows, onConfirm }: { rows: Row[]; onConfirm: (id: string) => void }) {
+  if (!rows.length) return <p className={styles.muted}>Nothing stored.</p>
+  const sensitivity = rows.find((row) => row.id === 'spread.sensitivity')
+  const facts = rows.filter((row) => row.id !== 'spread.sensitivity')
+  return (
+    <>
+      <ul className={styles.factGrid}>
+        {facts.map((row) => (
+          <li key={row.id} className={styles.fact}>
+            <Dot dot={row.dot} />
+            <span className={styles.factLabel}>{row.label}</span>
+            <span className={styles.factValue}>{row.display}</span>
+            {row.unverified && (
+              <Button size="sm" variant="secondary" onClick={() => onConfirm(row.id)}>
+                Confirm
+              </Button>
+            )}
+            <SourceNote row={row} />
+          </li>
+        ))}
+      </ul>
+      {sensitivity ? <Sensitivity value={sensitivity.value} /> : null}
+    </>
   )
 }
 
@@ -338,7 +391,11 @@ export function MergerArbPage() {
 
           {!view.empty && (view.sections || []).map((card) => (
             <Panel key={card.id} title={card.title}>
-              <Rows rows={card.rows} onConfirm={confirm} />
+              {card.id === 'overview' || card.id === 'spread' ? (
+                <CompactFacts rows={card.rows} onConfirm={confirm} />
+              ) : (
+                <Rows rows={card.rows} onConfirm={confirm} />
+              )}
               {card.blocks.map((block) => (
                 <div key={block.title}>
                   <h3 className={styles.blockTitle}>{block.title}</h3>
