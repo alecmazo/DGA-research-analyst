@@ -288,6 +288,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Handoff** | **`ui705-20261002-handoff`** | Credit is on the site. GitHub `main` is the full folder, including ticket screenshots and logo options. Pushing `main` deploys Railway service `web` with the Nixpacks start command. On this Mac the folder is `DGA-Research-Portal`. The GitHub repo name stays `DGA-research-analyst`. |
 | **Repo flow** | **`ui706-20261002-repo-flow`** | Desk card under Load flow. Nodes are folder names on main. A branch moves while a call is in that folder. |
 | **Statement quarters** | **`ui707-20261002-stmt-quarters`** | The equity/assets chart is the Balance sheet card and includes liabilities. Net income is off the free-cash-flow chart. Income statement, balance sheet, cash flow, and comprehensive income open on the quarterly array, with a TTM column. |
+| **Load flow pages** | **`ui708-20261002-load-flow`** | Load flow runs top down from the center. Credit and every Work, Lab, and Accounts page are on the chart. The card is tall enough to show them. |
 
 ### One-click handoff (preferred)
 
@@ -484,4 +485,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui707-20261002-stmt-quarters` · Live until the next upload: `ui705-20261002-handoff` · Next: `ui708-YYYYMMDD-slug`*
+*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui708-20261002-load-flow` · Live until the next upload: `ui707-20261002-stmt-quarters` · Next: `ui709-YYYYMMDD-slug`*

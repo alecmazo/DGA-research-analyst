@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { beforeEach, describe, it } from 'node:test'
 import {
   FLOW_ROOT,
@@ -45,6 +46,8 @@ describe('matchLeaf', () => {
     assert.equal(matchLeaf('/api/v2/gp/email-test'), 'settings')
     assert.equal(matchLeaf('/api/local/reports'), 'localBooks')
     assert.equal(matchLeaf('/api/merger-arb/deals'), 'mergerArb')
+    assert.equal(matchLeaf('/api/credit/issuers'), 'credit')
+    assert.equal(matchLeaf('/api/credit/issuers/0001/compute'), 'credit')
     assert.equal(matchLeaf('/api/reports'), 'reports')
     assert.equal(matchLeaf('/api/reports/AAPL/valuation'), 'reportWindow')
     assert.equal(matchLeaf('/api/market/pulse?limit=8'), 'pulse')
@@ -115,16 +118,60 @@ describe('buildFlow', () => {
       'pulse',
       'sec',
     ]
-    let previous = -1
+    let previousY = -1
+    let previousX = -1
     for (const id of order) {
       const box = must(findFlowBox(chart.root, id), id)
-      assert.ok(box.y > previous, `${id} should sit below the previous desk step`)
-      previous = box.y
+      if (box.y === previousY) {
+        assert.ok(box.x > previousX, `${id} should sit to the right of the previous desk step`)
+      } else {
+        assert.ok(box.y > previousY, `${id} should sit below the previous desk row`)
+      }
+      previousY = box.y
+      previousX = box.x
     }
     const gp = must(findFlowBox(chart.root, 'gp'), 'gp')
     const session = must(findFlowBox(chart.root, 'session'), 'session')
-    assert.equal(gp.y, session.y)
-    assert.ok(gp.x < session.x)
+    const credit = must(findFlowBox(chart.root, 'credit'), 'credit')
+    const gurus = must(findFlowBox(chart.root, 'gurus'), 'gurus')
+    const settings = must(findFlowBox(chart.root, 'settings'), 'settings')
+    assert.ok(session.y > gp.y + gp.h)
+    assert.ok(credit.y > gurus.y)
+    assert.ok(Math.abs(credit.x + credit.w / 2 - (gp.x + gp.w / 2)) < 1)
+    assert.ok(settings.y + settings.h < 1300, `settings is still below the card at y=${settings.y}`)
+    assert.ok(chart.height < 1400, `chart is ${chart.width}×${chart.height}`)
+    const kids = gp.children
+    const left = Math.min(...kids.map((kid) => kid.x))
+    const right = Math.max(...kids.map((kid) => kid.x + kid.w))
+    const mid = (left + right) / 2
+    assert.ok(Math.abs(gp.x + gp.w / 2 - mid) < 1)
+    assert.ok(kids.every((kid) => kid.y >= gp.y + gp.h))
+    assert.ok(chart.height > chart.width)
+  })
+
+  it('includes every page in the work, lab, and accounts menus', () => {
+    const topbar = fs.readFileSync(
+      new URL('../src/components/layout/Topbar.tsx', import.meta.url),
+      'utf8',
+    )
+    const tos = [
+      ...topbar.matchAll(/to:\s*'(\/[^']*)'/g),
+      ...topbar.matchAll(/to="(\/[^"]*)"/g),
+    ].map((match) => match[1])
+    assert.ok(tos.includes('/credit'))
+    const dest = new Set<string>()
+    const walk = (node: FlowNode) => {
+      if (node.to) dest.add(node.to)
+      node.children?.forEach(walk)
+    }
+    walk(FLOW_ROOT)
+    for (const to of tos) {
+      if (to === '/') {
+        assert.ok(ids(FLOW_ROOT).includes('desk'))
+        continue
+      }
+      assert.ok(dest.has(to), to)
+    }
   })
 
   it('paints the trunk from the calls underneath it', () => {
@@ -142,8 +189,9 @@ describe('buildFlow', () => {
     assert.deepEqual(must(findFlowBox(chart.root, 'desk'), 'desk').failedLabels, ['Watchlist'])
   })
 
-  it('draws a vertical bus and a stub into each branch', () => {
-    const desk = must(findFlowBox(buildFlow({}).root, 'desk'), 'desk')
+  it('draws downward from the center into each branch', () => {
+    const chart = buildFlow({})
+    const desk = must(findFlowBox(chart.root, 'desk'), 'desk')
     const links = flowLinks(desk)
     if (!links) throw new Error('desk has no links')
     assert.match(links.trunk, / V /)
@@ -151,7 +199,33 @@ describe('buildFlow', () => {
     for (const stub of links.stubs) {
       const child = desk.children.find((box) => box.id === stub.id)
       if (!child) throw new Error(stub.id)
-      assert.ok(stub.d.endsWith(`H ${child.x}`))
+      assert.ok(child.y > desk.y)
+      assert.ok(stub.d.endsWith(`V ${child.y}`), stub.d)
+      assert.equal(stub.d.includes(`H ${child.x}`), false, stub.d)
+    }
+    const financials = must(findFlowBox(chart.root, 'financials'), 'financials')
+    const row = flowLinks(financials)
+    if (!row) throw new Error('financials has no links')
+    assert.match(row.trunk, / V /)
+    for (const stub of row.stubs) {
+      const child = financials.children.find((box) => box.id === stub.id)
+      if (!child) throw new Error(stub.id)
+      assert.ok(stub.d.endsWith(`V ${child.y}`))
+    }
+    const boxes: FlowBox[] = []
+    const walk = (box: FlowBox) => {
+      boxes.push(box)
+      box.children.forEach(walk)
+    }
+    walk(chart.root)
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]
+        const b = boxes[j]
+        const overlap =
+          a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+        assert.equal(overlap, false, `${a.id} overlaps ${b.id}`)
+      }
     }
   })
 

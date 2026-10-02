@@ -142,7 +142,7 @@ Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status do
 | Top Movers | $1B+ names by \|day %\|. |
 | Analyze Ticker | Multi-engine Analyze (Grok / Claude / DeepSeek / Kimi). Overlay while running. |
 | Desk health | Quote / report / pulse counts. |
-| Load flow | Live call tree. Green loaded, yellow in flight, red failed. Stays under Portfolio Strategist. |
+| Load flow | Live call tree, top down from the center. Credit and the other Work, Lab, and Accounts pages are on it. Green loaded, yellow in flight, red failed. Stays under Portfolio Strategist. |
 | Repo flow | Same board, directly under Load flow. Nodes are folder names on `main` (`web`, `gp-app`, `api`, `domains`, `credit`, `merger_arb`, `scanner`, and the other folders this desk calls). A branch moves only while a call is in that folder. |
 
 Support FAB files tickets with screenshot. GPT-oss sits above it on the main desk and runs on this Mac.

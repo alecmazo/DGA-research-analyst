@@ -171,7 +171,7 @@ export function LoadFlowCard() {
   })
   const detail = hot
     ? detailLine(hot)
-    : 'Desk runs top to bottom after the watchlist. Hollow has not started.'
+    : 'The site runs down from the center. Hollow has not started.'
 
   const open = (box: FlowBox) => {
     if (box.widget && typeof document !== 'undefined') {

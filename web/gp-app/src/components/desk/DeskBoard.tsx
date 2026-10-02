@@ -58,9 +58,10 @@ const DEFAULT_LAYOUT: DeskLayoutMap = {
   movers: { x: 772, y: 632, w: 400, h: 460 },
   health: { x: 0, y: 1108, w: 340, h: 180 },
   // Full width, first free row under Portfolio Strategist (health ends at 1288).
-  flow: { x: 0, y: 1304, w: 1172, h: 720 },
-  // Full width, directly under Load flow.
-  repo: { x: 0, y: 2040, w: 1172, h: 520 },
+  // Tall enough for the top-down chart, including Credit and Settings.
+  flow: { x: 0, y: 1304, w: 1172, h: 1300 },
+  // Full width, directly under Load flow (1304 + 1300 + 16).
+  repo: { x: 0, y: 2620, w: 1172, h: 520 },
 }
 
 const ALL_IDS = Object.keys(DEFAULT_LAYOUT) as CardId[]
@@ -69,6 +70,8 @@ const MIN_W = 260
 const MIN_H = 120
 const COLLAPSED_H = 44
 const BOARD_W = 1172
+/** Load flow chart is 1162px, plus the card header and legend. */
+const FLOW_CARD_H = 1300
 /** Set once the load-flow card has been seated under Portfolio Strategist. */
 const FLOW_UNDER_KEY = 'dga.desk.flow-under-strategist'
 /** Set once the repo-flow card has been seated under Load flow. */
@@ -124,7 +127,7 @@ function flowUnderStrategist(strat: CardLayout, others: CardLayout[]): CardLayou
     x: 0,
     y: strat.y + rectH(strat) + gap,
     w: BOARD_W,
-    h: 720,
+    h: FLOW_CARD_H,
     collapsed: false,
   }
   for (let n = 0; n < 40; n++) {
@@ -269,6 +272,24 @@ function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
       .filter(isLayout)
     out.repo = repoUnderFlow(out.flow, others)
     markRepoAnchored()
+  }
+
+  // The first top-down chart was clipped at 720. Grow that untouched strip
+  // once so Credit is on screen, and keep Repo flow in the gap under it.
+  const flow = out.flow
+  if (isLayout(flow) && !flow.collapsed && flow.x === 0 && flow.w === BOARD_W && flow.h === 720) {
+    const grown: CardLayout = { ...flow, h: FLOW_CARD_H }
+    const others = ALL_IDS.filter((id) => id !== 'flow' && id !== 'repo').map((id) => out[id]).filter(isLayout)
+    if (!others.some((other) => overlapsLayout(grown, other))) {
+      const oldBottom = flow.y + flow.h
+      out.flow = grown
+      const repo = out.repo
+      if (isLayout(repo) && Math.abs(repo.y - (oldBottom + 16)) <= 40) {
+        const moved: CardLayout = { ...repo, y: repo.y + (FLOW_CARD_H - 720) }
+        const repoOthers = ALL_IDS.filter((id) => id !== 'repo').map((id) => (id === 'flow' ? grown : out[id])).filter(isLayout)
+        if (!repoOthers.some((other) => overlapsLayout(moved, other))) out.repo = moved
+      }
+    }
   }
 
   return out

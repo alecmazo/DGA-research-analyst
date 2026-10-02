@@ -54,10 +54,12 @@ export type LoadSnapshot = {
 
 type Rule = { id: string; test: (path: string) => boolean }
 
-const NODE_W = 156
+const NODE_W = 148
 const NODE_H = 26
-const GAP_X = 78
-const GAP_Y = 8
+const GAP_X = 18
+const GAP_Y = 22
+/** A parent with more children than this wraps them, unless a child is tall. */
+const FAN = 4
 const PAD = 16
 
 export const FLOW_NODE_W = NODE_W
@@ -147,6 +149,7 @@ const RULES: Rule[] = [
   { id: 'munger', test: (p) => p.startsWith('/api/munger') },
   { id: 'mergerArb', test: (p) => p.startsWith('/api/merger-arb') },
   { id: 'gurus', test: (p) => p.startsWith('/api/gurus') },
+  { id: 'credit', test: (p) => p.startsWith('/api/credit') },
   { id: 'builder', test: (p) => p.startsWith('/api/v2/builder') },
   { id: 'options', test: (p) => p.startsWith('/api/options') },
   {
@@ -374,6 +377,7 @@ export const FLOW_ROOT: FlowNode = {
     },
     { id: 'builder', label: 'Builder', hint: 'Lists and scenarios.', to: '/builder' },
     { id: 'gurus', label: 'Gurus', hint: 'Guru filings.', to: '/gurus' },
+    { id: 'credit', label: 'Credit', hint: 'Bond issuers and a typed-in book.', to: '/credit' },
     {
       id: 'lab',
       label: 'Lab',
@@ -532,20 +536,68 @@ function shownChildren(node: FlowNode, map: Record<string, LeafSnap>): FlowNode[
   })
 }
 
-function subtreeHeight(node: FlowNode, map: Record<string, LeafSnap>): number {
-  const kids = shownChildren(node, map)
-  if (!kids.length) return NODE_H
-  const inner = kids.reduce((sum, kid) => sum + subtreeHeight(kid, map), 0)
-  return Math.max(NODE_H, inner + GAP_Y * (kids.length - 1))
+function rowsOf<T>(items: T[], n: number): T[][] {
+  const rows: T[][] = []
+  for (let i = 0; i < items.length; i += n) rows.push(items.slice(i, i + n))
+  return rows
 }
 
-function place(node: FlowNode, map: Record<string, LeafSnap>, depth: number, top: number): FlowBox {
+/** Many small branches wrap into centered rows. A tall branch stays on the spine. */
+function wrapKids(sizes: { w: number; h: number }[]): boolean {
+  const shallow = NODE_H + GAP_Y + NODE_H + 1
+  return sizes.length > FAN && sizes.every((size) => size.h <= shallow)
+}
+
+function subtreeSize(node: FlowNode, map: Record<string, LeafSnap>): { w: number; h: number } {
   const kids = shownChildren(node, map)
+  if (!kids.length) return { w: NODE_W, h: NODE_H }
+  const sizes = kids.map((kid) => subtreeSize(kid, map))
+  if (!wrapKids(sizes) && kids.length > FAN) {
+    const colW = Math.max(NODE_W, ...sizes.map((size) => size.w))
+    const h =
+      NODE_H +
+      GAP_Y +
+      sizes.reduce((sum, size) => sum + size.h, 0) +
+      GAP_Y * (kids.length - 1)
+    return { w: colW, h }
+  }
+  const groups = wrapKids(sizes) ? rowsOf(sizes, FAN) : [sizes]
+  let rowW = 0
+  let rowsH = 0
+  for (const row of groups) {
+    rowW = Math.max(rowW, row.reduce((sum, size) => sum + size.w, 0) + GAP_X * (row.length - 1))
+    rowsH += Math.max(...row.map((size) => size.h))
+  }
+  rowsH += GAP_Y * (groups.length - 1)
+  return { w: Math.max(NODE_W, rowW), h: NODE_H + GAP_Y + rowsH }
+}
+
+function place(node: FlowNode, map: Record<string, LeafSnap>, left: number, top: number): FlowBox {
+  const kids = shownChildren(node, map)
+  const size = subtreeSize(node, map)
   const children: FlowBox[] = []
-  let cursor = top
-  for (const kid of kids) {
-    children.push(place(kid, map, depth + 1, cursor))
-    cursor += subtreeHeight(kid, map) + GAP_Y
+  const sizes = kids.map((kid) => subtreeSize(kid, map))
+  if (kids.length > FAN && !wrapKids(sizes)) {
+    let cursor = top + NODE_H + GAP_Y
+    kids.forEach((kid, i) => {
+      const kidLeft = left + (size.w - sizes[i].w) / 2
+      children.push(place(kid, map, kidLeft, cursor))
+      cursor += sizes[i].h + GAP_Y
+    })
+  } else if (kids.length) {
+    const paired = kids.map((kid, i) => ({ kid, size: sizes[i] }))
+    const groups = wrapKids(sizes) ? rowsOf(paired, FAN) : [paired]
+    let childTop = top + NODE_H + GAP_Y
+    for (const row of groups) {
+      const rowW = row.reduce((sum, item) => sum + item.size.w, 0) + GAP_X * (row.length - 1)
+      let cursor = left + (size.w - rowW) / 2
+      const rowH = Math.max(...row.map((item) => item.size.h))
+      for (const item of row) {
+        children.push(place(item.kid, map, cursor, childTop))
+        cursor += item.size.w + GAP_X
+      }
+      childTop += rowH + GAP_Y
+    }
   }
   const tracked = LEAF_IDS.has(node.id)
   const own = tracked ? leafPhase(map[node.id]) : null
@@ -566,9 +618,7 @@ function place(node: FlowNode, map: Record<string, LeafSnap>, depth: number, top
     refreshing: !!leaf && leaf.inflight > 0 && own === 'loaded',
     leaf,
     failedLabels,
-    x: PAD + depth * (NODE_W + GAP_X),
-    // Top of the branch, not the vertical center, so the trunk reads downward
-    // in load order and the main node stays at the top of the card.
+    x: left + (size.w - NODE_W) / 2,
     y: top,
     w: NODE_W,
     h: NODE_H,
@@ -593,33 +643,61 @@ export function buildFlow(map: Record<string, LeafSnap> = {}): {
   width: number
   height: number
 } {
-  const root = place(FLOW_ROOT, map, 0, PAD)
+  const root = place(FLOW_ROOT, map, PAD, PAD)
   return { root, ...bounds(root) }
+}
+
+function subtreeBottom(box: FlowBox): number {
+  let bottom = box.y + box.h
+  for (const child of box.children) bottom = Math.max(bottom, subtreeBottom(child))
+  return bottom
+}
+
+/** Rows share a y. Everything else is a later row down the page. */
+function linkRows(kids: FlowBox[]): FlowBox[][] {
+  const rows: FlowBox[][] = []
+  const sorted = [...kids].sort((a, b) => a.y - b.y || a.x - b.x)
+  for (const kid of sorted) {
+    const row = rows.find((group) => Math.abs(group[0].y - kid.y) < 1)
+    if (row) row.push(kid)
+    else rows.push([kid])
+  }
+  for (const row of rows) row.sort((a, b) => a.x - b.x)
+  return rows
 }
 
 export function flowLinks(box: FlowBox): { trunk: string; stubs: { id: string; d: string }[] } | null {
   const kids = box.children
   if (!kids.length) return null
-  const x1 = box.x + box.w
-  const y1 = box.y + box.h / 2
-  const mid = x1 + GAP_X / 2
-  if (kids.length === 1) {
-    const kid = kids[0]
-    const y2 = kid.y + kid.h / 2
-    return {
-      trunk: '',
-      stubs: [{ id: kid.id, d: `M ${x1} ${y1} H ${mid} V ${y2} H ${kid.x}` }],
+  const px = box.x + box.w / 2
+  const rows = linkRows(kids)
+  const trunk: string[] = []
+  const stubs: { id: string; d: string }[] = []
+  let yFrom = box.y + box.h
+  for (const row of rows) {
+    const yBus = (yFrom + row[0].y) / 2
+    if (row.length === 1) {
+      const kid = row[0]
+      const cx = kid.x + kid.w / 2
+      const d =
+        Math.abs(cx - px) < 0.5
+          ? `M ${px} ${yFrom} V ${kid.y}`
+          : `M ${px} ${yFrom} V ${yBus} H ${cx} V ${kid.y}`
+      stubs.push({ id: kid.id, d })
+    } else {
+      const centers = row.map((kid) => kid.x + kid.w / 2)
+      const xL = Math.min(...centers, px)
+      const xR = Math.max(...centers, px)
+      trunk.push(`M ${px} ${yFrom} V ${yBus}`)
+      if (xR - xL > 0.5) trunk.push(`M ${xL} ${yBus} H ${xR}`)
+      for (const kid of row) {
+        const cx = kid.x + kid.w / 2
+        stubs.push({ id: kid.id, d: `M ${cx} ${yBus} V ${kid.y}` })
+      }
     }
+    yFrom = Math.max(...row.map(subtreeBottom))
   }
-  const yTop = kids[0].y + kids[0].h / 2
-  const yBot = kids[kids.length - 1].y + kids[kids.length - 1].h / 2
-  return {
-    trunk: `M ${x1} ${y1} H ${mid} M ${mid} ${yTop} V ${yBot}`,
-    stubs: kids.map((kid) => {
-      const y2 = kid.y + kid.h / 2
-      return { id: kid.id, d: `M ${mid} ${y2} H ${kid.x}` }
-    }),
-  }
+  return { trunk: trunk.join(' '), stubs }
 }
 
 export function walkFlow(root: FlowBox, visit: (box: FlowBox) => void): void {
