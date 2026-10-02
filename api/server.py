@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui703-20261002-credit"
+WEB_BUILD_VERSION = "ui704-20261002-gpt-oss"
 
 
 @app.get("/api/build")
@@ -8764,8 +8764,9 @@ def _continuity_pack() -> dict:
         f"6. Never persist Grok live-search tool dumps as `report_md`.\n"
         f"7. Demo (`demo@dgacapital.com` / `demo123`) must never see live LP/GP PII.\n"
         f"8. Do not App Store-submit iOS without explicit confirmation.\n"
-        f"9. The Grok desk bot is part of the site (`api/domains/grok_bot.py`, "
-        f"FabDock). Do not commit `ticket_*.jpg` or `mobile/logo-options/`.\n"
+        f"9. The desk bot above Support is GPT-oss on this Mac "
+        f"(`gpt-oss-20b-finance` in the browser). It does not call xAI. "
+        f"Do not commit `ticket_*.jpg` or `mobile/logo-options/`.\n"
         f"10. Financials print CSS stays scoped to `.shell` — never `body *`.\n"
         f"11. Accounts rebalance = **Grok** 12m PT vs **live last**.\n"
         f"12. Saved Reports: Grok and Claude each show their own TGT + live upside.\n"
@@ -8851,7 +8852,7 @@ def _continuity_speed_prompt() -> str:
         f"edit run `npm run build` in `web/gp-app/` and commit `dist/`; one "
         f"uvicorn worker; do not auto-send email; do not publish a mobile "
         f"update unless Alec asks; do not re-upload wedding videos already "
-        f"on `/data/sliw-media`; the Grok desk bot stays in the repo; do not "
+        f"on `/data/sliw-media`; the desk bot is GPT-oss on this Mac and does not call xAI; do not "
         f"commit `ticket_*.jpg` or `mobile/logo-options/`.\n\n"
         f"## Then do the speed audit\n\n"
         f"1. Read `docs/mobile-speed/CHECKLIST.md`. The budgets are the steps "

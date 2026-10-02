@@ -52,7 +52,7 @@ ask him to open Terminal or clone anything himself.
 6. Never persist Grok live-search tool dumps as `report_md`.
 7. Demo login must never see live LP/GP PII (`demo@dgacapital.com` / `demo123`).
 8. Do not App Store-submit iOS without explicit confirmation.
-9. The Grok desk bot is part of the site (`api/domains/grok_bot.py`, FabDock). Do not commit `ticket_*.jpg` or `mobile/logo-options/`.
+9. The desk bot above Support is GPT-oss on this Mac (`gpt-oss-20b-finance` in the browser, `GrokBot.tsx`). It does not call xAI. Do not commit `ticket_*.jpg` or `mobile/logo-options/`.
 10. Support tickets: `GET /api/support/agent-inbox` (or Settings). Close with PATCH + trail.
 
 ## 4. If the paste is the mobile speed prompt

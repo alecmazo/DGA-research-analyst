@@ -284,6 +284,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Denser page** | **`ui701-20261002-denser-page`** | Downside and upside share one card. Sources, refresh, and flags share one card. Regulatory path, votes, and catalysts share one card. Each fact stays one line. |
 | **Grok desk** | **`ui702-20261002-grok-desk`** | The Grok desk bot sits above Support on the main desk. GitHub `main` is the code the site runs. |
 | **Credit** | **`ui703-20261002-credit`** | Credit is in the Work menu. The issuer page is keyed by CIK. Paramount Skydance is the seed. Bond prices are typed in. The verdict is code, not a model. |
+| **GPT-oss** | **`ui704-20261002-gpt-oss`** | The bottom-right desk button is GPT-oss. It calls `gpt-oss-20b-finance` on this Mac and does not call the paid API. |
 
 ### One-click handoff (preferred)
 
@@ -480,4 +481,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui703-20261002-credit` · Live until the next upload: `ui702-20261002-grok-desk` · Next: `ui704-YYYYMMDD-slug`*
+*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui704-20261002-gpt-oss` · Live until the next upload: `ui702-20261002-grok-desk` · Next: `ui705-YYYYMMDD-slug`*

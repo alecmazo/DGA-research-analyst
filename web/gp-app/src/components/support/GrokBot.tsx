@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
+import { getCachedUser } from '@/lib/auth'
+import { ensureOllama, ollamaChat } from '@/lib/localOllama'
 import { renderMd } from '@/lib/md'
 import { openReportWindow } from '@/pages/ReportPage'
 import styles from './GrokBot.module.css'
@@ -16,6 +18,115 @@ type SiteAction = {
 }
 
 const STORE_KEY = 'dga.grokbot.chat'
+const ALLOWED_PATHS = new Set([
+  '/',
+  '/financials',
+  '/options',
+  '/builder',
+  '/local',
+  '/munger',
+  '/gurus',
+  '/podcasts',
+  '/transcripts',
+  '/merger-arb',
+  '/credit',
+  '/positions',
+  '/fund',
+  '/memos',
+  '/settings',
+])
+const TICKER_ACTIONS = new Set(['analyze', 'open_financials', 'add_watchlist', 'open_report'])
+const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,11}$/
+const DESK_SYSTEM = `You are GPT-oss, the on-desk assistant inside DGA Capital's GP terminal (portfolio.dgacapital.com/gp).
+Alec or Edyta is talking to you from this Mac. Help them get work done on this page.
+
+You can answer questions AND propose site actions. Do not invent prices, NAVs, or filings — if you need live numbers, say so or use an action (analyze / financials).
+
+Allowed actions (only these types):
+- navigate { "type":"navigate", "path":"/financials" }  paths: / /financials /local /munger /gurus /options /builder /podcasts /transcripts /merger-arb /credit /positions /fund /memos /settings
+- analyze { "type":"analyze", "ticker":"AAPL", "autoRun":true }  opens Desk Analyze and runs research
+- open_financials { "type":"open_financials", "ticker":"HHH" }
+- add_watchlist { "type":"add_watchlist", "ticker":"NVDA" }
+- open_report { "type":"open_report", "ticker":"AAPL" }
+- run_daily_pulse { "type":"run_daily_pulse" }
+- run_market_pulse { "type":"run_market_pulse" }
+- open_support { "type":"open_support", "note":"optional" }  files a bug via the Support button
+
+Return ONLY a JSON object (no preamble):
+{"reply":"markdown for the user","actions":[ ... ]}
+If no action is needed, use "actions":[]. Keep reply concise (under 180 words) unless they ask for depth.
+`
+
+function cleanTicker(raw: unknown): string | null {
+  const s = String(raw ?? '').trim().toUpperCase()
+  if (!s || !TICKER_RE.test(s)) return null
+  return s
+}
+
+function sanitizeActions(raw: unknown): SiteAction[] {
+  if (!Array.isArray(raw)) return []
+  const out: SiteAction[] = []
+  for (const item of raw.slice(0, 8)) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as { type?: string; path?: string; ticker?: string; autoRun?: boolean; note?: string }
+    const kind = String(row.type || '').trim().toLowerCase()
+    if (
+      kind !== 'navigate' &&
+      kind !== 'analyze' &&
+      kind !== 'open_financials' &&
+      kind !== 'add_watchlist' &&
+      kind !== 'open_support' &&
+      kind !== 'run_daily_pulse' &&
+      kind !== 'run_market_pulse' &&
+      kind !== 'open_report'
+    ) {
+      continue
+    }
+    const action: SiteAction = { type: kind }
+    if (kind === 'navigate') {
+      let path = String(row.path || '').trim() || '/'
+      if (!path.startsWith('/')) path = `/${path}`
+      path = path.split('?')[0].replace(/\/+$/, '') || '/'
+      if (!ALLOWED_PATHS.has(path)) continue
+      action.path = path
+    } else if (TICKER_ACTIONS.has(kind)) {
+      const ticker = cleanTicker(row.ticker)
+      if (!ticker) continue
+      action.ticker = ticker
+      if (kind === 'analyze') action.autoRun = row.autoRun !== false
+    } else if (kind === 'open_support') {
+      const note = String(row.note || '').trim().slice(0, 400)
+      if (note) action.note = note
+    }
+    out.push(action)
+  }
+  return out
+}
+
+function parseDeskReply(text: string): { reply: string; actions: SiteAction[] } {
+  const raw = (text || '').trim()
+  if (!raw) return { reply: '', actions: [] }
+  const fence = raw.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/)
+  let blob = fence?.[1]
+  if (!blob) {
+    const start = raw.indexOf('{')
+    const end = raw.lastIndexOf('}')
+    if (start >= 0 && end > start) blob = raw.slice(start, end + 1)
+  }
+  if (blob) {
+    try {
+      const data = JSON.parse(blob) as { reply?: unknown; actions?: unknown }
+      if (data && typeof data === 'object' && ('reply' in data || 'actions' in data)) {
+        const reply = String(data.reply || '').trim()
+        return { reply: reply || raw, actions: sanitizeActions(data.actions) }
+      }
+    } catch {
+      /* the model wrote plain text */
+    }
+  }
+  return { reply: raw, actions: [] }
+}
+
 const STARTERS = [
   'What’s on this page?',
   'Analyze the biggest watchlist mover',
@@ -117,41 +228,53 @@ export function GrokBot() {
   const send = async (text?: string) => {
     const message = (text ?? draft).trim()
     if (message.length < 2 || busy) return
+    if (getCachedUser()?.demo_mode) {
+      setErr('Demo cannot use the desk bot.')
+      return
+    }
     setDraft('')
     setErr(null)
     const nextMsgs: ChatMsg[] = [...msgs, { role: 'user', content: message }]
     setMsgs(nextMsgs)
     setBusy(true)
     try {
-      const res = await api<{
-        ok?: boolean
-        reply?: string
-        actions?: SiteAction[]
-        error?: string
-        detail?: string
-      }>('/api/grok-bot/chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          message,
-          history: nextMsgs.slice(-12).map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          page_path: loc.pathname + loc.search,
-          page_title: document.title,
-        }),
-      })
-      if (!res.ok && (res.error || res.detail)) {
-        throw new Error(res.error || res.detail || 'Grok failed')
+      const who = getCachedUser()
+      const hist = nextMsgs
+        .slice(-12)
+        .map((m) => `${m.role}: ${m.content.slice(0, 1500)}`)
+        .join('\n')
+      const userBlock = [
+        `Current page: ${document.title || 'GP'} · ${loc.pathname}${loc.search}`,
+        `User: ${who?.name || ''} <${who?.email || ''}>`,
+        hist ? `Recent chat:\n${hist}` : '',
+        `New task:\n${message}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+      const ask = () =>
+        ollamaChat({
+          system: DESK_SYSTEM,
+          user: userBlock,
+          maxTokens: 800,
+          think: 'low',
+          numCtx: 8192,
+        })
+      let chat
+      try {
+        chat = await ask()
+      } catch (err) {
+        const offline = err instanceof Error ? err.message : ''
+        if (!/offline|Ollama/i.test(offline)) throw err
+        const started = await ensureOllama()
+        if (!started.ok) throw new Error(started.message)
+        chat = await ask()
       }
-      const actions = Array.isArray(res.actions) ? res.actions : []
-      setMsgs((cur) => [
-        ...cur,
-        { role: 'assistant', content: res.reply || 'Done.', actions },
-      ])
-      if (actions.length) runActions(actions)
+      const parsed = parseDeskReply(chat.text)
+      const reply = parsed.reply || 'I heard you — try again in a moment.'
+      setMsgs((cur) => [...cur, { role: 'assistant', content: reply, actions: parsed.actions }])
+      if (parsed.actions.length) runActions(parsed.actions)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Grok unavailable')
+      setErr(e instanceof Error ? e.message : 'GPT-oss unavailable')
     } finally {
       setBusy(false)
     }
@@ -174,23 +297,23 @@ export function GrokBot() {
       <button
         type="button"
         className={`${styles.fab} ${open ? styles.fabOpen : ''}`}
-        title="Ask Grok to do something on this page"
-        aria-label="Open Grok desk bot"
+        title="Ask GPT-oss to do something on this page"
+        aria-label="Open GPT-oss"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         <span className={styles.fabIco} aria-hidden>
           ✶
         </span>
-        <span className={styles.fabLabel}>Grok</span>
+        <span className={styles.fabLabel}>GPT-oss</span>
       </button>
 
       {open && (
-        <div className={styles.panel} role="dialog" aria-label="Grok desk bot">
+        <div className={styles.panel} role="dialog" aria-label="GPT-oss">
           <div className={styles.head}>
             <div>
-              <div className={styles.headTitle}>Grok</div>
-              <span className={styles.headSub}>Desk bot · this page</span>
+              <div className={styles.headTitle}>GPT-oss</div>
+              <span className={styles.headSub}>On this Mac · this page</span>
             </div>
             <div className={styles.headBtns}>
               <button
@@ -216,9 +339,9 @@ export function GrokBot() {
           <div className={styles.msgs} ref={listRef}>
             {!msgs.length && (
               <div className={styles.hint}>
-                Give Grok a task on this site — analyze a name, jump to
+                Give GPT-oss a task on this site — analyze a name, jump to
                 Financials, run Pulse, add to the watchlist, or ask what’s on
-                this page.
+                this page. It runs on this Mac and does not call a paid API.
                 <div className={styles.chips}>
                   {STARTERS.map((s) => (
                     <button
@@ -274,7 +397,7 @@ export function GrokBot() {
               ref={inputRef}
               className={styles.input}
               rows={1}
-              placeholder="Task for Grok…"
+              placeholder="Task for GPT-oss…"
               value={draft}
               disabled={busy}
               onChange={(e) => setDraft(e.target.value)}

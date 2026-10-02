@@ -1,4 +1,7 @@
-"""GP Grok desk bot — chat + structured site actions (xAI / SpaceXAI)."""
+"""Desk bot route. The button calls gpt-oss-20b-finance in the browser.
+
+This route does not call xAI. A stale page that still posts here is refused.
+"""
 from __future__ import annotations
 
 import json
@@ -7,7 +10,6 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["grok-bot"])
 
@@ -136,7 +138,7 @@ def _extract_payload(text: str) -> tuple[str, list[dict[str, Any]]]:
     return raw, []
 
 
-_SYSTEM = """You are Grok, the on-desk assistant inside DGA Capital's GP terminal (portfolio.dgacapital.com/gp).
+_SYSTEM = """You are GPT-oss, the on-desk assistant inside DGA Capital's GP terminal (portfolio.dgacapital.com/gp).
 Alec or Edyta is talking to you from the live site. Help them get work done on this page.
 
 You can answer questions AND propose site actions. Do not invent prices, NAVs, or filings — if you need live numbers, say so or use an action (analyze / financials).
@@ -162,55 +164,7 @@ def grok_bot_chat(request: Request) -> dict[str, Any]:
     claims = _gp_only(request)
     if claims.get("demo_mode"):
         raise HTTPException(403, "Demo cannot use the desk bot.")
-    email = (claims.get("email") or claims.get("sub") or "gp").lower()
-    if not _rate_ok(f"grok-bot:{email}"):
-        return JSONResponse(
-            {"ok": False, "error": "Slow down — too many Grok bot turns."},
-            status_code=429,
-        )
-    body = B._request_json_sync(request) or {}
-    if not isinstance(body, dict):
-        body = {}
-
-    message = str(body.get("message") or "").strip()
-    if len(message) < 2:
-        raise HTTPException(400, "Say what you want Grok to do.")
-    if len(message) > 4000:
-        raise HTTPException(400, "Keep the task under 4,000 characters.")
-
-    page_path = str(body.get("page_path") or "")[:200]
-    page_title = str(body.get("page_title") or "")[:160]
-    history = body.get("history") if isinstance(body.get("history"), list) else []
-    hist_lines = []
-    for turn in history[-12:]:
-        if not isinstance(turn, dict):
-            continue
-        role = str(turn.get("role") or "").lower()
-        if role not in ("user", "assistant"):
-            continue
-        text = str(turn.get("content") or "").strip()[:1500]
-        if text:
-            hist_lines.append(f"{role}: {text}")
-
-    user_block = (
-        f"Current page: {page_title or 'GP'} · {page_path or '/gp'}\n"
-        f"User: {claims.get('name') or ''} <{claims.get('email') or ''}>\n"
+    raise HTTPException(
+        410,
+        "The desk bot runs on this Mac (gpt-oss-20b-finance) and does not call the paid API.",
     )
-    if hist_lines:
-        user_block += "Recent chat:\n" + "\n".join(hist_lines) + "\n\n"
-    user_block += f"New task:\n{message}"
-
-    try:
-        raw = B.analyst.call_llm("grok", _SYSTEM, user_block, live_search=False)
-    except Exception as exc:
-        raise HTTPException(502, f"Grok unavailable: {exc!s:.180}") from exc
-
-    reply, actions = _extract_payload(str(raw or ""))
-    if not reply:
-        reply = "I heard you — try again in a moment."
-    return {
-        "ok": True,
-        "reply": reply[:8000],
-        "actions": actions,
-        "model": getattr(B.analyst, "GROK_MODEL", None) or "grok",
-    }
