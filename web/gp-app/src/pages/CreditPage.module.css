@@ -3,6 +3,164 @@
   margin: 0 0 8px;
 }
 
+.desk {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mast {
+  background: #0a1628;
+  color: #f4f1ea;
+  padding: 18px 20px 16px;
+  border-radius: 10px;
+}
+
+.mast h1 {
+  margin: 2px 0 6px;
+  font-family: var(--font-display);
+  font-size: clamp(26px, 3vw, 34px);
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.kicker {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #c9a84c;
+}
+
+.mastCopy {
+  margin: 0;
+  max-width: 78ch;
+  color: #d5dbe3;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.filters input,
+.filters select,
+.book input {
+  font: inherit;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: inherit;
+  padding: 6px 8px;
+}
+
+.filters input {
+  min-width: 220px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.scroll {
+  overflow: auto;
+}
+
+.book {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.book th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: 6px 8px;
+  border-bottom: 2px solid #0a1628;
+  white-space: nowrap;
+}
+
+.book td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.book tbody tr:hover td {
+  background: var(--bg-subtle);
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.book input {
+  width: 100%;
+  min-width: 88px;
+  box-sizing: border-box;
+}
+
+.sheet {
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 12px 14px 14px;
+  background: var(--bg-surface);
+}
+
+.sheetHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sheetHead h2 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.off td {
+  color: var(--text-tertiary);
+}
+
+.drop {
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.mast a,
+.sheet a {
+  color: inherit;
+}
+
+@media (max-width: 720px) {
+  .filters input {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
 .err {
   color: #9b2c2c;
 }

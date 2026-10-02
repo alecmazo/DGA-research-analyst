@@ -11,7 +11,9 @@ from fastapi import APIRouter, HTTPException, Request
 
 from credit.fixture import CIK, build_fixture
 from credit.present import build_view
+from credit.screen import book_rows, screen_view
 from credit.store import MemoryStore, PostgresStore
+from credit.universe import by_cik
 
 _STORE = None
 _FIXTURE_MEMORY = None
@@ -59,15 +61,25 @@ def _cik(value: str) -> str:
     return digits.zfill(10)[-10:]
 
 
-def _packet_for(cik: str) -> dict:
+def _saved_packet(cik: str) -> dict | None:
     store = get_store()
-    saved = store.latest(cik) if not isinstance(store, MemoryStore) or cik in store.versions else None
-    if saved and (saved.get("packet_meta") or {}).get("stage") != "fixture":
-        return saved
-    if cik == CIK:
-        return build_fixture()
+    if isinstance(store, MemoryStore) and cik not in store.versions:
+        return None
+    saved = store.latest(cik)
+    if saved and (saved.get("packet_meta") or {}).get("stage") == "fixture":
+        return None
+    return saved
+
+
+def _view_for(cik: str, body: dict | None = None) -> dict:
+    saved = _saved_packet(cik)
     if saved:
-        return saved
+        return build_view(saved, body)
+    if cik == CIK:
+        return build_view(build_fixture(), body)
+    row = by_cik(cik)
+    if row:
+        return screen_view(row, body)
     raise HTTPException(404, "Issuer not found")
 
 
@@ -85,19 +97,18 @@ def create_router(claims_fn) -> APIRouter:
     @router.get("/issuers")
     def issuers(request: Request):
         gp(request)
-        rows = [{"cik": CIK, "legal_name": "Paramount Skydance Corporation", "ticker": "PSKY", "status": "watch", "fixture": True}]
-        for row in get_store().list_issuers():
-            if row.get("cik") == CIK and isinstance(get_store(), MemoryStore):
-                continue
-            if row.get("cik") and row["cik"] not in {item["cik"] for item in rows}:
-                rows.append(row)
-        return {"ok": True, "issuers": rows}
+        extra = [] if isinstance(get_store(), MemoryStore) else get_store().list_issuers()
+        return {
+            "ok": True,
+            "book": "high_yield",
+            "floor_pct": "6",
+            "issuers": _plain(book_rows(extra)),
+        }
 
     @router.get("/issuers/{cik}")
     def issuer(cik: str, request: Request):
         gp(request)
-        cik = _cik(cik)
-        return {"ok": True, **_plain(build_view(_packet_for(cik)))}
+        return {"ok": True, **_plain(_view_for(_cik(cik)))}
 
     @router.post("/issuers/{cik}/compute")
     def compute(cik: str, request: Request):
@@ -106,8 +117,7 @@ def create_router(claims_fn) -> APIRouter:
         body = _request_json_sync(request) or {}
         if not isinstance(body, dict):
             body = {}
-        view = build_view(_packet_for(_cik(cik)), body)
-        return {"ok": True, **_plain(view)}
+        return {"ok": True, **_plain(_view_for(_cik(cik), body))}
 
     @router.post("/issuers/{cik}/deep-dive")
     def deep_dive(cik: str, request: Request):

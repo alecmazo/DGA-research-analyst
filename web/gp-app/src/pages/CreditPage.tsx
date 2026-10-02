@@ -5,7 +5,27 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import styles from './CreditPage.module.css'
 
-type IssuerRow = { cik: string; legal_name?: string; ticker?: string; status?: string }
+type IssuerRow = {
+  cik: string
+  legal_name?: string
+  ticker?: string
+  sector?: string
+  status?: string
+  coupon_high?: string
+  floor_pct?: string
+  book?: string
+}
+
+type Draft = {
+  id: string
+  name: string
+  coupon: string
+  maturity: string
+  amount: string
+  clean_price: string
+}
+
+type Desk = Record<string, { bonds: Draft[]; quotes: Quote[] }>
 
 type Instrument = {
   id: string
@@ -33,6 +53,10 @@ type Quote = Instrument & {
   verdict_reason?: string
   ytw_note?: string
   note?: string
+  on_book?: boolean
+  off_book?: boolean
+  clean_price?: string | null
+  amount?: string
   market_pd?: Record<string, string>
   buy_spread_bp?: string | null
   assumption?: string
@@ -41,7 +65,12 @@ type Quote = Instrument & {
 type MetricBase = { id: string; label: string; ebitda?: string | null; gross?: string | null; net?: string | null; reason?: string }
 
 type View = {
-  identity?: { name?: string; cik?: string; ticker?: string; ticker_next?: string; name_change?: string; close?: string }
+  mode?: string
+  floor_pct?: string
+  sec_url?: string
+  curve_note?: string
+  recovery_note?: string
+  identity?: { name?: string; cik?: string; ticker?: string; ticker_next?: string; name_change?: string; close?: string; sector?: string }
   badge?: string
   badge_reason?: string
   totals?: Record<string, string>
@@ -67,10 +96,73 @@ const GROUPS = [
   ['exchange', 'WBD notes delivered for exchange'],
 ] as const
 
+const DESK_KEY = 'dga.credit.hy.v1'
+
 function money(value?: string | null, currency = 'USD') {
   if (value == null || value === '') return '—'
   const prefix = currency === 'EUR' ? '€' : '$'
   return `${prefix}${value}m`
+}
+
+function loadDesk(): Desk {
+  try {
+    const raw = localStorage.getItem(DESK_KEY)
+    const parsed = raw ? JSON.parse(raw) as Desk : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveDesk(desk: Desk) {
+  try {
+    localStorage.setItem(DESK_KEY, JSON.stringify(desk))
+  } catch {
+    /* the book still works for this page view */
+  }
+}
+
+function blankBond(): Draft {
+  return {
+    id: `b-${Math.random().toString(36).slice(2, 8)}`,
+    name: '',
+    coupon: '',
+    maturity: '',
+    amount: '',
+    clean_price: '',
+  }
+}
+
+function bestNumber(values: Array<string | null | undefined>) {
+  let best: number | null = null
+  for (const value of values) {
+    if (value == null || value === '') continue
+    const number = Number(value)
+    if (!Number.isFinite(number)) continue
+    if (best == null || number > best) best = number
+  }
+  return best
+}
+
+function sameNumber(left?: string | null, right?: string | null) {
+  if (!left && !right) return true
+  const a = Number(left)
+  const b = Number(right)
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return (left || '') === (right || '')
+  return Math.abs(a - b) < 0.0001
+}
+
+function staysOnBook(row: IssuerRow, desk: Desk, floor: number) {
+  const saved = desk[row.cik]
+  const ytm = bestNumber((saved?.quotes || []).map((quote) => quote.ytm))
+  const coupon = bestNumber([
+    row.coupon_high,
+    ...(saved?.bonds || []).map((bond) => bond.coupon),
+    ...(saved?.quotes || []).map((quote) => quote.coupon),
+  ])
+  if (ytm != null) return ytm >= floor
+  if (coupon != null) return coupon >= floor
+  return true
 }
 
 export function CreditPage() {
@@ -82,6 +174,16 @@ export function CreditPage() {
   const [price, setPrice] = useState('')
   const [multiple, setMultiple] = useState('6')
   const [busy, setBusy] = useState(false)
+  const [desk, setDesk] = useState<Desk>({})
+  const [query, setQuery] = useState('')
+  const [sector, setSector] = useState('All')
+  const [floor, setFloor] = useState('6')
+  const [pricedOnly, setPricedOnly] = useState(false)
+  const [drafts, setDrafts] = useState<Draft[]>([blankBond()])
+
+  useEffect(() => {
+    setDesk(loadDesk())
+  }, [])
 
   useEffect(() => {
     api<{ issuers: IssuerRow[] }>('/api/credit/issuers')
@@ -94,7 +196,10 @@ export function CreditPage() {
       setView(null)
       return
     }
+    const saved = loadDesk()[issuer]
+    setDrafts(saved?.bonds?.length ? saved.bonds : [blankBond()])
     setErr('')
+    setView(null)
     api<View>(`/api/credit/issuers/${issuer}`)
       .then(setView)
       .catch((error) => setErr(error instanceof Error ? error.message : 'Could not load this issuer'))
@@ -126,23 +231,195 @@ export function CreditPage() {
     }
   }
 
+  const floorNumber = Number(floor) || 6
+  const sectors = [...new Set(issuers.map((row) => row.sector).filter(Boolean))].sort() as string[]
+  const shown = issuers.filter((row) => {
+    const hay = `${row.legal_name || ''} ${row.ticker || ''} ${row.cik}`.toLowerCase()
+    if (query.trim() && !hay.includes(query.trim().toLowerCase())) return false
+    if (sector !== 'All' && row.sector !== sector) return false
+    if (!staysOnBook(row, desk, floorNumber)) return false
+    if (pricedOnly && bestNumber((desk[row.cik]?.quotes || []).map((quote) => quote.ytm)) == null) return false
+    return true
+  })
+
   if (!issuer) {
     return (
-      <Panel title="Credit">
-        <p className={styles.lead}>
-          Bond credit, downside first. Issuers are keyed by SEC CIK, not by ticker.
-        </p>
+      <div className={styles.desk}>
+        <header className={styles.mast}>
+          <p className={styles.kicker}>DGA Capital · Credit</p>
+          <h1>High yield book</h1>
+          <p className={styles.mastCopy}>
+            {issuers.length} issuers to underwrite. The screen drops a bond once its yield is under {floorNumber}%.
+            A 3–4% coupon is not this desk. Prices are what you type. Nothing here is a live TRACE print.
+          </p>
+        </header>
         {err && <p className={styles.err}>{err}</p>}
-        <ul className={styles.list}>
-          {issuers.map((row) => (
-            <li key={row.cik}>
-              <Link to={`/credit/${row.cik}`}>{row.legal_name || row.cik}</Link>
-              <span className={styles.meta}>{row.ticker || 'ticker not set'} · CIK {row.cik}</span>
-            </li>
-          ))}
-          {!issuers.length && !err && <li>No issuers yet.</li>}
-        </ul>
-      </Panel>
+        <div className={styles.filters}>
+          <input aria-label="Search issuers" placeholder="Issuer, ticker, or CIK" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <label>
+            Sector
+            <select aria-label="Sector" value={sector} onChange={(event) => setSector(event.target.value)}>
+              <option>All</option>
+              {sectors.map((name) => <option key={name}>{name}</option>)}
+            </select>
+          </label>
+          <label>
+            Min yield
+            <input aria-label="Minimum yield" value={floor} onChange={(event) => setFloor(event.target.value)} />
+          </label>
+          <label className={styles.check}>
+            <input type="checkbox" checked={pricedOnly} onChange={(event) => setPricedOnly(event.target.checked)} />
+            Priced only
+          </label>
+          <span className={styles.meta}>{shown.length} on the screen</span>
+        </div>
+        <div className={styles.scroll}>
+          <table className={styles.book}>
+            <thead>
+              <tr>
+                <th>Issuer</th>
+                <th>Ticker</th>
+                <th>Sector</th>
+                <th>Coupon</th>
+                <th>YTM</th>
+                <th>Call</th>
+                <th>Work</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((row) => {
+                const saved = desk[row.cik]
+                const ytm = bestNumber((saved?.quotes || []).map((quote) => quote.ytm))
+                const coupon = bestNumber([row.coupon_high, ...(saved?.quotes || []).map((quote) => quote.coupon)])
+                const call = (saved?.quotes || []).find((quote) => quote.verdict)?.verdict
+                return (
+                  <tr key={row.cik}>
+                    <td><Link to={`/credit/${row.cik}`}>{row.legal_name || row.cik}</Link></td>
+                    <td className={styles.num}>{row.ticker || '—'}</td>
+                    <td>{row.sector || '—'}</td>
+                    <td className={styles.num}>{coupon == null ? '—' : `${coupon.toFixed(2)}%`}</td>
+                    <td className={styles.num}>{ytm == null ? '—' : `${ytm.toFixed(2)}%`}</td>
+                    <td>{call || '—'}</td>
+                    <td>{row.status === 'structure' ? 'Structure' : 'Screen'}</td>
+                  </tr>
+                )
+              })}
+              {!shown.length && (
+                <tr><td colSpan={7}>{issuers.length ? 'Nothing clears this screen.' : 'No issuers yet.'}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  if (!view) {
+    return (
+      <div className={styles.desk}>
+        <p className={styles.back}><Link to="/credit">High yield book</Link></p>
+        {err ? <p className={styles.err}>{err}</p> : <p className={styles.meta}>Opening the issuer.</p>}
+      </div>
+    )
+  }
+
+  if (view.mode === 'screen') {
+    const priceScreen = async () => {
+      setBusy(true)
+      setErr('')
+      try {
+        const next = await api<View>(`/api/credit/issuers/${issuer}/compute`, {
+          method: 'POST',
+          body: JSON.stringify({
+            bonds: drafts.map((bond) => ({
+              id: bond.id,
+              name: bond.name,
+              coupon: bond.coupon,
+              maturity: bond.maturity,
+              amount: bond.amount,
+              clean_price: bond.clean_price,
+            })),
+          }),
+        })
+        setView(next)
+        const stored = { ...loadDesk(), [issuer]: { bonds: drafts, quotes: next.quotes || [] } }
+        saveDesk(stored)
+        setDesk(stored)
+      } catch (error) {
+        setErr(error instanceof Error ? error.message : 'Could not price the blotter')
+      } finally {
+        setBusy(false)
+      }
+    }
+    const idn = view.identity
+    return (
+      <div className={styles.desk}>
+        <p className={styles.back}><Link to="/credit">High yield book</Link></p>
+        <header className={styles.mast}>
+          <p className={styles.kicker}>DGA Capital · High yield credit · {idn?.sector || 'Sector not set'}</p>
+          <h1>{idn?.name || 'Issuer'}</h1>
+          <p className={styles.mastCopy}>
+            {idn?.ticker || '—'} · CIK {idn?.cik || issuer}. {view.badge}. {view.badge_reason}
+          </p>
+        </header>
+        {err && <p className={styles.err}>{err}</p>}
+        <section className={styles.sheet}>
+          <div className={styles.sheetHead}>
+            <h2>Bond blotter</h2>
+            <div className={styles.toolbar}>
+              <Button size="sm" onClick={() => setDrafts((rows) => [...rows, blankBond()])}>Add bond</Button>
+              <Button size="sm" variant="primary" disabled={busy} onClick={() => void priceScreen()}>
+                {busy ? 'Pricing…' : 'Price'}
+              </Button>
+            </div>
+          </div>
+          <p className={styles.meta}>
+            Look the bond up on <a href={view.finra_url} target="_blank" rel="noreferrer">FINRA</a> and type the clean price.
+            Filings are on <a href={view.sec_url} target="_blank" rel="noreferrer">EDGAR</a>.
+            {view.curve_note} {view.recovery_note}
+          </p>
+          <div className={styles.scroll}>
+            <table className={styles.book}>
+              <thead>
+                <tr>
+                  <th>Bond</th>
+                  <th>Coupon</th>
+                  <th>Maturity</th>
+                  <th>Amount $m</th>
+                  <th>Clean</th>
+                  <th>YTM</th>
+                  <th>G-spread</th>
+                  <th>Call</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {drafts.map((bond, index) => {
+                  const quote = (view.quotes || []).find((row) => (
+                    row.id === bond.id
+                    && sameNumber(row.coupon, bond.coupon)
+                    && sameNumber(row.clean_price, bond.clean_price)
+                    && (row.maturity || '') === bond.maturity
+                  ))
+                  return (
+                    <tr key={bond.id} className={quote?.off_book ? styles.off : undefined}>
+                      <td><input aria-label="Bond name" value={bond.name} placeholder="Senior notes" onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></td>
+                      <td><input aria-label="Coupon" value={bond.coupon} placeholder="8.00" onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, coupon: event.target.value } : item))} /></td>
+                      <td><input aria-label="Maturity" value={bond.maturity} placeholder="2031-10-15" onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, maturity: event.target.value } : item))} /></td>
+                      <td><input aria-label="Amount" value={bond.amount} onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, amount: event.target.value } : item))} /></td>
+                      <td><input aria-label="Clean price" value={bond.clean_price} placeholder="100" onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, clean_price: event.target.value } : item))} /></td>
+                      <td className={styles.num}>{quote?.ytm ? `${quote.ytm}%` : '—'}</td>
+                      <td className={styles.num}>{quote?.g_spread_bp ? `${quote.g_spread_bp} bp` : '—'}</td>
+                      <td>{quote?.verdict || '—'}{quote?.note ? <span className={styles.meta}> {quote.note}</span> : null}</td>
+                      <td><button type="button" className={styles.drop} onClick={() => setDrafts((rows) => rows.filter((item) => item.id !== bond.id))}>Remove</button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     )
   }
 
@@ -153,11 +430,11 @@ export function CreditPage() {
 
   return (
     <>
-      <p className={styles.back}><Link to="/credit">All issuers</Link></p>
+      <p className={styles.back}><Link to="/credit">High yield book</Link></p>
       <Panel title={id?.name || 'Credit'}>
         <p className={styles.lead}>
-          CIK {id?.cik || issuer}. Ticker {id?.ticker || '—'}, then {id?.ticker_next || '—'} ({id?.name_change || 'name change not found'}).
-          Expected close {id?.close || 'not found'}.
+          Structure is loaded. CIK {id?.cik || issuer}. Ticker {id?.ticker || '—'}, then {id?.ticker_next || '—'} ({id?.name_change || 'name change not found'}).
+          Expected close {id?.close || 'not found'}. Coupons under 6% stay off the book screen.
         </p>
         <p className={styles.meta}>{view?.badge}. {view?.badge_reason}</p>
         {err && <p className={styles.err}>{err}</p>}

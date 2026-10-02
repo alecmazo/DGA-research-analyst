@@ -232,6 +232,14 @@ Opened from the Market Pulse **Comps** chip.
 - Missing cells render **n/a** — never NTM / (E)
 - Same Support FAB + Download pulldown (Excel = `/comps.xlsx`) + ticker stats line as the valuation window
 
+### 5.16 Credit (`/credit`)
+
+High-yield book. About 80 public issuers, keyed by SEC CIK, plus the Paramount Skydance structure. Filter by name, sector, and a minimum yield that starts at 6%. A priced bond under that floor drops off. Coupons and clean prices are typed on the issuer blotter. The call is code. Investment-grade 3–4% coupons are not the book.
+
+### 5.17 Merger arb (`/merger-arb`)
+
+A situation memorandum: navy masthead, the spread tape, then numbered sections for the situation, consideration, spread, regulatory path, votes, catalysts, downside, and upside. The math is unchanged.
+
 ---
 
 ## 6. LP portal & mobile

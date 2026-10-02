@@ -65,10 +65,6 @@ type View = {
   escalate?: boolean
 }
 
-function Dot({ dot }: { dot: Row['dot'] }) {
-  return <span className={styles.dot} data-dot={dot} title={dot} />
-}
-
 function pct(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return '—'
   return `${(value * 100).toFixed(2)}%`
@@ -130,29 +126,67 @@ function SourceNote({ row }: { row: Row }) {
   )
 }
 
-function CompactFacts({ rows, onConfirm, cols = 3 }: { rows: Row[]; onConfirm: (id: string) => void; cols?: 1 | 2 | 3 }) {
-  if (!rows.length) return <p className={styles.muted}>Nothing stored.</p>
-  const sensitivity = rows.find((row) => row.id === 'spread.sensitivity')
+const TAPE: [string, string][] = [
+  ['overview.offer_value', 'Offer'],
+  ['overview.target_price', 'Price'],
+  ['spread.gross_percent', 'Gross spread'],
+  ['spread.annualized', 'Annualized'],
+  ['spread.implied_probability', 'Probability'],
+  ['overview.expected_close', 'Close'],
+  ['downside.downside_percent', 'Downside'],
+  ['upside.upside_percent', 'Upside'],
+]
+
+function sectionRows(sections: Card[] | undefined, id: string): Row[] {
+  const card = (sections || []).find((item) => item.id === id)
+  if (!card) return []
+  return [...card.rows, ...card.blocks.flatMap((block) => block.rows)]
+}
+
+function findRow(sections: Card[] | undefined, id: string): Row | undefined {
+  for (const card of sections || []) {
+    const hit = [...card.rows, ...card.blocks.flatMap((block) => block.rows)].find((row) => row.id === id)
+    if (hit) return hit
+  }
+  return undefined
+}
+
+function MemoTable({ rows, onConfirm }: { rows: Row[]; onConfirm: (id: string) => void }) {
   const facts = rows.filter((row) => row.id !== 'spread.sensitivity')
+  const sensitivity = rows.find((row) => row.id === 'spread.sensitivity')
+  if (!facts.length && !sensitivity) return <p className={styles.muted}>Nothing stored.</p>
   return (
     <>
-      <ul className={styles.factGrid} data-cols={cols}>
-        {facts.map((row) => (
-          <li key={row.id} className={styles.fact}>
-            <Dot dot={row.dot} />
-            <span className={styles.factLabel}>{row.label}</span>
-            <span className={styles.factValue}>{row.display}</span>
-            {row.unverified && (
-              <Button size="sm" variant="secondary" onClick={() => onConfirm(row.id)}>
-                Confirm
-              </Button>
-            )}
-            <SourceNote row={row} />
-          </li>
-        ))}
-      </ul>
+      {facts.length > 0 && (
+        <table className={styles.memoTable}>
+          <tbody>
+            {facts.map((row) => (
+              <tr key={row.id}>
+                <th>{row.label}</th>
+                <td>
+                  <span className={styles.memoVal}>{row.display}</span>
+                  <i className={styles.pip} data-dot={row.dot} title={row.dot} />
+                  {row.unverified && (
+                    <Button size="sm" variant="secondary" onClick={() => onConfirm(row.id)}>Confirm</Button>
+                  )}
+                  <SourceNote row={row} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       {sensitivity ? <Sensitivity value={sensitivity.value} /> : null}
     </>
+  )
+}
+
+function BookSection({ n, title, children }: { n: string; title: string; children: ReactNode }) {
+  return (
+    <section className={styles.section}>
+      <h2><span>{n}</span>{title}</h2>
+      {children}
+    </section>
   )
 }
 
@@ -269,32 +303,44 @@ export function MergerArbPage() {
 
   return (
     <div className={page.page}>
-      <header className={page.hero}>
-        <div>
-          <p className={page.kicker}>Research</p>
-          <h1 className={page.h1}>Merger arb analysis</h1>
-          <p className={page.sub}>
-            Deep dive on a cloud model you pick. Refresh and follow-up stay on the local model.
-          </p>
-        </div>
-      </header>
+      {!dealId && (
+        <header className={page.hero}>
+          <div>
+            <p className={page.kicker}>DGA Capital</p>
+            <h1 className={page.h1}>Merger arbitrage</h1>
+            <p className={page.sub}>
+              Situation memoranda. Spread, probability, and downside are computed in code.
+            </p>
+          </div>
+        </header>
+      )}
       {err && <p className={styles.err}>{err}</p>}
 
       {!dealId && (
         <>
           <DealScan />
-          <Panel title="Deals">
-            <ul className={styles.deals}>
-              {deals.map((deal) => (
-                <li key={deal.id}>
-                  <Link to={`/merger-arb/analysis/${deal.id}`}>
-                    {deal.target_ticker} / {deal.acquirer_ticker}
-                  </Link>
-                  <span>{deal.target_name} · {deal.status}{deal.sample ? ' · sample' : ''}</span>
-                </li>
-              ))}
-              {!deals.length && <li>No deals yet.</li>}
-            </ul>
+          <Panel title="Pipeline">
+            <table className={styles.pipe}>
+              <thead>
+                <tr><th>Target</th><th>Acquirer</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {deals.map((deal) => (
+                  <tr key={deal.id}>
+                    <td>
+                      <Link to={`/merger-arb/analysis/${deal.id}`}>{deal.target_ticker || deal.id}</Link>
+                      <span className={styles.meta}>{deal.target_name}</span>
+                    </td>
+                    <td>
+                      {deal.acquirer_ticker || '—'}
+                      <span className={styles.meta}>{deal.acquirer_name}</span>
+                    </td>
+                    <td>{deal.status || '—'}{deal.sample ? ' · sample' : ''}</td>
+                  </tr>
+                ))}
+                {!deals.length && <tr><td colSpan={3}>No deals yet.</td></tr>}
+              </tbody>
+            </table>
           </Panel>
           <Panel title="Add a deal">
             <div className={styles.form}>
@@ -311,197 +357,192 @@ export function MergerArbPage() {
       )}
 
       {dealId && view && (
-        <>
-          <Panel
-            title={`${view.deal?.target_ticker || dealId} / ${view.deal?.acquirer_ticker || ''}`}
-            badge={view.badge}
-          >
-            <div className={styles.toolbar}>
-              <label>
-                Deal
-                <select
-                  aria-label="Deal"
-                  value={dealId}
-                  onChange={(e) => navigate(`/merger-arb/analysis/${e.target.value}`)}
-                >
-                  {(view.deals || deals).map((deal) => (
-                    <option key={deal.id} value={deal.id}>
-                      {deal.target_ticker} / {deal.acquirer_ticker}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <span>Version {view.version ?? '—'} · {view.model} · as of {view.as_of_pt || '—'}</span>
-              <label>
-                Deep dive model
-                <select aria-label="Deep dive model" value={provider} onChange={(e) => setProvider(e.target.value as 'grok' | 'claude')}>
-                  <option value="grok">Grok</option>
-                  <option value="claude">Claude</option>
-                </select>
-              </label>
-              <Button size="sm" variant="primary" disabled={!!busy} onClick={() => void run(`/api/merger-arb/analysis/${dealId}/deep-dive`, { provider }, 'deep')}>
-                {busy === 'deep' ? 'Running…' : `Run Deep Dive (${provider === 'grok' ? 'Grok' : 'Claude'})`}
-              </Button>
-              <Button size="sm" disabled={!!busy || !!view.empty} onClick={() => void run(`/api/merger-arb/analysis/${dealId}/refresh`, {}, 'refresh')}>
-                {busy === 'refresh' ? 'Refreshing…' : 'Refresh with Local Model (free)'}
-              </Button>
-              <Button size="sm" disabled={!!busy || !!view.empty} onClick={() => void exportPacket('md')}>Export Markdown</Button>
-              <Button size="sm" disabled={!!busy || !!view.empty} onClick={() => void exportPacket('json')}>Export JSON</Button>
+        <article className={styles.book}>
+          <header className={styles.mast}>
+            <p className={styles.kicker}>DGA Capital · Merger arbitrage · Situation memorandum</p>
+            <div className={styles.mastTop}>
+              <h1>
+                {view.deal?.target_name || view.deal?.target_ticker || dealId}
+                <span> / {view.deal?.acquirer_name || view.deal?.acquirer_ticker || 'Acquirer'}</span>
+              </h1>
+              <p className={styles.badge}>{view.badge || 'No packet'}</p>
             </div>
-            <p className={styles.muted}>
-              Deep dive runs only when you click it, on {provider === 'grok' ? 'Grok' : 'Claude'}. Refresh never switches to a paid model.
+            <p className={styles.mastMeta}>
+              {view.deal?.target_ticker || dealId} / {view.deal?.acquirer_ticker || '—'}
+              {' · '}Version {view.version ?? '—'}
+              {' · '}{view.model || 'no model yet'}
+              {' · '}as of {view.as_of_pt || '—'}
             </p>
-            {view.cut_warning && <p className={styles.warn}>{view.cut_warning}</p>}
-            {view.empty && <p>No packet yet. Run Deep Dive to create version 1. Nothing runs until you click.</p>}
-          </Panel>
-
-          {!view.empty && (() => {
-            const sections = view.sections || []
-            const byId = (id: string) => sections.find((card) => card.id === id)
-            const used = new Set(['overview', 'spread', 'structure', 'regulatory', 'votes', 'catalysts', 'downside', 'upside', 'sources'])
-            const lead = ['overview', 'spread', 'structure'].map(byId).filter((card): card is Card => !!card)
-            const path = ['regulatory', 'votes', 'catalysts'].map(byId).filter((card): card is Card => !!card)
-            const book = ['downside', 'upside'].map(byId).filter((card): card is Card => !!card)
-            const sources = byId('sources')
-            const rest = sections.filter((card) => !used.has(card.id))
-            const body = (card: Card, cols: 1 | 2 | 3 = 1) => (
-              <>
-                {card.rows.length > 0 && <CompactFacts rows={card.rows} onConfirm={confirm} cols={cols} />}
-                {card.blocks.map((block) => (
-                  <div key={block.title}>
-                    <h3 className={styles.subhead}>{block.title}</h3>
-                    <CompactFacts rows={block.rows} onConfirm={confirm} cols={1} />
-                  </div>
-                ))}
-                {!card.rows.length && !card.blocks.length && <p className={styles.muted}>Nothing stored.</p>}
-              </>
-            )
-            return (
-              <>
-                {lead.map((card) => (
-                  <Panel key={card.id} title={card.title}>
-                    {body(card, 3)}
-                  </Panel>
-                ))}
-                {path.length > 0 && (
-                  <Panel title="Regulatory, votes, and catalysts">
-                    <div className={styles.groupGrid}>
-                      {path.map((card) => (
-                        <section key={card.id}>
-                          <h3 className={styles.subhead}>{card.title}</h3>
-                          {body(card, 1)}
-                        </section>
-                      ))}
-                    </div>
-                  </Panel>
-                )}
-                {book.length > 0 && (
-                  <Panel title="Downside and upside">
-                    <div className={styles.groupGrid2}>
-                      {book.map((card) => (
-                        <section key={card.id}>
-                          <h3 className={styles.subhead}>{card.title}</h3>
-                          {body(card, 1)}
-                        </section>
-                      ))}
-                    </div>
-                  </Panel>
-                )}
-                <Panel title="Sources, refresh, and flags">
-                  <div className={styles.groupGrid}>
-                    <section>
-                      <h3 className={styles.subhead}>Sources</h3>
-                      {sources ? body(sources, 1) : <p className={styles.muted}>Nothing stored.</p>}
-                    </section>
-                    <section>
-                      <h3 className={styles.subhead}>Refresh</h3>
-                      {view.done?.complete ? <p className={styles.muted}>Refresh complete</p> : null}
-                      <ul className={styles.log}>
-                        {(view.done?.failed || []).map((item) => <li key={item}>{item}</li>)}
-                        {(view.refresh || []).map((item) => (
-                          <li key={item.id}>{item.status} · {item.id}{item.detail ? ` · ${item.detail}` : ''}</li>
-                        ))}
-                        {!view.refresh?.length && !view.done?.failed?.length && <li>No refresh yet.</li>}
-                      </ul>
-                    </section>
-                    <section>
-                      <h3 className={styles.subhead}>Flags</h3>
-                      <ul className={styles.log}>
-                        {(view.flags || []).map((flag, index) => (
-                          <li key={`${flag.id}-${index}`}><strong>{flag.kind}</strong> · {flag.id}{flag.detail ? ` · ${flag.detail}` : ''}</li>
-                        ))}
-                        {!view.flags?.length && <li>None.</li>}
-                      </ul>
-                    </section>
-                  </div>
-                </Panel>
-                {rest.map((card) => (
-                  <Panel key={card.id} title={card.title}>
-                    {body(card, 3)}
-                  </Panel>
-                ))}
-              </>
-            )
-          })()}
-
+          </header>
+          <div className={styles.rule} />
           {!view.empty && (
-          <>
-
-          <Panel title="Ask a follow-up">
-            <textarea
-              aria-label="Follow-up"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              rows={2}
-              placeholder="Ask from this packet only"
-            />
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={!!busy || question.trim().length < 4}
-              onClick={() => void run(`/api/merger-arb/analysis/${dealId}/ask`, { question }, 'ask')}
-            >
-              Ask a follow-up
-            </Button>
-            {answer && <p>{answer}</p>}
-            {citations.length > 0 && <p className={styles.meta}>Cites {citations.join(', ')}</p>}
-            {answerNote && <p className={styles.warn}>{answerNote}</p>}
-            {escalate && (
-              <Button size="sm" variant="secondary" onClick={() => void run(`/api/merger-arb/analysis/${dealId}/deep-dive`, { provider }, 'deep')}>
-                Escalate to Deep Dive
-              </Button>
-            )}
-          </Panel>
-
-          <Panel title="Version history">
-            <ul className={styles.log}>
-              {(view.versions || []).map((item) => (
-                <li key={`${item.version}-${item.stage}`}>
-                  <strong>v{item.version}</strong> · {item.stage} · {item.model} · {item.created_at_pt}
-                  {item.diff?.length ? (
-                    <ul>
-                      {item.diff.map((change) => (
-                        <li key={change.id}>{change.id}: {String(change.before)} → {String(change.after)}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </Panel>
-
-          {view.stage1_notes?.length ? (
-            <Panel title="Deep dive notes">
-              <ul>
-                {view.stage1_notes.map((note) => (
-                  <li key={note.text}>{note.text} ({(note.field_ids || []).join(', ')})</li>
-                ))}
-              </ul>
-            </Panel>
-          ) : null}
-          </>
+            <div className={styles.tape}>
+              {TAPE.map(([id, label]) => {
+                const row = findRow(view.sections, id)
+                return (
+                  <div key={id} className={styles.tapeCell}>
+                    <span>{label}</span>
+                    <strong>{row?.display || '—'}</strong>
+                  </div>
+                )
+              })}
+            </div>
           )}
-        </>
+          <div className={styles.command}>
+            <label>
+              Deal
+              <select
+                aria-label="Deal"
+                value={dealId}
+                onChange={(e) => navigate(`/merger-arb/analysis/${e.target.value}`)}
+              >
+                {(view.deals || deals).map((deal) => (
+                  <option key={deal.id} value={deal.id}>
+                    {deal.target_ticker} / {deal.acquirer_ticker}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Deep dive
+              <select aria-label="Deep dive model" value={provider} onChange={(e) => setProvider(e.target.value as 'grok' | 'claude')}>
+                <option value="grok">Grok</option>
+                <option value="claude">Claude</option>
+              </select>
+            </label>
+            <Button size="sm" variant="primary" disabled={!!busy} onClick={() => void run(`/api/merger-arb/analysis/${dealId}/deep-dive`, { provider }, 'deep')}>
+              {busy === 'deep' ? 'Running…' : 'Run deep dive'}
+            </Button>
+            <Button size="sm" disabled={!!busy || !!view.empty} onClick={() => void run(`/api/merger-arb/analysis/${dealId}/refresh`, {}, 'refresh')}>
+              {busy === 'refresh' ? 'Refreshing…' : 'Refresh on local model'}
+            </Button>
+            <Button size="sm" disabled={!!busy || !!view.empty} onClick={() => void exportPacket('md')}>Export</Button>
+            <Button size="sm" disabled={!!busy || !!view.empty} onClick={() => void exportPacket('json')}>JSON</Button>
+            <Link className={styles.back} to="/merger-arb">Pipeline</Link>
+          </div>
+          <p className={styles.muted}>
+            Deep dive runs only when you click it, on {provider === 'grok' ? 'Grok' : 'Claude'}. Refresh stays on the local model.
+          </p>
+          {view.cut_warning && <p className={styles.warn}>{view.cut_warning}</p>}
+          {view.empty && <p className={styles.pad}>No packet yet. Run deep dive to write version 1. Nothing runs until you click.</p>}
+          {!view.empty && (
+            <div className={styles.body}>
+              <div className={styles.split}>
+                <BookSection n="01" title="Situation">
+                  <MemoTable rows={sectionRows(view.sections, 'overview')} onConfirm={confirm} />
+                </BookSection>
+                <BookSection n="02" title="Consideration">
+                  <MemoTable rows={sectionRows(view.sections, 'structure')} onConfirm={confirm} />
+                </BookSection>
+              </div>
+              <BookSection n="03" title="Spread and implied probability">
+                <MemoTable rows={sectionRows(view.sections, 'spread')} onConfirm={confirm} />
+              </BookSection>
+              <div className={styles.split3}>
+                <BookSection n="04" title="Regulatory path">
+                  <MemoTable rows={sectionRows(view.sections, 'regulatory')} onConfirm={confirm} />
+                </BookSection>
+                <BookSection n="05" title="Shareholder votes">
+                  <MemoTable rows={sectionRows(view.sections, 'votes')} onConfirm={confirm} />
+                </BookSection>
+                <BookSection n="06" title="Catalysts">
+                  <MemoTable rows={sectionRows(view.sections, 'catalysts')} onConfirm={confirm} />
+                </BookSection>
+              </div>
+              <div className={styles.split}>
+                <BookSection n="07" title="Downside if the deal breaks">
+                  <MemoTable rows={sectionRows(view.sections, 'downside')} onConfirm={confirm} />
+                </BookSection>
+                <BookSection n="08" title="Upside on close">
+                  <MemoTable rows={sectionRows(view.sections, 'upside')} onConfirm={confirm} />
+                </BookSection>
+              </div>
+              <BookSection n="09" title="Sources, refresh, and flags">
+                <div className={styles.split3}>
+                  <div>
+                    <h3 className={styles.subhead}>Sources</h3>
+                    <MemoTable rows={sectionRows(view.sections, 'sources')} onConfirm={confirm} />
+                  </div>
+                  <div>
+                    <h3 className={styles.subhead}>Refresh</h3>
+                    {view.done?.complete ? <p className={styles.muted}>Refresh complete</p> : null}
+                    <ul className={styles.log}>
+                      {(view.done?.failed || []).map((item) => <li key={item}>{item}</li>)}
+                      {(view.refresh || []).map((item) => (
+                        <li key={item.id}>{item.status} · {item.id}{item.detail ? ` · ${item.detail}` : ''}</li>
+                      ))}
+                      {!view.refresh?.length && !view.done?.failed?.length && <li>No refresh yet.</li>}
+                    </ul>
+                  </div>
+                  <div>
+                    <h3 className={styles.subhead}>Flags</h3>
+                    <ul className={styles.log}>
+                      {(view.flags || []).map((flag, index) => (
+                        <li key={`${flag.id}-${index}`}><strong>{flag.kind}</strong> · {flag.id}{flag.detail ? ` · ${flag.detail}` : ''}</li>
+                      ))}
+                      {!view.flags?.length && <li>None.</li>}
+                    </ul>
+                  </div>
+                </div>
+              </BookSection>
+              {(view.sections || []).filter((card) => !['overview', 'spread', 'structure', 'regulatory', 'votes', 'catalysts', 'downside', 'upside', 'sources'].includes(card.id)).map((card) => (
+                <BookSection key={card.id} n="—" title={card.title}>
+                  <MemoTable rows={[...card.rows, ...card.blocks.flatMap((block) => block.rows)]} onConfirm={confirm} />
+                </BookSection>
+              ))}
+              <BookSection n="10" title="Follow-up">
+                <textarea
+                  aria-label="Follow-up"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  rows={2}
+                  placeholder="Ask from this packet only"
+                />
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={!!busy || question.trim().length < 4}
+                  onClick={() => void run(`/api/merger-arb/analysis/${dealId}/ask`, { question }, 'ask')}
+                >
+                  Ask
+                </Button>
+                {answer && <p>{answer}</p>}
+                {citations.length > 0 && <p className={styles.meta}>Cites {citations.join(', ')}</p>}
+                {answerNote && <p className={styles.warn}>{answerNote}</p>}
+                {escalate && (
+                  <Button size="sm" variant="secondary" onClick={() => void run(`/api/merger-arb/analysis/${dealId}/deep-dive`, { provider }, 'deep')}>
+                    Escalate to deep dive
+                  </Button>
+                )}
+              </BookSection>
+              <BookSection n="11" title="Version history">
+                <ul className={styles.log}>
+                  {(view.versions || []).map((item) => (
+                    <li key={`${item.version}-${item.stage}`}>
+                      <strong>v{item.version}</strong> · {item.stage} · {item.model} · {item.created_at_pt}
+                      {item.diff?.length ? (
+                        <ul>
+                          {item.diff.map((change) => (
+                            <li key={change.id}>{change.id}: {String(change.before)} → {String(change.after)}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </BookSection>
+              {view.stage1_notes?.length ? (
+                <BookSection n="12" title="Deep dive notes">
+                  <ul className={styles.log}>
+                    {view.stage1_notes.map((note) => (
+                      <li key={note.text}>{note.text} ({(note.field_ids || []).join(', ')})</li>
+                    ))}
+                  </ul>
+                </BookSection>
+              ) : null}
+            </div>
+          )}
+        </article>
       )}
     </div>
   )
