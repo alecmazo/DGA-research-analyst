@@ -9,10 +9,11 @@ from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Request
 
+from credit.filing import filing_view, load_filing
 from credit.fixture import CIK, build_fixture
 from credit.present import build_view
 from credit.prices import priced_packet_body
-from credit.screen import book_rows, screen_view
+from credit.screen import book_rows
 from credit.store import MemoryStore, PostgresStore
 from credit.universe import by_cik
 
@@ -81,7 +82,9 @@ def _view_for(cik: str, body: dict | None = None, entered_by: str = "") -> dict:
         return build_view(packet, priced_packet_body(get_store(), packet, body, entered_by))
     row = by_cik(cik)
     if row:
-        return screen_view(row, body)
+        loaded = load_filing(cik)
+        note = "" if loaded.get("ok") else (loaded.get("note") or "SEC companyfacts did not load.")
+        return filing_view(row, loaded.get("parsed"), body, note)
     raise HTTPException(404, "Issuer not found")
 
 

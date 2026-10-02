@@ -45,6 +45,24 @@ type Instrument = {
   maturity_notes?: string
 }
 
+type FilingLine = {
+  id: string
+  name?: string
+  amount?: string
+  currency?: string
+  coupon_note?: string
+  maturity_note?: string
+  as_of?: string
+  source_url?: string
+  source_name?: string
+  note?: string
+  in_total?: boolean
+}
+
+type ScheduleRow = { label: string; amount?: string; currency?: string; end?: string }
+
+type InterestRow = { label: string; amount?: string; currency?: string; as_of?: string }
+
 type Quote = Instrument & {
   ytm?: string | null
   g_spread_bp?: string | null
@@ -76,12 +94,27 @@ type View = {
   totals?: Record<string, string>
   instruments?: Instrument[]
   maturity_wall?: { year: string; priority: string; amount: string }[]
-  metrics?: { debt?: string | null; cash?: string | null; interest?: string | null; interest_coverage?: string | null; bases?: MetricBase[] }
+  metrics?: {
+    debt?: string | null
+    debt_note?: string
+    cash?: string | null
+    cash_label?: string
+    interest?: string | InterestRow[] | null
+    interest_coverage?: string | null
+    bases?: MetricBase[]
+  }
+  lines?: FilingLine[]
+  schedule?: ScheduleRow[]
+  schedule_complete?: boolean
+  filing_note?: string
+  source?: { url?: string; name?: string; form?: string; filed?: string; as_of?: string }
+  as_of?: string
+  waterfall?: { ev?: string; distributable?: string; reason?: string; rows?: { id?: string; name?: string; claim?: string; paid?: string; recovery?: string | null; assumption?: string }[] }
   covenants?: { key: string; label: string; status: string; summary: string; source?: { url?: string; name?: string } }[]
   quotes?: Quote[]
   oas?: Record<string, string>
   oas_note?: string
-  waterfall?: { ev?: string; distributable?: string; rows?: { id?: string; name?: string; claim?: string; paid?: string; recovery?: string | null; assumption?: string }[] }
+
   pd?: { rating?: string; fundamental?: string; market?: string }
   scenarios?: { id: string; name: string; rationale: string; default_year?: number | null; warning_indicators?: string[]; projection?: { year: number; leverage?: string; fcf?: string; default?: string }[] }[]
   flags?: { flag_type?: string; details?: string }[]
@@ -106,8 +139,10 @@ type StructureBook = Record<string, { prices: Record<string, string>; quotes: Qu
 
 function money(value?: string | null, currency = 'USD') {
   if (value == null || value === '') return '—'
+  const negative = value.trim().startsWith('-')
+  const abs = negative ? value.trim().slice(1) : value.trim()
   const prefix = currency === 'EUR' ? '€' : '$'
-  return `${prefix}${value}m`
+  return `${negative ? '−' : ''}${prefix}${abs}m`
 }
 
 function loadDesk(): Desk {
@@ -153,6 +188,58 @@ function maturityLabel(row: Instrument) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
   if (/^\d{4}$/.test(value)) return `${value} (month and day not in the filing)`
   return value || 'not found'
+}
+
+function BlotterTable({ drafts, quotes, onDrafts }: {
+  drafts: Draft[]
+  quotes: Quote[]
+  onDrafts: (next: Draft[]) => void
+}) {
+  const edit = (index: number, field: keyof Draft, value: string) => {
+    onDrafts(drafts.map((item, i) => i === index ? { ...item, [field]: value } : item))
+  }
+  return (
+    <div className={styles.scroll}>
+      <table className={styles.book}>
+        <thead>
+          <tr>
+            <th>Bond</th>
+            <th>Coupon</th>
+            <th>Maturity</th>
+            <th>Amount $m</th>
+            <th>Clean</th>
+            <th>YTM</th>
+            <th>G-spread</th>
+            <th>Call</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {drafts.map((bond, index) => {
+            const quote = quotes.find((row) => (
+              row.id === bond.id
+              && sameNumber(row.coupon, bond.coupon)
+              && sameNumber(row.clean_price, bond.clean_price)
+              && (row.maturity || '') === bond.maturity
+            ))
+            return (
+              <tr key={bond.id} className={quote?.off_book ? styles.off : undefined}>
+                <td><input aria-label="Bond name" value={bond.name} placeholder="Senior notes" onChange={(event) => edit(index, 'name', event.target.value)} /></td>
+                <td><input aria-label="Coupon" value={bond.coupon} placeholder="8.00" onChange={(event) => edit(index, 'coupon', event.target.value)} /></td>
+                <td><input aria-label="Maturity" value={bond.maturity} placeholder="2031-10-15" onChange={(event) => edit(index, 'maturity', event.target.value)} /></td>
+                <td><input aria-label="Amount" value={bond.amount} onChange={(event) => edit(index, 'amount', event.target.value)} /></td>
+                <td><input aria-label="Clean price" value={bond.clean_price} placeholder="100" onChange={(event) => edit(index, 'clean_price', event.target.value)} /></td>
+                <td className={styles.num}>{quote?.ytm ? `${quote.ytm}%` : '—'}</td>
+                <td className={styles.num}>{quote?.g_spread_bp ? `${quote.g_spread_bp} bp` : '—'}</td>
+                <td>{quote?.verdict || '—'}{quote?.note ? <span className={styles.meta}> {quote.note}</span> : null}</td>
+                <td><button type="button" className={styles.drop} onClick={() => onDrafts(drafts.filter((item) => item.id !== bond.id))}>Remove</button></td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 function blankBond(): Draft {
@@ -357,7 +444,8 @@ export function CreditPage() {
           <p className={styles.kicker}>DGA Capital · Credit</p>
           <h1>High yield book</h1>
           <p className={styles.mastCopy}>
-            {issuers.length} issuers to underwrite. The screen drops a bond once its yield is under {floorNumber}%.
+            {issuers.length} issuers to underwrite. Open a name for the annual-report balances and maturity schedule.
+            Paramount opens the named notes. The screen drops a bond once its yield is under {floorNumber}%.
             A 3–4% coupon is not this desk. Prices are what you type. Nothing here is a live TRACE print.
           </p>
         </header>
@@ -408,7 +496,7 @@ export function CreditPage() {
                     <td className={styles.num}>{coupon == null ? '—' : `${coupon.toFixed(2)}%`}</td>
                     <td className={styles.num}>{ytm == null ? '—' : `${ytm.toFixed(2)}%`}</td>
                     <td>{call || '—'}</td>
-                    <td>{row.status === 'structure' ? 'Structure' : 'Screen'}</td>
+                    <td>{row.status === 'structure' ? 'Structure' : row.status === 'filing' ? 'Filing' : 'Screen'}</td>
                   </tr>
                 )
               })}
@@ -431,104 +519,215 @@ export function CreditPage() {
     )
   }
 
-  if (view.mode === 'screen') {
-    const priceScreen = async () => {
-      setBusy(true)
-      setErr('')
-      try {
-        const next = await api<View>(`/api/credit/issuers/${issuer}/compute`, {
-          method: 'POST',
-          body: JSON.stringify({
-            bonds: drafts.map((bond) => ({
-              id: bond.id,
-              name: bond.name,
-              coupon: bond.coupon,
-              maturity: bond.maturity,
-              amount: bond.amount,
-              clean_price: bond.clean_price,
-            })),
-          }),
-        })
-        setView(next)
-        const stored = { ...loadDesk(), [issuer]: { bonds: drafts, quotes: next.quotes || [] } }
-        saveDesk(stored)
-        setDesk(stored)
-      } catch (error) {
-        setErr(error instanceof Error ? error.message : 'Could not price the blotter')
-      } finally {
-        setBusy(false)
-      }
+  const priceBlotter = async () => {
+    if (!issuer) return
+    setBusy(true)
+    setErr('')
+    try {
+      const next = await api<View>(`/api/credit/issuers/${issuer}/compute`, {
+        method: 'POST',
+        body: JSON.stringify({
+          bonds: drafts.map((bond) => ({
+            id: bond.id,
+            name: bond.name,
+            coupon: bond.coupon,
+            maturity: bond.maturity,
+            amount: bond.amount,
+            clean_price: bond.clean_price,
+          })),
+        }),
+      })
+      setView(next)
+      const stored = { ...loadDesk(), [issuer]: { bonds: drafts, quotes: next.quotes || [] } }
+      saveDesk(stored)
+      setDesk(stored)
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not price the blotter')
+    } finally {
+      setBusy(false)
     }
+  }
+
+  if (view.mode === 'filing' || view.mode === 'screen') {
     const idn = view.identity
+    const lines = view.lines || []
+    const schedule = view.schedule || []
+    const interestRows = Array.isArray(view.metrics?.interest) ? view.metrics.interest : []
+    const blotter = (
+      <>
+        <div className={styles.toolbar}>
+          <Button size="sm" onClick={() => setDrafts((rows) => [...rows, blankBond()])}>Add bond</Button>
+          <Button size="sm" variant="primary" disabled={busy} onClick={() => void priceBlotter()}>
+            {busy ? 'Pricing…' : 'Price'}
+          </Button>
+        </div>
+        <BlotterTable drafts={drafts} quotes={view.quotes || []} onDrafts={setDrafts} />
+      </>
+    )
+    if (view.mode === 'screen') {
+      return (
+        <div className={styles.desk}>
+          <p className={styles.back}><Link to="/credit">High yield book</Link></p>
+          <header className={styles.mast}>
+            <p className={styles.kicker}>DGA Capital · High yield credit · {idn?.sector || 'Sector not set'}</p>
+            <h1>{idn?.name || 'Issuer'}</h1>
+            <p className={styles.mastCopy}>
+              {idn?.ticker || '—'} · CIK {idn?.cik || issuer}. {view.badge}. {view.badge_reason}
+            </p>
+          </header>
+          {err && <p className={styles.err}>{err}</p>}
+          <section className={styles.sheet}>
+            <div className={styles.sheetHead}><h2>Bond blotter</h2></div>
+            <p className={styles.meta}>
+              Look the bond up on <a href={view.finra_url} target="_blank" rel="noreferrer">FINRA</a> and type the clean price.
+              Settlement {view.settlement || 'the next business day'}.
+              Filings are on <a href={view.sec_url} target="_blank" rel="noreferrer">EDGAR</a>.
+              {view.curve_note} {view.recovery_note}
+            </p>
+            {blotter}
+          </section>
+        </div>
+      )
+    }
+    const priced = (view.quotes || []).filter((row) => row.verdict)
     return (
-      <div className={styles.desk}>
+      <>
         <p className={styles.back}><Link to="/credit">High yield book</Link></p>
-        <header className={styles.mast}>
-          <p className={styles.kicker}>DGA Capital · High yield credit · {idn?.sector || 'Sector not set'}</p>
-          <h1>{idn?.name || 'Issuer'}</h1>
-          <p className={styles.mastCopy}>
-            {idn?.ticker || '—'} · CIK {idn?.cik || issuer}. {view.badge}. {view.badge_reason}
+        <Panel title={idn?.name || 'Credit'}>
+          <p className={styles.lead}>
+            Filing details are loaded. CIK {idn?.cik || issuer}. Ticker {idn?.ticker || '—'}.
+            {view.as_of ? ` Balance sheet ${view.as_of}.` : ''}
+            {view.source?.name ? ` Source ${view.source.name}.` : ''}
+            A named coupon, a rating, and a TRACE price are not in this file.
           </p>
-        </header>
-        {err && <p className={styles.err}>{err}</p>}
-        <section className={styles.sheet}>
-          <div className={styles.sheetHead}>
-            <h2>Bond blotter</h2>
-            <div className={styles.toolbar}>
-              <Button size="sm" onClick={() => setDrafts((rows) => [...rows, blankBond()])}>Add bond</Button>
-              <Button size="sm" variant="primary" disabled={busy} onClick={() => void priceScreen()}>
-                {busy ? 'Pricing…' : 'Price'}
-              </Button>
-            </div>
-          </div>
+          <p className={styles.meta}>{view.badge}. {view.badge_reason}</p>
+          {view.filing_note && <p className={styles.meta}>{view.filing_note}</p>}
+          {view.source?.url && <p className={styles.meta}><a href={view.source.url} target="_blank" rel="noreferrer">{view.source.name || 'Annual report'}</a></p>}
+          {err && <p className={styles.err}>{err}</p>}
+          {(view.flags || []).map((flag) => (
+            <p key={flag.details} className={styles.warn}>{flag.details}</p>
+          ))}
+        </Panel>
+
+        <Panel title="Capital structure">
           <p className={styles.meta}>
-            Look the bond up on <a href={view.finra_url} target="_blank" rel="noreferrer">FINRA</a> and type the clean price.
-            Settlement {view.settlement || 'the next business day'}.
-            Filings are on <a href={view.sec_url} target="_blank" rel="noreferrer">EDGAR</a>.
-            {view.curve_note} {view.recovery_note}
+            Amounts are millions. Borrowings {money(view.metrics?.debt)}.
+            {view.metrics?.debt_note ? ` ${view.metrics.debt_note}` : ''}
+            A line with no coupon says not found. Leases are not added to borrowings.
           </p>
-          <div className={styles.scroll}>
-            <table className={styles.book}>
-              <thead>
-                <tr>
-                  <th>Bond</th>
-                  <th>Coupon</th>
-                  <th>Maturity</th>
-                  <th>Amount $m</th>
-                  <th>Clean</th>
-                  <th>YTM</th>
-                  <th>G-spread</th>
-                  <th>Call</th>
-                  <th></th>
+          <table className={styles.table}>
+            <thead>
+              <tr><th>Instrument</th><th>Amount</th><th>Coupon</th><th>Maturity</th><th>As of</th><th>Source</th></tr>
+            </thead>
+            <tbody>
+              {lines.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.name}{row.note ? <span className={styles.meta}> {row.note}</span> : null}</td>
+                  <td>{money(row.amount, row.currency)}</td>
+                  <td>{row.coupon_note || 'not found'}</td>
+                  <td>{row.maturity_note || 'not found'}</td>
+                  <td>{row.as_of || '—'}</td>
+                  <td>{row.source_url ? <a href={row.source_url} target="_blank" rel="noreferrer">{row.source_name || 'Source'}</a> : 'not found'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {drafts.map((bond, index) => {
-                  const quote = (view.quotes || []).find((row) => (
-                    row.id === bond.id
-                    && sameNumber(row.coupon, bond.coupon)
-                    && sameNumber(row.clean_price, bond.clean_price)
-                    && (row.maturity || '') === bond.maturity
-                  ))
-                  return (
-                    <tr key={bond.id} className={quote?.off_book ? styles.off : undefined}>
-                      <td><input aria-label="Bond name" value={bond.name} placeholder="Senior notes" onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></td>
-                      <td><input aria-label="Coupon" value={bond.coupon} placeholder="8.00" onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, coupon: event.target.value } : item))} /></td>
-                      <td><input aria-label="Maturity" value={bond.maturity} placeholder="2031-10-15" onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, maturity: event.target.value } : item))} /></td>
-                      <td><input aria-label="Amount" value={bond.amount} onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, amount: event.target.value } : item))} /></td>
-                      <td><input aria-label="Clean price" value={bond.clean_price} placeholder="100" onChange={(event) => setDrafts((rows) => rows.map((item, i) => i === index ? { ...item, clean_price: event.target.value } : item))} /></td>
-                      <td className={styles.num}>{quote?.ytm ? `${quote.ytm}%` : '—'}</td>
-                      <td className={styles.num}>{quote?.g_spread_bp ? `${quote.g_spread_bp} bp` : '—'}</td>
-                      <td>{quote?.verdict || '—'}{quote?.note ? <span className={styles.meta}> {quote.note}</span> : null}</td>
-                      <td><button type="button" className={styles.drop} onClick={() => setDrafts((rows) => rows.filter((item) => item.id !== bond.id))}>Remove</button></td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
+              ))}
+              {!lines.length && <tr><td colSpan={6}>No debt balance was tagged on the annual report.</td></tr>}
+            </tbody>
+          </table>
+          <h3 className={styles.sub}>Contractual maturity schedule</h3>
+          <p className={styles.meta}>
+            Principal repayments from the annual report. A bucket is not a named bond and it has no coupon.
+            {!view.schedule_complete && schedule.length ? ' A missing bucket is left out. It is not zero.' : ''}
+          </p>
+          <table className={styles.table}>
+            <thead><tr><th>Bucket</th><th>Principal</th></tr></thead>
+            <tbody>
+              {schedule.map((row) => (
+                <tr key={row.label}>
+                  <td>{row.label}</td>
+                  <td>{money(row.amount, row.currency)}</td>
+                </tr>
+              ))}
+              {!schedule.length && <tr><td colSpan={2}>The annual report did not tag a contractual maturity schedule.</td></tr>}
+            </tbody>
+          </table>
+        </Panel>
+
+        <Panel title="Credit metrics">
+          <p className={styles.meta}>
+            Borrowings {money(view.metrics?.debt)}. {view.metrics?.cash_label || 'Cash'} {money(view.metrics?.cash)}.
+            Interest coverage is not found. The companyfacts file does not give one EBITDA figure.
+          </p>
+          <ul className={styles.list}>
+            {interestRows.map((row) => (
+              <li key={row.label}>
+                <strong>{row.label}</strong>
+                <span>{money(row.amount, row.currency)}</span>
+                <span className={styles.meta}>{row.as_of || view.as_of}</span>
+              </li>
+            ))}
+            {!interestRows.length && <li>Interest expense was not tagged for this balance-sheet date.</li>}
+          </ul>
+        </Panel>
+
+        <Panel title="Pricing versus the market">
+          <p className={styles.meta}>
+            Companyfacts does not name each note. Look a bond up on <a href={view.finra_url} target="_blank" rel="noreferrer">FINRA</a> and type the coupon, the maturity day, and the clean price.
+            Settlement {view.settlement || 'the next business day'}. {view.curve_note} {view.recovery_note}
+          </p>
+          <p className={styles.meta}>
+            OAS buckets{view.oas_as_of ? `, ${view.oas_as_of}` : ''}: IG {view.oas?.ig || '—'} · BBB {view.oas?.bbb || '—'} · BB {view.oas?.bb || '—'} · B {view.oas?.b || '—'} · HY {view.oas?.hy || '—'} · CCC {view.oas?.ccc || '—'}.
+          </p>
+          {blotter}
+        </Panel>
+
+        <Panel title="Documents and covenants">
+          <ul className={styles.list}>
+            {(view.covenants || []).map((row) => (
+              <li key={row.key}>
+                <strong>{row.label}</strong>
+                <span className={row.status === 'found' ? styles.ok : styles.warn}>{row.status.replace('_', ' ')}</span>
+                <span className={styles.meta}>{row.summary}</span>
+                {row.source?.url && <a href={row.source.url} target="_blank" rel="noreferrer">{row.source.name || 'Source'}</a>}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+
+        <Panel title="Recovery waterfall">
+          <p className={styles.meta}>{view.waterfall?.reason || 'No recovery is calculated.'}</p>
+        </Panel>
+
+        <Panel title="Probability of default, three ways">
+          <ul className={styles.list}>
+            <li><strong>Rating-implied</strong><span className={styles.meta}>{view.pd?.rating}</span></li>
+            <li><strong>Market-implied</strong><span className={styles.meta}>{view.pd?.market}</span></li>
+            <li><strong>Fundamental</strong><span className={styles.meta}>{view.pd?.fundamental}</span></li>
+          </ul>
+        </Panel>
+
+        <Panel title="How this defaults">
+          {(view.scenarios || []).length
+            ? (view.scenarios || []).map((row) => (
+              <div key={row.id} className={styles.scenario}>
+                <strong>{row.name}</strong>
+                <span className={styles.meta}>{row.rationale}</span>
+              </div>
+            ))
+            : <p className={styles.meta}>Default paths are not loaded. The Paramount paths belong to that deal.</p>}
+        </Panel>
+
+        <Panel title="Per-bond verdict">
+          <ul className={styles.list}>
+            {priced.map((row) => (
+              <li key={row.id}>
+                <strong>{row.name}: {row.verdict}</strong>
+                <span className={styles.meta}>{row.verdict_reason}</span>
+              </li>
+            ))}
+            {!priced.length && <li>Type a coupon, a maturity day, and a clean price to see a verdict.</li>}
+          </ul>
+        </Panel>
+      </>
     )
   }
 
@@ -607,7 +806,7 @@ export function CreditPage() {
       <Panel title="Credit metrics">
         <p className={styles.meta}>
           Pro forma debt {money(view?.metrics?.debt)}. Cash {money(view?.metrics?.cash)}.
-          FY2025 pro forma interest {money(view?.metrics?.interest)}. Coverage on the no-synergy EBITDA {view?.metrics?.interest_coverage || '—'}.
+          FY2025 pro forma interest {money(typeof view?.metrics?.interest === 'string' ? view.metrics.interest : null)}. Coverage on the no-synergy EBITDA {view?.metrics?.interest_coverage || '—'}.
         </p>
         <div className={styles.bases}>
           {(view?.metrics?.bases || []).map((base) => (

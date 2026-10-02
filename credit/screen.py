@@ -89,7 +89,7 @@ def book_rows(extra: list[dict] | None = None) -> list[dict]:
             "legal_name": row["legal_name"],
             "sector": row["sector"],
             "book": BOOK,
-            "status": "screen",
+            "status": "filing",
             "coupon_high": "",
             "floor_pct": YIELD_FLOOR_PCT,
         })

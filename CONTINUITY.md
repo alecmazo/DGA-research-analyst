@@ -291,6 +291,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Load flow pages** | **`ui708-20261002-load-flow`** | Load flow runs top down from the center. Credit and every Work, Lab, and Accounts page are on the chart. The card is tall enough to show them. |
 | **High yield book** | **`ui709-20261002-hy-memo`** | Credit is a high-yield issuer book with a 6% floor. Merger arb opens as a situation memorandum. |
 | **Credit marks** | **`ui710-20261002-credit-marks`** | Typed clean prices stay on the pricing card. The Treasury curve and spread benchmarks load daily. Yield settlement is the next business day. WBD exchange notes do not use a January 1 maturity. |
+| **Credit details** | **`ui711-20261002-credit-details`** | Opening any high-yield name loads the annual-report debt balances, cash, interest, and contractual maturity schedule. A named coupon, rating, or TRACE price stays not found. Paramount still opens its named structure. |
 
 ### One-click handoff (preferred)
 
@@ -487,4 +488,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui710-20261002-credit-marks` · Live until the next upload: `ui709-20261002-hy-memo` · Next: `ui711-YYYYMMDD-slug`*
+*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui711-20261002-credit-details` · Live until the next upload: `ui710-20261002-credit-marks` · Next: `ui712-YYYYMMDD-slug`*
