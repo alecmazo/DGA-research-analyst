@@ -22,6 +22,7 @@ export type CardId =
   | 'analyze'
   | 'health'
   | 'flow'
+  | 'repo'
 
 export type CardLayout = {
   x: number
@@ -58,6 +59,8 @@ const DEFAULT_LAYOUT: DeskLayoutMap = {
   health: { x: 0, y: 1108, w: 340, h: 180 },
   // Full width, first free row under Portfolio Strategist (health ends at 1288).
   flow: { x: 0, y: 1304, w: 1172, h: 720 },
+  // Full width, directly under Load flow.
+  repo: { x: 0, y: 2040, w: 1172, h: 520 },
 }
 
 const ALL_IDS = Object.keys(DEFAULT_LAYOUT) as CardId[]
@@ -68,6 +71,8 @@ const COLLAPSED_H = 44
 const BOARD_W = 1172
 /** Set once the load-flow card has been seated under Portfolio Strategist. */
 const FLOW_UNDER_KEY = 'dga.desk.flow-under-strategist'
+/** Set once the repo-flow card has been seated under Load flow. */
+const REPO_UNDER_KEY = 'dga.desk.repo-under-flow'
 
 function isLayout(v: unknown): v is CardLayout {
   if (!v || typeof v !== 'object') return false
@@ -146,6 +151,40 @@ function markFlowAnchored(): void {
   }
 }
 
+/** Full-width strip in the first open row under Load flow. */
+function repoUnderFlow(flow: CardLayout, others: CardLayout[]): CardLayout {
+  const gap = 16
+  const card: CardLayout = {
+    x: 0,
+    y: flow.y + rectH(flow) + gap,
+    w: BOARD_W,
+    h: 520,
+    collapsed: false,
+  }
+  for (let n = 0; n < 40; n++) {
+    const hit = others.find((other) => overlapsLayout(card, other))
+    if (!hit) break
+    card.y = hit.y + rectH(hit) + gap
+  }
+  return card
+}
+
+function repoNeedsAnchor(): boolean {
+  try {
+    return localStorage.getItem(REPO_UNDER_KEY) !== '1'
+  } catch {
+    return false
+  }
+}
+
+function markRepoAnchored(): void {
+  try {
+    localStorage.setItem(REPO_UNDER_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Merge saved user positions onto defaults.
  * - Existing cards keep the user's x/y/w/h/collapsed forever.
@@ -174,6 +213,7 @@ function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
   saved = withoutMarkets(saved)
   if (!saved) {
     markFlowAnchored()
+    markRepoAnchored()
     return { ...DEFAULT_LAYOUT }
   }
 
@@ -200,7 +240,7 @@ function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
   // New cards other than load-flow stack below cards the user already placed.
   // Do not measure the defaults of cards that are still missing — that used to
   // drop Load flow hundreds of pixels under the desk.
-  const rest = missing.filter((id) => id !== 'flow')
+  const rest = missing.filter((id) => id !== 'flow' && id !== 'repo')
   if (kept.length && rest.length) {
     let y = maxBottom(kept, out) + 16
     for (const id of rest) {
@@ -214,11 +254,21 @@ function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
   // has no saved slot. After that, a drag sticks.
   if (missing.includes('flow') || flowNeedsAnchor()) {
     const others = ALL_IDS
-      .filter((id) => id !== 'flow' && id !== 'strategist')
+      .filter((id) => id !== 'flow' && id !== 'strategist' && id !== 'repo')
       .map((id) => out[id])
       .filter(isLayout)
     out.flow = flowUnderStrategist(out.strategist, others)
     markFlowAnchored()
+  }
+
+  // Seat Repo flow under Load flow the first time. After that, a drag sticks.
+  if (missing.includes('repo') || repoNeedsAnchor()) {
+    const others = ALL_IDS
+      .filter((id) => id !== 'repo' && id !== 'flow')
+      .map((id) => out[id])
+      .filter(isLayout)
+    out.repo = repoUnderFlow(out.flow, others)
+    markRepoAnchored()
   }
 
   return out

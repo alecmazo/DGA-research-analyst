@@ -293,6 +293,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
   if (!n) {
     return (
       <div className={styles.chartCard}>
+        {cfg.title && <div className={styles.chartTitle}>{cfg.title}</div>}
         <div className={styles.mutedSm}>No data.</div>
       </div>
     )
@@ -300,6 +301,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
 
   return (
     <div className={styles.chartCard}>
+      {cfg.title && <div className={styles.chartTitle}>{cfg.title}</div>}
       <div className={styles.chartLegend}>
         {cfg.series.map((s) => (
           <span key={s.name} className={styles.chartLegItem}>
@@ -393,11 +395,6 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
           values: col(series, 'fcf'),
         },
         {
-          name: 'Net Income',
-          color: COLORS.green,
-          values: col(series, 'net_income'),
-        },
-        {
           name: 'Dividends',
           color: COLORS.purple,
           values: col(series, 'dividends'),
@@ -456,17 +453,23 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
       ],
     },
     {
+      title: 'Balance sheet',
       labels,
       series: [
-        {
-          name: 'Stockholders Equity',
-          color: COLORS.green,
-          values: col(series, 'equity'),
-        },
         {
           name: 'Total Assets',
           color: COLORS.blue,
           values: col(series, 'assets'),
+        },
+        {
+          name: 'Total Liabilities',
+          color: COLORS.orange,
+          values: col(series, 'liabilities'),
+        },
+        {
+          name: 'Stockholders Equity',
+          color: COLORS.green,
+          values: col(series, 'equity'),
         },
       ],
     },

@@ -5397,6 +5397,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
         sbc = None   # not extracted in the store (yet)
         shares = _dash_f(r.get("shares_outstanding")) or _dash_f(r.get("diluted_shares"))
         eq  = _dash_f(r.get("stockholders_equity")); ta = _dash_f(r.get("total_assets"))
+        liab = _dash_f(r.get("total_liabilities"))
         gm = _dash_f(r.get("gross_margin")); om = _dash_f(r.get("operating_margin"))
         nm = _dash_f(r.get("net_margin"))
         # Margins stored as fractions (0.15) → percent points for charts.
@@ -5430,7 +5431,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "ocf": ocf, "fcf": fcf, "dividends": div, "buybacks": bb, "sbc": sbc,
             "shares": shares, "buyback_ratio_pct": (round(bb_ratio, 3)
                                                     if bb_ratio is not None else None),
-            "equity": eq, "assets": ta,
+            "equity": eq, "assets": ta, "liabilities": liab,
             "gross_margin_pct": _m_pct(gm, gp, rev),
             "operating_margin_pct": _m_pct(om, opin, rev),
             "net_margin_pct": _m_pct(nm, ni, rev),
@@ -6379,22 +6380,25 @@ def _debt_maturity_note(facts: dict, fy: int) -> str:
     return "Debt maturities (latest year in this table). " + "; ".join(bits) + "."
 
 
-def _add_ebit_lines(facts: dict, years: list, lines: list) -> list:
+def _add_ebit_lines(facts: dict, periods: list, lines: list, value_at=None) -> list:
     """EBIT when it is not the same as operating income. EBITDA when D&A is filed."""
+    if value_at is None:
+        def value_at(tags, kind, period):
+            return _stmt_line_value(facts, tags, period, kind)
     oi = next((ln["values"] for ln in lines if ln.get("label") == "Operating income"), None)
     ebit_tags = (
         "IncomeLossFromContinuingOperationsBeforeInterestExpenseInterestIncomeIncomeTaxesExtraordinaryItemsNoncontrollingInterestsMinorityInterestsNetOfTax",
     )
-    ebit_vals = [_stmt_line_value(facts, ebit_tags, fy, "duration") for fy in years]
+    ebit_vals = [value_at(ebit_tags, "duration", period) for period in periods]
     if any(v is not None for v in ebit_vals) and ebit_vals != oi:
         lines.append({"label": "EBIT", "unit": "$", "role": "total", "values": ebit_vals, "note": ""})
     da = [
-        _stmt_line_value(
-            facts,
+        value_at(
             ("DepreciationDepletionAndAmortization", "DepreciationAndAmortization"),
-            fy, "duration",
+            "duration",
+            period,
         )
-        for fy in years
+        for period in periods
     ]
     base = ebit_vals if any(v is not None for v in ebit_vals) else oi
     if base and any(v is not None for v in da):
@@ -6406,7 +6410,7 @@ def _add_ebit_lines(facts: dict, years: list, lines: list) -> list:
                 ebitda.append((a or 0.0) + abs(b or 0.0))
         lines.append({
             "label": "EBITDA", "unit": "$", "role": "total", "values": ebitda,
-            "note": "Operating income (or EBIT) plus depreciation and amortization filed in the 10-K.",
+            "note": "Operating income (or EBIT) plus depreciation and amortization.",
         })
     return lines
 
@@ -6480,30 +6484,324 @@ def _statement_tables(facts: dict, n_years: int = 5) -> dict:
     out["liabilities"] = build("liabilities")
     out["equity"] = build("equity")
     out["balance"] = out["assets"] + out["liabilities"] + out["equity"]
-    income = _add_ebit_lines(facts, years, build("income"))
-    # Keep EBIT and EBITDA with the operating block, before "Below operating income".
-    below = next((i for i, ln in enumerate(income) if ln.get("label") == "Below operating income"), None)
-    extras = [ln for ln in income if ln.get("label") in ("EBIT", "EBITDA")]
-    income = [ln for ln in income if ln.get("label") not in ("EBIT", "EBITDA")]
-    if below is None:
-        income.extend(extras)
-    else:
-        # extras were appended, so the index of the section row is unchanged
-        # only if extras were at the end. Insert just before the section.
-        idx = next(i for i, ln in enumerate(income) if ln.get("label") == "Below operating income")
-        income = income[:idx] + extras + income[idx:]
-    out["income"] = income
+    out["income"] = _place_operating_extras(_add_ebit_lines(facts, years, build("income")))
     out["cash_flow"] = _cash_flow_with_total(build("cash_flow"))
     out["comprehensive"] = build("comprehensive")
     return out
 
 
+def _place_operating_extras(income: list) -> list:
+    """Keep EBIT and EBITDA with the operating block, before the next section."""
+    extras = [ln for ln in income if ln.get("label") in ("EBIT", "EBITDA")]
+    rest = [ln for ln in income if ln.get("label") not in ("EBIT", "EBITDA")]
+    idx = next((i for i, ln in enumerate(rest) if ln.get("label") == "Below operating income"), None)
+    if idx is None:
+        return rest + extras
+    return rest[:idx] + extras + rest[idx:]
+
+
+_STMT_ANCHORS = (
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "Revenues", "SalesRevenueNet", "Revenue", "NetIncomeLoss",
+)
+
+
+def _stmt_tag_rows(facts: dict, tags: tuple, units: tuple) -> list:
+    import sec_edgar_xbrl as edgar
+    rows = []
+    for tag in tags:
+        rows.extend(edgar._iter_facts(facts, tag, units))
+    return rows
+
+
+def _latest_span(rows: list, end: str, lo: int, hi: int):
+    import sec_edgar_xbrl as edgar
+    best = None
+    best_filed = ""
+    for row in rows:
+        if (row.get("end") or "") != end:
+            continue
+        span = edgar._days(row.get("start") or "", end)
+        if not (lo <= span <= hi):
+            continue
+        filed = str(row.get("filed") or "")
+        if best is None or filed >= best_filed:
+            best = row
+            best_filed = filed
+    return best
+
+
+def _fact_float(row) -> float | None:
+    if not row or row.get("val") is None or isinstance(row.get("val"), str):
+        return None
+    try:
+        return float(row["val"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _anchor_spans(facts: dict) -> tuple:
+    """Quarter-end → start, and fiscal-year-end → start, from core income tags."""
+    import sec_edgar_xbrl as edgar
+    quarters: dict = {}
+    annuals: dict = {}
+    for row in _stmt_tag_rows(facts, _STMT_ANCHORS, ("USD",)):
+        end = row.get("end") or ""
+        start = row.get("start") or ""
+        if not end:
+            continue
+        span = edgar._days(start, end)
+        filed = str(row.get("filed") or "")
+        bucket = quarters if 80 <= span <= 100 else annuals if 340 <= span <= 380 else None
+        if bucket is None:
+            continue
+        prev = bucket.get(end)
+        if prev is None or filed >= prev[1]:
+            bucket[end] = (start, filed)
+    return (
+        {end: start for end, (start, _filed) in quarters.items()},
+        {end: start for end, (start, _filed) in annuals.items()},
+    )
+
+
+def _quarter_columns(facts: dict, n_quarters: int = 8) -> tuple:
+    """Oldest → newest columns. A missing standalone Q4 is the year-end column."""
+    q_start, a_start = _anchor_spans(facts)
+    columns = [{"end": end, "derived": False} for end in q_start]
+    for end, start in a_start.items():
+        if end in q_start:
+            continue
+        interims = [e for e in q_start if start < e < end]
+        if len(interims) >= 3:
+            columns.append({"end": end, "derived": True})
+    columns.sort(key=lambda col: col["end"])
+    columns = columns[-max(1, int(n_quarters or 8)):]
+    labels = []
+    for col in columns:
+        end = col["end"]
+        try:
+            month = int(end[5:7])
+            label = f"Q{(month - 1) // 3 + 1}'{end[2:4]}"
+        except (TypeError, ValueError):
+            label = end
+        col["label"] = label
+        labels.append(label)
+    counts: dict = {}
+    for label in labels:
+        counts[label] = counts.get(label, 0) + 1
+    for col in columns:
+        if counts.get(col["label"], 0) > 1:
+            col["label"] = f"{col['label']} {col['end'][:7]}"
+    return columns, a_start
+
+
+def _cash_discrete_map(rows: list) -> dict:
+    """Discrete quarter from year-to-date cash-flow facts that share a start."""
+    import sec_edgar_xbrl as edgar
+    ytd: dict = {}
+    for row in rows:
+        end = row.get("end") or ""
+        start = row.get("start") or ""
+        span = edgar._days(start, end)
+        val = _fact_float(row)
+        if not end or span <= 0 or val is None:
+            continue
+        filed = str(row.get("filed") or "")
+        cur = ytd.get(end)
+        if cur is None or span > cur[1] or (span == cur[1] and filed >= cur[3]):
+            ytd[end] = (start, span, val, filed)
+    out = {}
+    for end in sorted(ytd):
+        start, _span, val, _filed = ytd[end]
+        prev = None
+        for earlier in sorted(ytd):
+            if earlier < end and ytd[earlier][0] == start:
+                prev = earlier
+        out[end] = (val - ytd[prev][2]) if prev is not None else val
+    return out
+
+
+def _discrete_flow_value(tag_rows: list, end: str, annual_starts: dict):
+    """Three-month fact when filed. Otherwise fiscal year minus the interim quarters."""
+    import sec_edgar_xbrl as edgar
+    for rows in tag_rows:
+        hit = _fact_float(_latest_span(rows, end, 80, 100))
+        if hit is not None:
+            return hit
+    fyv = None
+    start = annual_starts.get(end)
+    for rows in tag_rows:
+        ann = _latest_span(rows, end, 340, 380)
+        hit = _fact_float(ann)
+        if hit is None:
+            continue
+        fyv = hit
+        if ann and ann.get("start"):
+            start = ann.get("start")
+        break
+    if fyv is None or not start:
+        return None
+    interims = set()
+    for rows in tag_rows:
+        for row in rows:
+            q_end = row.get("end") or ""
+            if start < q_end < end and 80 <= edgar._days(row.get("start") or "", q_end) <= 100:
+                interims.add(q_end)
+    if len(interims) < 3:
+        return None
+    parts = []
+    for q_end in sorted(interims):
+        qv = None
+        for rows in tag_rows:
+            qv = _fact_float(_latest_span(rows, q_end, 80, 100))
+            if qv is not None:
+                break
+        if qv is None:
+            return None
+        parts.append(qv)
+    return fyv - sum(parts)
+
+
+def _instant_at(rows: list, end: str):
+    import sec_edgar_xbrl as edgar
+    from datetime import datetime
+    hit = edgar._pick_instant_near(rows, end)
+    val = _fact_float(hit)
+    if val is None or not hit:
+        return None
+    try:
+        left = datetime.strptime(hit.get("end") or "", "%Y-%m-%d").date()
+        right = datetime.strptime(end, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+    if abs((left - right).days) > 7:
+        return None
+    return val
+
+
+def _values_for_columns(facts, tags, kind, columns, annual_starts, flow: str) -> list:
+    if not tags:
+        return [None] * len(columns)
+    units = ("USD/shares", "USD/share") if kind == "per_share" else ("USD",)
+    import sec_edgar_xbrl as edgar
+    tag_rows = [edgar._iter_facts(facts, tag, units) for tag in tags]
+    if kind == "instant":
+        out = []
+        for col in columns:
+            val = None
+            for rows in tag_rows:
+                val = _instant_at(rows, col["end"])
+                if val is not None:
+                    break
+            out.append(val)
+        return out
+    if flow == "cash":
+        maps = [_cash_discrete_map(rows) for rows in tag_rows]
+        out = []
+        for col in columns:
+            val = None
+            for mp in maps:
+                if col["end"] in mp:
+                    val = mp[col["end"]]
+                    break
+            out.append(val)
+        return out
+    return [
+        _discrete_flow_value(tag_rows, col["end"], annual_starts)
+        for col in columns
+    ]
+
+
+def _append_ttm(lines: list, *, instant: bool) -> list:
+    """Flows sum the last four quarters. A balance-sheet line keeps the latest instant."""
+    for ln in lines:
+        if ln.get("unit") == "section" or ln.get("role") == "section":
+            continue
+        vals = list(ln.get("values") or [])
+        if instant:
+            ttm = vals[-1] if vals else None
+        else:
+            tail = vals[-4:]
+            ttm = sum(tail) if len(tail) == 4 and all(v is not None for v in tail) else None
+        ln["values"] = vals + [ttm]
+    return lines
+
+
+def _quarterly_statement_tables(facts: dict, n_quarters: int = 8) -> dict:
+    """Same statement lines as the annual array, for recent quarters plus TTM."""
+    columns, annual_starts = _quarter_columns(facts, n_quarters)
+    note = (
+        "Recent quarters from SEC company facts. "
+        "TTM on the income statement, cash flow, comprehensive income, and diluted EPS "
+        "is the sum of the last four quarters, and only when all four are filed. "
+        "On the balance sheet, TTM is the latest quarter-end. "
+        "A fourth quarter with no standalone filing is the fiscal year minus the first three quarters. "
+        "A blank cell means that tag was not filed."
+    )
+    empty = {
+        "labels": [], "assets": [], "liabilities": [], "equity": [],
+        "balance": [], "income": [], "cash_flow": [], "comprehensive": [],
+        "note": "No quarterly facts in the SEC company file.",
+    }
+    if not columns:
+        return empty
+
+    def build(key: str) -> list:
+        flow = "cash" if key == "cash_flow" else "duration"
+        lines = []
+        for label, tags, kind, role, _note_tags in _STMT_SPECS[key]:
+            if role == "section":
+                lines.append({"label": label, "unit": "section", "role": "section", "values": []})
+                continue
+            vals = (
+                _values_for_columns(facts, tags, kind, columns, annual_starts, flow)
+                if tags else [None] * len(columns)
+            )
+            if not any(v is not None for v in vals) and label not in _INCOME_ALWAYS:
+                continue
+            unit = "$/sh" if kind == "per_share" else "$"
+            lines.append({
+                "label": label, "unit": unit, "role": role, "values": vals, "note": "",
+            })
+        return lines
+
+    def flow_value(tags, kind, col):
+        vals = _values_for_columns(facts, tags, kind, [col], annual_starts, "duration")
+        return vals[0] if vals else None
+
+    assets = build("assets")
+    liabilities = build("liabilities")
+    equity = build("equity")
+    income = _place_operating_extras(_add_ebit_lines(
+        facts, columns, build("income"), value_at=flow_value,
+    ))
+    cash_flow = _cash_flow_with_total(build("cash_flow"))
+    comprehensive = build("comprehensive")
+    _append_ttm(assets, instant=True)
+    _append_ttm(liabilities, instant=True)
+    _append_ttm(equity, instant=True)
+    _append_ttm(income, instant=False)
+    _append_ttm(cash_flow, instant=False)
+    _append_ttm(comprehensive, instant=False)
+    return {
+        "labels": [col["label"] for col in columns] + ["TTM"],
+        "assets": assets,
+        "liabilities": liabilities,
+        "equity": equity,
+        "balance": assets + liabilities + equity,
+        "income": income,
+        "cash_flow": cash_flow,
+        "comprehensive": comprehensive,
+        "note": note,
+    }
+
+
 @app.get("/api/financials/{ticker}/statements")
 def financials_statements(ticker: str, request: Request):
-    """Balance sheet, income, cash flow, and comprehensive income for recent years.
+    """Annual and quarterly statement lines. SEC companyfacts, cached six hours.
 
-    SEC companyfacts, cached six hours. Not called when the Value Line card
-    first paints — only when a total is opened or a statement is chosen.
+    Not called when the Value Line card first paints — only when a total is
+    opened or a statement is chosen. Quarterly adds a TTM column.
     """
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
@@ -6520,10 +6818,19 @@ def financials_statements(ticker: str, request: Request):
         cik = edgar.resolve_cik(tk, user_agent=ua)
         facts = edgar.fetch_company_facts(cik, user_agent=ua)
         tables = _statement_tables(facts, 5)
+        try:
+            quarterly = _quarterly_statement_tables(facts, 8)
+        except Exception as qe:
+            print(f"[fin-stmt] {tk} quarterly: {qe!s:.160}", flush=True)
+            quarterly = {
+                "labels": [], "assets": [], "liabilities": [], "equity": [],
+                "balance": [], "income": [], "cash_flow": [], "comprehensive": [],
+                "note": "Quarterly statement lines could not be built from this filing.",
+            }
     except Exception as e:
         print(f"[fin-stmt] {tk}: {e!s:.160}", flush=True)
         return {"ok": False, "ticker": tk, "error": f"Could not read SEC statements for {tk}."}
-    payload = {"ok": True, "ticker": tk, **tables,
+    payload = {"ok": True, "ticker": tk, **tables, "quarterly": quarterly,
                "note": "Last five fiscal years from the 10-K. A blank line means the company did not file that tag."}
     _FIN_STMT_CACHE[tk] = (time.time(), payload)
     return payload

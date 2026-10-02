@@ -286,6 +286,8 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Credit** | **`ui703-20261002-credit`** | Credit is in the Work menu. The issuer page is keyed by CIK. Paramount Skydance is the seed. Bond prices are typed in. The verdict is code, not a model. |
 | **GPT-oss** | **`ui704-20261002-gpt-oss`** | The bottom-right desk button is GPT-oss. It calls `gpt-oss-20b-finance` on this Mac and does not call the paid API. |
 | **Handoff** | **`ui705-20261002-handoff`** | Credit is on the site. GitHub `main` is the full folder, including ticket screenshots and logo options. Pushing `main` deploys Railway service `web` with the Nixpacks start command. On this Mac the folder is `DGA-Research-Portal`. The GitHub repo name stays `DGA-research-analyst`. |
+| **Repo flow** | **`ui706-20261002-repo-flow`** | Desk card under Load flow. Nodes are folder names on main. A branch moves while a call is in that folder. |
+| **Statement quarters** | **`ui707-20261002-stmt-quarters`** | The equity/assets chart is the Balance sheet card and includes liabilities. Net income is off the free-cash-flow chart. Income statement, balance sheet, cash flow, and comprehensive income open on the quarterly array, with a TTM column. |
 
 ### One-click handoff (preferred)
 
@@ -482,4 +484,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui705-20261002-handoff` · Live until the next upload: `ui704-20261002-gpt-oss` · Next: `ui706-YYYYMMDD-slug`*
+*Last updated: 2026-10-02 · Agent: Grok Build · Built: `ui707-20261002-stmt-quarters` · Live until the next upload: `ui705-20261002-handoff` · Next: `ui708-YYYYMMDD-slug`*

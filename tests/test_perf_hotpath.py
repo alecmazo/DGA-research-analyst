@@ -147,7 +147,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui705-20261002-handoff"' in src
+    assert 'WEB_BUILD_VERSION = "ui707-20261002-stmt-quarters"' in src
     assert "if (not lite) and _wl_left()" in wl
 
 

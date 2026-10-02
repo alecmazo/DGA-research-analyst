@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Panel } from '@/components/ui/Panel'
 import { Button } from '@/components/ui/Button'
 import { ApiError, api } from '@/lib/api'
+import { trackLoad } from '@/lib/loadFlow'
 import { OLLAMA_DESK } from '@/lib/localOllama'
 import styles from './ShowFinder.module.css'
 
@@ -37,12 +38,25 @@ function videoIdFrom(err: unknown): string {
 
 /** YouTube blocks the server. The helper on this Mac can still read captions. */
 async function macCaptions(videoId: string): Promise<string> {
-  const res = await fetch(`${OLLAMA_DESK}/captions?v=${encodeURIComponent(videoId)}`)
-  if (!res.ok) return ''
-  const data = (await res.json()) as { ok?: boolean; text?: string }
-  const text = typeof data.text === 'string' ? data.text : ''
-  if (!data.ok || text.length < 800) return ''
-  return text
+  const done = trackLoad('ollama://captions')
+  try {
+    const res = await fetch(`${OLLAMA_DESK}/captions?v=${encodeURIComponent(videoId)}`)
+    if (!res.ok) {
+      done('fail', `HTTP ${res.status}`)
+      return ''
+    }
+    const data = (await res.json()) as { ok?: boolean; text?: string }
+    const text = typeof data.text === 'string' ? data.text : ''
+    if (!data.ok || text.length < 800) {
+      done('fail', 'No captions')
+      return ''
+    }
+    done('ok')
+    return text
+  } catch {
+    done('fail', 'Captions did not respond')
+    return ''
+  }
 }
 
 export function ShowFinder({ onOpen }: { onOpen: (id: string) => void }) {

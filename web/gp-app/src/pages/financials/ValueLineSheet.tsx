@@ -3,7 +3,7 @@ import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
 import { api, downloadAuth } from '@/lib/api'
-import type { PeriodType, SheetBlock, SheetData, SheetLink, StatementLine, StatementPack } from './types'
+import type { PeriodType, SheetBlock, SheetData, SheetLink, StatementLine, StatementPack, StatementQuarter } from './types'
 import { vlMoney } from './format'
 import styles from '../FinancialsPage.module.css'
 import { BizBlurb } from './BizBlurb'
@@ -203,6 +203,13 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
         })}`
       : '—'
   const sectorLine = [sheet?.industry, sheet?.sector].filter(Boolean).join(' · ')
+  const summary = period === 'quarter' ? sheet?.quarterly : sheet?.annual
+  const summaryReady = blockReady(summary)
+  const qPack = stmts?.quarterly
+  const activePack = period === 'quarter' ? qPack : stmts
+  const stmtYears = period === 'quarter' ? (qPack?.labels || []) : (stmts?.years || [])
+  const stmtNote = period === 'quarter' ? qPack?.note : stmts?.note
+  const stmtSpan = period === 'quarter' ? 'recent quarters' : 'last five years'
 
   return (
     <CollapsibleCard
@@ -332,7 +339,7 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
             </div>
             <PeriodSeg period={period} setPeriod={setPeriod} />
           </div>
-          {period === 'annual' && sheet.annual && blockReady(sheet.annual) && (
+          {summaryReady && summary && (
             <>
               <div className={styles.stmtBar}>
                 {(
@@ -355,27 +362,35 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
                     {label}
                   </button>
                 ))}
-                {stmtBusy && <span className={styles.mutedSm}>Reading the 10-K…</span>}
+                {stmtBusy && (
+                  <span className={styles.mutedSm}>
+                    {period === 'quarter' ? 'Reading the filings…' : 'Reading the 10-K…'}
+                  </span>
+                )}
               </div>
               {stmtErr && <div className={styles.inlineErr}>{stmtErr}</div>}
               <VlTable
-                block={sheet.annual}
-                title="Annual"
-                expand={{
-                  open: openLines,
-                  assets: alignLines(stmts?.assets, stmts?.years, sheet.annual.labels),
-                  liabilities: alignLines(
-                    stmts?.liabilities,
-                    stmts?.years,
-                    sheet.annual.labels,
-                  ),
-                  onToggle: (id) => {
-                    setOpenLines((cur) => ({ ...cur, [id]: !cur[id] }))
-                    void ensureStatements(activeTk || sheet.ticker || '')
-                  },
-                }}
+                block={summary}
+                title={period === 'quarter' ? 'Quarterly' : 'Annual'}
+                expand={
+                  period === 'annual'
+                    ? {
+                        open: openLines,
+                        assets: alignLines(stmts?.assets, stmts?.years, summary.labels),
+                        liabilities: alignLines(
+                          stmts?.liabilities,
+                          stmts?.years,
+                          summary.labels,
+                        ),
+                        onToggle: (id) => {
+                          setOpenLines((cur) => ({ ...cur, [id]: !cur[id] }))
+                          void ensureStatements(activeTk || sheet.ticker || '')
+                        },
+                      }
+                    : undefined
+                }
               />
-              {stmtView && stmts?.ok && (
+              {stmtView && stmts?.ok && activePack && (
                 <StatementBlock
                   title={
                     stmtView === 'income'
@@ -386,32 +401,23 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
                           ? 'Cash flow'
                           : 'Comprehensive income'
                   }
-                  years={stmts.years || []}
-                  lines={
-                    stmtView === 'income'
-                      ? stmts.income
-                      : stmtView === 'balance'
-                        ? stmts.balance || [
-                            ...(stmts.assets || []),
-                            ...(stmts.liabilities || []),
-                            ...(stmts.equity || []),
-                          ]
-                        : stmtView === 'cash_flow'
-                          ? stmts.cash_flow
-                          : stmts.comprehensive
-                  }
-                  note={stmts.note}
+                  years={stmtYears}
+                  lines={packLines(activePack, stmtView)}
+                  note={stmtNote}
+                  span={stmtSpan}
                 />
+              )}
+              {stmtView && stmts?.ok && period === 'quarter' && !qPack && (
+                <div className={styles.mutedSm}>
+                  Quarterly statement lines are not in this filing response.
+                </div>
               )}
             </>
           )}
-          {period === 'annual' && !blockReady(sheet.annual) && (
+          {period === 'annual' && !summaryReady && (
             <div className={styles.mutedSm}>No annual figures stored.</div>
           )}
-          {period === 'quarter' && sheet.quarterly && blockReady(sheet.quarterly) && (
-            <VlTable block={sheet.quarterly} title="Quarterly" />
-          )}
-          {period === 'quarter' && !blockReady(sheet.quarterly) && (
+          {period === 'quarter' && !summaryReady && (
             <div className={styles.mutedSm}>No quarterly figures stored.</div>
           )}
           <div className={styles.mutedSm}>
@@ -447,23 +453,47 @@ function alignLines(
   }))
 }
 
+type StmtView = 'income' | 'balance' | 'cash_flow' | 'comprehensive'
+
+function packLines(
+  pack: StatementPack | StatementQuarter | null | undefined,
+  view: StmtView,
+): StatementLine[] | undefined {
+  if (!pack) return undefined
+  if (view === 'income') return pack.income
+  if (view === 'cash_flow') return pack.cash_flow
+  if (view === 'comprehensive') return pack.comprehensive
+  return pack.balance || [
+    ...(pack.assets || []),
+    ...(pack.liabilities || []),
+    ...(pack.equity || []),
+  ]
+}
+
 function StatementBlock({
   title,
   years,
   lines,
   note,
+  span = 'last five years',
 }: {
   title: string
   years: string[]
   lines?: StatementLine[]
   note?: string
+  span?: string
 }) {
   if (!lines?.length) {
-    return <div className={styles.mutedSm}>No {title.toLowerCase()} lines in the last five 10-Ks.</div>
+    return (
+      <div className={styles.mutedSm}>
+        No {title.toLowerCase()} lines in the {span}.
+        {note ? ` ${note}` : ''}
+      </div>
+    )
   }
   return (
     <div style={{ marginTop: 10 }}>
-      <div className={styles.vlSection}>{title} · last five years</div>
+      <div className={styles.vlSection}>{title} · {span}</div>
       <VlTable block={{ labels: years, rows: lines }} title={title} />
       {note && <div className={styles.mutedSm}>{note}</div>}
     </div>

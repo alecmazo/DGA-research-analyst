@@ -11,6 +11,7 @@ import { MarketWire } from '@/components/desk/MarketWire'
 import { MarketPulse } from '@/components/desk/MarketPulse'
 import { TopMovers } from '@/components/desk/TopMovers'
 import { FlowBadge, LoadFlowCard } from '@/components/desk/LoadFlowCard'
+import { RepoFlowBadge, RepoFlowCard } from '@/components/desk/RepoFlowCard'
 import { SecUpdatePopup } from '@/components/desk/SecUpdatePopup'
 import {
   api,
@@ -764,6 +765,13 @@ export function DeskPage() {
       badge: <FlowBadge />,
       flush: true,
       children: <LoadFlowCard />,
+    },
+    {
+      id: 'repo' as const,
+      title: 'Repo flow',
+      badge: <RepoFlowBadge />,
+      flush: true,
+      children: <RepoFlowCard />,
     },
     {
       id: 'wire' as const,

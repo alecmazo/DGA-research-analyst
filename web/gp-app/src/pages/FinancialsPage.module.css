@@ -480,6 +480,13 @@
   min-height: 0;
 }
 
+.chartTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+}
+
 .chartLegend {
   display: flex;
   flex-wrap: wrap;

@@ -34,6 +34,7 @@ export type DashSeriesPoint = {
   shares?: number | null
   buyback_ratio_pct?: number | null
   equity?: number | null
+  liabilities?: number | null
   assets?: number | null
   gross_margin_pct?: number | null
   operating_margin_pct?: number | null
@@ -195,6 +196,18 @@ export type StatementLine = {
   values?: Array<number | null>
 }
 
+export type StatementQuarter = {
+  labels?: string[]
+  assets?: StatementLine[]
+  liabilities?: StatementLine[]
+  equity?: StatementLine[]
+  balance?: StatementLine[]
+  income?: StatementLine[]
+  cash_flow?: StatementLine[]
+  comprehensive?: StatementLine[]
+  note?: string
+}
+
 export type StatementPack = {
   ok?: boolean
   error?: string
@@ -209,6 +222,7 @@ export type StatementPack = {
   cash_flow?: StatementLine[]
   comprehensive?: StatementLine[]
   note?: string
+  quarterly?: StatementQuarter
 }
 
 export type SheetData = {
