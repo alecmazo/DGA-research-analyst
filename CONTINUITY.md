@@ -281,6 +281,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Deal scan** | **`ui698-20261001-deal-scan`** | Merger Arb has a Scan for deals button on the deal list. A scan does not add a deal. Add and Open write a desk deal only after you confirm. |
 | **Deal lines** | **`ui699-20261002-deal-lines`** | A scan row opens that deal. Hide removes it. The line states the offer, the price, and what is being bought. Analyze runs on the local model and does not start a paid deep dive. |
 | **Compact cards** | **`ui700-20261002-compact-cards`** | Deal overview and spread, including implied probability, sit in a grid. Each fact is one line with its green dot. The source opens on that line. |
+| **Denser page** | **`ui701-20261002-denser-page`** | Downside and upside share one card. Sources, refresh, and flags share one card. Regulatory path, votes, and catalysts share one card. Each fact stays one line. |
 
 ### One-click handoff (preferred)
 
@@ -477,4 +478,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-02 · Agent: Grok Build · Live: `ui700-20261002-compact-cards` · Next: `ui701-YYYYMMDD-slug`*
+*Last updated: 2026-10-02 · Agent: Grok Build · Live: `ui701-20261002-denser-page` · Next: `ui702-YYYYMMDD-slug`*

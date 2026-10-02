@@ -130,13 +130,13 @@ function SourceNote({ row }: { row: Row }) {
   )
 }
 
-function CompactFacts({ rows, onConfirm }: { rows: Row[]; onConfirm: (id: string) => void }) {
+function CompactFacts({ rows, onConfirm, cols = 3 }: { rows: Row[]; onConfirm: (id: string) => void; cols?: 1 | 2 | 3 }) {
   if (!rows.length) return <p className={styles.muted}>Nothing stored.</p>
   const sensitivity = rows.find((row) => row.id === 'spread.sensitivity')
   const facts = rows.filter((row) => row.id !== 'spread.sensitivity')
   return (
     <>
-      <ul className={styles.factGrid}>
+      <ul className={styles.factGrid} data-cols={cols}>
         {facts.map((row) => (
           <li key={row.id} className={styles.fact}>
             <Dot dot={row.dot} />
@@ -153,40 +153,6 @@ function CompactFacts({ rows, onConfirm }: { rows: Row[]; onConfirm: (id: string
       </ul>
       {sensitivity ? <Sensitivity value={sensitivity.value} /> : null}
     </>
-  )
-}
-
-function Rows({ rows, onConfirm }: { rows: Row[]; onConfirm: (id: string) => void }) {
-  if (!rows.length) return <p className={styles.muted}>Nothing stored.</p>
-  return (
-    <ul className={styles.rows}>
-      {rows.map((row) => (
-        <li key={row.id}>
-          <Dot dot={row.dot} />
-          <div>
-            <strong>{row.label}</strong>
-            <span className={styles.value}>{row.display}</span>
-            <span className={styles.meta}>
-              {row.source_url ? (
-                <a href={row.source_url} target="_blank" rel="noreferrer">{row.source_name || 'Source'}</a>
-              ) : (
-                row.source_name || 'No source'
-              )}
-              {row.locator ? ` · ${row.locator}` : ''}
-              {row.pulled_at_pt ? ` · pulled ${row.pulled_at_pt}` : ''}
-              {row.as_of_pt ? ` · as of ${row.as_of_pt}` : ''}
-            </span>
-            {row.id === 'spread.sensitivity' ? <Sensitivity value={row.value} /> : null}
-            {row.notes ? <span className={styles.meta}>{row.notes}</span> : null}
-            {row.unverified && (
-              <Button size="sm" variant="secondary" onClick={() => onConfirm(row.id)}>
-                Confirm this value
-              </Button>
-            )}
-          </div>
-        </li>
-      ))}
-    </ul>
   )
 }
 
@@ -389,52 +355,104 @@ export function MergerArbPage() {
             {view.empty && <p>No packet yet. Run Deep Dive to create version 1. Nothing runs until you click.</p>}
           </Panel>
 
-          {!view.empty && (view.sections || []).map((card) => (
-            <Panel key={card.id} title={card.title}>
-              {card.id === 'overview' || card.id === 'spread' ? (
-                <CompactFacts rows={card.rows} onConfirm={confirm} />
-              ) : (
-                <Rows rows={card.rows} onConfirm={confirm} />
-              )}
-              {card.blocks.map((block) => (
-                <div key={block.title}>
-                  <h3 className={styles.blockTitle}>{block.title}</h3>
-                  <Rows rows={block.rows} onConfirm={confirm} />
-                </div>
-              ))}
-            </Panel>
-          ))}
+          {!view.empty && (() => {
+            const sections = view.sections || []
+            const byId = (id: string) => sections.find((card) => card.id === id)
+            const used = new Set(['overview', 'spread', 'structure', 'regulatory', 'votes', 'catalysts', 'downside', 'upside', 'sources'])
+            const lead = ['overview', 'spread', 'structure'].map(byId).filter((card): card is Card => !!card)
+            const path = ['regulatory', 'votes', 'catalysts'].map(byId).filter((card): card is Card => !!card)
+            const book = ['downside', 'upside'].map(byId).filter((card): card is Card => !!card)
+            const sources = byId('sources')
+            const rest = sections.filter((card) => !used.has(card.id))
+            const body = (card: Card, cols: 1 | 2 | 3 = 1) => (
+              <>
+                {card.rows.length > 0 && <CompactFacts rows={card.rows} onConfirm={confirm} cols={cols} />}
+                {card.blocks.map((block) => (
+                  <div key={block.title}>
+                    <h3 className={styles.subhead}>{block.title}</h3>
+                    <CompactFacts rows={block.rows} onConfirm={confirm} cols={1} />
+                  </div>
+                ))}
+                {!card.rows.length && !card.blocks.length && <p className={styles.muted}>Nothing stored.</p>}
+              </>
+            )
+            return (
+              <>
+                {lead.map((card) => (
+                  <Panel key={card.id} title={card.title}>
+                    {body(card, 3)}
+                  </Panel>
+                ))}
+                {path.length > 0 && (
+                  <Panel title="Regulatory, votes, and catalysts">
+                    <div className={styles.groupGrid}>
+                      {path.map((card) => (
+                        <section key={card.id}>
+                          <h3 className={styles.subhead}>{card.title}</h3>
+                          {body(card, 1)}
+                        </section>
+                      ))}
+                    </div>
+                  </Panel>
+                )}
+                {book.length > 0 && (
+                  <Panel title="Downside and upside">
+                    <div className={styles.groupGrid2}>
+                      {book.map((card) => (
+                        <section key={card.id}>
+                          <h3 className={styles.subhead}>{card.title}</h3>
+                          {body(card, 1)}
+                        </section>
+                      ))}
+                    </div>
+                  </Panel>
+                )}
+                <Panel title="Sources, refresh, and flags">
+                  <div className={styles.groupGrid}>
+                    <section>
+                      <h3 className={styles.subhead}>Sources</h3>
+                      {sources ? body(sources, 1) : <p className={styles.muted}>Nothing stored.</p>}
+                    </section>
+                    <section>
+                      <h3 className={styles.subhead}>Refresh</h3>
+                      {view.done?.complete ? <p className={styles.muted}>Refresh complete</p> : null}
+                      <ul className={styles.log}>
+                        {(view.done?.failed || []).map((item) => <li key={item}>{item}</li>)}
+                        {(view.refresh || []).map((item) => (
+                          <li key={item.id}>{item.status} · {item.id}{item.detail ? ` · ${item.detail}` : ''}</li>
+                        ))}
+                        {!view.refresh?.length && !view.done?.failed?.length && <li>No refresh yet.</li>}
+                      </ul>
+                    </section>
+                    <section>
+                      <h3 className={styles.subhead}>Flags</h3>
+                      <ul className={styles.log}>
+                        {(view.flags || []).map((flag, index) => (
+                          <li key={`${flag.id}-${index}`}><strong>{flag.kind}</strong> · {flag.id}{flag.detail ? ` · ${flag.detail}` : ''}</li>
+                        ))}
+                        {!view.flags?.length && <li>None.</li>}
+                      </ul>
+                    </section>
+                  </div>
+                </Panel>
+                {rest.map((card) => (
+                  <Panel key={card.id} title={card.title}>
+                    {body(card, 3)}
+                  </Panel>
+                ))}
+              </>
+            )
+          })()}
 
           {!view.empty && (
           <>
-          <Panel title="Refresh">
-            {view.done?.complete ? <p>Refresh complete</p> : null}
-            {view.done?.failed?.length ? (
-              <ul>{view.done.failed.map((item) => <li key={item}>{item}</li>)}</ul>
-            ) : null}
-            <ul className={styles.rows}>
-              {(view.refresh || []).map((item) => (
-                <li key={item.id}><span>{item.status}</span><span>{item.id}{item.detail ? ` · ${item.detail}` : ''}</span></li>
-              ))}
-              {!view.refresh?.length && <li>No refresh yet.</li>}
-            </ul>
-          </Panel>
-
-          <Panel title="Flags">
-            <ul>
-              {(view.flags || []).map((flag, index) => (
-                <li key={`${flag.id}-${index}`}><strong>{flag.kind}</strong> · {flag.id} · {flag.detail}</li>
-              ))}
-              {!view.flags?.length && <li>None.</li>}
-            </ul>
-          </Panel>
 
           <Panel title="Ask a follow-up">
             <textarea
               aria-label="Follow-up"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              rows={3}
+              rows={2}
               placeholder="Ask from this packet only"
             />
             <Button
@@ -456,7 +474,7 @@ export function MergerArbPage() {
           </Panel>
 
           <Panel title="Version history">
-            <ul>
+            <ul className={styles.log}>
               {(view.versions || []).map((item) => (
                 <li key={`${item.version}-${item.stage}`}>
                   <strong>v{item.version}</strong> · {item.stage} · {item.model} · {item.created_at_pt}
