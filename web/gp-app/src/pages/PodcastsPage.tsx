@@ -129,13 +129,13 @@ export function PodcastsPage() {
 
   useAnalysisScene(
     'podcast-script',
-    Boolean(scriptProg),
+    scriptBusy,
     scriptProg?.label || 'Writing script…',
     scriptProg ? `${scriptProg.pct}%` : undefined,
   )
   useAnalysisScene(
     'podcast-audio',
-    Boolean(audioProg),
+    audioBusy,
     audioProg?.label || 'Mixing audio…',
     audioProg ? `${audioProg.pct}%` : undefined,
   )
@@ -444,7 +444,7 @@ export function PodcastsPage() {
             setAudioProg({ label: st.label || st.stage || 'Working…', pct })
             if (st.status === 'done') {
               setAudioBusy(false)
-              setAudioProg({ label: st.label || '✓ Done', pct: 100 })
+              setAudioProg(null)
               showPlayer(tk, fmt, { ...st, format: fmt })
               void refreshLists()
               resolve()

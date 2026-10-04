@@ -163,7 +163,7 @@ SEC EDGAR 13F-HR (stored) + Form 4 / SC 13D/G index. Roster: Ackman, Buffett, Ic
 
 ### 5.4 Podcasts (`/podcasts`)
 
-Lab: generate / play / upload roundups. Internal tab id remains `lab`.
+Lab: generate / play / upload roundups. Internal tab id remains `lab`. The behind-the-scenes graphic closes when script or audio generation finishes.
 
 ### 5.5 Transcripts (`/transcripts`)
 
