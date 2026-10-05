@@ -31,9 +31,18 @@ _LONG = (
     ("NotesPayable", "Notes payable", False),
     ("UnsecuredDebt", "Unsecured debt", False),
     ("SecuredDebt", "Secured debt", False),
+    # Many 10-Ks, including Transocean, tag the balance-sheet line this way
+    # and never tag LongTermDebt. The figure includes capital leases.
+    ("LongTermDebtAndCapitalLeaseObligations", "Long-term debt and capital lease obligations", True),
+    ("DebtAndCapitalLeaseObligations", "Debt and capital lease obligations", False),
 )
+_LEASE_TAGS = {
+    "LongTermDebtAndCapitalLeaseObligations",
+    "DebtAndCapitalLeaseObligations",
+}
 _CURRENT = (
     ("LongTermDebtCurrent", "Current portion of long-term debt"),
+    ("LongTermDebtAndCapitalLeaseObligationsCurrent", "Current portion of long-term debt and capital lease obligations"),
     ("DebtCurrent", "Debt, current"),
     ("ShortTermBorrowings", "Short-term borrowings"),
     ("CommercialPaper", "Commercial paper"),
@@ -318,12 +327,38 @@ def parse_companyfacts(facts: dict | None, cik: str = "") -> dict:
             break
         if long_hit and current_hit and long_hit.get("unit") != current_hit.get("unit"):
             long_additive = False
+        total_hit = _pick(facts, "DebtAndCapitalLeaseObligations", as_of) if as_of else None
+        if (
+            used_long == "LongTermDebtAndCapitalLeaseObligations"
+            and long_hit
+            and current_hit
+            and total_hit
+            and not total_hit.get("conflict")
+            and not total_hit.get("negative")
+            and long_hit.get("unit") == total_hit.get("unit")
+        ):
+            summed = long_hit["val"] + current_hit["val"]
+            if total_hit["val"] == long_hit["val"]:
+                long_additive = False
+            elif total_hit["val"] != summed:
+                long_additive = False
+                flags.append({
+                    "flag_type": "conflict",
+                    "details": (
+                        f"Debt and capital lease obligations ${millions(total_hit['val'])}m "
+                        f"does not match the long-term line plus the current portion on {as_of}, "
+                        "so the current portion is not added."
+                    ),
+                })
         shown = set()
         if long_hit:
             shown.add(millions(long_hit["val"]))
             if current_hit and long_additive:
                 shown.add(millions(long_hit["val"] + current_hit["val"]))
             note = _alt_note(facts, _LONG, as_of, {used_long}, shown)
+            if used_long in _LEASE_TAGS:
+                lease_note = "Includes capital lease obligations. The finance lease line is not added again."
+                note = f"{lease_note} {note}".strip()
             lines.append(_line(
                 cik, "borrow.long", long_label, long_hit, in_total=True,
                 maturity_note="This total has no single maturity. The schedule below is the contractual repayments.",
@@ -404,7 +439,10 @@ def parse_companyfacts(facts: dict | None, cik: str = "") -> dict:
     if borrowed:
         debt = _text_amount(sum((Decimal(row["amount"]) for row in borrowed), Decimal("0")))
         if any(row["id"] == "borrow.long" for row in borrowed) and any(row["id"] == "borrow.current" for row in borrowed):
-            debt_note = "Long-term borrowings plus the current portion."
+            if used_long in _LEASE_TAGS:
+                debt_note = "Long-term debt and capital lease obligations plus the current portion."
+            else:
+                debt_note = "Long-term borrowings plus the current portion."
         elif any(row["id"] == "borrow.current" for row in borrowed) and not any(row["id"] == "borrow.long" for row in borrowed):
             debt_note = "Only a current portion is tagged. Long-term borrowings were not tagged on this date."
         elif any(row.get("note") and "Not added" in row["note"] for row in lines):
@@ -520,9 +558,17 @@ def filing_view(issuer: dict, parsed: dict | None, body: dict | None = None, loa
         reason = load_note
     elif loaded:
         badge = "Filing details"
+        if schedule:
+            opening = "Balances and the contractual maturity schedule are from the annual report. "
+        else:
+            opening = (
+                "Balance-sheet debt is from the annual report. "
+                "This filing did not tag a contractual maturity schedule. "
+            )
         reason = (
-            "Balances and the contractual maturity schedule are from the annual report. "
-            "A named bond coupon, a rating, and a TRACE price are not in that file."
+            opening
+            + "A named bond coupon, a rating, and a TRACE price are not in that file. "
+            "Paramount is the only name with a note-by-note structure from the deal documents."
         )
     else:
         badge = "No debt balance tagged"

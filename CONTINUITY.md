@@ -296,6 +296,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Report prices** | **`ui713-20261005-report-prices`** | Saved Reports shows the stored last price for names that are not on the watchlist. A day move from an earlier session stays blank. |
 | **Positions** | **`ui714-20261005-positions`** | The Positions tab uses the newest print. A stored quote older than the brokerage sync is replaced by that sync's price. BRKB uses the BRK-B quote. A day move from an earlier session stays blank. |
 | **Transcripts** | **`ui715-20261005-transcripts`** | Local transcript analysis reads the full transcript in packets, saves each section, and stitches those notes. Caption lines are joined into paragraphs. Refresh reloads the library and the call-coverage table and says so. Enter on a ticker in the library pulls that ticker's calls and shows that it is working. |
+| **Credit debt tags** | **`ui716-20261005-debt-tags`** | A 10-K that tags debt only as long-term debt and capital lease obligations shows that line. Transocean borrowings are the $5,212m long-term line plus the $445m current portion. The finance lease is not added again. A missing maturity schedule stays missing. |
 
 ### One-click handoff (preferred)
 
@@ -492,4 +493,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-05 · Agent: Grok Build · Built: `ui715-20261005-transcripts` · Live until the next upload: `ui714-20261005-positions` · Next: `ui716-YYYYMMDD-slug`*
+*Last updated: 2026-10-05 · Agent: Grok Build · Built: `ui716-20261005-debt-tags` · Live until the next upload: `ui715-20261005-transcripts` · Next: `ui717-YYYYMMDD-slug`*

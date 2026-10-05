@@ -212,6 +212,65 @@ def test_a_loaded_filing_is_cached_for_the_day():
     clear_filing_cache()
 
 
+def test_combined_debt_and_capital_lease_tag_is_the_long_term_line():
+    """Transocean tags this line and does not tag LongTermDebt."""
+    facts = _facts({
+        "LongTermDebtAndCapitalLeaseObligations": [_fact(5212000000, filed="2026-02-23")],
+        "LongTermDebtAndCapitalLeaseObligationsCurrent": [_fact(445000000, filed="2026-02-23")],
+        "DebtAndCapitalLeaseObligations": [_fact(5657000000, filed="2026-02-23")],
+        "DebtCurrent": [_fact(445000000, filed="2026-02-23")],
+        "FinanceLeaseLiability": [_fact(220000000, filed="2026-02-23")],
+        "OperatingLeaseLiability": [_fact(94000000, filed="2026-02-23")],
+        "CashAndCashEquivalentsAtCarryingValue": [_fact(620000000, filed="2026-02-23")],
+        "InterestPaidNet": [_fact(538000000, start="2025-01-01", filed="2026-02-23")],
+    })
+    parsed = parse_companyfacts(facts, "0001451505")
+    view = filing_view(by_cik("0001451505"), parsed, {"benchmarks": CURVE, "settlement": "2026-10-06"})
+    assert view["metrics"]["debt"] == "5657"
+    assert "capital lease obligations plus the current portion" in view["metrics"]["debt_note"]
+    long = view["lines"][0]
+    current = view["lines"][1]
+    assert long["name"] == "Long-term debt and capital lease obligations"
+    assert long["amount"] == "5212"
+    assert long["in_total"] is True
+    assert long["coupon_note"] == "not found"
+    assert "not added again" in long["note"]
+    assert "5657" not in long["note"]
+    assert current["name"] == "Current portion of long-term debt and capital lease obligations"
+    assert current["amount"] == "445"
+    assert current["in_total"] is True
+    finance = next(row for row in view["lines"] if row["id"] == "lease.finance")
+    assert finance["in_total"] is False
+    assert view["schedule"] == []
+    assert "did not tag a contractual maturity schedule" in view["badge_reason"]
+    assert view["covenants"][0]["status"] == "not_found"
+
+
+def test_a_pure_long_term_tag_still_wins_over_the_combined_line():
+    facts = _facts({
+        "LongTermDebtNoncurrent": [_fact(4000000000)],
+        "LongTermDebtAndCapitalLeaseObligations": [_fact(4200000000)],
+        "LongTermDebtCurrent": [_fact(100000000)],
+    })
+    parsed = parse_companyfacts(facts, "0001451505")
+    assert parsed["lines"][0]["name"] == "Long-term borrowings"
+    assert parsed["lines"][0]["amount"] == "4000"
+    assert "Long-term debt and capital lease obligations $4200m" in parsed["lines"][0]["note"]
+    assert parsed["metrics"]["debt"] == "4100"
+
+
+def test_current_is_not_added_when_the_combined_line_already_is_the_total():
+    facts = _facts({
+        "LongTermDebtAndCapitalLeaseObligations": [_fact(5657000000)],
+        "DebtAndCapitalLeaseObligations": [_fact(5657000000)],
+        "DebtCurrent": [_fact(445000000)],
+    })
+    parsed = parse_companyfacts(facts, "0001451505")
+    assert parsed["metrics"]["debt"] == "5657"
+    assert parsed["lines"][1]["in_total"] is False
+    assert parsed["flags"] == []
+
+
 def test_paramount_stays_on_its_structure_and_other_names_load_the_filing(monkeypatch):
     def boom(_cik):
         raise AssertionError("companyfacts")
