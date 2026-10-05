@@ -50,7 +50,24 @@ def test_list_reports_sql_skips_valuation_json():
     assert "_quote_from_current_session" in fill
     assert "_batch_quotes_fast" not in fill
     assert "_reports_attach_store_prices(out)" in fn
-    assert 'WEB_BUILD_VERSION = "ui713-20261005-report-prices"' in src
+    assert 'WEB_BUILD_VERSION = "ui714-20261005-positions"' in src
+
+
+def test_positions_use_newest_print_not_yahoo():
+    fn = _fn_src(ROOT / "api/server.py", "lp_me_positions")
+    fill = _fn_src(ROOT / "api/server.py", "_positions_quote_book")
+    marks = _fn_src(ROOT / "api/server.py", "_positions_snap_marks")
+    assert "_positions_quote_book(" in fn
+    assert "_positions_snap_marks(" in fn
+    assert "batch_quotes(" not in fn
+    assert "yf.Ticker" not in fn
+    assert "LIKE" not in marks.split("cur.execute", 1)[1]
+    assert "holdings_json" in marks
+    assert "_resolve_ticker_alias" in fill
+    assert "_quote_from_current_session" in fill
+    assert "_db_quotes(want, max_age_s=None)" in fill
+    assert "batch_quotes(" not in fill
+    assert "Cache-Control" in _fn_src(ROOT / "api/server.py", "_positions_json")
 
 
 def test_watchlist_has_sub_2s_paint_wall():
@@ -153,7 +170,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui713-20261005-report-prices"' in src
+    assert 'WEB_BUILD_VERSION = "ui714-20261005-positions"' in src
     assert "if (not lite) and _wl_left()" in wl
 
 

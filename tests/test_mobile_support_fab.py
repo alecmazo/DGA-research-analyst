@@ -66,6 +66,8 @@ def test_positions_and_financials_paint_from_cache():
     assert "POS_DATA_KEY" in pos
     assert "commitPositions" in pos
     assert "paintedRef" in pos
+    assert "/api/v2/lp/me/positions?_=" in pos
+    assert "netStamp" in pos
     fin = (ROOT / "mobile" / "src" / "screens" / "FinancialsScreen.js").read_text(
         encoding="utf-8"
     )

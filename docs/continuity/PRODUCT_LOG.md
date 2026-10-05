@@ -171,7 +171,7 @@ Earnings-call / transcript tools.
 
 ### 5.6 Positions (`/positions`)
 
-Live lots across managed accounts + LP stakes (`GET /api/v2/lp/me/positions`). Demo-lane SQL must **not** use `LIKE 'DEMO%'` inside parameterized queries (that 500’d Eugene’s mobile Portfolio).
+Live lots across managed accounts + LP stakes (`GET /api/v2/lp/me/positions`). Demo-lane SQL must **not** use `LIKE 'DEMO%'` inside parameterized queries (that 500’d Eugene’s mobile Portfolio). The last price is the newest print on hand: today's stored quote, including a brokerage alias such as BRKB → BRK-B. When that quote is older than the SnapTrade sync, the row uses the Fidelity price from the sync. A day move from an earlier session stays blank. The response is not cached.
 
 ### 5.7 Options (`/options`)
 

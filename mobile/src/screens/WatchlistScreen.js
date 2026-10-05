@@ -80,6 +80,17 @@ function fmtTime() {
   }) + ' PT';
 }
 
+function fmtBookTime(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }) + ' PT';
+}
+
 // Full dollar format — never abbreviates (used for gain/loss amounts)
 function fmtUSDFull(v) {
   if (v == null || isNaN(v)) return '—';
@@ -232,6 +243,8 @@ export default function WatchlistScreen({ navigation }) {
   const [impName,      setImpName]      = useState('');
   const timerRef                        = useRef(null);
   const paintedRef                      = useRef(false);
+  // Bumps when a network book lands, so a late cache read cannot overwrite it.
+  const netStamp                        = useRef(0);
 
   // Computed ordered group list
   const groups = orderedKeys.map(k => groupMap[k]).filter(Boolean);
@@ -281,13 +294,14 @@ export default function WatchlistScreen({ navigation }) {
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
 
-  const commitPositions = useCallback((data, savedConfig) => {
+  const commitPositions = useCallback((data, savedConfig, fromNetwork = false) => {
     const pos  = (data.positions || []).sort((a, b) =>
       (b.market_weight_pct || 0) - (a.market_weight_pct || 0)
     );
 
     setTotalValue(data.total_market_value ?? null);
-    setUpdatedAt(fmtTime());
+    const stamp = fromNetwork ? fmtTime() : fmtBookTime(data && data.book_as_of);
+    if (stamp) setUpdatedAt(stamp);
 
     let totalAbs = 0, totalPrev = 0;
     pos.forEach(p => {
@@ -362,13 +376,17 @@ export default function WatchlistScreen({ navigation }) {
 
   const fetchPositions = useCallback(async (isRefresh = false) => {
     if (!isRefresh && !paintedRef.current) {
+      const seen = netStamp.current;
       try {
         const raw = await AsyncStorage.getItem(POS_DATA_KEY);
-        if (raw) {
+        if (raw && netStamp.current === seen) {
           const data = JSON.parse(raw);
           if (data && Array.isArray(data.positions) && data.positions.length) {
-            commitPositions(data, await loadViewConfig());
-            setLoading(false);
+            const savedConfig = await loadViewConfig();
+            if (netStamp.current === seen) {
+              commitPositions(data, savedConfig);
+              setLoading(false);
+            }
           }
         }
       } catch { /* keep going to the network */ }
@@ -379,13 +397,16 @@ export default function WatchlistScreen({ navigation }) {
 
     try {
       const [resp, savedConfig] = await Promise.all([
-        v2Fetch('/api/v2/lp/me/positions'),
+        v2Fetch('/api/v2/lp/me/positions?_=' + Date.now(), {
+          headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+        }),
         loadViewConfig(),
       ]);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
+      netStamp.current += 1;
       AsyncStorage.setItem(POS_DATA_KEY, JSON.stringify(data)).catch(() => {});
-      commitPositions(data, savedConfig);
+      commitPositions(data, savedConfig, true);
     } catch (e) {
       setError(e.message || 'Failed to load positions');
     } finally {
@@ -399,11 +420,13 @@ export default function WatchlistScreen({ navigation }) {
   useEffect(() => {
     (async () => {
       try {
+        const seen = netStamp.current;
         const raw = await AsyncStorage.getItem(POS_DATA_KEY);
-        if (!raw || paintedRef.current) return;
+        if (!raw || paintedRef.current || netStamp.current !== seen) return;
         const data = JSON.parse(raw);
         if (data && Array.isArray(data.positions) && data.positions.length) {
           const savedConfig = await loadViewConfig();
+          if (netStamp.current !== seen) return;
           commitPositions(data, savedConfig);
           setLoading(false);
         }
@@ -516,7 +539,7 @@ export default function WatchlistScreen({ navigation }) {
     );
   }
 
-  if (error) {
+  if (error && !groups.length) {
     return (
       <View style={[styles.centered, { backgroundColor: t.bg }]}>
         <Text style={styles.errorText}>{error}</Text>
@@ -564,6 +587,10 @@ export default function WatchlistScreen({ navigation }) {
           </Text>
         </View>
       )}
+
+      {error ? (
+        <Text style={[styles.errorText, { marginBottom: 8 }]}>{error}</Text>
+      ) : null}
 
       {/* ── Global summary ── */}
       <View style={styles.summaryCard}>

@@ -5333,6 +5333,134 @@ def lp_me_overview(request: Request):
     return out
 
 
+def _positions_as_of_dt(as_of):
+    """UTC datetime for a quote or sync timestamp. None when it will not parse."""
+    if as_of is None:
+        return None
+    if isinstance(as_of, datetime):
+        dt = as_of
+    else:
+        text = str(as_of).strip().replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(text[:32])
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _positions_snap_marks(cur, fund_ids) -> tuple:
+    """Fidelity last price per symbol, and the newest sync time.
+
+    One SELECT. Demo account ids are skipped in Python so this SQL
+    never contains a LIKE percent (that 500s the positions route).
+    """
+    snap_px: dict = {}
+    snap_as_of = None
+    if not fund_ids:
+        return snap_px, snap_as_of
+    cur.execute(
+        """
+        SELECT account_id, holdings_json, last_synced_at
+          FROM snaptrade_accounts
+         WHERE status = 'active' AND fund_id = ANY(%s)
+        """,
+        (list(fund_ids),),
+    )
+    for hr in cur.fetchall() or []:
+        if str(hr.get("account_id") or "").startswith("demo-"):
+            continue
+        ts = hr.get("last_synced_at")
+        if ts is not None and (snap_as_of is None or ts > snap_as_of):
+            snap_as_of = ts
+        hj = hr.get("holdings_json") or []
+        if isinstance(hj, str):
+            try:
+                hj = json.loads(hj)
+            except Exception:
+                hj = []
+        for p in hj or []:
+            if not isinstance(p, dict):
+                continue
+            ps = str(p.get("symbol") or "").upper().strip()
+            pv = _snaptrade_num(p.get("price"))
+            if ps and pv:
+                snap_px[ps] = float(pv)
+    return snap_px, snap_as_of
+
+
+def _positions_quote_book(symbols, snap_px: dict, snap_as_of) -> dict:
+    """Newest last for each open symbol. No Yahoo.
+
+    Use the quote store when that print is at least as new as the
+    brokerage sync. The lookup includes the alias, so BRKB reads BRK-B.
+    An older store print loses to the Fidelity price. A day move from
+    another session stays blank.
+    """
+    alias_of: dict[str, str] = {}
+    want: list[str] = []
+    for raw in symbols or []:
+        tk = str(raw or "").upper().strip()
+        if not tk or tk in alias_of:
+            continue
+        ysym = (_resolve_ticker_alias(tk) or tk).upper()
+        alias_of[tk] = ysym
+        want.append(tk)
+        if ysym != tk:
+            want.append(ysym)
+    store: dict = {}
+    if want:
+        try:
+            store = _db_quotes(want, max_age_s=None) or {}
+        except Exception as e:
+            print(f"[positions] store quotes: {e!s:.120}", flush=True)
+            store = {}
+    snap_dt = _positions_as_of_dt(snap_as_of)
+    out: dict = {}
+    for tk, ysym in alias_of.items():
+        q = store.get(tk) or store.get(ysym) or {}
+        px = q.get("price")
+        pct = q.get("pct_change")
+        as_of = q.get("as_of")
+        store_dt = _positions_as_of_dt(as_of)
+        broker = snap_px.get(tk)
+        if broker is None:
+            broker = snap_px.get(ysym)
+        broker_newer = broker is not None and (
+            px is None
+            or store_dt is None
+            or (snap_dt is not None and store_dt < snap_dt)
+        )
+        if broker_newer:
+            px = broker
+            pct = None
+            as_of = None
+        elif as_of and not _quote_from_current_session(as_of):
+            pct = None
+        if px is None:
+            continue
+        try:
+            px_f = float(px)
+        except (TypeError, ValueError):
+            continue
+        if not px_f or px_f != px_f:
+            continue
+        out[tk] = {"price": px_f, "pct_change": pct}
+    return out
+
+
+def _positions_json(payload: dict):
+    """The book changes through the day. A phone must not replay an old GET."""
+    return JSONResponse(
+        payload,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # v2 LP — Live position watchlist (managed accounts + fund positions)
 # ---------------------------------------------------------------------------
@@ -5359,10 +5487,14 @@ def lp_me_positions(request: Request):
     _pos_pred         = _sql_demo_short(_pos_demo)
 
     if not _PSYCOPG2_OK:
-        return {"positions": [], "total_market_value": None, "account_count": 0}
+        return _positions_json(
+            {"positions": [], "total_market_value": None, "account_count": 0}
+        )
 
     conn = _fund_conn()
     rows = []
+    snap_px: dict = {}
+    snap_as_of = None
     try:
         with conn.cursor(cursor_factory=_RealDictCursor) as cur:
 
@@ -5507,7 +5639,9 @@ def lp_me_positions(request: Request):
             lp_fund_rows = _partition_fund_rows(lp_fund_rows, _pos_demo)
             all_fund_rows = managed_rows + lp_fund_rows
             if not all_fund_rows:
-                return {"positions": [], "total_market_value": 0, "account_count": 0}
+                return _positions_json(
+                    {"positions": [], "total_market_value": 0, "account_count": 0}
+                )
 
             # fund_id (str) → fund info dict
             fund_map = {str(f["id"]): f for f in all_fund_rows}
@@ -5530,6 +5664,11 @@ def lp_me_positions(request: Request):
                  ORDER BY SUM(tl.quantity * tl.cost_basis_per_unit) DESC
             """, (fund_db_ids,))
             rows = cur.fetchall()
+            try:
+                snap_px, snap_as_of = _positions_snap_marks(cur, fund_db_ids)
+            except Exception as e:
+                snap_px, snap_as_of = {}, None
+                print(f"[positions] snap marks: {e!s:.140}", flush=True)
 
     except HTTPException:
         raise
@@ -5539,12 +5678,12 @@ def lp_me_positions(request: Request):
             conn.rollback()
         except Exception:
             pass
-        return {
+        return _positions_json({
             "positions": [],
             "total_market_value": 0,
             "account_count": 0,
             "error": str(exc)[:200],
-        }
+        })
     finally:
         conn.close()
 
@@ -5560,43 +5699,22 @@ def lp_me_positions(request: Request):
         for f in fund_map.values()
     ]
 
+    book_as_of = snap_as_of.isoformat() if hasattr(snap_as_of, "isoformat") else None
+
     if not rows:
-        return {
+        return _positions_json({
             "positions":          [],
             "total_market_value": 0,
             "account_count":      len(fund_map),
             "funds":              all_funds_meta,
             "as_of":              _pacific_time_str(),
-        }
+            "book_as_of":         book_as_of,
+        })
 
     symbols = list({r["symbol"] for r in rows if r["symbol"]})
-    quotes: dict = {}
-    if symbols:
-        # Holdings are already in Postgres. Paint store prices first so the
-        # phone is not stuck on a Yahoo fan-out. Fill blanks with a short live pass.
-        try:
-            store = _db_quotes(symbols, max_age_s=None) or {}
-            for sym, q in store.items():
-                if (q or {}).get("price") is not None:
-                    quotes[sym] = {
-                        "price": q.get("price"),
-                        "pct_change": q.get("pct_change"),
-                    }
-        except Exception as e:
-            print(f"[positions] store quotes: {e!s:.120}", flush=True)
-        missing = [s for s in symbols if (quotes.get(s) or {}).get("price") is None]
-        if missing:
-            try:
-                live = _run_with_timeout(
-                    lambda: batch_quotes(",".join(missing)) or {},
-                    1.2,
-                    default={},
-                ) or {}
-                for sym, q in live.items():
-                    if (q or {}).get("price") is not None:
-                        quotes[sym] = q
-            except Exception as e:
-                print(f"[positions] live quotes: {e!s:.120}", flush=True)
+    # Newest print already on hand: today's store quote, or the brokerage
+    # price when the store row is older. No Yahoo on this tab.
+    quotes = _positions_quote_book(symbols, snap_px, snap_as_of) if symbols else {}
 
     total_mkt = 0.0
     result    = []
@@ -5617,7 +5735,7 @@ def lp_me_positions(request: Request):
         qty       = round(full_qty  * stake_frac, 6)
         tot_cost  = round(full_cost * stake_frac, 2)
 
-        q        = quotes.get(sym) or {}
+        q        = quotes.get((sym or "").upper()) or {}
         last_p   = q.get("price")
         pct_chg  = q.get("pct_change")
         if _is_par_cash_symbol(sym):
@@ -5654,13 +5772,14 @@ def lp_me_positions(request: Request):
                 round(item["market_value"] / total_mkt * 100, 2) if item["market_value"] else None
             )
 
-    return {
+    return _positions_json({
         "positions":          result,
         "total_market_value": round(total_mkt, 2),
         "account_count":      len(fund_map),
         "funds":              all_funds_meta,
         "as_of":              datetime.utcnow().strftime("%H:%M UTC"),
-    }
+        "book_as_of":         book_as_of,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -8624,7 +8743,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui713-20261005-report-prices"
+WEB_BUILD_VERSION = "ui714-20261005-positions"
 
 
 @app.get("/api/build")
