@@ -34,6 +34,7 @@ type FundOpt = { id: string; name?: string; short_name?: string }
 
 type StratReview = {
   id: string
+  fund_id?: string | null
   fund_name?: string
   tickers?: string
   generated_at?: string
@@ -83,6 +84,7 @@ export function StrategistCard({ bare = false }: Props) {
   const [positions, setPositions] = useState<unknown[]>([])
   const [archive, setArchive] = useState<StratReview[]>([])
   const [roundupMsg, setRoundupMsg] = useState<string | null>(null)
+  const [roundupBusy, setRoundupBusy] = useState(false)
 
   const loadFunds = useCallback(async () => {
     try {
@@ -343,27 +345,97 @@ export function StrategistCard({ bare = false }: Props) {
     }
   }
 
-  const handoffRoundup = async () => {
-    if (tickers.length < 5) {
-      alert(`Portfolio Roundup needs ≥5 tickers; this book has ${tickers.length}.`)
-      return
-    }
-    setRoundupMsg('🎙️ Queuing Portfolio Roundup script…')
+  const openRoundup = (jobKey: string) => {
+    setRoundupMsg('✓ Script started — opening Podcasts.')
+    navigate(`/podcasts?roundup=${encodeURIComponent(jobKey)}`)
+  }
+
+  const startRoundup = async (body: Record<string, unknown>) => {
+    setRoundupMsg('🎙️ Starting Portfolio Roundup…')
+    setRoundupBusy(true)
     try {
-      const j = await api<{ ok?: boolean; error?: string }>(
+      const j = await api<{ ok?: boolean; error?: string; ticker?: string }>(
         '/api/podcast-portfolio-roundup/script',
-        {
-          method: 'POST',
-          body: JSON.stringify({ tickers, positions }),
-        },
+        { method: 'POST', body: JSON.stringify(body) },
       )
-      if (!j.ok) throw new Error(j.error || 'Failed')
-      setRoundupMsg('✓ Roundup script queued — open Podcasts to review / generate audio.')
-      // Soft navigate to podcasts
-      window.setTimeout(() => navigate('/podcasts'), 1200)
+      if (!j.ok || !j.ticker) throw new Error(j.error || 'Failed to start')
+      openRoundup(j.ticker)
     } catch (e) {
       setRoundupMsg('❌ ' + (e instanceof Error ? e.message : e))
+    } finally {
+      setRoundupBusy(false)
     }
+  }
+
+  const handoffRoundup = async () => {
+    if (roundupBusy) return
+    if (selected.length) {
+      await startRoundup({ fund_ids: selected })
+      return
+    }
+    if (file) {
+      setRoundupMsg('🎙️ Reading the book…')
+      setRoundupBusy(true)
+      try {
+        const fd = new FormData()
+        fd.append('file', file)
+        const headers = new Headers()
+        try {
+          const token = localStorage.getItem('dga_v2_token')
+          if (token) headers.set('x-auth-v2-token', token)
+        } catch {
+          /* ignore */
+        }
+        const up = await fetch('/api/podcast-portfolio-roundup/upload', {
+          method: 'POST',
+          headers,
+          body: fd,
+        })
+        const uj = (await up.json()) as {
+          ok?: boolean
+          detail?: string
+          error?: string
+          ticker?: string
+        }
+        if (!up.ok || !uj.ok || !uj.ticker) {
+          throw new Error(uj.detail || uj.error || 'Upload failed')
+        }
+        openRoundup(uj.ticker)
+      } catch (e) {
+        setRoundupMsg('❌ ' + (e instanceof Error ? e.message : e))
+      } finally {
+        setRoundupBusy(false)
+      }
+      return
+    }
+    if (tickers.length >= 5) {
+      await startRoundup({
+        tickers,
+        positions,
+        title_hint: fundLabel || undefined,
+      })
+      return
+    }
+    setRoundupMsg('Pick an account or upload a book with at least 5 names.')
+  }
+
+  const handoffReview = async (rv: StratReview) => {
+    if (roundupBusy) return
+    const names = (rv.tickers || '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean)
+    if (rv.fund_id) {
+      await startRoundup({ fund_ids: [rv.fund_id], title_hint: rv.fund_name || undefined })
+      return
+    }
+    if (names.length < 5) {
+      setRoundupMsg(
+        `Portfolio Roundup needs at least 5 names. ${rv.fund_name || 'That review'} has ${names.length}.`,
+      )
+      return
+    }
+    await startRoundup({ tickers: names, title_hint: rv.fund_name || undefined })
   }
 
   const viewArchive = (id: string) => {
@@ -405,7 +477,9 @@ export function StrategistCard({ bare = false }: Props) {
         Full investment-committee review of an entire book. Reasons{' '}
         <em>across</em> positions (concentration, correlation, EV) and proposes
         grounded adjustments. The review opens in a new window when ready —
-        same as Saved Reports. Hand off to Roundup podcast or strategy memo.
+        same as Saved Reports. Generate Portfolio Roundup uses the accounts
+        you picked, or an uploaded book, and opens Podcasts with the script
+        already running. The committee review is a separate step.
         Cost follows the selected engine.
       </p>
 
@@ -483,7 +557,16 @@ export function StrategistCard({ bare = false }: Props) {
         <Button variant="primary" size="sm" disabled={busy} onClick={() => void run()}>
           {busy ? `⏳ ${engLabel(engine)}…` : '🧭 Run review'}
         </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={roundupBusy}
+          onClick={() => void handoffRoundup()}
+        >
+          {roundupBusy ? '🎙️ Starting…' : '🎙️ Generate Portfolio Roundup'}
+        </Button>
       </div>
+      {roundupMsg && <div className={styles.muted} style={{ marginTop: 8 }}>{roundupMsg}</div>}
 
       {err && <div className={styles.err}>❌ {err}</div>}
 
@@ -532,9 +615,6 @@ export function StrategistCard({ bare = false }: Props) {
             <Button size="sm" onClick={() => void emailPdf()}>
               ✉ Email
             </Button>
-            <Button size="sm" variant="primary" onClick={() => void handoffRoundup()}>
-              🎙️ Generate Portfolio Roundup
-            </Button>
             <Button size="sm" onClick={() => void draftMemo()}>
               📄 Draft strategy memo
             </Button>
@@ -543,7 +623,6 @@ export function StrategistCard({ bare = false }: Props) {
               {result.model ? ` · ${result.model}` : ''}
             </span>
           </div>
-          {roundupMsg && <div className={styles.muted} style={{ marginTop: 8 }}>{roundupMsg}</div>}
         </div>
       )}
 
@@ -572,6 +651,14 @@ export function StrategistCard({ bare = false }: Props) {
               </div>
               <Button size="sm" onClick={() => viewArchive(rv.id)}>
                 Open
+              </Button>
+              <Button
+                size="sm"
+                disabled={roundupBusy}
+                title="Generate a Portfolio Roundup from this review"
+                onClick={() => void handoffReview(rv)}
+              >
+                Roundup
               </Button>
               <Button size="sm" onClick={() => void exportPdf(rv.id)}>
                 PDF

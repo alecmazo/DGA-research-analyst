@@ -138,7 +138,7 @@ Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status do
 | Daily Pulse | LLM brief of the book; live prices injected; YOUR BOOK format. |
 | Saved Reports | Grok/Claude cards, style pills (VALUE/GROWTH/GARP/RICH/CORE), TGT/upside, clickable valuation chips. Last price comes from the quote store, including names that are not on the watchlist. |
 | Analyst | Agentic research; answer opens `/gp/research`. |
-| Portfolio Strategist | Whole-book review + IC snapshot; EV; both engines’ PTs. |
+| Portfolio Strategist | Whole-book review + IC snapshot; EV; both engines’ PTs. Generate Portfolio Roundup stays on the card. It uses the selected accounts, or an uploaded book, and opens Podcasts with the script job already running. |
 | Live Markets | TradingView. |
 | Market Wire | Official + wire RSS (**no Reuters, no AP**). |
 | Market Pulse | Per-name headline + **three** chips: DCF, Comps, Street. Top line: day % + mkt cap / Rev / NI / FCF (last FY). DCF/Street → valuation bridge. Comps → last-FY peer window. |
@@ -166,7 +166,7 @@ SEC EDGAR 13F-HR (stored) + Form 4 / SC 13D/G index. Roster: Ackman, Buffett, Ic
 
 ### 5.4 Podcasts (`/podcasts`)
 
-Work menu: generate / play / upload roundups. Internal tab id remains `lab`. The behind-the-scenes graphic closes when script or audio generation finishes.
+Work menu: generate / play / upload roundups. A Portfolio Strategist handoff opens this page with `?roundup=` and the script job keeps running until the script is on screen. Internal tab id remains `lab`. The behind-the-scenes graphic closes when script or audio generation finishes.
 
 ### 5.5 Transcripts (`/transcripts`)
 

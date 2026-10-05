@@ -8743,7 +8743,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui717-20261005-nav"
+WEB_BUILD_VERSION = "ui718-20261005-roundup"
 
 
 @app.get("/api/build")
@@ -32401,13 +32401,14 @@ def strategist_reviews_list(request: Request):
     _ensure_strategist_reviews_table()
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            cur.execute("""SELECT id, fund_name, tickers, cost_usd, model, generated_at,
+            cur.execute("""SELECT id, fund_id, fund_name, tickers, cost_usd, model, generated_at,
                                   length(answer) AS answer_len
                              FROM strategist_reviews
                             ORDER BY generated_at DESC LIMIT 100""")
             rows = cur.fetchall() or []
         return {"ok": True, "reviews": [{
-            "id": r["id"], "fund_name": r.get("fund_name"), "tickers": r.get("tickers"),
+            "id": r["id"], "fund_id": r.get("fund_id"),
+            "fund_name": r.get("fund_name"), "tickers": r.get("tickers"),
             "cost_usd": float(r["cost_usd"]) if r.get("cost_usd") is not None else None,
             "model": r.get("model"), "answer_len": int(r.get("answer_len") or 0),
             "generated_at": r["generated_at"].isoformat() if r.get("generated_at") else None,
@@ -39043,28 +39044,63 @@ def podcast_portfolio_roundup_upload(
 
 @app.post("/api/podcast-portfolio-roundup/script")
 def podcast_generate_portfolio_roundup(req: Request, background_tasks: BackgroundTasks):
-    """Portfolio Roundup — PM-style review of a 5-20 ticker book.
+    """Portfolio Roundup — PM-style review of a 5-35 name book.
 
-    Body:
-      { "tickers":   ["NVDA","INTC", ...],            // REQUIRED, 5-20 names
-        "positions": [{"ticker":"X","weight_pct":12, // OPTIONAL — adds sizing
-                       "sector":"Tech","beta":1.4}]  //            to snapshot
-      }
+    Body, one of:
+      { "fund_ids": ["..."] }     live account book, with market-value weights
+      { "fund_id": "..." }        one account
+      { "tickers": ["NVDA", ...], "positions": [{"ticker","weight_pct"}] }
+    title_hint is optional. A live book is GP-only and closed to the demo login.
 
-    Poll status under "PORTFOLIO_<tickers>" job key:
+    Poll status under "PORTFOLIO_<tickers>":
       GET /api/podcast/{key}/script-status
     """
     try:
         body = _request_json_sync(req)
     except Exception:
         body = {}
-    tickers = [t.upper().strip() for t in (body or {}).get("tickers", []) if t and t.strip()]
+    body = body or {}
+    fund_ids = [str(f) for f in (body.get("fund_ids") or []) if f]
+    one_fund = body.get("fund_id")
+    if one_fund and not fund_ids:
+        fund_ids = [str(one_fund)]
+    title_hint = str(body.get("title_hint") or "").strip()[:80] or None
+    if fund_ids:
+        claims = _claims_or_401(req)
+        if claims.get("demo_mode"):
+            return JSONResponse(
+                {"ok": False, "error": "Demo cannot read a live book."},
+                status_code=403,
+            )
+        if claims.get("role") not in ("gp", "admin"):
+            raise HTTPException(403, "GP only")
+        if len(fund_ids) == 1:
+            positions = _load_fund_positions(fund_ids[0])
+            title_hint = title_hint or _fund_name_lookup(fund_ids[0])
+        else:
+            positions = _combine_fund_positions(fund_ids)
+            names = [(_fund_name_lookup(f) or f) for f in fund_ids]
+            title_hint = title_hint or " + ".join(names)
+        if not positions:
+            return JSONResponse(
+                {"ok": False, "error": "No live positions for the selected account(s)."},
+                status_code=400,
+            )
+        tickers = [p["ticker"] for p in positions if p.get("ticker")]
+    else:
+        tickers = [
+            str(t).upper().strip()
+            for t in (body.get("tickers") or [])
+            if t and str(t).strip()
+        ]
+        positions = body.get("positions") or [{"ticker": t} for t in tickers]
     if len(tickers) < 5:
         return JSONResponse({"ok": False, "error": "Need at least 5 tickers for a Portfolio Roundup"},
                             status_code=400)
     if len(tickers) > 35:
         tickers = tickers[:35]
-    positions = (body or {}).get("positions") or [{"ticker": t} for t in tickers]
+        if isinstance(positions, list):
+            positions = positions[:35]
     job_key = "PORTFOLIO_" + ",".join(tickers)
     existing = _podcast_script_jobs.get(job_key)
     if existing and existing.get("status") == "running":
@@ -39079,8 +39115,11 @@ def podcast_generate_portfolio_roundup(req: Request, background_tasks: Backgroun
         "updated_at": time.time(),
     }
     print(f"🎙️ [portfolio-roundup] WROTE job_key={job_key!r} ({len(tickers)} tickers)", flush=True)
-    background_tasks.add_task(_run_portfolio_roundup_generation, tickers, positions)
-    return {"ok": True, "ticker": job_key, "tickers": tickers, "started": True}
+    background_tasks.add_task(
+        _run_portfolio_roundup_generation, tickers, positions, title_hint, None,
+    )
+    return {"ok": True, "ticker": job_key, "tickers": tickers, "started": True,
+            "title_hint": title_hint}
 
 
 @app.get("/api/podcast/{ticker}/script-status")

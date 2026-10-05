@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api, apiBlob } from '@/lib/api'
@@ -63,6 +64,9 @@ function anyReport(r: SavedReportRow) {
 }
 
 export function PodcastsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const roundupJob = useRef<string | null>(null)
+  const scriptAnchor = useRef<HTMLDivElement>(null)
   const [reports, setReports] = useState<SavedReportRow[]>([])
   const [scripts, setScripts] = useState<PodcastScriptMeta[]>([])
   const [episodes, setEpisodes] = useState<PodcastEpisode[]>([])
@@ -235,6 +239,12 @@ export function PodcastsPage() {
       daBrief: payload.da_brief,
       stats: `${s.word_count || 0} words · ${s.approx_minutes || 0} min · ${s.turn_count || 0} turns · ${s.curse_count || 0} curses · winner: ${String(s.winner || '?').toUpperCase()}${scriptCost}${audioCost}`,
     })
+    const tk = String(sc.ticker || '')
+    if (tk) {
+      syncTk(tk)
+      if (tk.startsWith('PORTFOLIO_')) setFormat('portfolio_roundup')
+      else if (tk.startsWith('ROUNDUP_')) setFormat('roundup')
+    }
     void refreshLists()
   }
 
@@ -299,6 +309,34 @@ export function PodcastsPage() {
       void tick()
     })
   }
+
+  // Desk hands off with ?roundup=<job key>. Stay on this page and follow
+  // that job until the script is on screen. A bare visit does not poll.
+  useEffect(() => {
+    const job = searchParams.get('roundup')
+    if (!job) {
+      roundupJob.current = null
+      return
+    }
+    if (roundupJob.current === job) return
+    roundupJob.current = job
+    setFormat('portfolio_roundup')
+    setErr(null)
+    setScriptView(null)
+    setScriptBusy(true)
+    setScriptProg({ label: 'Portfolio Roundup started…', pct: 4 })
+    window.setTimeout(() => {
+      scriptAnchor.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 60)
+    void pollScriptStatus(job).finally(() => {
+      if (roundupJob.current === job) roundupJob.current = null
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('roundup')
+        return next
+      }, { replace: true })
+    })
+  }, [searchParams, setSearchParams])
 
   const generateScript = async () => {
     setErr(null)
@@ -761,7 +799,7 @@ export function PodcastsPage() {
         <header className={styles.pcHead}>🎙️ DGA HiTech Podcast</header>
 
         {/* ① Script */}
-        <div className={styles.pcSection}>
+        <div className={styles.pcSection} ref={scriptAnchor}>
           <div className={styles.pcTitle}>① Script Generator</div>
           <div className={styles.pcDesc}>
             Pick a ticker with BOTH Grok + Claude reports. <strong>Kimi narrates</strong>{' '}

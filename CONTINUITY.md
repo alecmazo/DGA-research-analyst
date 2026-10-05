@@ -298,6 +298,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Transcripts** | **`ui715-20261005-transcripts`** | Local transcript analysis reads the full transcript in packets, saves each section, and stitches those notes. Caption lines are joined into paragraphs. Refresh reloads the library and the call-coverage table and says so. Enter on a ticker in the library pulls that ticker's calls and shows that it is working. |
 | **Credit debt tags** | **`ui716-20261005-debt-tags`** | A 10-K that tags debt only as long-term debt and capital lease obligations shows that line. Transocean borrowings are the $5,212m long-term line plus the $445m current portion. The finance lease is not added again. A missing maturity schedule stays missing. |
 | **Nav** | **`ui717-20261005-nav`** | Credit sits in the Lab menu. Podcasts takes its place in Work. The Builder label is Watchlists. The route stays `/builder`. |
+| **Portfolio roundup** | **`ui718-20261005-roundup`** | Generate Portfolio Roundup stays on the strategist card. It uses the selected accounts, or an uploaded book, and Podcasts follows that script job until the script is on screen. |
 
 ### One-click handoff (preferred)
 
@@ -495,4 +496,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-05 · Agent: Grok Build · Built: `ui717-20261005-nav` · Live until the next upload: `ui716-20261005-debt-tags` · Next: `ui718-YYYYMMDD-slug`*
+*Last updated: 2026-10-05 · Agent: Grok Build · Built: `ui718-20261005-roundup` · Live until the next upload: `ui717-20261005-nav` · Next: `ui719-YYYYMMDD-slug`*
