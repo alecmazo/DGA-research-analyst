@@ -293,6 +293,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Credit marks** | **`ui710-20261002-credit-marks`** | Typed clean prices stay on the pricing card. The Treasury curve and spread benchmarks load daily. Yield settlement is the next business day. WBD exchange notes do not use a January 1 maturity. |
 | **Credit details** | **`ui711-20261002-credit-details`** | Opening any high-yield name loads the annual-report debt balances, cash, interest, and contractual maturity schedule. A named coupon, rating, or TRACE price stays not found. Paramount still opens its named structure. |
 | **Podcast scene** | **`ui712-20261004-podcast-scene`** | The behind-the-scenes graphic closes when podcast script or audio generation finishes. A finished episode does not keep the animation running. |
+| **Report prices** | **`ui713-20261005-report-prices`** | Saved Reports shows the stored last price for names that are not on the watchlist. A day move from an earlier session stays blank. |
 
 ### One-click handoff (preferred)
 
@@ -489,4 +490,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-04 · Agent: Grok Build · Built: `ui712-20261004-podcast-scene` · Live until the next upload: `ui711-20261002-credit-details` · Next: `ui713-YYYYMMDD-slug`*
+*Last updated: 2026-10-05 · Agent: Grok Build · Built: `ui713-20261005-report-prices` · Live until the next upload: `ui712-20261004-podcast-scene` · Next: `ui714-YYYYMMDD-slug`*

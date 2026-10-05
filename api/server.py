@@ -8624,7 +8624,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui712-20261004-podcast-scene"
+WEB_BUILD_VERSION = "ui713-20261005-report-prices"
 
 
 @app.get("/api/build")
@@ -17735,6 +17735,64 @@ def _reports_list_refresh_bg() -> None:
     threading.Thread(target=_run, daemon=True, name="reports-list").start()
 
 
+def _reports_attach_store_prices(rows: list) -> None:
+    """Last price from market_quotes when the 90s process cache missed.
+
+    One SELECT. No Yahoo and no report JSON. A print from the last five
+    days still paints. A day-% from another session stays blank.
+    """
+    need: list[str] = []
+    for row in rows or []:
+        if not isinstance(row, dict) or row.get("current_price") is not None:
+            continue
+        tk = str(row.get("ticker") or "").upper().strip()
+        if tk:
+            need.append(tk)
+    if not need:
+        return
+    alias_of: dict[str, str] = {}
+    want: list[str] = []
+    for tk in need:
+        ysym = _resolve_ticker_alias(tk)
+        alias_of[tk] = ysym
+        want.append(tk)
+        if ysym and ysym != tk:
+            want.append(ysym)
+    try:
+        store = _db_quotes(want, max_age_s=5 * 86400) or {}
+    except Exception as e:
+        print(f"[list_reports] store prices failed: {e!s:.140}", flush=True)
+        return
+    for row in rows:
+        if not isinstance(row, dict) or row.get("current_price") is not None:
+            continue
+        tk = str(row.get("ticker") or "").upper().strip()
+        if not tk:
+            continue
+        q = store.get(tk) or store.get(alias_of.get(tk) or "") or {}
+        px = q.get("price")
+        if px is None:
+            continue
+        try:
+            px_f = float(px)
+        except (TypeError, ValueError):
+            continue
+        if not px_f or px_f != px_f:
+            continue
+        row["current_price"] = px_f
+        pct = q.get("pct_change")
+        as_of = q.get("as_of")
+        if as_of and not _quote_from_current_session(as_of):
+            pct = None
+        row["pct_change"] = pct
+        pt = row.get("price_target")
+        if pt is not None:
+            try:
+                row["upside_pct"] = round((float(pt) - px_f) / px_f * 100.0, 2)
+            except Exception:
+                pass
+
+
 @app.get("/api/reports")
 def list_reports(request: Request = None):
     """Return saved-report tickers for the Research table.
@@ -17955,11 +18013,10 @@ def list_reports(request: Request = None):
                             "dcf_user_value":      float(r["dcf_user_value"]) if r.get("dcf_user_value") is not None else None,
                             "valuation_approaches": [],
                         })
-                    # Process-cache prices only. Detoasting valuation_approaches
-                    # JSON + excel_model recut + _db_quotes(104) was 10–60s and
-                    # starved the one worker. Client /api/quotes fills day-%.
+                    # Process cache first (this session), then one store read
+                    # for the names it missed. Detoasting valuation JSON and
+                    # a Yahoo fan-out used to take 10–60s. Do not do either.
                     try:
-                        now = time.time()
                         for row in out:
                             tk = row.get("ticker")
                             ent = _QUOTE_CACHE.get(tk) if tk else None
@@ -17977,6 +18034,7 @@ def list_reports(request: Request = None):
                                         (float(row["price_target"]) - px) / px * 100.0, 2)
                                 except Exception:
                                     pass
+                        _reports_attach_store_prices(out)
                     except Exception as e:
                         print(f"[list_reports] quote enrich failed: {e!s:.140}", flush=True)
                     out.sort(key=_report_freshness_key, reverse=True)

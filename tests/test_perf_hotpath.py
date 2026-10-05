@@ -36,15 +36,21 @@ def test_health_and_build_are_async():
 
 def test_list_reports_sql_skips_valuation_json():
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
+    fn = _fn_src(ROOT / "api/server.py", "list_reports")
     # The list SELECT must not detoast valuation_approaches JSONB.
-    start = src.find("def list_reports")
-    chunk = src[start : start + 12000]
-    assert "FROM analyst_reports" in chunk
-    # column may still appear as empty list in the payload, not in SELECT
-    sel = chunk.split("FROM analyst_reports")[0]
+    assert "FROM analyst_reports" in fn
+    sel = fn.split("FROM analyst_reports")[0]
     assert "valuation_approaches," not in sel
     assert "dcf_user_fcf" not in sel
-    assert "excel_model" not in chunk
+    assert "excel_model" not in fn
+    assert "_batch_quotes_fast" not in fn
+    assert "yf.Ticker" not in fn
+    fill = _fn_src(ROOT / "api/server.py", "_reports_attach_store_prices")
+    assert "_db_quotes(want, max_age_s=5 * 86400)" in fill
+    assert "_quote_from_current_session" in fill
+    assert "_batch_quotes_fast" not in fill
+    assert "_reports_attach_store_prices(out)" in fn
+    assert 'WEB_BUILD_VERSION = "ui713-20261005-report-prices"' in src
 
 
 def test_watchlist_has_sub_2s_paint_wall():
@@ -147,7 +153,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui712-20261004-podcast-scene"' in src
+    assert 'WEB_BUILD_VERSION = "ui713-20261005-report-prices"' in src
     assert "if (not lite) and _wl_left()" in wl
 
 

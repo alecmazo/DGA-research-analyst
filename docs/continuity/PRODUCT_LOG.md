@@ -133,7 +133,7 @@ Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status do
 |------|----------------|
 | Watchlist | Tickers, last, day %, YTD, earnings chips, report pill. Click row → StockPeek. Earnings chip → `EarningsCard`. |
 | Daily Pulse | LLM brief of the book; live prices injected; YOUR BOOK format. |
-| Saved Reports | Grok/Claude cards, style pills (VALUE/GROWTH/GARP/RICH/CORE), TGT/upside, clickable valuation chips. |
+| Saved Reports | Grok/Claude cards, style pills (VALUE/GROWTH/GARP/RICH/CORE), TGT/upside, clickable valuation chips. Last price comes from the quote store, including names that are not on the watchlist. |
 | Analyst | Agentic research; answer opens `/gp/research`. |
 | Portfolio Strategist | Whole-book review + IC snapshot; EV; both engines’ PTs. |
 | Live Markets | TradingView. |
