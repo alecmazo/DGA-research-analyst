@@ -1,10 +1,16 @@
 """Open-transcript packing. No database."""
 
+from pathlib import Path
+
 from podcast_intel.ask_context import (
+    analysis_packets,
+    analysis_system,
     content_words,
     or_tsquery,
     pack_chosen,
     select_passages,
+    stitch_system,
+    stitch_transcript,
     system_prompt,
     user_message,
 )
@@ -79,6 +85,67 @@ def test_chosen_transcripts_are_the_only_context():
     assert "2026 guidance" in packed
     assert "cut the dividend" in packed
     assert len(packed) <= 1800
+
+
+def test_caption_lines_stitch_into_paragraphs_and_keep_the_tail():
+    lines = [
+        "[00:00:00] The most interesting big new trend is in",
+        "[00:00:02] personal agents.",
+        "[00:00:04] OpenAI is spending on ads.",
+        "[00:09:10] Stripe and Shopify came up with Andreessen Horowitz.",
+    ]
+    text = stitch_transcript("\n\n".join(lines))
+    assert text.startswith("[00:00:00] ")
+    assert "personal agents." in text
+    assert "OpenAI is spending" in text
+    assert "[00:09:10] Stripe and Shopify came up with Andreessen Horowitz." in text
+    assert text.count("[00:") == 2
+    packets = analysis_packets("\n\n".join(lines), packet_chars=90)
+    assert len(packets) > 1
+    assert any("Stripe" in packet and "Shopify" in packet for packet in packets)
+    assert all(len(packet) <= 90 for packet in packets)
+
+
+def test_packets_cover_a_late_name_the_keyword_excerpt_would_drop():
+    head = "\n\n".join(
+        f"[00:00:{i:02d}] intro words about the weather today really" for i in range(0, 40, 2)
+    )
+    tail = "[00:08:00] Andreessen Horowitz and Stripe were discussed with Shopify."
+    packets = analysis_packets(head + "\n\n" + tail, packet_chars=500)
+    assert len(packets) > 1
+    assert any("Stripe" in packet and "Shopify" in packet for packet in packets)
+    blob = ("word " * 3000).strip()
+    fitted = analysis_packets(blob, packet_chars=1000)
+    assert fitted
+    assert all(len(packet) <= 1000 for packet in fitted)
+    assert "word" in fitted[0] and "word" in fitted[-1]
+
+
+def test_speaker_change_starts_a_new_paragraph():
+    raw = "[00:00:01] Alice: Hello there.\n\n[00:00:03] Bob: Good to see you."
+    text = stitch_transcript(raw)
+    assert "[00:00:01] Alice: Hello there." in text
+    assert "[00:00:03] Bob: Good to see you." in text
+    assert analysis_system("a16z Show").startswith("You read one section")
+    assert "Do not invent" in stitch_system()
+
+
+def test_transcript_page_asks_in_packets_and_shows_work():
+    root = Path(__file__).resolve().parents[2]
+    ask = (root / "web/gp-app/src/components/transcripts/TranscriptAsk.tsx").read_text()
+    page = (root / "web/gp-app/src/pages/TranscriptsPage.tsx").read_text()
+    library = (root / "web/gp-app/src/components/transcripts/LibraryTree.tsx").read_text()
+    server = (root / "api/server.py").read_text()
+    assert "packets: true" in ask
+    assert "Reading section" in ask
+    assert "Stitching" in ask
+    assert "Refreshing the transcript library and the call-coverage table" in page
+    assert "Refreshing…" in page
+    assert "onKeyDown={onSearchKey}" in library
+    assert "Pulling earnings-call transcripts for" in library
+    assert "analysis_packets(" in server
+    assert "stitch_transcript(" in server
+    assert 'packets=bool((body or {}).get("packets"))' in server
 
 
 def test_no_open_document_still_says_when_the_library_is_empty():

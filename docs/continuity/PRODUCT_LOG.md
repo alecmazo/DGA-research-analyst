@@ -167,7 +167,7 @@ Lab: generate / play / upload roundups. Internal tab id remains `lab`. The behin
 
 ### 5.5 Transcripts (`/transcripts`)
 
-Earnings-call / transcript tools.
+Earnings-call / transcript tools. Local Ask reads the open transcript in packets the on-Mac model can handle, saves each section note, and stitches those notes. The reader joins caption lines into paragraphs. Refresh reloads the stored library and the call-coverage table. Enter on a ticker in the library pulls that ticker's calls and shows the pull while it runs.
 
 ### 5.6 Positions (`/positions`)
 

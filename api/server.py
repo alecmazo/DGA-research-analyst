@@ -8743,7 +8743,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui714-20261005-positions"
+WEB_BUILD_VERSION = "ui715-20261005-transcripts"
 
 
 @app.get("/api/build")
@@ -36164,6 +36164,7 @@ def _transcript_ask_pack(
     open_label: str = "",
     scope: str = "open",
     sources: list | None = None,
+    packets: bool = False,
 ) -> dict:
     """Passages for one question. No model call.
 
@@ -36172,10 +36173,13 @@ def _transcript_ask_pack(
     only when nothing is open.
     """
     from podcast_intel.ask_context import (
+        analysis_packets,
+        analysis_system,
         content_words,
         or_tsquery,
         pack_chosen,
         select_passages,
+        stitch_system,
         system_prompt,
         user_message,
     )
@@ -36194,6 +36198,7 @@ def _transcript_ask_pack(
     chosen_text = ""
     chosen_labels: list[str] = []
     shown_label = ""
+    raw_docs: list[tuple[str, str]] = []
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         labels = [row.get("label") or "Transcript" for row in chosen] if scope == "chosen" else []
         return {
@@ -36244,6 +36249,7 @@ def _transcript_ask_pack(
                 chosen_labels = [label for label, _text in documents] or [
                     row.get("label") or "Transcript" for row in chosen
                 ]
+                raw_docs = list(documents)
                 chosen_text = pack_chosen(documents, question) or "No text was stored for the chosen transcripts."
             elif interview_id:
                 cur.execute(
@@ -36265,6 +36271,7 @@ def _transcript_ask_pack(
                         ) if p
                     )
                     shown_label = open_label or who or "Interview"
+                    raw_docs = [(shown_label, body)]
                     open_text = (
                         f"[Open transcript · {shown_label}]\n{select_passages([body], question)}"
                     )
@@ -36272,9 +36279,33 @@ def _transcript_ask_pack(
                 pieces = _ask_call_pieces(cur, ticker, quarter)
                 if pieces:
                     shown_label = open_label or f"{ticker} · {quarter}"
+                    raw_docs = [(shown_label, "\n\n".join(pieces))]
                     open_text = (
                         f"[Open transcript · {shown_label}]\n{select_passages(pieces, question)}"
                     )
+            if packets and raw_docs:
+                flat: list[tuple[str, str]] = []
+                for label, text in raw_docs:
+                    for piece in analysis_packets(text):
+                        flat.append((label, piece))
+                if flat:
+                    total = len(flat)
+                    shown = "; ".join(chosen_labels[:8]) if chosen_labels else (shown_label or open_label or ticker)
+                    return {
+                        "mode": "packets",
+                        "system": analysis_system(shown),
+                        "stitch_system": stitch_system(),
+                        "question": question,
+                        "packets": [
+                            {"n": i, "of": total, "label": label, "text": piece}
+                            for i, (label, piece) in enumerate(flat, 1)
+                        ],
+                        "ticker": ticker,
+                        "quarter": quarter,
+                        "interview_id": interview_id,
+                        "scope": scope,
+                        "excerpts": total,
+                    }
             if scope != "chosen" and not open_text and not ticker:
                 words = [
                     w.upper() for w in re.findall(r"[A-Za-z]{1,5}", question)
@@ -36398,6 +36429,7 @@ def transcripts_ask_context(request: Request):
         open_label=str((body or {}).get("open_label") or ""),
         scope=scope,
         sources=sources,
+        packets=bool((body or {}).get("packets")),
     )
     return {"ok": True, **pack}
 
@@ -36487,13 +36519,15 @@ def transcripts_call_read(ticker: str, quarter: str, request: Request):
         note = ""
         if len(rows) >= 400:
             note = "Showing the first 400 sections of this call."
+        from podcast_intel.ask_context import stitch_transcript
+        stitched = stitch_transcript("\n\n".join(parts))
         return {
             "ok": True,
             "ticker": ticker,
             "quarter": quarter,
             "call_date": rows[0].get("call_date"),
             "source": rows[0].get("source"),
-            "text": "\n\n".join(parts),
+            "text": stitched or "\n\n".join(parts),
             "note": note,
         }
     except HTTPException:
@@ -36520,11 +36554,13 @@ def transcripts_detail(transcript_id: str, request: Request):
                              FROM transcript_entities WHERE transcript_id = %s
                             ORDER BY id""", (transcript_id,))
             ents = cur.fetchall() or []
-        return {"ok": True,
-                "transcript": {**{k: t.get(k) for k in
-                    ("id", "person", "title", "video_url", "channel", "summary", "full_text", "word_count")},
-                    "created_at": t["created_at"].isoformat() if t.get("created_at") else None},
-                "entities": ents}
+        from podcast_intel.ask_context import stitch_transcript
+        stored = t.get("full_text") or ""
+        transcript = {k: t.get(k) for k in
+                      ("id", "person", "title", "video_url", "channel", "summary", "full_text", "word_count")}
+        transcript["full_text"] = stitch_transcript(stored) or stored
+        transcript["created_at"] = t["created_at"].isoformat() if t.get("created_at") else None
+        return {"ok": True, "transcript": transcript, "entities": ents}
     except HTTPException:
         raise
     except Exception as e:

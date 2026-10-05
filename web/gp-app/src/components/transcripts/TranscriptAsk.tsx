@@ -65,6 +65,86 @@ function askBody(question: string, scope: Scope, openDoc: OpenTranscript | null 
   return body
 }
 
+type AskPacket = { n?: number; of?: number; label?: string; text?: string }
+type PacketPack = {
+  mode?: string
+  system?: string
+  stitch_system?: string
+  user?: string
+  packets?: AskPacket[]
+}
+
+const NOTE_BUDGET = 12000
+
+function sectionUser(question: string, packet: AskPacket): string {
+  const n = packet.n || 1
+  const total = packet.of || 1
+  const label = packet.label ? ` (${packet.label})` : ''
+  return `Question: ${question}\n\nSection ${n} of ${total}${label}:\n${packet.text || ''}`
+}
+
+function keepSectionNote(text: string): boolean {
+  const note = text.trim()
+  return Boolean(note) && !/^nothing in this section\b/i.test(note)
+}
+
+async function stitchSaved(
+  question: string,
+  system: string,
+  notes: string[],
+  onProgress: (text: string) => void,
+): Promise<string> {
+  const promptFor = (blocks: string[]) =>
+    `Question: ${question}\n\nSaved section notes:\n\n${blocks.join('\n\n')}\n\nWrite one answer from these notes only. Keep every company and fact. Drop a note that says nothing was in that section. If a note says the section stopped, say that part did not finish. Do not invent.`
+  const run = async (blocks: string[]) => {
+    const chat = await ollamaChat({
+      system: system || 'Combine saved transcript section notes into one answer. Do not invent.',
+      user: promptFor(blocks),
+      maxTokens: 1600,
+      numCtx: 8192,
+    })
+    return (chat.text || '').trim()
+  }
+  let blocks = notes
+    .map((note, i) => `Section ${i + 1}:\n${note.trim()}`)
+    .filter((block) => block.trim().length > 10)
+  if (!blocks.length) return ''
+  let guard = 0
+  while (blocks.join('\n\n').length > NOTE_BUDGET && blocks.length > 1 && guard < 6) {
+    guard += 1
+    const groups: string[][] = []
+    let buf: string[] = []
+    let size = 0
+    for (const block of blocks) {
+      if (buf.length && size + block.length > NOTE_BUDGET) {
+        groups.push(buf)
+        buf = []
+        size = 0
+      }
+      buf.push(block)
+      size += block.length + 2
+    }
+    if (buf.length) groups.push(buf)
+    const next: string[] = []
+    for (let g = 0; g < groups.length; g++) {
+      onProgress(`Stitching saved sections, batch ${g + 1} of ${groups.length}…`)
+      try {
+        next.push((await run(groups[g])) || groups[g].join('\n\n'))
+      } catch {
+        next.push(groups[g].join('\n\n'))
+      }
+    }
+    if (next.length >= blocks.length) break
+    blocks = next.map((note, i) => `Batch ${i + 1}:\n${note}`)
+  }
+  onProgress('Stitching the saved sections into one answer…')
+  try {
+    return (await run(blocks)) || blocks.join('\n\n')
+  } catch {
+    return blocks.join('\n\n')
+  }
+}
+
 function rowsFrom(folders: LibraryFolder[] | undefined, kind: 'interview' | 'call'): OpenTranscript[] {
   const out: OpenTranscript[] = []
   const seen = new Set<string>()
@@ -100,6 +180,7 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
   const [filter, setFilter] = useState('')
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [answer, setAnswer] = useState('')
   const [used, setUsed] = useState('')
@@ -161,6 +242,7 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
     if (q.length < 4) return
     if (scope === 'chosen' && selected.length === 0) return
     setBusy(true)
+    setProgress('')
     setErr(null)
     setAnswer('')
     try {
@@ -173,15 +255,53 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
       if (engine === 'local') {
         const health = await ollamaStatus()
         if (!health.ok) throw new Error(health.message)
-        const pack = await api<{ system?: string; user?: string }>(
+        const pack = await api<PacketPack>(
           '/api/transcripts/ask-context',
-          { method: 'POST', body: JSON.stringify(body) },
+          { method: 'POST', body: JSON.stringify({ ...body, packets: true }) },
         )
-        if (!pack.system || !pack.user) throw new Error('Could not load transcript excerpts')
-        const chat = await ollamaChat({ system: pack.system, user: pack.user, maxTokens: 2500 })
-        if (!chat.text) throw new Error('The local model returned an empty answer')
-        setAnswer(chat.text)
-        setUsed(`${chosen.via} · ${context}`)
+        if (pack.mode === 'packets') {
+          const packets = (pack.packets || []).filter((packet) => (packet.text || '').trim())
+          if (!packets.length) throw new Error('No transcript text is stored for that selection')
+          const saved: string[] = []
+          for (let i = 0; i < packets.length; i++) {
+            const packet = packets[i]
+            setProgress(`Reading section ${packet.n || i + 1} of ${packet.of || packets.length}…`)
+            try {
+              const chat = await ollamaChat({
+                system: pack.system || '',
+                user: sectionUser(q, packet),
+                maxTokens: 900,
+                numCtx: 8192,
+              })
+              const note = (chat.text || '').trim()
+              if (keepSectionNote(note)) saved.push(note)
+              else if (!note) saved.push(`(Section ${packet.n || i + 1} stopped before it finished.)`)
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : 'the section stopped'
+              saved.push(`(Section ${packet.n || i + 1} stopped before it finished: ${msg}.)`)
+            }
+          }
+          const notes = saved.filter(keepSectionNote)
+          const via = `${chosen.via} · ${context} · ${packets.length} section${packets.length === 1 ? '' : 's'}`
+          if (!notes.length) {
+            setAnswer('Nothing in this transcript answers that.')
+            setUsed(via)
+          } else if (notes.length === 1) {
+            setAnswer(notes[0])
+            setUsed(via)
+          } else {
+            setProgress(`Stitching ${notes.length} saved sections…`)
+            const stitched = await stitchSaved(q, pack.stitch_system || '', notes, setProgress)
+            setAnswer(stitched || notes.map((note, i) => `Section ${i + 1}\n${note}`).join('\n\n'))
+            setUsed(`${via} stitched`)
+          }
+        } else {
+          if (!pack.system || !pack.user) throw new Error('Could not load transcript excerpts')
+          const chat = await ollamaChat({ system: pack.system, user: pack.user, maxTokens: 2500 })
+          if (!chat.text) throw new Error('The local model returned an empty answer')
+          setAnswer(chat.text)
+          setUsed(`${chosen.via} · ${context}`)
+        }
       } else {
         const data = await api<{ answer?: string; via?: string; model?: string; detail?: string }>(
           '/api/transcripts/ask',
@@ -195,6 +315,7 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
       setErr(e instanceof Error ? e.message : 'Could not answer')
     } finally {
       setBusy(false)
+      setProgress('')
     }
   }
 
@@ -321,6 +442,7 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
           {busy ? 'Answering…' : 'Ask'}
         </Button>
       </div>
+      {busy && progress && <p className={styles.about} role="status">{progress}</p>}
       {err && <p className={styles.err}>{err}</p>}
       {used && answer && <p className={styles.used}>Answered with {used}.</p>}
       {answer && (

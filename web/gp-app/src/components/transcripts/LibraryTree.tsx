@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { api } from '@/lib/api'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import styles from './LibraryTree.module.css'
@@ -102,6 +102,7 @@ export function LibraryTree({
   const [busyTk, setBusyTk] = useState<string | null>(null)
   const [refreshTk, setRefreshTk] = useState<string | null>(null)
   const [refreshNote, setRefreshNote] = useState('')
+  const [pullNote, setPullNote] = useState('')
 
   const load = useCallback(async () => {
     const data = await api<Library>('/api/transcripts/library')
@@ -134,6 +135,8 @@ export function LibraryTree({
           setSel(null)
           setDetail(null)
           setReadErr(null)
+        } else if (cur) {
+          openRef.current(cur)
         }
       })
       .catch((e) => {
@@ -145,17 +148,20 @@ export function LibraryTree({
   }, [reloadKey, load])
 
   const refreshCalls = async (ticker: string) => {
-    setBusyTk(ticker)
-    setRefreshTk(ticker)
+    const symbol = ticker.trim().toUpperCase()
+    if (!symbol || busyTk) return
+    setBusyTk(symbol)
+    setRefreshTk(symbol)
     setErr(null)
-    setRefreshNote(`Refreshing ${ticker}…`)
+    setPullNote(`Pulling earnings-call transcripts for ${symbol}…`)
+    setRefreshNote(`Pulling earnings-call transcripts for ${symbol}…`)
     let finalNote = ''
     let settled = false
     try {
       const job = await api<{ job_id?: string; error?: string }>('/api/transcripts/calls/sync', {
         method: 'POST',
         body: JSON.stringify({
-          tickers: [ticker],
+          tickers: [symbol],
           max_quarters: 6,
           max_names: 1,
           missing_only: false,
@@ -170,26 +176,44 @@ export function LibraryTree({
         const st = await api<{ status?: string; label?: string; error?: string }>(
           `/api/transcripts/calls/sync/${encodeURIComponent(job.job_id)}`,
         )
-        setRefreshNote(st.label || `Refreshing ${ticker}…`)
+        const label = st.label || `Pulling earnings-call transcripts for ${symbol}…`
+        setRefreshNote(label)
+        setPullNote(label)
         const status = st.status || ''
         if (status === 'done' || status === 'failed' || status === 'error' || status === 'canceled') {
           settled = true
-          if (status !== 'done') setErr(st.error || st.label || `${ticker} refresh failed`)
-          finalNote = st.label || `${ticker} refresh finished`
+          if (status !== 'done') setErr(st.error || st.label || `${symbol} pull failed`)
+          finalNote = st.label || `${symbol} pull finished`
           break
         }
       }
       if (!settled) {
-        finalNote = `${ticker} refresh is still running. New quarters show up here when it finishes.`
+        finalNote = `${symbol} is still pulling. New quarters show up here when it finishes.`
       }
       await load()
       setRefreshNote(finalNote)
+      setPullNote(finalNote)
+      setOpen((prev) => ({ ...prev, watchCalls: true, calls: true }))
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Refresh failed')
+      setErr(e instanceof Error ? e.message : 'Pull failed')
       setRefreshNote('')
+      setPullNote('')
     } finally {
       setBusyTk(null)
     }
+  }
+
+  const onSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    const raw = query.trim()
+    if (!raw || busyTk) return
+    if (!/^[A-Za-z]{1,5}(?:[.\-][A-Za-z0-9]{1,3})?$/.test(raw)) {
+      setPullNote('That filters the library. Type a ticker, such as AAPL, and press Enter to pull its calls.')
+      return
+    }
+    setQuery(raw.toUpperCase())
+    void refreshCalls(raw)
   }
 
   const q = query.trim().toLowerCase()
@@ -325,9 +349,19 @@ export function LibraryTree({
           className={styles.search}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter by show, ticker, or title"
-          aria-label="Filter transcripts"
+          onKeyDown={onSearchKey}
+          placeholder="Filter, or a ticker then Enter"
+          aria-label="Filter the library, or enter a ticker and press Enter to pull its calls"
+          disabled={Boolean(busyTk)}
         />
+        <p className={styles.hint}>
+          Type a ticker and press Enter to pull its earnings calls. Other words filter this library.
+        </p>
+        {pullNote && (
+          <p className={styles.pull} role="status">
+            {busyTk ? `Working — ${pullNote}` : pullNote}
+          </p>
+        )}
         {loading && <Spinner label="Loading the library…" />}
         {!loading && err && !lib && <p className={styles.err}>{err}</p>}
         {!loading && lib?.enabled === false && (

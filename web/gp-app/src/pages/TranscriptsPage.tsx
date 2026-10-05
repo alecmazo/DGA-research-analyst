@@ -86,6 +86,7 @@ export function TranscriptsPage() {
   const [focus, setFocus] = useState<{ id: string; nonce: number } | null>(null)
   const [cleanupOpen, setCleanupOpen] = useState(false)
   const [libraryReload, setLibraryReload] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -103,12 +104,33 @@ export function TranscriptsPage() {
           ? (list as { transcripts: YtRow[] }).transcripts
           : []
       setYtList(rows)
+      return true
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load transcripts')
+      return false
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const refreshPage = async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    setStatus(
+      'Refreshing the transcript library and the call-coverage table. This reloads stored interviews and indexed calls. It does not download new transcripts.',
+    )
+    try {
+      const ok = await load()
+      if (ok) {
+        setLibraryReload((n) => n + 1)
+        setStatus('Refreshed the transcript library and the call-coverage table.')
+      } else {
+        setStatus(null)
+      }
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   useEffect(() => {
     void load()
@@ -275,8 +297,15 @@ export function TranscriptsPage() {
           >
             Clean up
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => void load()}>
-            Refresh
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={refreshing}
+            aria-busy={refreshing}
+            title="Reload the transcript library and the call-coverage table. This does not download new calls."
+            onClick={() => void refreshPage()}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
         </div>
       </header>
