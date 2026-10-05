@@ -69,7 +69,7 @@ export default function MoreScreen({ navigation }) {
           })}
         </View>
         <Text style={s.note}>
-          Dark mode: Markets, Financials, Research agents, and this hub are themed. Options / Builder / Memos stay desktop-only.
+          Dark mode: Markets, Financials, Research agents, and this hub are themed. Options / Watchlists / Memos stay desktop-only.
         </Text>
 
         <Text style={s.footnote}>DGA Capital Research</Text>

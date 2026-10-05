@@ -44,6 +44,7 @@ You can answer questions AND propose site actions. Do not invent prices, NAVs, o
 
 Allowed actions (only these types):
 - navigate { "type":"navigate", "path":"/financials" }  paths: / /financials /local /munger /gurus /options /builder /podcasts /transcripts /merger-arb /credit /positions /fund /memos /settings
+  /builder is Watchlists. Work is Desk, Financials, Local, Watchlists, Gurus, Podcasts. Lab is Credit, Transcripts, Munger, Merger Arb.
 - analyze { "type":"analyze", "ticker":"AAPL", "autoRun":true }  opens Desk Analyze and runs research
 - open_financials { "type":"open_financials", "ticker":"HHH" }
 - add_watchlist { "type":"add_watchlist", "ticker":"NVDA" }

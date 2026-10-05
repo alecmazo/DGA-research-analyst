@@ -177,7 +177,14 @@ def test_nav_has_lab_accounts_gurus():
     assert 'label="Accounts"' in top
     assert "NavMenu" in top
     assert "createPortal" in top
-    assert "{ to: '/podcasts'" in top
+    work, rest = top.split("const LAB", 1)
+    lab, _accounts = rest.split("const ACCOUNTS", 1)
+    assert "label: 'Watchlists'" in work
+    assert "label: 'Builder'" not in work
+    assert "{ to: '/podcasts'" in work
+    assert "{ to: '/credit'" not in work
+    assert "{ to: '/credit'" in lab
+    assert "{ to: '/podcasts'" not in lab
     assert "{ to: '/positions'" in top
     app = (ROOT / "web/gp-app/src/App.tsx").read_text()
     assert 'path="gurus"' in app

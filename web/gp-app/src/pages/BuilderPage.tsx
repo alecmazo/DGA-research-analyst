@@ -645,7 +645,7 @@ export function BuilderPage() {
       <header className={page.hero}>
         <div>
           <p className={page.kicker}>Research · portfolio design</p>
-          <h1 className={page.h1}>Builder</h1>
+          <h1 className={page.h1}>Watchlists</h1>
           <p className={page.sub}>
             Build high expected-value baskets from saved reports (15–20 names),
             save high-conviction scenarios, and track them as boards over time.

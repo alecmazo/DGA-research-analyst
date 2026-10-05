@@ -375,16 +375,16 @@ export const FLOW_ROOT: FlowNode = {
         },
       ],
     },
-    { id: 'builder', label: 'Builder', hint: 'Lists and scenarios.', to: '/builder' },
+    { id: 'builder', label: 'Watchlists', hint: 'Lists and scenarios.', to: '/builder' },
     { id: 'gurus', label: 'Gurus', hint: 'Guru filings.', to: '/gurus' },
-    { id: 'credit', label: 'Credit', hint: 'Bond issuers and a typed-in book.', to: '/credit' },
+    { id: 'podcasts', label: 'Podcasts', hint: 'Scripts, episodes, and votes.', to: '/podcasts' },
     {
       id: 'lab',
       label: 'Lab',
-      hint: 'Podcasts, transcripts, Munger, and merger arb.',
-      to: '/podcasts',
+      hint: 'Credit, transcripts, Munger, and merger arb.',
+      to: '/credit',
       children: [
-        { id: 'podcasts', label: 'Podcasts', hint: 'Scripts, episodes, and votes.', to: '/podcasts' },
+        { id: 'credit', label: 'Credit', hint: 'Bond issuers and a typed-in book.', to: '/credit' },
         { id: 'calls', label: 'Transcripts', hint: 'Calls and the library.', to: '/transcripts' },
         { id: 'munger', label: 'Munger', hint: 'Munger desk.', to: '/munger' },
         {

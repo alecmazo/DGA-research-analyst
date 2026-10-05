@@ -157,7 +157,7 @@ export default function App() {
               <Route
                 path="builder"
                 element={
-                  <ErrorBoundary label="Builder">
+                  <ErrorBoundary label="Watchlists">
                     <BuilderPage />
                   </ErrorBoundary>
                 }

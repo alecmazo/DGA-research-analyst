@@ -297,6 +297,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Positions** | **`ui714-20261005-positions`** | The Positions tab uses the newest print. A stored quote older than the brokerage sync is replaced by that sync's price. BRKB uses the BRK-B quote. A day move from an earlier session stays blank. |
 | **Transcripts** | **`ui715-20261005-transcripts`** | Local transcript analysis reads the full transcript in packets, saves each section, and stitches those notes. Caption lines are joined into paragraphs. Refresh reloads the library and the call-coverage table and says so. Enter on a ticker in the library pulls that ticker's calls and shows that it is working. |
 | **Credit debt tags** | **`ui716-20261005-debt-tags`** | A 10-K that tags debt only as long-term debt and capital lease obligations shows that line. Transocean borrowings are the $5,212m long-term line plus the $445m current portion. The finance lease is not added again. A missing maturity schedule stays missing. |
+| **Nav** | **`ui717-20261005-nav`** | Credit sits in the Lab menu. Podcasts takes its place in Work. The Builder label is Watchlists. The route stays `/builder`. |
 
 ### One-click handoff (preferred)
 
@@ -347,22 +348,23 @@ React topbar at `/gp` (`web/gp-app/src/components/layout/Topbar.tsx`). Paths are
 1. Desk (`/`)
 2. Financials (`/financials`)
 3. Local (`/local`)
-4. Builder (`/builder`)
+4. Watchlists (`/builder`) — *label only; route stays `/builder`*
 5. Gurus (`/gurus`)
-
-**Lab** (Munger lives here, not under Work):
-
 6. Podcasts (`/podcasts`)
-7. Transcripts (`/transcripts`)
-8. Munger (`/munger`)
-9. Merger Arb (`/merger-arb`, analysis at `/merger-arb/analysis/:dealId`)
+
+**Lab:**
+
+7. Credit (`/credit`, issuer at `/credit/:issuer`)
+8. Transcripts (`/transcripts`)
+9. Munger (`/munger`)
+10. Merger Arb (`/merger-arb`, analysis at `/merger-arb/analysis/:dealId`)
 
 **Accounts:**
 
-10. Accounts (`/fund`) — *label only; route stays `/fund`*
-11. Positions (`/positions`)
-12. Options (`/options`)
-13. Memos (`/memos`)
+11. Accounts (`/fund`) — *label only; route stays `/fund`*
+12. Positions (`/positions`)
+13. Options (`/options`)
+14. Memos (`/memos`)
 
 Settings stays in the account menu, not a top-level work tab. Sliw (`/sliw/`) stays a gated link, not a GP tab.
 
@@ -493,4 +495,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-05 · Agent: Grok Build · Built: `ui716-20261005-debt-tags` · Live until the next upload: `ui715-20261005-transcripts` · Next: `ui717-YYYYMMDD-slug`*
+*Last updated: 2026-10-05 · Agent: Grok Build · Built: `ui717-20261005-nav` · Live until the next upload: `ui716-20261005-debt-tags` · Next: `ui718-YYYYMMDD-slug`*

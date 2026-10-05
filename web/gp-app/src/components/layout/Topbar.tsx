@@ -13,13 +13,13 @@ const WORK: { to: string; label: string }[] = [
   { to: '/', label: 'Desk' },
   { to: '/financials', label: 'Financials' },
   { to: '/local', label: 'Local' },
-  { to: '/builder', label: 'Builder' },
+  { to: '/builder', label: 'Watchlists' },
   { to: '/gurus', label: 'Gurus' },
-  { to: '/credit', label: 'Credit' },
+  { to: '/podcasts', label: 'Podcasts' },
 ]
 
 const LAB: { to: string; label: string }[] = [
-  { to: '/podcasts', label: 'Podcasts' },
+  { to: '/credit', label: 'Credit' },
   { to: '/transcripts', label: 'Transcripts' },
   { to: '/munger', label: 'Munger' },
   { to: '/merger-arb', label: 'Merger Arb' },

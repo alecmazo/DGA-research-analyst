@@ -120,8 +120,11 @@ Copy these into every new agent session:
 
 Nav (do not reshuffle casually):
 
-**Work (left):** Desk · Financials · Builder · Podcasts · Transcripts · Positions · Options  
-**Firm (right):** Accounts · Memos · Settings · Sliw
+**Work:** Desk · Financials · Local · Watchlists · Gurus · Podcasts  
+**Lab:** Credit · Transcripts · Munger · Merger Arb  
+**Accounts:** Accounts · Positions · Options · Memos  
+
+Settings stays in the account menu. Sliw stays a gated link.
 
 Chrome-less windows: `/gp/report`, `/gp/research`, `/gp/valuation`.
 
@@ -153,9 +156,9 @@ Company dashboard (DGA Score, ranks, snapshots), Value Line sheet, SEC store, se
 
 DGA Score: negative book equity is **not** a free 100 on ROE; no-debt is fortress on Financial Strength.
 
-### 5.3 Builder (`/builder`)
+### 5.3 Watchlists (`/builder`)
 
-Sector / GuruFocus boards. Date first added, cost, split-adjusted since-add %, notes/FV. Hover snapshot. New-tab financials. Watchlist dropdown, compact rows, add/delete lists. Board switch must stay fast (cache + `_batch_quotes_fast`, no force DCF).
+The menu and the page title say Watchlists. The route stays `/builder` (the Builder page). Sector / GuruFocus boards. Date first added, cost, split-adjusted since-add %, notes/FV. Hover snapshot. New-tab financials. Watchlist dropdown, compact rows, add/delete lists. Board switch must stay fast (cache + `_batch_quotes_fast`, no force DCF).
 
 ### 5.3b Gurus (`/gurus`)
 
@@ -163,7 +166,7 @@ SEC EDGAR 13F-HR (stored) + Form 4 / SC 13D/G index. Roster: Ackman, Buffett, Ic
 
 ### 5.4 Podcasts (`/podcasts`)
 
-Lab: generate / play / upload roundups. Internal tab id remains `lab`. The behind-the-scenes graphic closes when script or audio generation finishes.
+Work menu: generate / play / upload roundups. Internal tab id remains `lab`. The behind-the-scenes graphic closes when script or audio generation finishes.
 
 ### 5.5 Transcripts (`/transcripts`)
 
@@ -234,7 +237,7 @@ Opened from the Market Pulse **Comps** chip.
 
 ### 5.16 Credit (`/credit`)
 
-High-yield book. About 80 public issuers, keyed by SEC CIK, plus the Paramount Skydance structure. Filter by name, sector, and a minimum yield that starts at 6%. A priced bond under that floor drops off. Coupons and clean prices are typed on the issuer blotter. The call is code. Investment-grade 3–4% coupons are not the book. A clean price typed on the Paramount pricing card stays on that card. The Treasury curve and ICE BofA spread benchmarks load daily. Yield settlement is the next business day. WBD exchange notes keep the year from the filing and do not store a January 1 maturity. Opening any other name loads the annual-report borrowings, cash, interest, and contractual maturity schedule from SEC companyfacts. A filing that tags only long-term debt and capital lease obligations uses that line, and the separate finance lease is not added again. A missing maturity schedule stays missing. A named coupon, rating, or TRACE price stays not found. Paramount remains the only note-by-note deal structure.
+Lab menu. High-yield book. About 80 public issuers, keyed by SEC CIK, plus the Paramount Skydance structure. Filter by name, sector, and a minimum yield that starts at 6%. A priced bond under that floor drops off. Coupons and clean prices are typed on the issuer blotter. The call is code. Investment-grade 3–4% coupons are not the book. A clean price typed on the Paramount pricing card stays on that card. The Treasury curve and ICE BofA spread benchmarks load daily. Yield settlement is the next business day. WBD exchange notes keep the year from the filing and do not store a January 1 maturity. Opening any other name loads the annual-report borrowings, cash, interest, and contractual maturity schedule from SEC companyfacts. A filing that tags only long-term debt and capital lease obligations uses that line, and the separate finance lease is not added again. A missing maturity schedule stays missing. A named coupon, rating, or TRACE price stays not found. Paramount remains the only note-by-note deal structure.
 
 ### 5.17 Merger arb (`/merger-arb`)
 
