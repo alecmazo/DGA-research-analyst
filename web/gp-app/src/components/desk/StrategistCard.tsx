@@ -41,6 +41,7 @@ type StratReview = {
   cost_usd?: number
   model?: string
   answer?: string
+  has_book?: boolean
   verification?: AgenticResult['verification']
 }
 
@@ -58,6 +59,7 @@ export function StrategistCard({ bare = false }: Props) {
   const [progress, setProgress] = useState<AgenticJob | null>(null)
   const [result, setResult] = useState<AgenticResult | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
+  const [reviewJobId, setReviewJobId] = useState<string | null>(null)
   const [fundLabel, setFundLabel] = useState('')
   const [tickers, setTickers] = useState<string[]>([])
 
@@ -139,6 +141,7 @@ export function StrategistCard({ bare = false }: Props) {
       if (!d0.ok || !d0.job_id) throw new Error(d0.error || 'Failed to start')
       startedId = d0.job_id
       setJobId(d0.job_id)
+      setReviewJobId(d0.job_id)
       setPositions(d0.positions || [])
       setTickers(d0.tickers || [])
       const name = d0.fund_name || label
@@ -367,75 +370,19 @@ export function StrategistCard({ bare = false }: Props) {
     }
   }
 
-  const handoffRoundup = async () => {
-    if (roundupBusy) return
-    if (selected.length) {
-      await startRoundup({ fund_ids: selected })
-      return
-    }
-    if (file) {
-      setRoundupMsg('🎙️ Reading the book…')
-      setRoundupBusy(true)
-      try {
-        const fd = new FormData()
-        fd.append('file', file)
-        const headers = new Headers()
-        try {
-          const token = localStorage.getItem('dga_v2_token')
-          if (token) headers.set('x-auth-v2-token', token)
-        } catch {
-          /* ignore */
-        }
-        const up = await fetch('/api/podcast-portfolio-roundup/upload', {
-          method: 'POST',
-          headers,
-          body: fd,
-        })
-        const uj = (await up.json()) as {
-          ok?: boolean
-          detail?: string
-          error?: string
-          ticker?: string
-        }
-        if (!up.ok || !uj.ok || !uj.ticker) {
-          throw new Error(uj.detail || uj.error || 'Upload failed')
-        }
-        openRoundup(uj.ticker)
-      } catch (e) {
-        setRoundupMsg('❌ ' + (e instanceof Error ? e.message : e))
-      } finally {
-        setRoundupBusy(false)
-      }
-      return
-    }
-    if (tickers.length >= 5) {
-      await startRoundup({
-        tickers,
-        positions,
-        title_hint: fundLabel || undefined,
-      })
-      return
-    }
-    setRoundupMsg('Pick an account or upload a book with at least 5 names.')
-  }
-
   const handoffReview = async (rv: StratReview) => {
-    if (roundupBusy) return
-    const names = (rv.tickers || '')
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean)
-    if (rv.fund_id) {
-      await startRoundup({ fund_ids: [rv.fund_id], title_hint: rv.fund_name || undefined })
-      return
+    if (roundupBusy || !rv.id) return
+    const body: Record<string, unknown> = {
+      review_id: rv.id,
+      title_hint: rv.fund_name || undefined,
     }
-    if (names.length < 5) {
-      setRoundupMsg(
-        `Portfolio Roundup needs at least 5 names. ${rv.fund_name || 'That review'} has ${names.length}.`,
-      )
-      return
+    // The review on this screen still has the book the committee used.
+    // That covers a review saved before weights were stored on the record.
+    if (rv.id === reviewJobId && positions.length) {
+      body.positions = positions
+      body.tickers = tickers
     }
-    await startRoundup({ tickers: names, title_hint: rv.fund_name || undefined })
+    await startRoundup(body)
   }
 
   const viewArchive = (id: string) => {
@@ -477,9 +424,9 @@ export function StrategistCard({ bare = false }: Props) {
         Full investment-committee review of an entire book. Reasons{' '}
         <em>across</em> positions (concentration, correlation, EV) and proposes
         grounded adjustments. The review opens in a new window when ready —
-        same as Saved Reports. Generate Portfolio Roundup uses the accounts
-        you picked, or an uploaded book, and opens Podcasts with the script
-        already running. The committee review is a separate step.
+        same as Saved Reports. Run the review first. Portfolio roundup is on
+        that saved review: it speaks the review, using the book that was
+        reviewed, and opens Podcasts with the script already running.
         Cost follows the selected engine.
       </p>
 
@@ -557,16 +504,7 @@ export function StrategistCard({ bare = false }: Props) {
         <Button variant="primary" size="sm" disabled={busy} onClick={() => void run()}>
           {busy ? `⏳ ${engLabel(engine)}…` : '🧭 Run review'}
         </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={roundupBusy}
-          onClick={() => void handoffRoundup()}
-        >
-          {roundupBusy ? '🎙️ Starting…' : '🎙️ Generate Portfolio Roundup'}
-        </Button>
       </div>
-      {roundupMsg && <div className={styles.muted} style={{ marginTop: 8 }}>{roundupMsg}</div>}
 
       {err && <div className={styles.err}>❌ {err}</div>}
 
@@ -618,6 +556,23 @@ export function StrategistCard({ bare = false }: Props) {
             <Button size="sm" onClick={() => void draftMemo()}>
               📄 Draft strategy memo
             </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={roundupBusy || !reviewJobId}
+              title="Speak this review, using the book that was reviewed"
+              onClick={() =>
+                reviewJobId &&
+                void handoffReview({
+                  id: reviewJobId,
+                  fund_name: fundLabel,
+                  tickers: tickers.join(', '),
+                  has_book: true,
+                })
+              }
+            >
+              {roundupBusy ? '🎙️ Starting…' : '🎙️ Portfolio roundup'}
+            </Button>
             <span className={styles.resultCost}>
               {result.cost_usd != null ? `$${Number(result.cost_usd).toFixed(3)}` : ''}
               {result.model ? ` · ${result.model}` : ''}
@@ -625,6 +580,8 @@ export function StrategistCard({ bare = false }: Props) {
           </div>
         </div>
       )}
+
+      {roundupMsg && <div className={styles.muted} style={{ marginTop: 8 }}>{roundupMsg}</div>}
 
       <div className={styles.reviews}>
         <div className={styles.reviewsHead}>
@@ -655,10 +612,14 @@ export function StrategistCard({ bare = false }: Props) {
               <Button
                 size="sm"
                 disabled={roundupBusy}
-                title="Generate a Portfolio Roundup from this review"
+                title={
+                  rv.has_book
+                    ? 'Speak this review, using the book that was reviewed'
+                    : 'Speak this review. This record has no saved weights, so the roundup uses the account or the ticker list.'
+                }
                 onClick={() => void handoffReview(rv)}
               >
-                Roundup
+                Portfolio roundup
               </Button>
               <Button size="sm" onClick={() => void exportPdf(rv.id)}>
                 PDF

@@ -8743,7 +8743,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui719-20261006-roundup-book"
+WEB_BUILD_VERSION = "ui720-20261006-roundup-record"
 
 
 @app.get("/api/build")
@@ -28937,6 +28937,25 @@ def _load_script_by_job_key(job_key: str) -> dict | None:
         return None
 
 
+def _fund_id_by_exact_name(name: str | None) -> str | None:
+    """One fund whose short name or name is exactly `name`. None if zero or many."""
+    name = (name or "").strip()
+    if (not name or name.endswith("(combined)") or " + " in name
+            or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL"))):
+        return None
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id::text FROM funds WHERE short_name = %s OR name = %s",
+                (name, name),
+            )
+            rows = cur.fetchall() or []
+        ids = list({r[0] for r in rows if r and r[0]})
+        return ids[0] if len(ids) == 1 else None
+    except Exception:
+        return None
+
+
 def _fund_name_lookup(fund_id: str | None) -> str | None:
     if not fund_id or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return None
@@ -30313,9 +30332,34 @@ def _ensure_strategist_reviews_table() -> None:
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS strategist_reviews_gen_idx ON strategist_reviews(generated_at DESC)")
+            cur.execute("ALTER TABLE strategist_reviews ADD COLUMN IF NOT EXISTS positions JSONB")
             conn.commit()
     except Exception as e:
         print(f"❌ _ensure_strategist_reviews_table: {e!s:.200}", flush=True)
+
+
+def _roundup_position_rows(raw) -> list[dict]:
+    """[{ticker, weight_pct}] from a review payload, a request body, or JSONB."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for p in raw:
+        if not isinstance(p, dict):
+            continue
+        tk = str(p.get("ticker") or "").upper().strip()
+        if not tk:
+            continue
+        try:
+            w = round(float(p.get("weight_pct") or 0), 2)
+        except (TypeError, ValueError):
+            w = 0.0
+        out.append({"ticker": tk, "weight_pct": w})
+    return out[:40]
 
 
 def _persist_strategist_review(job_id: str, job: dict, answer: str,
@@ -30324,12 +30368,13 @@ def _persist_strategist_review(job_id: str, job: dict, answer: str,
     _ensure_strategist_reviews_table()
     try:
         tickers = ", ".join(job.get("tickers") or [])[:600]
+        compact = _roundup_position_rows(job.get("positions"))
         with _fund_conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO strategist_reviews
                     (id, fund_id, fund_name, tickers, question, answer,
-                     verification, cost_usd, model, generated_by)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     verification, cost_usd, model, generated_by, positions)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (id) DO NOTHING
             """, (job_id, job.get("fund_id"), job.get("fund_name"), tickers,
                   (job.get("display_question")
@@ -30340,7 +30385,8 @@ def _persist_strategist_review(job_id: str, job: dict, answer: str,
                        if job.get("fund_name") else "Investment committee review")
                    )[:400], answer or "",
                   json.dumps(verification or {}), cost_usd, model,
-                  job.get("generated_by") or "gp"))
+                  job.get("generated_by") or "gp",
+                  json.dumps(compact) if compact else None))
             conn.commit()
         print(f"🧭 [strategist] persisted review {job_id} ({tickers[:60]})", flush=True)
     except Exception as e:
@@ -31662,6 +31708,11 @@ def research_portfolio_strategist(req: Request, background_tasks: BackgroundTask
     fund_ids = [str(f) for f in ((body or {}).get("fund_ids") or []) if f]
     if not fund_ids and fund_id:
         fund_ids = [str(fund_id)]
+    elif len(fund_ids) == 1:
+        fund_id = str(fund_ids[0])
+    elif len(fund_ids) > 1:
+        # A combined book is the stored positions, not one of the accounts.
+        fund_id = None
     positions = (body or {}).get("positions") or []
     fund_name = None
 
@@ -32402,7 +32453,8 @@ def strategist_reviews_list(request: Request):
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
             cur.execute("""SELECT id, fund_id, fund_name, tickers, cost_usd, model, generated_at,
-                                  length(answer) AS answer_len
+                                  length(answer) AS answer_len,
+                                  (positions IS NOT NULL) AS has_book
                              FROM strategist_reviews
                             ORDER BY generated_at DESC LIMIT 100""")
             rows = cur.fetchall() or []
@@ -32411,6 +32463,7 @@ def strategist_reviews_list(request: Request):
             "fund_name": r.get("fund_name"), "tickers": r.get("tickers"),
             "cost_usd": float(r["cost_usd"]) if r.get("cost_usd") is not None else None,
             "model": r.get("model"), "answer_len": int(r.get("answer_len") or 0),
+            "has_book": bool(r.get("has_book")),
             "generated_at": r["generated_at"].isoformat() if r.get("generated_at") else None,
         } for r in rows]}
     except Exception as e:
@@ -38761,7 +38814,8 @@ def podcast_generate_roundup(req: Request, background_tasks: BackgroundTasks):
 # ─── Portfolio Roundup (PM-style review of the whole book) ──────────────
 def _run_portfolio_roundup_generation(tickers: list[str], positions: list[dict] | None,
                                        title_hint: str | None = None,
-                                       matched_fund: dict | None = None) -> None:
+                                       matched_fund: dict | None = None,
+                                       review_brief: str | None = None) -> None:
     """Background worker for /api/podcast/portfolio-roundup/script.
     Heaviest format: Grok macro pull + Sonnet bolt-on screen + Opus script.
     Expect 2-4 min total wall time."""
@@ -38795,6 +38849,7 @@ def _run_portfolio_roundup_generation(tickers: list[str], positions: list[dict] 
         result = podcast_engine.generate_portfolio_roundup_script(
             tickers, reports, positions=positions, title_hint=title_hint,
             matched_fund=matched_fund, on_progress=_on_progress,
+            review_brief=review_brief,
         )
         if not result.get("script"):
             errs = (result.get("validation") or {}).get("errors", []) or ["unknown"]
@@ -39042,15 +39097,87 @@ def podcast_portfolio_roundup_upload(
             "title_hint": title_hint}
 
 
+def _load_strategist_review_for_roundup(review_id: str) -> dict | None:
+    """Saved committee review: book, name, and answer. None if it is not on file."""
+    if not review_id or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return None
+    _ensure_strategist_reviews_table()
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, fund_id, fund_name, tickers, answer, positions
+                  FROM strategist_reviews WHERE id = %s
+            """, (review_id,))
+            r = cur.fetchone()
+        if not r:
+            return None
+        return {
+            "id": r["id"],
+            "fund_id": r.get("fund_id"),
+            "fund_name": r.get("fund_name"),
+            "tickers": r.get("tickers") or "",
+            "answer": r.get("answer") or "",
+            "positions": _roundup_position_rows(r.get("positions")),
+            "has_book": r.get("positions") is not None,
+        }
+    except Exception as e:
+        print(f"⚠️ [roundup review] {e!s:.150}", flush=True)
+        return None
+
+
+def _book_from_strategist_review(review_id: str, body: dict, claims: dict):
+    """The book a saved review should speak.
+
+    Stored weights win. A browser that still has the book from a review saved
+    before weights were stored can send those positions. Otherwise one account
+    is reloaded, then the ticker list. Returns
+    (tickers, positions, title_hint, review_brief, sized, error).
+    """
+    loaded = _load_strategist_review_for_roundup(review_id)
+    if not loaded:
+        return [], [], None, None, False, JSONResponse(
+            {"ok": False, "error": "Review not found."}, status_code=404)
+    title = str(body.get("title_hint") or "").strip()[:80] or (loaded.get("fund_name") or None)
+    brief = (loaded.get("answer") or "").strip() or None
+    stored = loaded["positions"] if loaded.get("has_book") else []
+    client = _roundup_position_rows(body.get("positions"))
+    if stored:
+        tickers = [p["ticker"] for p in stored]
+        sized = any(float(p.get("weight_pct") or 0) > 0 for p in stored)
+        return tickers, stored, title, brief, sized, None
+    if client and any(float(p.get("weight_pct") or 0) > 0 for p in client):
+        tickers = [p["ticker"] for p in client]
+        return tickers, client, title, brief, True, None
+    fid = loaded.get("fund_id") or _fund_id_by_exact_name(loaded.get("fund_name"))
+    if fid:
+        if claims.get("demo_mode"):
+            return [], [], None, None, False, JSONResponse(
+                {"ok": False, "error": "Demo cannot read a live book."},
+                status_code=403,
+            )
+        positions = _load_fund_positions(fid)
+        if not positions:
+            return [], [], None, None, False, JSONResponse(
+                {"ok": False, "error": "No live positions for the selected account(s)."},
+                status_code=400,
+            )
+        tickers = [p["ticker"] for p in positions if p.get("ticker")]
+        return tickers, positions, title or _fund_name_lookup(fid), brief, True, None
+    tickers = [t.strip().upper() for t in (loaded.get("tickers") or "").split(",") if t.strip()]
+    return tickers, [{"ticker": t} for t in tickers], title, brief, False, None
+
+
 @app.post("/api/podcast-portfolio-roundup/script")
 def podcast_generate_portfolio_roundup(req: Request, background_tasks: BackgroundTasks):
     """Portfolio Roundup — PM-style review of a 5-35 name book.
 
     Body, one of:
-      { "fund_ids": ["..."] }     live account book, with market-value weights
-      { "fund_id": "..." }        one account
+      { "review_id": "STRAT_..." }  the saved committee review and its book
+      { "fund_ids": ["..."] }       live account book, with market-value weights
+      { "fund_id": "..." }          one account
       { "tickers": ["NVDA", ...], "positions": [{"ticker","weight_pct"}] }
     title_hint is optional. A live book is GP-only and closed to the demo login.
+    review_id is the Desk path: the podcast speaks that review.
 
     Poll status under "PORTFOLIO_<tickers>":
       GET /api/podcast/{key}/script-status
@@ -39065,7 +39192,19 @@ def podcast_generate_portfolio_roundup(req: Request, background_tasks: Backgroun
     if one_fund and not fund_ids:
         fund_ids = [str(one_fund)]
     title_hint = str(body.get("title_hint") or "").strip()[:80] or None
-    if fund_ids:
+    review_id = str(body.get("review_id") or "").strip()
+    review_brief = None
+    sized_review = False
+    if review_id:
+        claims = _claims_or_401(req)
+        if claims.get("role") not in ("gp", "admin"):
+            raise HTTPException(403, "GP only")
+        tickers, positions, title_hint, review_brief, sized_review, err = (
+            _book_from_strategist_review(review_id, body, claims)
+        )
+        if err is not None:
+            return err
+    elif fund_ids:
         claims = _claims_or_401(req)
         if claims.get("demo_mode"):
             return JSONResponse(
@@ -39094,9 +39233,16 @@ def podcast_generate_portfolio_roundup(req: Request, background_tasks: Backgroun
             if t and str(t).strip()
         ]
         positions = body.get("positions") or [{"ticker": t} for t in tickers]
-    if len(tickers) < 5:
+    # A saved review with weights can be a short book. The engine keeps names
+    # at or above 1%. Chip and live-account starts still need 5 names.
+    if not sized_review and len(tickers) < 5:
         return JSONResponse({"ok": False, "error": "Need at least 5 tickers for a Portfolio Roundup"},
                             status_code=400)
+    if sized_review and not tickers:
+        return JSONResponse(
+            {"ok": False, "error": "That review has no positions to speak."},
+            status_code=400,
+        )
     if len(tickers) > 35:
         tickers = tickers[:35]
         if isinstance(positions, list):
@@ -39117,6 +39263,7 @@ def podcast_generate_portfolio_roundup(req: Request, background_tasks: Backgroun
     print(f"🎙️ [portfolio-roundup] WROTE job_key={job_key!r} ({len(tickers)} tickers)", flush=True)
     background_tasks.add_task(
         _run_portfolio_roundup_generation, tickers, positions, title_hint, None,
+        review_brief,
     )
     return {"ok": True, "ticker": job_key, "tickers": tickers, "started": True,
             "title_hint": title_hint}

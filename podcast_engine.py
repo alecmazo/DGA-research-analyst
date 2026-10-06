@@ -2299,6 +2299,7 @@ def generate_portfolio_roundup_script(
     matched_fund: dict | None = None,
     model: str | None = None,
     on_progress=None,
+    review_brief: str | None = None,
 ) -> dict[str, Any]:
     """Portfolio Roundup — PM-style review of a 5-35 ticker book.
 
@@ -2504,6 +2505,21 @@ NO REAL WEIGHTS — do not invent percents:
     fmt_meta = EPISODE_FORMATS["portfolio_roundup"]
     budget = _portfolio_roundup_budget(len(tickers))
     system = _system_prompt(format="portfolio_roundup")
+    brief = (review_brief or "").strip()
+    if len(brief) > 12000:
+        brief = brief[:4000] + "\n…\n" + brief[-8000:]
+    review_block = ""
+    if brief:
+        review_block = (
+            "\n══════════════════════════════════════════════════════════════════════\n"
+            "COMMITTEE REVIEW ON FILE — speak this review. The book weights above win.\n"
+            "══════════════════════════════════════════════════════════════════════\n"
+            f"{brief}\n"
+            "If this review names a percent that differs from the book, cite the book.\n"
+            "Do not add a ticker that is not in the book. Leave out anything under 1%.\n"
+            "Keep the section order. Rates and politics still use only the macro block\n"
+            "when this review is silent on them.\n"
+        )
     dropped_line = (
         f"{len(dropped)} names under {ROUNDUP_WEIGHT_FLOOR_PCT:g}% were removed before this prompt. Do not name them."
         if dropped else
@@ -2591,7 +2607,7 @@ MACRO CONTEXT (today's headlines, via live web search):
 SOURCE REPORTS (only for names in this review):
 ══════════════════════════════════════════════════════════════════════
 {reports_block}
-
+{review_block}
 ══════════════════════════════════════════════════════════════════════
 Write the review.
   • Sections, in order: cold_open, portfolio_snapshot, position_walk,

@@ -138,7 +138,7 @@ Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status do
 | Daily Pulse | LLM brief of the book; live prices injected; YOUR BOOK format. |
 | Saved Reports | Grok/Claude cards, style pills (VALUE/GROWTH/GARP/RICH/CORE), TGT/upside, clickable valuation chips. Last price comes from the quote store, including names that are not on the watchlist. |
 | Analyst | Agentic research; answer opens `/gp/research`. |
-| Portfolio Strategist | Whole-book review + IC snapshot; EV; both engines’ PTs. Generate Portfolio Roundup stays on the card. It uses the selected accounts, or an uploaded book, and opens Podcasts with the script job already running. |
+| Portfolio Strategist | Whole-book review + IC snapshot; EV; both engines’ PTs. Run the review first. Portfolio roundup is on that saved review. It speaks the review, using the book that was reviewed, and opens Podcasts with the script job already running. |
 | Live Markets | TradingView. |
 | Market Wire | Official + wire RSS (**no Reuters, no AP**). |
 | Market Pulse | Per-name headline + **three** chips: DCF, Comps, Street. Top line: day % + mkt cap / Rev / NI / FCF (last FY). DCF/Street → valuation bridge. Comps → last-FY peer window. |

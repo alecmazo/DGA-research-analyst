@@ -300,6 +300,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Nav** | **`ui717-20261005-nav`** | Credit sits in the Lab menu. Podcasts takes its place in Work. The Builder label is Watchlists. The route stays `/builder`. |
 | **Portfolio roundup** | **`ui718-20261005-roundup`** | Generate Portfolio Roundup stays on the strategist card. It uses the selected accounts, or an uploaded book, and Podcasts follows that script job until the script is on screen. |
 | **Roundup book** | **`ui719-20261006-roundup-book`** | The portfolio review walks from the heaviest weight down and leaves out anything under 1%. It states the rebalance, the rate stance, the political stance, and the next 12 months in plain sentences. |
+| **Roundup record** | **`ui720-20261006-roundup-record`** | Run the review first. Portfolio roundup is on that saved review. It speaks the review, using the book that was reviewed. |
 
 ### One-click handoff (preferred)
 
@@ -497,4 +498,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-06 · Agent: Grok Build · Built: `ui719-20261006-roundup-book` · Live until the next upload: `ui718-20261005-roundup` · Next: `ui720-YYYYMMDD-slug`*
+*Last updated: 2026-10-06 · Agent: Grok Build · Built: `ui720-20261006-roundup-record` · Live until the next upload: `ui719-20261006-roundup-book` · Next: `ui721-YYYYMMDD-slug`*
