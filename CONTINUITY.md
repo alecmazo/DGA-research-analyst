@@ -299,6 +299,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Credit debt tags** | **`ui716-20261005-debt-tags`** | A 10-K that tags debt only as long-term debt and capital lease obligations shows that line. Transocean borrowings are the $5,212m long-term line plus the $445m current portion. The finance lease is not added again. A missing maturity schedule stays missing. |
 | **Nav** | **`ui717-20261005-nav`** | Credit sits in the Lab menu. Podcasts takes its place in Work. The Builder label is Watchlists. The route stays `/builder`. |
 | **Portfolio roundup** | **`ui718-20261005-roundup`** | Generate Portfolio Roundup stays on the strategist card. It uses the selected accounts, or an uploaded book, and Podcasts follows that script job until the script is on screen. |
+| **Roundup book** | **`ui719-20261006-roundup-book`** | The portfolio review walks from the heaviest weight down and leaves out anything under 1%. It states the rebalance, the rate stance, the political stance, and the next 12 months in plain sentences. |
 
 ### One-click handoff (preferred)
 
@@ -496,4 +497,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-05 · Agent: Grok Build · Built: `ui718-20261005-roundup` · Live until the next upload: `ui717-20261005-nav` · Next: `ui719-YYYYMMDD-slug`*
+*Last updated: 2026-10-06 · Agent: Grok Build · Built: `ui719-20261006-roundup-book` · Live until the next upload: `ui718-20261005-roundup` · Next: `ui720-YYYYMMDD-slug`*

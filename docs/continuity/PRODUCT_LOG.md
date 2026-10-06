@@ -166,7 +166,7 @@ SEC EDGAR 13F-HR (stored) + Form 4 / SC 13D/G index. Roster: Ackman, Buffett, Ic
 
 ### 5.4 Podcasts (`/podcasts`)
 
-Work menu: generate / play / upload roundups. A Portfolio Strategist handoff opens this page with `?roundup=` and the script job keeps running until the script is on screen. Internal tab id remains `lab`. The behind-the-scenes graphic closes when script or audio generation finishes.
+Work menu: generate / play / upload roundups. A Portfolio Strategist handoff opens this page with `?roundup=` and the script job keeps running until the script is on screen. The review walks weights from heaviest down and leaves out anything under 1%. It states the rebalance, the rate stance, the political stance, and the next 12 months in plain sentences. Internal tab id remains `lab`. The behind-the-scenes graphic closes when script or audio generation finishes.
 
 ### 5.5 Transcripts (`/transcripts`)
 

@@ -213,7 +213,7 @@ EPISODE_FORMATS = {
     "portfolio_roundup": {
         "label":   "Portfolio Roundup",
         "icon":    "🧰",
-        "tagline": "PM-style review of your whole book — risks, blind spots, bolt-ons, the one move this week",
+        "tagline": "Heaviest weights first. Names under 1% are left out. Rebalance, rates, politics, next 12 months.",
         "multi_ticker":     True,
         # Budget below is a FALLBACK only. The generator computes a dynamic
         # budget based on ticker count via _portfolio_roundup_budget() and
@@ -227,25 +227,74 @@ EPISODE_FORMATS = {
 
 
 def _portfolio_roundup_budget(n_tickers: int) -> dict:
-    """Dynamic word + minute budget for Portfolio Roundup.
+    """Word budget for the names that remain after the 1% weight floor.
 
-    Formula: base (1500w) + per-ticker (95w). 95w ≈ 35 sec of dialogue —
-    enough for one analyst to land a real point on each name, with bigger
-    positions naturally pulling more.
-
-      5 tickers  → ~1,975w  ≈ 12 min
-     10 tickers  → ~2,450w  ≈ 15 min
-     15 tickers  → ~2,925w  ≈ 18 min
-     20 tickers  → ~3,400w  ≈ 20 min
-     25 tickers  → ~3,875w  ≈ 23 min
-     30 tickers  → ~4,350w  ≈ 26 min
-     35 tickers  → ~4,825w  ≈ 29 min
+    The base covers the snapshot, rates, politics, the rebalance list, and
+    the 12-month plan. Each kept name adds a short walk. The cap stops a
+    long list of 1–2% lines from becoming a roll call.
     """
-    base, per = 1500, 95
-    target = base + n_tickers * per
-    lo, hi = int(target * 0.92), int(target * 1.12)
-    minutes = round(target / 165, 0)   # ~165 wpm conversational TTS
+    base, per = 900, 55
+    target = min(2400, base + max(n_tickers, 1) * per)
+    lo, hi = int(target * 0.85), int(target * 1.10)
+    minutes = round(target / 165, 0)
     return {"low": lo, "high": hi, "target": target, "minutes": minutes}
+
+
+ROUNDUP_WEIGHT_FLOOR_PCT = 1.0
+
+
+def _position_weight(p: dict) -> float | None:
+    if not isinstance(p, dict) or p.get("weight_pct") is None:
+        return None
+    try:
+        return float(p.get("weight_pct"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _prepare_roundup_book(
+    tickers: list[str], positions: list[dict] | None,
+) -> tuple[list[str], list[dict], list[str], bool]:
+    """Heaviest first. Drop anything under 1% when the book has weights.
+
+    Returns (tickers, positions, dropped tickers, sized).
+    A sized book is one where any line has weight_pct above 0. In that book
+    a missing weight and a 0% line are both under the floor. When no line
+    has a weight, the caller's ticker order is kept.
+    """
+    wanted = [str(t).upper().strip() for t in (tickers or []) if t and str(t).strip()]
+    by_tk: dict[str, dict] = {}
+    ordered: list[dict] = []
+    for raw in positions or []:
+        if not isinstance(raw, dict):
+            continue
+        tk = str(raw.get("ticker") or "").upper().strip()
+        if not tk or tk in by_tk:
+            continue
+        row = dict(raw)
+        row["ticker"] = tk
+        by_tk[tk] = row
+        ordered.append(row)
+    for tk in wanted:
+        if tk in by_tk:
+            continue
+        row = {"ticker": tk}
+        by_tk[tk] = row
+        ordered.append(row)
+    sized = any((w or 0) > 0 for w in (_position_weight(p) for p in ordered))
+    if not sized:
+        kept = [by_tk[tk] for tk in wanted] if wanted else list(ordered)
+        return [p["ticker"] for p in kept], kept, [], False
+    kept: list[dict] = []
+    dropped: list[str] = []
+    for p in ordered:
+        w = _position_weight(p)
+        if w is None or w < ROUNDUP_WEIGHT_FLOOR_PCT:
+            dropped.append(p["ticker"])
+            continue
+        kept.append(p)
+    kept.sort(key=lambda p: float(p.get("weight_pct") or 0), reverse=True)
+    return [p["ticker"] for p in kept], kept, dropped, True
 
 
 # Money-market / cash-sweep tickers that should be bucketed as "Cash"
@@ -497,13 +546,11 @@ FORMAT_SECTIONS = {
     "portfolio_roundup": [
         "cold_open",
         "portfolio_snapshot",
-        "macro_setup",
         "position_walk",
-        "concentration_risks",
-        "wipeout_scenarios",
-        "correlation_blind_spots",
-        "bolt_ons",
-        "cuts",
+        "rates",
+        "politics",
+        "rebalance",
+        "twelve_month",
         "pm_verdict",
     ],
 }
@@ -698,78 +745,55 @@ Total ~600–900 words. ~5 min episode. DO NOT pad — short is the whole point.
         winner_field = '  "winner": "rock" | "claudia",\n'
 
     elif format == "portfolio_roundup":
-        structure = """STRUCTURE — Portfolio Roundup. PM-style review of the WHOLE book.
-This is NOT a sequence of mini-debates per ticker. This is a senior investment
-committee meeting where Kimi runs the show as a hands-on PM at DGA Capital.
+        structure = """STRUCTURE — Portfolio Roundup. A portfolio review, not a show.
 
-OPUS PERSONA SHIFT — read carefully:
-  For this format ONLY, Kimi is NOT a neutral moderator. He's a SENIOR PM at
-  DGA Capital who owns the P&L on this book. Directional, opinionated, owns
-  the decisions. Use phrases like:
-    "We're not comfortable with the X exposure."
-    "I've been telling the team to trim Y."
-    "The committee voted to add Z last Thursday."
-    "What's our plan if rates rip 50bps from here?"
-  He still calls a verdict at the end — but it's a PM call, not a debate winner.
+LANGUAGE — this format overrides the show-style tone above:
+  • Plain sentences. No metaphors.
+  • Do not say "AI trade", "AI capex", "sleeping", "dressed up as",
+    "illusion of breadth", "lose sleep", or "animal spirits".
+  • Do not explain several holdings as one theme. Name the weight and the action.
+  • No swear words. No filler. No interruptions.
+  • Do not invent a rate, a bill, a poll, or a price. If the macro block
+    does not contain the number, say it is not in today's tape.
 
-ROCK + CLAUDIA in this format:
-  • Rock = the analyst pushing for MORE risk / bolder positioning. He sees
-    upside others miss. Will push back on Kimi when Kimi wants to trim.
-  • Claudia = the analyst flagging risks / arguing for trims. She sees
-    cracks the bulls miss. Will push back when Kimi wants to add.
-  Both stay in character — Rock British/punchy, Claudia measured/skeptic.
+ORDER — heaviest weight first, then the next, down through 1.0%.
+A name under 1% is not in this episode. Do not mention it.
+Cash and money-market lines get one sentence in the snapshot, the percent.
+They are not a company walk.
 
-  1. cold_open            — Kimi only, ~35–55 words. ONE-LINE hook the book.
-        e.g. "We're 73% long tech, sitting on $4M in unrealized gain, and
-              I'm starting to lose sleep. Let's go through it."
-        Or: "Tonight: the book, top to bottom. What's working, what's not,
-             what I'd add this week."
-  2. portfolio_snapshot   — Kimi only, ~160–200 words. What's in the book in
-        plain English: sector mix, top 3 positions by weight, % cash,
-        concentration profile. Use the position data provided. NO TICKER LIST
-        DUMP — synthesize: "Top three names — NVDA, MSFT, AAPL — are 38% of
-        the book. Tech is 73%. Cash is 8%."
-  3. macro_setup          — Kimi only, ~180–230 words. The world THIS WEEK
-        as it relates to THIS book. Use the macro context block provided —
-        cite specific headlines + dates. NOT generic — "rates" is bad,
-        "the 10yr at 4.62% after Thursday's CPI print" is good.
-  4. position_walk        — MUST cover EVERY ticker in the portfolio. This
-        is the longest section by far. Average 80-100 words per ticker (a
-        few sentences). Bigger positions get longer treatment (4-6 sentences),
-        smaller positions get shorter (1-2 sentences) — but NO ticker is
-        skipped entirely. Don't dump them ticker-by-ticker like a roll call;
-        group naturally by sector / theme / risk-bucket and have Rock and
-        Claudia trade takes within each group. Cite specific numbers from the
-        source reports (price target, multiples, recent move) where present.
-        For a 15-ticker portfolio expect ~18-22 turns in this section alone.
-        For a 5-ticker portfolio expect ~8-10 turns.
-  5. concentration_risks  — 4–5 turns mixed. Identify where the book is
-        over-exposed (sector, factor, single name, theme). Specific numbers
-        from the snapshot. Both argue intensity — Rock often defends ("the
-        AI capex cycle has 2 more years"), Claudia warns ("you're 60% in
-        one trade dressed up as 8 different names").
-  6. wipeout_scenarios    — 4–5 turns mixed. Both name 2-3 SPECIFIC scenarios
-        that would draw this book down 40%+ and assign probabilities.
-        Brutally honest. "A China-Taiwan escalation puts 35% of your book
-        at immediate risk." "A regional banking crisis hits BAC + C
-        simultaneously." Not abstract — specific.
-  7. correlation_blind_spots — 3–4 turns mixed. Where the book LOOKS
-        diversified but isn't. e.g. "Your 6 tech names are all the same
-        AI capex trade." "You think you have defensives but staples are
-        getting margin-compressed too." Calls out the illusion of breadth.
-  8. bolt_ons             — 4–6 turns mixed. Walks through the 2-3 SPECIFIC
-        BOLT-ON CANDIDATES provided in the user prompt. For each: which
-        analyst sponsors it, what role it plays (hedge / complement /
-        rotation), where to size it. DO NOT INVENT bolt-on tickers — only
-        present the ones provided.
-  9. cuts                 — 3–4 turns mixed. Name 1-2 positions that should
-        be trimmed/exited. Why. Be specific. Both analysts can disagree on
-        a name. Kimi has the final word.
- 10. pm_verdict           — Kimi only, 1–2 turns, ~170–220 words. The PM
-        call. Are we positioned to capitalize on volatility AND protect
-        downside? What's the ONE specific move this week? Sizing + entry
-        + time horizon. End with a specific date for the next review."""
-        winner_field = '  "winner": "rock" | "claudia",  // who landed more concrete trade ideas\n'
+  1. cold_open — Kimi only, two sentences. The largest position and its
+        weight. Say that names under 1% are left out.
+  2. portfolio_snapshot — Kimi only. How many names are at or above 1%,
+        the cash percent, and the top five weights with the company name
+        and the weight to one decimal. Then the sector weights from the
+        table, heaviest sector first.
+  3. position_walk — Heaviest name first, then the next. Every name at or
+        above 1% is included, except cash and money-market funds. A name at or above 5% gets its weight, one
+        fact from its report (a price target or a multiple, or "no report
+        on file"), and hold, trim, or add with a target weight. A name from
+        1% up to but not including 5% gets one sentence: the weight, and
+        hold, trim, or add. Do not skip a name at or above 1%. Do not
+        reorder the names into themes.
+  4. rates — four to six turns. How this book sits if the policy rate stays
+        here, falls, or rises. Use only rate levels printed in the macro
+        block. Name the heavy positions that are the exposure. Say what
+        to change, in percentage points.
+  5. politics — four to six turns. Tariffs, fiscal policy, regulation, and
+        elections only when the macro block states them. Name the heavy
+        positions that are exposed and the weight change if that policy
+        hits. If the macro block has no political fact, say so in one
+        sentence and stop.
+  6. rebalance — a numbered list. Each line is "Trim A from X% to Y%.
+        Add those points to B, from P% to Q%." or "Leave C at Z%."
+        The trims fund the adds. Targets are names already at or above 1%,
+        or cash. Do not introduce a new ticker.
+  7. twelve_month — the next 12 months after that rebalance. Which held
+        names carry the upside, what has to be true, and what would make
+        the call wrong. Weights, not a story.
+  8. pm_verdict — Kimi only. Repeat the rebalance list, one sentence on
+        rates, one sentence on politics, and the names that carry the
+        12-month upside. End with the date of the next review."""
+        winner_field = '  "winner": "rock" | "claudia",  // who landed more concrete weight changes\n'
 
     elif format == "roundup":
         structure = """STRUCTURE — Roundup. Multi-ticker show covering 3-4 names in one episode.
@@ -2165,13 +2189,15 @@ def fetch_macro_context(*, on_progress=None, usage_capture=None) -> str:
 that affect a US equity portfolio. Use your web search tool.
 
 Cover these buckets only when there's actual news in each (don't pad):
+  • The current policy rate and the 10-year Treasury yield, with the date
   • Fed / rates moves (FOMC statements, dot plot, Fed speakers)
   • Major economic releases (jobs, CPI, PCE, GDP, ISM, PMI)
-  • Geopolitical events affecting markets (war, sanctions, trade, tariffs)
+  • Politics that move markets: tariffs, fiscal bills, regulation, elections
+  • Geopolitical events affecting markets (war, sanctions, trade)
   • Major FX moves (DXY, USD/JPY, EUR/USD, CNY)
   • Commodity moves > 2% (oil, gold, copper, nat gas)
   • Sector-specific news (semis, banks, energy, healthcare regulation)
-  • Big earnings results from BELLWETHER names that move sentiment
+  • Big earnings results from bellwether names that move sentiment
 
 OUTPUT FORMAT: 6-10 bullets, one sentence each.
 Each bullet MUST include: the actual headline + the date (use real dates,
@@ -2295,9 +2321,16 @@ def generate_portfolio_roundup_script(
     import DGA_analyst as _ca
     import time as _t
 
-    tickers = [t.upper().strip() for t in (tickers or []) if t and t.strip()]
-    if len(tickers) < 5:
+    tickers, positions, dropped, sized = _prepare_roundup_book(tickers, positions)
+    if sized and not tickers:
+        raise ValueError("Portfolio Roundup has no position at or above 1% weight")
+    if not sized and len(tickers) < 5:
         raise ValueError("Portfolio Roundup needs at least 5 tickers")
+    print(
+        f"🎙️ [portfolio_roundup] {len(tickers)} names in the review"
+        + (f", dropped {len(dropped)} under {ROUNDUP_WEIGHT_FLOOR_PCT:g}%" if dropped else ""),
+        flush=True,
+    )
 
     # 1. Macro context (Grok live search) — best-effort
     cost_events: list[dict] = []
@@ -2305,8 +2338,7 @@ def generate_portfolio_roundup_script(
 
     macro = fetch_macro_context(on_progress=on_progress, usage_capture=_track_cost)
 
-    # 2. Bolt-on screen via Sonnet 4.6 (constrained to current_positions awareness)
-    positions = positions or [{"ticker": t} for t in tickers]
+    # 2. Enrich the kept book only. Names under 1% are already gone.
 
     # 2a. ENRICH positions — pull real sectors via yfinance/SEC (don't let the
     #     LLM guess) + flag cash/MM funds explicitly + compute REAL YTD return
@@ -2331,7 +2363,8 @@ def generate_portfolio_roundup_script(
     #     the right numbers.
     sector_breakdown = _build_sector_breakdown(positions)
 
-    bolt_ons = screen_bolton_candidates(positions, on_progress=on_progress, usage_capture=_track_cost)
+    # No bolt-on screen. New tickers were pulling the episode off the book.
+    bolt_ons: list[dict] = []
 
     # 3. Build the dialogue prompt
     if on_progress:
@@ -2358,7 +2391,6 @@ def generate_portfolio_roundup_script(
         "(No saved reports for any of these tickers — write based on the macro context + position sizing.)"
 
     pos_block = json.dumps(positions, indent=2, default=str)
-    bolton_block = json.dumps(bolt_ons, indent=2, default=str) if bolt_ons else "(none)"
 
     # ── DETERMINISTIC SECTOR / CASH / YTD BLOCK ──────────────────────────────
     # Pre-computed so the LLM does NOT have to count and cannot miscount.
@@ -2431,75 +2463,68 @@ def generate_portfolio_roundup_script(
     # require the script to cite them verbatim and forbid invented concentrations.
     real_weights = [p for p in positions
                     if isinstance(p, dict) and float(p.get("weight_pct") or 0) > 0]
-    has_real_weights = len(real_weights) >= max(3, int(len(positions) * 0.6))
+    has_real_weights = sized and bool(real_weights)
     if has_real_weights:
         sorted_w = sorted(real_weights, key=lambda p: float(p.get("weight_pct") or 0), reverse=True)
         top3 = sorted_w[:3]
         top3_str = ", ".join(f"{p['ticker']} ({float(p['weight_pct']):.1f}%)" for p in top3)
         total_w = sum(float(p.get("weight_pct") or 0) for p in real_weights)
+        order_lines = "\n".join(
+            f"  {i}. {p['ticker']} {float(p.get('weight_pct') or 0):.1f}%"
+            for i, p in enumerate(sorted_w, 1)
+        )
         weights_rules = f"""
 ══════════════════════════════════════════════════════════════════════
-🔒 REAL PORTFOLIO WEIGHTS — STRICT CITATION RULES (uploaded by the user):
+REAL WEIGHTS — cite them. Heaviest first. Nothing under 1%.
 ══════════════════════════════════════════════════════════════════════
-The `weight_pct` field on each position above is REAL — the user uploaded their
-actual book. You MUST:
+The weight_pct on each position is the book. You must:
 
-  1. CITE the exact weight_pct (rounded to 1 decimal) when discussing any
-     position by size. e.g. "NVDA at 12.4% of the book", NOT "our big NVDA
-     position" and NEVER "we're 20% NVDA" if the file says 12.4%.
-  2. NEVER invent, round aggressively, or estimate weights. If you say a
-     number, it must match the file.
-  3. The portfolio_snapshot section MUST open with the REAL top-3 by weight:
-       Top 3 by weight: {top3_str}
-       Total book weight covered by file: {total_w:.1f}%
-  4. The concentration_risks section MUST reference REAL weights when calling
-     out over-exposure ("you're 38% in 3 names" only if math agrees).
-  5. cuts + bolt_ons MUST suggest sizing in REAL percentage-point deltas
-     ("trim NVDA from 12.4% → 9%", not vague "trim a bit").
-  6. Rock and Claudia MUST disagree CONCRETELY on specific positions tied to
-     real weights — not vague "I'd be more cautious." Examples:
-       Rock:    "Keep NVDA at 12.4% — actually I'd push to 15%."
-       Claudia: "12.4% is already a fat tail. Trim to 8% this week."
-     Every analyst turn in position_walk should name a specific weight + a
-     specific trim/hold/add number. Real intellectual debate, not pleasantries.
+  1. Cite the weight to one decimal. "NVIDIA at 12.4%." Not "a big position."
+  2. Do not invent or round a weight to a different number.
+  3. Open the snapshot with the real top 3: {top3_str}.
+     Weight covered by the names in this review: {total_w:.1f}%.
+  4. Walk names in this order only:
+{order_lines}
+  5. Rebalance lines use from-weight and to-weight on names already listed,
+     or cash. Example: "Trim NVIDIA from 12.4% to 9.0%. Add those 3.4 points
+     to cash." Do not add a ticker that is not in the list above.
+  6. If two speakers disagree, they disagree by naming a different target
+     weight. No metaphor.
 """
     else:
         weights_rules = """
 ══════════════════════════════════════════════════════════════════════
-⚠️ NO REAL WEIGHTS PROVIDED — SIZING MUST STAY QUALITATIVE:
+NO REAL WEIGHTS — do not invent percents:
 ══════════════════════════════════════════════════════════════════════
-The caller did NOT upload real portfolio weights. You MUST:
-  • NEVER state a specific weight_pct ("we're 12% NVDA" is FORBIDDEN).
-  • Use qualitative sizing only: "a meaningful position", "a small starter",
-    "concentrated", "trimmed to a half-size". Never numeric.
-  • In concentration_risks, talk about NAME / SECTOR overlap qualitatively,
-    not "X% in Y" — you don't know the X.
+  • Do not state a weight percent.
+  • Say "largest", "a mid-size holding", or "a starter".
+  • Still give a rebalance in those words: trim the largest, add to the next.
 """
 
     fmt_meta = EPISODE_FORMATS["portfolio_roundup"]
     budget = _portfolio_roundup_budget(len(tickers))
     system = _system_prompt(format="portfolio_roundup")
-    user = f"""Generate the DGA HiTech Podcast PORTFOLIO ROUNDUP for this book.
+    dropped_line = (
+        f"{len(dropped)} names under {ROUNDUP_WEIGHT_FLOOR_PCT:g}% were removed before this prompt. Do not name them."
+        if dropped else
+        "No name under 1% is in this prompt."
+    )
+    user = f"""Generate the portfolio review for this book. Plain sentences. No metaphors.
 
 ══════════════════════════════════════════════════════════════════════
-WORD BUDGET (DYNAMIC — scales with ticker count, overrides any system-prompt budget):
+WORD BUDGET:
 ══════════════════════════════════════════════════════════════════════
 TARGET: ~{budget['target']:,} words  (acceptable range: {budget['low']:,}–{budget['high']:,})
-EXPECTED RUNTIME: ~{int(budget['minutes'])} min at conversational pacing.
+About {int(budget['minutes'])} minutes.
 
-This is the MOST IMPORTANT NUMBER in this prompt. The position_walk
-section ALONE should be ~{int(len(tickers) * 90):,} words because you have
-{len(tickers)} tickers and each one gets ~80-100 words of treatment (some
-big positions longer, some small positions shorter, but NONE skipped).
-The other sections together add another ~{budget['target'] - int(len(tickers) * 90):,} words.
-
-If you produce a {int(budget['target'] * 0.5):,}-word episode for {len(tickers)} tickers
-it will not be acceptable — that's ~{int(budget['target'] * 0.5 / len(tickers)):,} words/ticker
-which is not enough for a real PM-style review.
+Spend the words on the heaviest names, the rate stance, the political stance,
+the rebalance list, and the 12-month upside. A name between 1% and 5% is one
+sentence. Do not pad.
 
 ══════════════════════════════════════════════════════════════════════
-CURRENT POSITIONS ({len(tickers)} names):
+BOOK IN THIS REVIEW ({len(tickers)} names, heaviest first):
 ══════════════════════════════════════════════════════════════════════
+{dropped_line}
 {pos_block}
 {weights_rules}
 
@@ -2563,30 +2588,22 @@ MACRO CONTEXT (today's headlines, via live web search):
 {macro}
 
 ══════════════════════════════════════════════════════════════════════
-BOLT-ON CANDIDATES (pre-screened by Sonnet 4.6, only present these):
-══════════════════════════════════════════════════════════════════════
-{bolton_block}
-
-══════════════════════════════════════════════════════════════════════
-SOURCE REPORTS (per-ticker Grok + Claudia analyses):
+SOURCE REPORTS (only for names in this review):
 ══════════════════════════════════════════════════════════════════════
 {reports_block}
 
 ══════════════════════════════════════════════════════════════════════
-Now write the episode. Reminders:
-  • Opus speaks as a SENIOR PM at DGA Capital — directional, owns the P&L.
-    NOT a moderator.
-  • Use the DYNAMIC word budget above ({budget['target']:,} words target,
-    ~{int(budget['minutes'])} min). The default in the system prompt is a
-    fallback for missing data — override it with the dynamic budget here.
-  • position_walk MUST cover EVERY one of the {len(tickers)} tickers
-    (some briefly, some in depth — none skipped entirely).
-  • Bolt-on suggestions MUST be from the candidates provided above. DO NOT
-    invent any other tickers.
-  • Cite specific headlines from the macro block + specific numbers from
-    the reports where relevant. Be concrete.
-  • End the pm_verdict with a specific date for the next portfolio review
-    (e.g., "next committee — Thursday").
+Write the review.
+  • Sections, in order: cold_open, portfolio_snapshot, position_walk,
+    rates, politics, rebalance, twelve_month, pm_verdict.
+  • Heaviest weight first. Do not mention a name that is not in the book above.
+  • Rates: only levels printed in the macro block. Say how the heavy names
+    sit if the policy rate stays, falls, or rises, and the weight change.
+  • Politics: only facts printed in the macro block. If there is none, say so.
+  • Rebalance: numbered from-weight and to-weight. Trims fund the adds.
+  • Twelve months: which held names carry the upside after that rebalance,
+    what has to be true, and what would make the call wrong.
+  • No metaphors. No new ticker. End with the next review date.
 """
 
     _tc = _t.time()
