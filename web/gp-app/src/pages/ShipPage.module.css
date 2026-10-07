@@ -215,7 +215,8 @@
   overflow: hidden;
 }
 
-:global(.dga-ship-photo) {
+:global(.dga-ship-photo),
+:global(.dga-ship-video) {
   position: absolute;
   inset: 0;
   width: 100%;

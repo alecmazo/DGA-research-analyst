@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { plateMix } from './sea'
 import { DRAW_ORDER, PINS, type ShipPart } from './pins'
 
@@ -29,10 +30,24 @@ type Props = {
 }
 
 const PLATES = [
-  ['storm', 'storm.jpg'],
-  ['flat', 'flat.jpg'],
-  ['clear', 'clear.jpg'],
+  ['storm', 'storm.jpg', 'storm.mp4'],
+  ['flat', 'flat.jpg', 'flat.mp4'],
+  ['clear', 'clear.jpg', 'clear.mp4'],
 ] as const
+
+type PlateId = (typeof PLATES)[number][0]
+
+function useSeaMotion(): boolean {
+  const [motion, setMotion] = useState(true)
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const apply = () => setMotion(!media.matches)
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [])
+  return motion
+}
 
 function weightLabel(n: number): string {
   const rounded = Math.round(n * 10) / 10
@@ -41,27 +56,65 @@ function weightLabel(n: number): string {
 
 export function ShipScene({ t, sectors, active, hover, onSelect, onHover }: Props) {
   const mix = plateMix(t)
-  const opacity: Record<(typeof PLATES)[number][0], number> = {
+  const opacity: Record<PlateId, number> = {
     storm: mix.storm,
     flat: mix.flat,
     clear: mix.clear,
   }
+  const motion = useSeaMotion()
+  const clips = useRef<Partial<Record<PlateId, HTMLVideoElement | null>>>({})
+  const [ready, setReady] = useState<Record<PlateId, boolean>>({
+    storm: false,
+    flat: false,
+    clear: false,
+  })
   const byPart = new Map(sectors.map((sector) => [sector.part, sector]))
   const lit = hover || active
   const base = import.meta.env.BASE_URL
 
+  useEffect(() => {
+    if (!motion) return
+    for (const [id] of PLATES) {
+      const node = clips.current[id]
+      if (!node) continue
+      if (opacity[id] <= 0.02) node.pause()
+      else void node.play().catch(() => {})
+    }
+  }, [motion, opacity.storm, opacity.flat, opacity.clear])
+
   return (
     <div className={lit ? 'dga-ship-frame is-dim' : 'dga-ship-frame'}>
-      {PLATES.map(([id, file]) => (
+      {PLATES.map(([id, still]) => (
         <img
           key={id}
           className="dga-ship-photo"
           alt={id === 'clear' ? 'Expedition ship at sea' : ''}
-          src={`${base}ship/${file}`}
-          style={{ opacity: opacity[id] }}
+          src={`${base}ship/${still}`}
+          style={{ opacity: motion && ready[id] ? 0 : opacity[id] }}
           draggable={false}
         />
       ))}
+      {motion &&
+        PLATES.map(([id, still, clip]) => (
+          <video
+            key={id}
+            ref={(node) => {
+              clips.current[id] = node
+            }}
+            className="dga-ship-video"
+            src={`${base}ship/${clip}`}
+            poster={`${base}ship/${still}`}
+            muted
+            loop
+            playsInline
+            autoPlay
+            preload="auto"
+            style={{ opacity: ready[id] ? opacity[id] : 0 }}
+            onLoadedData={() =>
+              setReady((prev) => (prev[id] ? prev : { ...prev, [id]: true }))
+            }
+          />
+        ))}
       <div className="dga-ship-vignette" />
       {DRAW_ORDER.map((part) => {
         const sector = byPart.get(part)

@@ -305,6 +305,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **City offline** | **`ui722-20261007-city-off`** | The city page and its API are off. The scene did not write to the database. Lab is Credit, Transcripts, Munger, and Merger Arb. |
 | **Portfolio ship** | **`ui723-20261007-ship`** | Lab opens the positions book as a ship. Empty sleeves stay off the legend. The sea slides with the S&P 500 day move: +2% and above is clear and smooth, −3% and below is the darkest chop, and a missing print is the flat-day sea. Demo and non-GP logins see weights only. The city route stays off. |
 | **Ship plates** | **`ui724-20261007-ship-real`** | The ship is a photoreal plate. Clear, flat, and storm stills crossfade with the S&P day move. Held sleeves are clickable pins and the picture does not zoom. Industrials and aerospace are separate. Microsoft and the other software names sit on the bridge, Nike on Consumer Staples, Howard Hughes and the other property names on Real Estate, Uber with consumer discretionary, and the Fannie and Freddie lines stay on the stern. |
+| **Ship sea** | **`ui725-20261007-ship-live`** | The same three plates loop as muted sea video. The stills stay underneath, and a reduced-motion setting shows the stills only. Pins stay clickable and the picture does not zoom. |
 
 ### One-click handoff (preferred)
 
@@ -502,4 +503,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-07 · Agent: Grok Build · Built: `ui724-20261007-ship-real` · Live until the next upload: `ui723-20261007-ship` · Next: `ui725-YYYYMMDD-slug`*
+*Last updated: 2026-10-07 · Agent: Grok Build · Built: `ui725-20261007-ship-live` · Live until the next upload: `ui724-20261007-ship-real` · Next: `ui726-YYYYMMDD-slug`*

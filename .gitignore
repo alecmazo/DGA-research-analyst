@@ -65,5 +65,5 @@ apps/sliw-agent/data/master_deck.json
 
 # React GP shell
 web/gp-app/node_modules/
-web/gp-app/dist/*.map
+web/gp-app/dist/**/*.map
 

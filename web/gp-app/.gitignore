@@ -24,3 +24,4 @@ dist-ssr
 # dist is committed as Railway fallback; rebuild via npm run build
 !dist/
 !dist/**
+dist/**/*.map
