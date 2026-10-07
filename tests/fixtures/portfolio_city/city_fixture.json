@@ -1,0 +1,108 @@
+{
+  "note": "Synthetic book. Not a real account and not the Desktop sample.",
+  "positions": {
+    "account_count": 3,
+    "book_as_of": "2026-10-07",
+    "positions": [
+      {
+        "symbol": "TSLA",
+        "name": "Tesla Inc",
+        "account_name": "Sample Managed",
+        "account_short": "SM",
+        "source_type": "managed_account",
+        "stake_pct": 100,
+        "market_value": 60000,
+        "last_price": 100,
+        "day_change_pct": 1.5
+      },
+      {
+        "symbol": "TSLA",
+        "name": "Tesla Inc",
+        "account_name": "Sample LP",
+        "account_short": "SL",
+        "source_type": "lp_fund",
+        "stake_pct": 25,
+        "market_value": 40000,
+        "last_price": 100,
+        "day_change_pct": 1.5
+      },
+      {
+        "symbol": "FMCC",
+        "name": "Freddie Mac",
+        "account_name": "Sample Managed",
+        "source_type": "managed_account",
+        "stake_pct": 100,
+        "market_value": 10000,
+        "last_price": 2,
+        "day_change_pct": -0.4
+      },
+      {
+        "symbol": "FMCCJ",
+        "name": "Freddie preferred",
+        "account_name": "Sample Managed",
+        "source_type": "managed_account",
+        "stake_pct": 100,
+        "market_value": 5000,
+        "last_price": 8,
+        "day_change_pct": null
+      },
+      {
+        "symbol": "FNMAP",
+        "name": "Fannie preferred",
+        "account_name": "Sample LP",
+        "source_type": "lp_fund",
+        "stake_pct": 40,
+        "market_value": 2500,
+        "last_price": 4,
+        "day_change_pct": null
+      },
+      {
+        "symbol": "SPAXX",
+        "name": "Cash",
+        "account_name": "Sample Managed",
+        "source_type": "managed_account",
+        "stake_pct": 100,
+        "market_value": 8000,
+        "last_price": 1,
+        "day_change_pct": null
+      },
+      {
+        "symbol": "SPCX",
+        "name": "Space Exploration Technologies Corp",
+        "account_name": "Sample LP",
+        "source_type": "lp_fund",
+        "stake_pct": 100,
+        "market_value": 7000,
+        "last_price": 50,
+        "day_change_pct": 0.2
+      }
+    ]
+  },
+  "fundamentals": {
+    "TSLA": {
+      "shares": 1000000000,
+      "shares_as_of": "2026-01-31",
+      "book_equity": 10000000000,
+      "book_equity_as_of": "2025-12-31",
+      "total_assets": 100000000000,
+      "total_assets_as_of": "2025-12-31"
+    },
+    "FMCC": {
+      "shares": 1000000000,
+      "shares_as_of": "2025-12-31",
+      "book_equity": 5000000000,
+      "book_equity_as_of": "2025-12-31",
+      "total_assets": 1000000000000,
+      "total_assets_as_of": "2025-12-31"
+    },
+    "FNMA": {
+      "price": 3,
+      "shares": 1000000000,
+      "shares_as_of": "2025-12-31",
+      "book_equity": 4000000000,
+      "book_equity_as_of": "2025-12-31",
+      "total_assets": 2000000000000,
+      "total_assets_as_of": "2025-12-31"
+    }
+  }
+}

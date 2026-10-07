@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://portfolio.dgacapital.com/gp/portfolio-city.schema.json",
+  "title": "PortfolioCity",
+  "type": "object",
+  "required": ["schema_version", "portfolio", "scale", "companies"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "metric": {"enum": ["market_cap", "position_value", "total_assets"]},
+    "portfolio": {
+      "type": "object",
+      "required": ["total_value", "currency", "as_of", "source"],
+      "properties": {
+        "total_value": {"type": ["number", "null"]},
+        "currency": {"type": "string"},
+        "accounts": {"type": ["integer", "null"]},
+        "raw_positions": {"type": "integer", "minimum": 0},
+        "as_of": {"type": "string"},
+        "source": {"type": "string"},
+        "market_cap_missing": {"type": "integer", "minimum": 0}
+      }
+    },
+    "scale": {
+      "type": "object",
+      "required": ["height_min", "height_max"],
+      "properties": {
+        "height_min": {"type": "number"},
+        "height_max": {"type": "number"},
+        "position_value": {"enum": ["linear", "sqrt", "log10"]},
+        "total_assets": {"enum": ["linear", "sqrt", "log10"]},
+        "market_cap": {"enum": ["linear", "sqrt", "log10"]}
+      }
+    },
+    "companies": {"type": "array", "items": {"$ref": "#/$defs/company"}}
+  },
+  "$defs": {
+    "money": {"type": ["number", "null"], "minimum": 0},
+    "hex": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+    "company": {
+      "type": "object",
+      "required": ["id", "ticker", "name", "sector", "archetype", "position_value", "weight", "size", "position", "colors"],
+      "properties": {
+        "id": {"type": "string"},
+        "ticker": {"type": "string"},
+        "name": {"type": "string"},
+        "sector": {"enum": ["Information Technology", "Communication Services", "Consumer Discretionary", "Consumer Staples", "Financials", "Health Care", "Energy", "Utilities", "Industrials", "Materials", "Real Estate", "Cash"]},
+        "industry_note": {"type": ["string", "null"]},
+        "archetype": {"enum": ["tech_neon", "comm_spire", "consumer_flagship", "consumer_staples_market", "financial_monolith", "health_biomorph", "energy_reactor", "utility_grid", "industrial_steel", "aero_gantry", "materials_forge", "realestate_terrace", "speculative_beacon", "cash_plaza"]},
+        "position_value": {"$ref": "#/$defs/money"},
+        "weight": {"type": "number", "minimum": 0, "maximum": 1},
+        "total_assets": {"$ref": "#/$defs/money"},
+        "total_assets_as_of": {"type": ["string", "null"]},
+        "market_cap": {"$ref": "#/$defs/money"},
+        "market_cap_as_of": {"type": ["string", "null"]},
+        "book_equity": {"type": ["number", "null"]},
+        "book_equity_as_of": {"type": ["string", "null"]},
+        "equity_to_market_cap": {"type": ["number", "null"]},
+        "equity_band": {
+          "type": ["object", "null"],
+          "properties": {
+            "side": {"enum": ["up", "down"]},
+            "fraction": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "members": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": ["ticker", "position_value"],
+            "properties": {
+              "ticker": {"type": "string"},
+              "position_value": {"$ref": "#/$defs/money"}
+            }
+          }
+        },
+        "holders": {"type": "array"},
+        "size": {
+          "type": "object",
+          "required": ["metric_default", "height_by_position_value", "footprint"],
+          "properties": {
+            "metric_default": {"enum": ["position_value", "total_assets", "market_cap"]},
+            "height_by_position_value": {"type": ["number", "null"]},
+            "height_by_total_assets": {"type": ["number", "null"]},
+            "height_by_market_cap": {"type": ["number", "null"]},
+            "footprint": {"type": "number"}
+          }
+        },
+        "position": {
+          "type": "object",
+          "required": ["x", "z"],
+          "properties": {
+            "x": {"type": "number"},
+            "z": {"type": "number"}
+          }
+        },
+        "colors": {
+          "type": "object",
+          "required": ["base", "primary", "accent"],
+          "properties": {
+            "base": {"$ref": "#/$defs/hex"},
+            "primary": {"$ref": "#/$defs/hex"},
+            "accent": {"$ref": "#/$defs/hex"}
+          }
+        },
+        "volatility_1y": {"type": ["number", "null"]},
+        "daily_change_pct": {"type": ["number", "null"]}
+      }
+    }
+  }
+}

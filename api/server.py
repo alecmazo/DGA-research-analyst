@@ -44072,6 +44072,17 @@ def _mount_credit() -> None:
 _mount_credit()
 
 
+def _mount_portfolio_city() -> None:
+    try:
+        from api.domains.portfolio_city import create_router
+        app.include_router(create_router(_claims_or_401))
+    except Exception as exc:
+        print(f"[portfolio-city] mount failed: {exc!r}", flush=True)
+
+
+_mount_portfolio_city()
+
+
 if BRANDING_DIR.exists():
     app.mount("/branding", StaticFiles(directory=str(BRANDING_DIR)), name="branding")
 
