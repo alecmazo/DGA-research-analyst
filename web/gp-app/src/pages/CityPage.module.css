@@ -1,0 +1,58 @@
+.page {
+  --city-glass: rgb(17 26 38 / 0.78);
+}
+
+.stage {
+  position: relative;
+  height: calc(100dvh - var(--topbar-h) - var(--ribbon-h));
+  min-height: 420px;
+  background: #070814;
+  overflow: hidden;
+}
+
+.stage :global(canvas) {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.banner, .tip, .live {
+  /* Local overlays. The shared glass lives with the city controls. */
+}
+
+.banner {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  z-index: 5;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--warn-50);
+  color: var(--warn-500);
+}
+
+.tip {
+  position: fixed;
+  z-index: 6;
+  pointer-events: none;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--city-glass);
+  border: 1px solid var(--border-default);
+  backdrop-filter: blur(10px);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+:global([data-theme='light']) .tip {
+  background: rgb(255 255 255 / 0.86);
+}

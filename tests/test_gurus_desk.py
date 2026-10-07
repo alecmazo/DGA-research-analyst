@@ -7,9 +7,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Parsers live in the FastAPI domain module; stub FastAPI so tests run
-# without that extra in the local venv.
+# without that extra in the local venv. Do not replace an installed FastAPI
+# just because this file was imported first.
 import types
-if "fastapi" not in sys.modules:
+try:
+    import fastapi  # noqa: F401
+    import fastapi.responses  # noqa: F401
+except ImportError:
     fake = types.ModuleType("fastapi")
     class _R:
         def __init__(self, *a, **k):
