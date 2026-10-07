@@ -1,7 +1,7 @@
 import { useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { MeshReflectorMaterial } from '@react-three/drei'
-import { EffectComposer, Bloom, SMAA, Vignette, ChromaticAberration } from '@react-three/postprocessing'
+import { EffectComposer, Bloom, Vignette, ChromaticAberration } from '@react-three/postprocessing'
 import { AmbientLight, Color, DirectionalLight, HemisphereLight, Vector2 } from 'three'
 import type { Points } from 'three'
 import { cityMotion, cityNight, cityTime } from '../materials'
@@ -104,7 +104,6 @@ export function Post({ night, mobile }: { night: boolean; mobile: boolean }) {
         mipmapBlur
         resolutionScale={mobile ? 0.5 : 1}
       />
-      {!mobile && <SMAA />}
       <Vignette eskil={false} offset={0.16} darkness={night ? 0.72 : 0.32} />
       {!mobile && <ChromaticAberration offset={offset} />}
     </EffectComposer>

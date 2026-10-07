@@ -323,5 +323,4 @@ def test_router_is_mounted_beside_the_other_domains():
     assert "def _mount_portfolio_city" in server
     assert "from api.domains.portfolio_city import create_router" in server
     assert server.count("WEB_BUILD_VERSION") >= 1
-    # This phase does not bump the live build.
-    assert "ui720-20261006-roundup-record" in server
+    assert 'WEB_BUILD_VERSION = "ui721-20261007-city"' in server

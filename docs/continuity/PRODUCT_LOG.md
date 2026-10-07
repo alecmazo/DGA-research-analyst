@@ -121,7 +121,7 @@ Copy these into every new agent session:
 Nav (do not reshuffle casually):
 
 **Work:** Desk · Financials · Local · Watchlists · Gurus · Podcasts  
-**Lab:** Credit · Transcripts · Munger · Merger Arb  
+**Lab:** Credit · Transcripts · Munger · Merger Arb · City  
 **Accounts:** Accounts · Positions · Options · Memos  
 
 Settings stays in the account menu. Sliw stays a gated link.
@@ -242,6 +242,10 @@ Lab menu. High-yield book. About 80 public issuers, keyed by SEC CIK, plus the P
 ### 5.17 Merger arb (`/merger-arb`)
 
 A situation memorandum: navy masthead, the spread tape, then numbered sections for the situation, consideration, spread, regulatory path, votes, catalysts, downside, and upside. The math is unchanged.
+
+### 5.18 City (`/city`)
+
+Lab menu. The open book, managed accounts and LP funds together, is one tower per ticker, sized by market cap, with position size and total assets as toggles and book equity as a glass band.
 
 ---
 
