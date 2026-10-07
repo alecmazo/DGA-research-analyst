@@ -23,6 +23,7 @@ const LAB: { to: string; label: string }[] = [
   { to: '/transcripts', label: 'Transcripts' },
   { to: '/munger', label: 'Munger' },
   { to: '/merger-arb', label: 'Merger Arb' },
+  { to: '/ship', label: 'Ship' },
 ]
 
 const ACCOUNTS: { to: string; label: string }[] = [

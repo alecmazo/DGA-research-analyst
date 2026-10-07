@@ -150,6 +150,7 @@ const RULES: Rule[] = [
   { id: 'mergerArb', test: (p) => p.startsWith('/api/merger-arb') },
   { id: 'gurus', test: (p) => p.startsWith('/api/gurus') },
   { id: 'credit', test: (p) => p.startsWith('/api/credit') },
+  { id: 'ship', test: (p) => p.startsWith('/api/v2/gp/portfolio-ship') },
   { id: 'builder', test: (p) => p.startsWith('/api/v2/builder') },
   { id: 'options', test: (p) => p.startsWith('/api/options') },
   {
@@ -381,7 +382,7 @@ export const FLOW_ROOT: FlowNode = {
     {
       id: 'lab',
       label: 'Lab',
-      hint: 'Credit, transcripts, Munger, and merger arb.',
+      hint: 'Credit, transcripts, Munger, merger arb, and the ship.',
       to: '/credit',
       children: [
         { id: 'credit', label: 'Credit', hint: 'Bond issuers and a typed-in book.', to: '/credit' },
@@ -392,6 +393,12 @@ export const FLOW_ROOT: FlowNode = {
           label: 'Merger Arb',
           hint: 'Deal list and the analysis packet.',
           to: '/merger-arb',
+        },
+        {
+          id: 'ship',
+          label: 'Ship',
+          hint: 'The book as a vessel. The sea follows the S&P.',
+          to: '/ship',
         },
       ],
     },

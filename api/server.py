@@ -8743,7 +8743,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui722-20261007-city-off"
+WEB_BUILD_VERSION = "ui723-20261007-ship"
 
 
 @app.get("/api/build")
@@ -44070,6 +44070,17 @@ def _mount_credit() -> None:
 
 
 _mount_credit()
+
+
+def _mount_portfolio_ship() -> None:
+    try:
+        from api.domains.portfolio_ship import create_router
+        app.include_router(create_router(_claims_or_401))
+    except Exception as exc:
+        print(f"[portfolio-ship] mount failed: {exc!r}", flush=True)
+
+
+_mount_portfolio_ship()
 
 
 if BRANDING_DIR.exists():

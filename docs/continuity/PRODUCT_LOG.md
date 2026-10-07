@@ -121,7 +121,7 @@ Copy these into every new agent session:
 Nav (do not reshuffle casually):
 
 **Work:** Desk · Financials · Local · Watchlists · Gurus · Podcasts  
-**Lab:** Credit · Transcripts · Munger · Merger Arb  
+**Lab:** Credit · Transcripts · Munger · Merger Arb · Ship  
 **Accounts:** Accounts · Positions · Options · Memos  
 
 Settings stays in the account menu. Sliw stays a gated link.
@@ -246,6 +246,10 @@ A situation memorandum: navy masthead, the spread tape, then numbered sections f
 ### 5.18 City (`/city`) — offline
 
 The night-city page was taken off the site in `ui722-20261007-city-off`. It did not write portfolio rows. Do not turn the route back on.
+
+### 5.19 Ship (`/ship`)
+
+Lab menu. The open book is one expedition ship. Technology (core) on the bridge is TSLA, META, and AMZN. The stern is each GSE symbol plus IBRX. Cash is the anchor. A sleeve with no weight is left off the legend and off the labels. The hull is still a whole ship. The ocean slides with the S&P 500 day percent from the same index ribbon: +2% and above is clear smooth water, −3% and below is the darkest chop, and the steps between are a straight line. A missing print is labeled unavailable and draws the flat-day sea, the same picture as a 0% day. GP and admin see position dollars. Demo, a non-GP, and weights mode see percents only. The page does not write portfolio rows. GICS classification is unchanged. The city route stays off.
 
 ---
 

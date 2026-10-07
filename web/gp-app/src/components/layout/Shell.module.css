@@ -31,6 +31,12 @@
   padding-top: 4px;
 }
 
+.main:has([data-ship]) {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .inner {
   max-width: var(--content-max);
   margin: 0 auto;
@@ -40,6 +46,13 @@
 /* Desk free-form board needs the full width */
 .inner:has([data-desk-board]) {
   max-width: none;
+}
+
+.inner:has([data-ship]) {
+  max-width: none;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .footer {
