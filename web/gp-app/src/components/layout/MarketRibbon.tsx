@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { api, type IndexRow } from '@/lib/api'
 import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { subscribeQuoteRefresh } from '@/lib/quoteRefresh'
-import { fmtPct, pctClass } from '@/lib/format'
+import { fmtPct } from '@/lib/format'
 import styles from './MarketRibbon.module.css'
 
 type Idx = {
@@ -26,6 +26,14 @@ const FALLBACK: Idx[] = [
   { key: 'btc', label: 'Bitcoin' },
   { key: 'eth', label: 'Ethereum' },
 ]
+
+/** Module classes. Global `pos`/`neg` are dark greens that vanish on this navy bar. */
+function chgClass(pct?: number | null): string {
+  if (pct == null || Number.isNaN(Number(pct))) return ''
+  if (Number(pct) > 0) return styles.up
+  if (Number(pct) < 0) return styles.down
+  return ''
+}
 
 function fmtIdxPx(label: string, price?: number | null): string {
   if (price == null || Number.isNaN(Number(price))) return '—'
@@ -113,7 +121,7 @@ export function MarketRibbon() {
           <div key={r.key} className={styles.idx}>
             <span className={styles.name}>{r.label}</span>
             <span className={`${styles.px} tabular`}>{fmtIdxPx(r.label, r.price)}</span>
-            <span className={`${styles.chg} tabular ${pctClass(r.pct)}`}>
+            <span className={`${styles.chg} tabular ${chgClass(r.pct)}`}>
               {fmtPct(r.pct)}
             </span>
           </div>
