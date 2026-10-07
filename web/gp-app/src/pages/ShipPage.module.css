@@ -5,20 +5,17 @@
   grid-template-columns: minmax(0, 1fr) 320px;
   background: #071018;
   color: #e8eef4;
+  touch-action: manipulation;
 }
 
 .stage {
   position: relative;
-  min-height: 640px;
+  min-height: 560px;
   overflow: hidden;
-}
-
-.stage svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #061018;
 }
 
 .caption {
@@ -210,67 +207,121 @@
   font-size: 13px;
 }
 
-:global(.dga-ship-svg) {
-  display: block;
+:global(.dga-ship-frame) {
+  position: relative;
+  width: min(100%, calc((100dvh - 150px) * 16 / 9));
+  aspect-ratio: 16 / 9;
+  touch-action: manipulation;
+  overflow: hidden;
 }
 
-:global(.dga-ship-waves) {
-  animation: dga-ship-drift calc(9s + var(--dga-wx, 0.6) * 16s) linear infinite;
+:global(.dga-ship-photo) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
-:global(.dga-ship-vessel) {
-  transform-box: view-box;
-  transform-origin: 730px 470px;
-  animation: dga-ship-bob calc(3.1s + var(--dga-wx, 0.6) * 2.8s) ease-in-out infinite;
+:global(.dga-ship-vignette) {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, 0.42) 100%);
 }
 
-:global(.dga-ship-smoke) {
-  transform-box: view-box;
-  transform-origin: 460px 170px;
-  animation: dga-ship-smoke 2.6s ease-in-out infinite;
-}
-
-:global(.dga-ship-plate) {
+:global(.dga-ship-pin) {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
   cursor: pointer;
+  touch-action: manipulation;
+  transform: translate(-50%, -50%);
+  font: inherit;
 }
 
-:global(.dga-ship-svg.dim .dga-ship-plate) {
-  opacity: 0.34;
+:global(.dga-ship-pin-dot) {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--pin, #fff);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.92),
+    0 0 0 4px rgba(0, 0, 0, 0.4),
+    0 0 14px var(--pin, #fff);
 }
 
-:global(.dga-ship-svg.dim .dga-ship-plate.is-hot),
-:global(.dga-ship-svg.dim .dga-ship-plate.is-on) {
+:global(.dga-ship-pin-pill),
+:global(.dga-ship-pin-name) {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+  border-radius: 999px;
+  background: rgba(6, 12, 20, 0.82);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+:global(.dga-ship-pin-pill) {
+  bottom: calc(100% - 10px);
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+:global(.dga-ship-pin-name) {
+  top: calc(100% - 8px);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+:global(.dga-ship-frame.is-dim .dga-ship-pin) {
+  opacity: 0.38;
+}
+
+:global(.dga-ship-frame.is-dim .dga-ship-pin.is-hot),
+:global(.dga-ship-frame.is-dim .dga-ship-pin.is-on) {
   opacity: 1;
+  z-index: 2;
 }
 
-:global(.dga-ship-plate:focus) {
+:global(.dga-ship-pin:focus) {
   outline: none;
 }
 
-:global(.dga-ship-plate:focus-visible path) {
-  stroke: #ffffff;
-  stroke-width: 2.6px;
+:global(.dga-ship-pin:focus-visible .dga-ship-pin-dot) {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 5px var(--pin, #fff),
+    0 0 16px var(--pin, #fff);
 }
 
-@keyframes dga-ship-drift {
-  from { transform: translateX(0); }
-  to { transform: translateX(-140px); }
+:global(.dga-ship-pin.is-on .dga-ship-pin-dot) {
+  animation: dga-ship-pulse 1.8s ease-in-out infinite;
 }
 
-@keyframes dga-ship-bob {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(var(--dga-bob, 3px)) rotate(var(--dga-roll, 0.2deg)); }
-}
-
-@keyframes dga-ship-smoke {
-  0%, 100% { opacity: 0.55; transform: translateX(0); }
-  50% { opacity: 0.9; transform: translateX(-8px); }
+@keyframes dga-ship-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0, 0, 0, 0.4), 0 0 12px var(--pin, #fff); }
+  50% { box-shadow: 0 0 0 2px #fff, 0 0 0 7px rgba(0, 0, 0, 0.2), 0 0 18px var(--pin, #fff); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :global(.dga-ship-waves),
-  :global(.dga-ship-vessel),
-  :global(.dga-ship-smoke) {
+  :global(.dga-ship-pin.is-on .dga-ship-pin-dot) {
     animation: none;
   }
 }
@@ -282,7 +333,12 @@
   }
 
   .stage {
-    min-height: 68vh;
+    min-height: 0;
+    display: block;
+  }
+
+  :global(.dga-ship-frame) {
+    width: 100%;
   }
 
   .aside {

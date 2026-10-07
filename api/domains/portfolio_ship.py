@@ -28,6 +28,17 @@ CASH_PART = CASH_SYMBOLS | frozenset({
 })
 TECH_CORE = frozenset({"TSLA", "META", "AMZN"})
 STERN = frozenset({"IBRX"}) | GSE_SYMBOLS | frozenset(GSE_COMMONS)
+# Preferreds beyond the original commons. Each symbol stays its own line.
+_GSE_PREFIXES = ("FMCC", "FMCK", "FNMA", "FNMF", "FREG", "FREJ")
+# Sleeves the ship draws that are not the GICS sector.
+STORY_PART = {
+    "UBER": "cargo",
+    "NKE": "staples",
+    "SPY": "market",
+    "IWM": "market",
+    "QQQM": "market",
+    "36966TKX9": "aero",
+}
 
 PERFECT_PCT = 2.0
 WORST_PCT = -3.0
@@ -37,12 +48,15 @@ DRAW_ORDER = (
     "keel",
     "engine",
     "cargo",
+    "staples",
     "bow",
     "stern",
     "midship",
     "bridge",
     "mast",
+    "market",
     "deck",
+    "aero",
     "hull",
     "anchor",
     "cabins",
@@ -69,9 +83,27 @@ PARTS: dict[str, dict[str, str]] = {
     },
     "deck": {
         "id": "ind",
-        "name": "Industrials / Aerospace",
+        "name": "Industrials",
         "color": "#f2c14e",
-        "rationale": "The deck crane. Builders and networks.",
+        "rationale": "The crane. Machines, construction, and equipment.",
+    },
+    "aero": {
+        "id": "aero",
+        "name": "Aerospace",
+        "color": "#d6c4ff",
+        "rationale": "The gantry. Space and aerospace, off the industrial crane.",
+    },
+    "staples": {
+        "id": "staples",
+        "name": "Consumer Staples",
+        "color": "#1f8a4c",
+        "rationale": "The stores. Everyday brands.",
+    },
+    "market": {
+        "id": "market",
+        "name": "Index funds",
+        "color": "#dfe8f2",
+        "rationale": "The flag. Broad index funds, not a single industry.",
     },
     "hull": {
         "id": "hc",
@@ -105,9 +137,9 @@ PARTS: dict[str, dict[str, str]] = {
     },
     "cargo": {
         "id": "cons",
-        "name": "Consumer",
+        "name": "Consumer Discretionary",
         "color": "#7fc97f",
-        "rationale": "The containers. Everyday spending. Bridge names stay on the bridge.",
+        "rationale": "The deck load. Spending that can wait. Bridge names stay on the bridge.",
     },
     "mast": {
         "id": "comm",
@@ -127,7 +159,7 @@ SECTOR_PART = {
     "Information Technology": "bridge",
     "Communication Services": "mast",
     "Consumer Discretionary": "cargo",
-    "Consumer Staples": "cargo",
+    "Consumer Staples": "staples",
     "Financials": "bow",
     "Health Care": "hull",
     "Energy": "engine",
@@ -163,6 +195,14 @@ def weather_t(pct: float | None) -> float:
     return (value - WORST_PCT) / (PERFECT_PCT - WORST_PCT)
 
 
+def _is_gse(sym: str) -> bool:
+    return sym in GSE_SYMBOLS or sym in GSE_COMMONS or sym.startswith(_GSE_PREFIXES)
+
+
+def _is_stern(sym: str) -> bool:
+    return sym in STERN or _is_gse(sym)
+
+
 def part_for(symbol: str | None) -> str:
     """Story part. This is not a GICS assignment."""
     sym = _symbol(symbol)
@@ -172,10 +212,14 @@ def part_for(symbol: str | None) -> str:
         return "anchor"
     if sym in TECH_CORE:
         return "bridge"
-    if sym in STERN:
+    if _is_stern(sym):
         return "stern"
-    sector = classify(sym)["sector"]
-    return SECTOR_PART.get(sector, "deck")
+    if sym in STORY_PART:
+        return STORY_PART[sym]
+    info = classify(sym)
+    if info.get("archetype") == "aero_gantry":
+        return "aero"
+    return SECTOR_PART.get(info["sector"], "deck")
 
 
 def _num(value) -> float | None:

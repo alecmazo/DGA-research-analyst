@@ -41,6 +41,17 @@ export type SeaPaint = {
   reflection: number
 }
 
+/** Photo plates. t = 1 is the clear still, t = 0.6 the flat day, t = 0 the storm. */
+export function plateMix(t: number): { clear: number; flat: number; storm: number } {
+  const u = clamp01(t)
+  if (u >= 0.6) {
+    const k = (u - 0.6) / 0.4
+    return { clear: k, flat: 1 - k, storm: 0 }
+  }
+  const k = u / 0.6
+  return { clear: 0, flat: k, storm: 1 - k }
+}
+
 export function seaPaint(t: number): SeaPaint {
   const u = clamp01(t)
   const chop = 1 - u

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { crestPath, pathYRange, seaPaint } from '../src/pages/ship/sea.ts'
+import { crestPath, pathYRange, plateMix, seaPaint } from '../src/pages/ship/sea.ts'
 
 describe('sea scale', () => {
   it('slides from glassy sun to a dark chop', () => {
@@ -21,6 +21,28 @@ describe('sea scale', () => {
     const mid = seaPaint(0.5)
     assert.ok(mid.amp > perfect.amp && mid.amp < worst.amp)
     assert.ok(mid.sunY > perfect.sunY && mid.sunY < worst.sunY)
+  })
+
+  it('crossfades the clear, flat, and storm plates on the same line', () => {
+    const clear = plateMix(1)
+    const flat = plateMix(0.6)
+    const storm = plateMix(0)
+    assert.equal(clear.clear, 1)
+    assert.equal(clear.flat, 0)
+    assert.equal(clear.storm, 0)
+    assert.equal(flat.flat, 1)
+    assert.equal(flat.clear, 0)
+    assert.equal(flat.storm, 0)
+    assert.equal(storm.storm, 1)
+    assert.equal(storm.flat, 0)
+    const up = plateMix(0.8)
+    assert.ok(Math.abs(up.clear - 0.5) < 1e-9)
+    assert.ok(Math.abs(up.flat - 0.5) < 1e-9)
+    assert.equal(up.storm, 0)
+    const down = plateMix(0.3)
+    assert.ok(Math.abs(down.flat - 0.5) < 1e-9)
+    assert.ok(Math.abs(down.storm - 0.5) < 1e-9)
+    assert.equal(down.clear, 0)
   })
 
   it('draws a taller crest when the sea is worse', () => {

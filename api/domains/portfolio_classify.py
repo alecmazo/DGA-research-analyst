@@ -82,6 +82,59 @@ HAND: dict[str, tuple[str, str, str, str | None, bool]] = {
     "FNMA": ("Fannie Mae", "Financials", "speculative_beacon", None, False),
 }
 
+# Open-book names that were missing from the hand map. Sector is GICS.
+# An unknown symbol still falls through to Industrials below; these do not.
+BOOK_SECTORS: dict[str, tuple[str, str]] = {
+    "AMD": ("Advanced Micro Devices Inc", "Information Technology"),
+    "ANET": ("Arista Networks Inc", "Information Technology"),
+    "ARM": ("Arm Holdings plc", "Information Technology"),
+    "ASML": ("ASML Holding NV", "Information Technology"),
+    "AVGO": ("Broadcom Inc", "Information Technology"),
+    "AYI": ("Acuity Inc", "Industrials"),
+    "BRKB": ("Berkshire Hathaway Inc", "Financials"),
+    "CARR": ("Carrier Global Corp", "Industrials"),
+    "CAT": ("Caterpillar Inc", "Industrials"),
+    "CIEN": ("Ciena Corp", "Information Technology"),
+    "CMCSA": ("Comcast Corp", "Communication Services"),
+    "CMI": ("Cummins Inc", "Industrials"),
+    "CRM": ("Salesforce Inc", "Information Technology"),
+    "CSCO": ("Cisco Systems Inc", "Information Technology"),
+    "DE": ("Deere & Co", "Industrials"),
+    "DELL": ("Dell Technologies Inc", "Information Technology"),
+    "DLR": ("Digital Realty Trust Inc", "Real Estate"),
+    "DUK": ("Duke Energy Corp", "Utilities"),
+    "EQIX": ("Equinix Inc", "Real Estate"),
+    "FLR": ("Fluor Corp", "Industrials"),
+    "GOOG": ("Alphabet Inc", "Communication Services"),
+    "GOOGL": ("Alphabet Inc", "Communication Services"),
+    "HHH": ("Howard Hughes Holdings Inc", "Real Estate"),
+    "HPE": ("Hewlett Packard Enterprise Co", "Information Technology"),
+    "INTC": ("Intel Corp", "Information Technology"),
+    "IRM": ("Iron Mountain Inc", "Real Estate"),
+    "J": ("Jacobs Solutions Inc", "Industrials"),
+    "JCI": ("Johnson Controls International plc", "Industrials"),
+    "MLM": ("Martin Marietta Materials Inc", "Materials"),
+    "MRVL": ("Marvell Technology Inc", "Information Technology"),
+    "MSFT": ("Microsoft Corp", "Information Technology"),
+    "NEE": ("NextEra Energy Inc", "Utilities"),
+    "NFLX": ("Netflix Inc", "Communication Services"),
+    "NKE": ("Nike Inc", "Consumer Discretionary"),
+    "NLYPRF": ("Annaly Capital Management Inc", "Financials"),
+    "NVDA": ("NVIDIA Corp", "Information Technology"),
+    "OKLO": ("Oklo Inc", "Utilities"),
+    "PYPL": ("PayPal Holdings Inc", "Financials"),
+    "SMR": ("NuScale Power Corp", "Utilities"),
+    "SPG": ("Simon Property Group Inc", "Real Estate"),
+    "TSM": ("Taiwan Semiconductor Manufacturing Co Ltd", "Information Technology"),
+    "VMC": ("Vulcan Materials Co", "Materials"),
+    "VRT": ("Vertiv Holdings Co", "Industrials"),
+}
+
+for _sym, (_name, _sector) in BOOK_SECTORS.items():
+    if _sym in HAND:
+        continue
+    HAND[_sym] = (_name, _sector, SECTOR_ARCHETYPE[_sector], None, False)
+
 DISTRICTS: dict[str, tuple[float, float]] = {
     "Financials": (-1.0, -1.0),
     "Health Care": (1.0, -1.0),
@@ -128,7 +181,11 @@ def classify(symbol: str) -> dict:
             "industry_note": None,
             "archetype_override": False,
         }
-    if sym in GSE_SYMBOLS or sym in GSE_COMMONS:
+    if (
+        sym in GSE_SYMBOLS
+        or sym in GSE_COMMONS
+        or sym.startswith(("FMCC", "FMCK", "FNMA", "FNMF", "FREG", "FREJ"))
+    ):
         return {
             "name": HAND.get(sym, (sym,))[0] if sym in HAND else sym,
             "sector": "Financials",

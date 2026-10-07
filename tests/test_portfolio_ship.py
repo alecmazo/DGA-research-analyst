@@ -42,15 +42,17 @@ def test_story_groups_do_not_follow_gics_for_the_bridge_or_the_stern():
     assert part_for("TSLA") == "bridge"
     assert part_for("META") == "bridge"
     assert part_for("AMZN") == "bridge"
-    assert part_for("GOOG") == "deck"
+    assert part_for("GOOG") == "mast"
+    assert part_for("ZZZZ") == "deck"
     for sym in ("IBRX", "FMCC", "FNMA", "FMCCJ", "FMCCS", "FMCCM", "FMCCN", "FNMAP"):
         assert part_for(sym) == "stern", sym
     assert part_for("C") == "bow"
     assert part_for("WFC") == "bow"
     assert part_for("MOH") == "hull"
     assert part_for("BSX") == "hull"
-    assert part_for("SPCX") == "deck"
-    assert part_for("UBER") == "deck"
+    assert part_for("SPCX") == "aero"
+    assert part_for("UBER") == "cargo"
+    assert classify("UBER")["sector"] == "Industrials"
     assert part_for("CEG") == "keel"
     assert part_for("SPAXX") == "anchor"
     assert part_for("FZDXX") == "anchor"
@@ -138,6 +140,64 @@ def test_demo_and_weights_strip_position_dollars():
     assert shown["total_value"] == 100
     assert shown["weather"]["t"] == 1
     assert shown["sectors"][0]["market_value"] == 80
+
+
+def test_industrials_aerospace_and_the_misfiled_names():
+    assert classify("MSFT")["sector"] == "Information Technology"
+    assert classify("NKE")["sector"] == "Consumer Discretionary"
+    assert classify("HHH")["sector"] == "Real Estate"
+    assert part_for("MSFT") == "bridge"
+    assert part_for("NVDA") == "bridge"
+    assert part_for("NKE") == "staples"
+    assert part_for("HHH") == "cabins"
+    assert part_for("DLR") == "cabins"
+    assert part_for("EQIX") == "cabins"
+    assert part_for("IRM") == "cabins"
+    assert part_for("SPG") == "cabins"
+    assert part_for("CAT") == "deck"
+    assert part_for("DE") == "deck"
+    assert part_for("VRT") == "deck"
+    assert part_for("J") == "deck"
+    assert part_for("36966TKX9") == "aero"
+    assert part_for("NFLX") == "mast"
+    assert part_for("CMCSA") == "mast"
+    assert part_for("FMCKP") == "stern"
+    assert classify("FMCKP")["sector"] == "Financials"
+    assert part_for("FNMAS") == "stern"
+    assert part_for("FREGP") == "stern"
+    assert part_for("OKLO") == "keel"
+    assert part_for("SMR") == "keel"
+    assert part_for("NEE") == "keel"
+    assert part_for("MLM") == "midship"
+    assert part_for("VMC") == "midship"
+    assert part_for("PYPL") == "bow"
+    assert part_for("BRKB") == "bow"
+    assert part_for("NLYPRF") == "bow"
+    assert part_for("SPY") == "market"
+    assert part_for("IWM") == "market"
+    assert part_for("QQQM") == "market"
+    payload = build_ship(
+        _book([
+            _row("CAT", 10),
+            _row("SPCX", 8),
+            _row("UBER", 6),
+            _row("NKE", 5),
+            _row("MSFT", 20),
+            _row("FMCC", 4),
+            _row("FMCKP", 3),
+        ]),
+        0,
+        privacy=True,
+    )
+    by = {row["part"]: row for row in payload["sectors"]}
+    assert by["deck"]["name"] == "Industrials"
+    assert by["aero"]["name"] == "Aerospace"
+    assert [item["symbol"] for item in by["aero"]["holdings"]] == ["SPCX"]
+    assert by["cargo"]["name"] == "Consumer Discretionary"
+    assert by["staples"]["name"] == "Consumer Staples"
+    assert by["bridge"]["name"] == "Technology (core)"
+    assert [item["symbol"] for item in by["stern"]["holdings"]] == ["FMCC", "FMCKP"]
+    assert "$" not in json.dumps(payload)
 
 
 def test_ship_route_is_mounted_and_the_city_route_stays_off():
