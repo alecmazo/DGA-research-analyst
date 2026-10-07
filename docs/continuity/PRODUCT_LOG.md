@@ -121,7 +121,7 @@ Copy these into every new agent session:
 Nav (do not reshuffle casually):
 
 **Work:** Desk · Financials · Local · Watchlists · Gurus · Podcasts  
-**Lab:** Credit · Transcripts · Munger · Merger Arb · City  
+**Lab:** Credit · Transcripts · Munger · Merger Arb  
 **Accounts:** Accounts · Positions · Options · Memos  
 
 Settings stays in the account menu. Sliw stays a gated link.
@@ -243,9 +243,9 @@ Lab menu. High-yield book. About 80 public issuers, keyed by SEC CIK, plus the P
 
 A situation memorandum: navy masthead, the spread tape, then numbered sections for the situation, consideration, spread, regulatory path, votes, catalysts, downside, and upside. The math is unchanged.
 
-### 5.18 City (`/city`)
+### 5.18 City (`/city`) — offline
 
-Lab menu. The open book, managed accounts and LP funds together, is one tower per ticker, sized by market cap, with position size and total assets as toggles and book equity as a glass band.
+The night-city page was taken off the site in `ui722-20261007-city-off`. It did not write portfolio rows. Do not turn the route back on.
 
 ---
 

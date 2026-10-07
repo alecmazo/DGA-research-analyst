@@ -302,6 +302,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Roundup book** | **`ui719-20261006-roundup-book`** | The portfolio review walks from the heaviest weight down and leaves out anything under 1%. It states the rebalance, the rate stance, the political stance, and the next 12 months in plain sentences. |
 | **Roundup record** | **`ui720-20261006-roundup-record`** | Run the review first. Portfolio roundup is on that saved review. It speaks the review, using the book that was reviewed. |
 | **Portfolio city** | **`ui721-20261007-city`** | Lab opens the positions book as a city. One tower per ticker, market cap by default, with position size and total assets as toggles. Managed accounts and LP funds share the tower. Book equity is a glass band. The index tape paints green and red from its own row. |
+| **City offline** | **`ui722-20261007-city-off`** | The city page and its API are off. The scene did not write to the database. Lab is Credit, Transcripts, Munger, and Merger Arb. |
 
 ### One-click handoff (preferred)
 
@@ -499,4 +500,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-07 · Agent: Grok Build · Built: `ui721-20261007-city` · Live until the next upload: `ui720-20261006-roundup-record` · Next: `ui722-YYYYMMDD-slug`*
+*Last updated: 2026-10-07 · Agent: Grok Build · Built: `ui722-20261007-city-off` · Live until the next upload: `ui721-20261007-city` · Next: `ui723-YYYYMMDD-slug`*

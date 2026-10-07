@@ -318,9 +318,9 @@ def test_demo_and_weights_strip_position_dollars_on_the_route():
     assert decide_privacy({"role": "gp"}, "auto", public_flag="0") is False
 
 
-def test_router_is_mounted_beside_the_other_domains():
+def test_city_route_stays_unmounted():
     server = (ROOT / "api" / "server.py").read_text()
-    assert "def _mount_portfolio_city" in server
-    assert "from api.domains.portfolio_city import create_router" in server
+    assert "def _mount_portfolio_city" not in server
+    assert "from api.domains.portfolio_city import create_router" not in server
     assert server.count("WEB_BUILD_VERSION") >= 1
-    assert 'WEB_BUILD_VERSION = "ui721-20261007-city"' in server
+    assert 'WEB_BUILD_VERSION = "ui722-20261007-city-off"' in server

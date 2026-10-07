@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Shell } from '@/components/layout/Shell'
 import { DeskPage } from '@/pages/DeskPage'
@@ -22,9 +22,6 @@ import { GurusPage } from '@/pages/GurusPage'
 import { MergerArbPage } from '@/pages/MergerArbPage'
 import { CreditPage } from '@/pages/CreditPage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
-import { Empty } from '@/components/ui/Empty'
-
-const CityPage = lazy(() => import('@/pages/CityPage'))
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import {
   clearSession,
@@ -218,16 +215,6 @@ export default function App() {
                 element={
                   <ErrorBoundary label="Merger arb analysis">
                     <MergerArbPage />
-                  </ErrorBoundary>
-                }
-              />
-              <Route
-                path="city"
-                element={
-                  <ErrorBoundary label="City">
-                    <Suspense fallback={<Empty title="Opening the city" sub="Loading the skyline." />}>
-                      <CityPage />
-                    </Suspense>
                   </ErrorBoundary>
                 }
               />

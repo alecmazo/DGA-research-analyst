@@ -31,10 +31,6 @@
   padding-top: 4px;
 }
 
-.main:has([data-city]) {
-  padding: 0;
-}
-
 .inner {
   max-width: var(--content-max);
   margin: 0 auto;
@@ -42,13 +38,8 @@
 }
 
 /* Desk free-form board needs the full width */
-.inner:has([data-desk-board]),
-.inner:has([data-city]) {
+.inner:has([data-desk-board]) {
   max-width: none;
-}
-
-.shell:has([data-city]) .footer {
-  display: none;
 }
 
 .footer {
