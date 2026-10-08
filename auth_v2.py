@@ -194,15 +194,47 @@ def _overlay_path() -> Path:
 # assignments persist in PostgreSQL even if the overlay file path is
 # ephemeral (e.g. non-volume Railway containers).
 # ---------------------------------------------------------------------------
-_OVERLAY_DB_LOAD: Optional[Any] = None   # () -> dict[str, dict]
-_OVERLAY_DB_SAVE: Optional[Any] = None   # (dict) -> None
+_OVERLAY_DB_LOAD: Optional[Any] = None    # () -> dict[str, dict]
+_OVERLAY_DB_SAVE: Optional[Any] = None    # (dict) -> None
+_OVERLAY_DB_DELETE: Optional[Any] = None  # (lp_id) -> None
+
+# Fields a partial save must not wipe when the previous row already has them.
+_OVERLAY_KEEP_IF_ABSENT = (
+    "password_hash_hex",
+    "password_salt_hex",
+    "email",
+    "name",
+    "role",
+    "created_at",
+    "deleted",
+)
 
 
-def register_db_backend(load_fn, save_fn) -> None:
-    """Register DB load/save functions. Called once by server.py at startup."""
-    global _OVERLAY_DB_LOAD, _OVERLAY_DB_SAVE
+def register_db_backend(load_fn, save_fn, delete_fn=None) -> None:
+    """Register DB load/save functions. Called once by server.py at startup.
+
+    delete_fn removes one lp_id. The bulk save must not delete rows on its own:
+    a partial load used to erase every LP who was not in that load.
+    """
+    global _OVERLAY_DB_LOAD, _OVERLAY_DB_SAVE, _OVERLAY_DB_DELETE
     _OVERLAY_DB_LOAD = load_fn
     _OVERLAY_DB_SAVE = save_fn
+    _OVERLAY_DB_DELETE = delete_fn
+
+
+def merge_overlay_record(previous: Optional[dict], new: dict) -> dict:
+    """Overlay `new` onto `previous` without dropping a stored password or name.
+
+    Assignment saves send only fund_memberships and managed_account_ids.
+    Those must not replace a row that also holds the login.
+    """
+    prev = dict(previous or {})
+    nxt = dict(new or {})
+    out = {**prev, **nxt}
+    for key in _OVERLAY_KEEP_IF_ABSENT:
+        if not nxt.get(key) and prev.get(key):
+            out[key] = prev[key]
+    return out
 
 
 def _load_overlay_from_file() -> dict[str, dict]:
@@ -229,11 +261,19 @@ _OVERLAY_CACHE: dict = {"data": None, "ts": 0.0}
 _OVERLAY_TTL_SECS = 60.0
 
 
+def _copy_overlay(data: dict) -> dict[str, dict]:
+    """Return a copy so a caller cannot mutate the cached login table."""
+    out: dict[str, dict] = {}
+    for key, val in (data or {}).items():
+        out[key] = dict(val) if isinstance(val, dict) else val
+    return out
+
+
 def _load_overlay() -> dict[str, dict]:
     import time as _time
     now = _time.time()
     if _OVERLAY_CACHE["data"] is not None and (now - _OVERLAY_CACHE["ts"]) < _OVERLAY_TTL_SECS:
-        return _OVERLAY_CACHE["data"]
+        return _copy_overlay(_OVERLAY_CACHE["data"])
     file_data = _load_overlay_from_file()
     data = file_data
     if _OVERLAY_DB_LOAD is not None:
@@ -245,10 +285,10 @@ def _load_overlay() -> dict[str, dict]:
             # Desk DB is busy. Keep serving the last good user list so
             # sign-in is not stuck behind an analysis job.
             if _OVERLAY_CACHE["data"] is not None:
-                return _OVERLAY_CACHE["data"]
+                return _copy_overlay(_OVERLAY_CACHE["data"])
     _OVERLAY_CACHE["data"] = data
     _OVERLAY_CACHE["ts"] = now
-    return data
+    return _copy_overlay(data)
 
 
 def _save_overlay(overlay: dict[str, dict]) -> None:
@@ -593,12 +633,19 @@ def delete_user(lp_id: str) -> bool:
     seed_ids = {rec["lp_id"] for rec in LP_CREDENTIALS_SEED}
     overlay  = _load_overlay()
     if lp_id in seed_ids:
-        # Soft-delete: mark as deleted in overlay; _all_credentials() will skip it
+        # Soft-delete: mark as deleted in overlay; _all_credentials() will skip it.
+        # The row stays, so a later partial save cannot forget that the GP removed it.
         overlay[lp_id] = {**overlay.get(lp_id, {}), "deleted": True}
+        _save_overlay(overlay)
     else:
-        # Hard-delete: remove from overlay entirely
+        # Hard-delete this one id. Never delete the rest of the table.
         overlay.pop(lp_id, None)
-    _save_overlay(overlay)
+        _save_overlay(overlay)
+        if _OVERLAY_DB_DELETE is not None:
+            try:
+                _OVERLAY_DB_DELETE(lp_id)
+            except Exception:
+                pass
     return True
 
 

@@ -337,6 +337,31 @@ def _score_assigned_name(assigned: str, fund: dict) -> int:
     return score
 
 
+def canonical_managed_account_ids(assigned: list, funds: list[dict]) -> list[str]:
+    """Names the Settings checkboxes should show as already assigned.
+
+    Stored values can be the current account name, a short code, or an older
+    nickname ("EM DEFENSIVE", "Anatoly Ind"). The checkbox list uses funds.name.
+    Unmatched text is kept so a save does not drop it.
+    """
+    stored = [str(x).strip() for x in (assigned or []) if str(x).strip()]
+    if not stored:
+        return []
+    picked, unmatched = _pick_assigned_accounts(stored, funds or [])
+    out: list[str] = []
+    seen: set[str] = set()
+    for row in picked:
+        name = str(row.get("name") or "").strip()
+        if name and name.lower() not in seen:
+            out.append(name)
+            seen.add(name.lower())
+    for raw in unmatched:
+        if raw.lower() not in seen:
+            out.append(raw)
+            seen.add(raw.lower())
+    return out
+
+
 def _pick_assigned_accounts(assigned: list[str], funds: list[dict]) -> tuple[list[dict], list[str]]:
     """Bind exact Settings names first, then fuzzy-match leftovers.
 

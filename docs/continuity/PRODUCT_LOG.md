@@ -36,6 +36,8 @@ DGA Capital is a **single-GP family office / 3(c)(1) fund desk**:
 Canonical GP is **React + TypeScript** at `web/gp-app/` served at `/gp`.  
 Legacy HTML at `/gp-legacy` (`web/gp/`) is **not** the source of truth.
 
+Settings → LP User Management lists every LP login. Saving one person does not delete the others. Edit checks the managed accounts already assigned to that LP, including an older nickname or capitalization of the same account, and that check is still there after Save.
+
 ---
 
 ## 1. Versioning (do not go backwards)

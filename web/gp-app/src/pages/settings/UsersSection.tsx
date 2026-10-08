@@ -30,6 +30,15 @@ type AcctRow = {
 
 /* ── LP roster ────────────────────────────────────────────────── */
 
+function accountAssigned(ids: string[], account: AcctRow): boolean {
+  const name = (account.account_name || account.fund_name || '').trim().toLowerCase()
+  const short = (account.short_name || '').trim().toLowerCase()
+  return ids.some((raw) => {
+    const a = raw.trim().toLowerCase()
+    return !!a && (a === name || (!!short && a === short))
+  })
+}
+
 function LpRoster() {
   const [users, setUsers] = useState<User[]>([])
   const [funds, setFunds] = useState<FundRow[]>([])
@@ -72,13 +81,18 @@ function LpRoster() {
         const fundAliases: Record<string, string> = {}
         ;(overview.funds || []).forEach((f) => {
           const fname = f.fund_name || ''
-          fundChecks[fname] = fname in (u.fund_memberships || {})
-          fundAliases[fname] = (u.fund_memberships || {})[fname] || ''
+          const memberships = u.fund_memberships || {}
+          const key =
+            Object.keys(memberships).find(
+              (k) => k.trim().toLowerCase() === fname.trim().toLowerCase(),
+            ) || ''
+          fundChecks[fname] = !!key
+          fundAliases[fname] = key ? memberships[key] || '' : ''
         })
         const acctChecks: Record<string, boolean> = {}
         ;(overview.managed_accounts || []).forEach((a) => {
           const aname = a.account_name || a.fund_name || ''
-          acctChecks[aname] = (u.managed_account_ids || []).includes(aname)
+          acctChecks[aname] = accountAssigned(u.managed_account_ids || [], a)
         })
         next[u.lp_id] = {
           email: u.email || '',
@@ -155,9 +169,22 @@ function LpRoster() {
     Object.entries(ed.fundChecks).forEach(([fname, on]) => {
       if (on) fm[fname] = (ed.fundAliases[fname] || '').trim()
     })
-    const ma = Object.entries(ed.acctChecks)
+    const checked = Object.entries(ed.acctChecks)
       .filter(([, on]) => on)
       .map(([n]) => n)
+    const known = new Set(
+      accts.flatMap((a) => {
+        const name = (a.account_name || a.fund_name || '').trim().toLowerCase()
+        const short = (a.short_name || '').trim().toLowerCase()
+        return [name, short].filter(Boolean)
+      }),
+    )
+    const ma = [...checked]
+    for (const raw of users.find((u) => u.lp_id === lpId)?.managed_account_ids || []) {
+      const a = raw.trim().toLowerCase()
+      if (!a || known.has(a)) continue
+      if (!ma.some((n) => n.toLowerCase() === a)) ma.push(raw)
+    }
 
     setEditState((s) => ({
       ...s,

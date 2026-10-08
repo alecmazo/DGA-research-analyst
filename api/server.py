@@ -2092,7 +2092,50 @@ def admin_lp_list(request: Request):
     users = auth_v2_mod.list_users()
     # Symmetric: demo never sees live people; live GP never sees demo personas.
     users = _users_for_session(users, bool(claims.get("demo_mode")))
+    users = _label_lp_managed_accounts(users, bool(claims.get("demo_mode")))
     return {"users": users}
+
+
+def _label_lp_managed_accounts(users: list, is_demo: bool) -> list:
+    """Show each assigned SMA under the account name on the Edit checkboxes.
+
+    The stored value may be an older nickname or a different capitalization.
+    The roster the GP checks is funds.name. Unmatched text stays on the list
+    so Save does not drop it.
+    """
+    if not users:
+        return users
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id::text AS id, name, short_name
+                  FROM funds
+                 WHERE fund_type = 'managed_account'
+            """)
+            accounts = _partition_fund_rows(cur.fetchall(), is_demo)
+    except Exception:
+        return users
+    if not accounts:
+        return users
+    try:
+        from api.domains.lp_planning import canonical_managed_account_ids
+    except Exception:
+        return users
+    labeled = []
+    for user in users:
+        stored = user.get("managed_account_ids") or []
+        if not stored:
+            labeled.append(user)
+            continue
+        try:
+            labels = canonical_managed_account_ids(stored, accounts)
+        except Exception:
+            labeled.append(user)
+            continue
+        row = dict(user)
+        row["managed_account_ids"] = labels
+        labeled.append(row)
+    return labeled
 
 
 @app.post("/api/v2/admin/lp/set-password")
@@ -8749,7 +8792,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui729-20261008-campus"
+WEB_BUILD_VERSION = "ui730-20261008-lp-roster"
 
 
 @app.get("/api/build")
@@ -21314,40 +21357,69 @@ def _db_load_lp_overlay() -> dict:
         return {}
 
 
-def _db_save_lp_overlay(overlay: dict) -> None:
-    """Sync LP credential overlay to PostgreSQL — upserts AND deletes orphaned rows.
+def _db_upsert_lp_overlay(cur, lp_id: str, data: dict) -> None:
+    """Upsert one LP row, keeping a password the new payload does not include."""
+    import auth_v2 as _av2
+    cur.execute(
+        "SELECT data_json FROM lp_credentials_kv WHERE lp_id = %s",
+        (lp_id,),
+    )
+    row = cur.fetchone()
+    prev = None
+    if row and row[0]:
+        try:
+            prev = json.loads(row[0])
+        except Exception:
+            prev = None
+    merged = _av2.merge_overlay_record(prev if isinstance(prev, dict) else None, data)
+    cur.execute("""
+        INSERT INTO lp_credentials_kv (lp_id, data_json, updated_at)
+        VALUES (%s, %s, now())
+        ON CONFLICT (lp_id) DO UPDATE
+            SET data_json  = EXCLUDED.data_json,
+                updated_at = now()
+    """, (lp_id, json.dumps(merged)))
 
-    Previously this was upsert-only, so deleted users survived in the DB and
-    were resurrected on the next load (DB wins in _load_overlay merge).
-    Now we delete any row whose lp_id is no longer in the overlay dict.
+
+def _db_save_lp_overlay(overlay: dict) -> None:
+    """Upsert the LP rows this save touched.
+
+    Do not delete other lp_ids. A save used to treat the dict as the full
+    table and erase every login that was missing from a partial load.
+    Removing one LP is delete_user, which calls _db_delete_lp_overlay.
     """
     try:
         conn = _fund_conn()
         try:
             with conn.cursor() as cur:
-                # Remove rows whose lp_id is no longer in the overlay
-                keep = list(overlay.keys())
-                if keep:
-                    cur.execute(
-                        "DELETE FROM lp_credentials_kv WHERE NOT (lp_id = ANY(%s))",
-                        (keep,)
-                    )
-                else:
-                    cur.execute("DELETE FROM lp_credentials_kv")
-                # Upsert remaining entries
-                for lp_id, data in overlay.items():
-                    cur.execute("""
-                        INSERT INTO lp_credentials_kv (lp_id, data_json, updated_at)
-                        VALUES (%s, %s, now())
-                        ON CONFLICT (lp_id) DO UPDATE
-                            SET data_json  = EXCLUDED.data_json,
-                                updated_at = now()
-                    """, (lp_id, json.dumps(data)))
+                for lp_id, data in (overlay or {}).items():
+                    if not isinstance(data, dict):
+                        continue
+                    _db_upsert_lp_overlay(cur, lp_id, data)
             conn.commit()
         finally:
             conn.close()
     except Exception as e:
         print(f"[lp-creds-db] save failed: {e}")
+
+
+def _db_delete_lp_overlay(lp_id: str) -> None:
+    """Remove one overlay-only login. Seed users are soft-deleted instead."""
+    if not lp_id:
+        return
+    try:
+        conn = _fund_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM lp_credentials_kv WHERE lp_id = %s",
+                    (lp_id,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[lp-creds-db] delete failed: {e}")
 
 
 def _bootstrap_fund_schema(conn) -> None:
@@ -21642,7 +21714,11 @@ async def _on_startup_run_migrations() -> None:
             if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
                 try:
                     import auth_v2 as _av2
-                    _av2.register_db_backend(_db_load_lp_overlay, _db_save_lp_overlay)
+                    _av2.register_db_backend(
+                        _db_load_lp_overlay,
+                        _db_save_lp_overlay,
+                        _db_delete_lp_overlay,
+                    )
                     print("[auth_v2] DB backend registered", flush=True)
                 except Exception as _e:
                     print(f"[auth_v2] DB backend registration failed: {_e}", flush=True)
