@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/api'
 import { fmtPct, fmtUsd } from '@/lib/format'
-import { ShipScene, type ShipSector } from './ship/ShipScene'
+import { ShipScene, type ShipHolding, type ShipSector } from './ship/ShipScene'
+import type { ShipPart } from './ship/pins'
 import styles from './ShipPage.module.css'
 
 type ShipBook = {
@@ -17,6 +18,59 @@ type ShipBook = {
   }
   weather?: { t?: number }
   sectors?: ShipSector[]
+}
+
+function sleeve(
+  part: ShipPart,
+  name: string,
+  color: string,
+  rows: [string, number][],
+): ShipSector {
+  const holdings: ShipHolding[] = rows.map(([symbol, weight_pct]) => ({
+    symbol,
+    name: symbol,
+    weight_pct,
+    market_value: null,
+  }))
+  const weight_pct = holdings.reduce((sum, row) => sum + row.weight_pct, 0)
+  return {
+    id: part,
+    part,
+    name,
+    color,
+    weight_pct,
+    market_value: null,
+    rationale: 'WASH_PREVIEW_FIXTURE',
+    holdings,
+  }
+}
+
+/** Dev-only layout check. Production builds drop this branch. Not the live book. */
+function washPreview(): { sectors: ShipSector[]; t: number } | null {
+  if (!import.meta.env.DEV) return null
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('wash') !== '1') return null
+  const t = Number(params.get('t') ?? '0.6')
+  return {
+    t: Number.isFinite(t) ? t : 0.6,
+    sectors: [
+      sleeve('bridge', 'Technology (core)', '#5b8cff', [['NVDA', 14], ['MSFT', 8], ['AAPL', 4], ['AMZN', 2.2], ['META', 1.1]]),
+      sleeve('mast', 'Communication Services', '#38b6ff', [['NFLX', 3.2], ['DIS', 1.4]]),
+      sleeve('cabins', 'Real Estate', '#c4a882', [['EQIX', 2.1], ['DLR', 1.2]]),
+      sleeve('deck', 'Industrials', '#f2c14e', [['CAT', 4.4], ['DE', 2.1]]),
+      sleeve('aero', 'Aerospace', '#d6c4ff', [['SPCX', 1.6]]),
+      sleeve('cargo', 'Consumer Discretionary', '#7fc97f', [['UBER', 2.4]]),
+      sleeve('midship', 'Materials', '#c98b4a', [['LIN', 1.1]]),
+      sleeve('staples', 'Consumer Staples', '#1f8a4c', [['NKE', 1.8]]),
+      sleeve('hull', 'Healthcare', '#ef5d7a', [['LLY', 3.1], ['UNH', 1.4]]),
+      sleeve('keel', 'Utilities / Power', '#8a6cff', [['NEE', 2.2], ['CEG', 1.3]]),
+      sleeve('engine', 'Energy', '#4a4f63', [['XOM', 1.5]]),
+      sleeve('stern', 'Asymmetric bets', '#ff7a3d', [['FNMA', 6], ['FMCC', 4], ['IBRX', 1]]),
+      sleeve('bow', 'Financials', '#2ec4a6', [['JPM', 3.4], ['GS', 1.6]]),
+      sleeve('market', 'Index funds', '#dfe8f2', [['SPY', 5], ['QQQM', 2]]),
+      sleeve('anchor', 'Cash / Money market', '#9aa7b4', [['SPAXX', 4]]),
+    ],
+  }
 }
 
 function weightText(n: number): string {
@@ -52,12 +106,13 @@ export function ShipPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const sectors = book?.sectors || []
+  const preview = washPreview()
+  const sectors = preview?.sectors || book?.sectors || []
   const selected = useMemo(
     () => sectors.find((sector) => sector.part === active) || null,
     [sectors, active],
   )
-  const t = typeof book?.weather?.t === 'number' ? book.weather.t : 0.6
+  const t = preview ? preview.t : typeof book?.weather?.t === 'number' ? book.weather.t : 0.6
   const known = book?.spx?.known === true && book.spx.change_pct != null
   const caption = !book
     ? err
