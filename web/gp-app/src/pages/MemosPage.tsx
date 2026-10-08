@@ -123,12 +123,21 @@ function previewMd(text: string): string {
     .replace(/\n/g, ' ')
 }
 
-function emailMsg(em: { sent?: number; skipped?: number; errors?: unknown[] } | null | undefined) {
+function emailMsg(em: {
+  sent?: number
+  skipped?: number
+  errors?: unknown[]
+  fallback?: boolean
+} | null | undefined) {
   if (!em) return ''
+  const failed = em.errors && em.errors.length ? `, ${em.errors.length} failed` : ''
+  if (em.fallback && em.sent) {
+    return ` Emailed you the letter. This account has no investor login.${failed}`
+  }
   return (
     ` Emailed ${em.sent || 0} LP(s)` +
     (em.skipped ? ` (${em.skipped} skipped)` : '') +
-    (em.errors && em.errors.length ? `, ${em.errors.length} failed` : '') +
+    failed +
     '.'
   )
 }

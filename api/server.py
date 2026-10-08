@@ -8749,7 +8749,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui727-20261008-index-tape"
+WEB_BUILD_VERSION = "ui728-20261008-letter-mail"
 
 
 @app.get("/api/build")
@@ -32328,58 +32328,141 @@ def lp_quarterly_letter_read(request: Request):
     return {"ok": True}
 
 
-def _qletter_email_lps(period: str, target_fund_id: str | None = None) -> dict:
-    """Email LP holders a notification + portal link (content stays behind login).
-    target_fund_id → only LPs who hold that fund; None → all LPs with any holdings."""
+def _qletter_recipients(users, fund, fallback_email=None) -> tuple[list[dict], bool]:
+    """Who receives one published section.
+
+    A holder is a non-demo user whose managed-account list (managed account)
+    or fund memberships (LP fund) names this fund's id, short name, or name.
+    Names match without regard to case. When nobody holds the account, the
+    person who confirmed the send is the recipient. Other investors are not
+    counted as skipped.
+    """
+    fund = fund or {}
+    fid = str(fund.get("id") or "")
+    fname = str(fund.get("name") or "").upper()
+    fshort = str(fund.get("short_name") or "").upper()
+    managed = str(fund.get("fund_type") or "") == "managed_account"
+    found: list[dict] = []
+    seen: set[str] = set()
+    for u in users or []:
+        if not isinstance(u, dict) or u.get("demo_mode") or u.get("deleted"):
+            continue
+        email = str(u.get("email") or "").strip()
+        if not _valid_email_addr(email):
+            continue
+        keys = (
+            (u.get("managed_account_ids") or [])
+            if managed
+            else list((u.get("fund_memberships") or {}).keys())
+        )
+        holds = False
+        for raw in keys:
+            s = str(raw).strip()
+            su = s.upper()
+            if s == fid or (fname and su == fname) or (fshort and su == fshort):
+                holds = True
+                break
+        if not holds:
+            continue
+        key = email.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        first = (str(u.get("name") or "").split(" ") or [""])[0] or "there"
+        found.append({"email": email, "name": first})
+    if found:
+        return found, False
+    fb = str(fallback_email or "").strip()
+    if _valid_email_addr(fb):
+        return [{"email": fb, "name": "there"}], True
+    return [], False
+
+
+def _qletter_email_lps(
+    period: str,
+    target_fund_id: str | None = None,
+    *,
+    fallback_email: str | None = None,
+    section_name: str = "",
+    section_md: str = "",
+) -> dict:
+    """Email the account's investors the published section.
+
+    An account with no investor login goes to the GP who confirmed the send,
+    with the section in the message. Demo logins are never recipients.
+    """
     portal = os.environ.get("LP_PORTAL_URL", "https://portfolio.dgacapital.com").rstrip("/")
-    from_addr = os.environ.get("LETTER_EMAIL_FROM", "DGA Capital <onboarding@resend.dev>")
+    from_addr = os.environ.get("LETTER_EMAIL_FROM", "DGA Capital <reports@dgacapital.com>")
     try:
         users = auth_v2_mod.list_users()
     except Exception as e:
         return {"sent": 0, "skipped": 0, "errors": [{"error": f"list_users: {e!s:.120}"}]}
+    fund = None
+    if target_fund_id and _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT id::text AS id, name, short_name, fund_type FROM funds WHERE id::text=%s",
+                    (str(target_fund_id),),
+                )
+                fund = cur.fetchone()
+        except Exception as e:
+            print(f"[qletter] fund lookup failed: {e!s:.120}", flush=True)
+    if fund is None and target_fund_id:
+        fund = {"id": str(target_fund_id), "name": section_name, "short_name": section_name,
+                "fund_type": "managed_account"}
+    recipients, used_fallback = _qletter_recipients(users, fund, fallback_email)
+    if not recipients:
+        return {"sent": 0, "skipped": 0, "errors": [{"error": "no recipient"}], "fallback": False}
+    import html as _html
     from email.message import EmailMessage as _EmailMessage
-    sent, skipped, errors = [], [], []
-    for u in (users or []):
-        if u.get("role") != "lp":
-            continue
-        email = (u.get("email") or "").strip()
-        if not email:
-            continue
-        pseudo = {"role": "lp",
-                  "managed_account_ids": u.get("managed_account_ids") or [],
-                  "fund_memberships": u.get("fund_memberships") or {}}
-        my_fids = set(_lp_fund_ids_for_claims(pseudo))
-        if not my_fids or (target_fund_id and target_fund_id not in my_fids):
-            skipped.append(email)
-            continue
-        name = (u.get("name") or "").split(" ")[0] or "there"
+    label = section_name or "your account"
+    body_md = (section_md or "").strip()
+    sent, errors = [], []
+    for rec in recipients:
+        email = rec["email"]
+        name = rec["name"] or "there"
+        lead = (
+            f"No investor login is assigned to {label}, so this copy is coming to you."
+            if used_fallback
+            else f"Your {label} commentary for {period} is below."
+        )
+        plain = (
+            f"Hi {name},\n\n{lead}\n\n"
+            + (body_md + "\n\n" if body_md else "")
+            + f"The letter is also in the portal: {portal}\n\n— DGA Capital"
+        )
+        safe_md = _html.escape(body_md).replace("\n", "<br>\n") if body_md else ""
+        html_body = (
+            f"<p>Hi {_html.escape(name)},</p><p>{_html.escape(lead)}</p>"
+            + (f"<div style=\"font-family:Georgia,serif;font-size:15px;line-height:1.5;\">{safe_md}</div>" if safe_md else "")
+            + f"<p><a href=\"{portal}\" style=\"background:#5BB8D4;color:#0A1628;"
+            f"font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none;\">"
+            f"Open the portal</a></p><p style=\"color:#64748b;font-size:12px;\">— DGA Capital</p>"
+        )
         msg = _EmailMessage()
-        msg["Subject"] = f"Your DGA Capital {period} letter is ready"
+        msg["Subject"] = f"DGA Capital {period} letter — {label}"
         msg["From"] = from_addr
         msg["To"] = email
-        msg.set_content(
-            f"Hi {name},\n\nYour DGA Capital {period} letter is now available in your "
-            f"investor portal — a note from your GP plus commentary on your holdings.\n\n"
-            f"Read it here: {portal}\n\n— DGA Capital")
-        msg.add_alternative(
-            f"<p>Hi {name},</p><p>Your DGA Capital <strong>{period}</strong> letter is now "
-            f"available in your investor portal — a note from your GP plus commentary on your "
-            f"holdings.</p><p><a href=\"{portal}\" style=\"background:#5BB8D4;color:#0A1628;"
-            f"font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none;\">"
-            f"Read your letter →</a></p><p style=\"color:#64748b;font-size:12px;\">— DGA Capital</p>",
-            subtype="html")
+        msg.set_content(plain)
+        msg.add_alternative(html_body, subtype="html")
         try:
             res = analyst.send_portfolio_email(msg)
             if res and res.get("ok") is False:
-                errors.append({"email": email, "error": str(res.get("error"))[:140]})
+                errors.append({"email": _mask_email(email), "error": str(res.get("error"))[:140]})
             else:
                 sent.append(email)
         except Exception as e:
-            errors.append({"email": email, "error": f"{e!s:.140}"})
-    return {"sent": len(sent), "skipped": len(skipped), "errors": errors}
+            errors.append({"email": _mask_email(email), "error": f"{e!s:.140}"})
+    return {
+        "sent": len(sent),
+        "skipped": 0,
+        "errors": errors,
+        "fallback": bool(used_fallback and sent),
+    }
 
 
-def _qletter_publish(letter_id: str, fund_ids: list[str] | None) -> dict:
+def _qletter_publish(letter_id: str, fund_ids: list[str] | None, actor_email: str | None = None) -> dict:
     """Mark fund sections published (fund_ids=None → all filled sections) and email
     the affected LPs. Returns {published_fund_ids, email}."""
     _ensure_quarterly_letters_table()
@@ -32405,19 +32488,28 @@ def _qletter_publish(letter_id: str, fund_ids: list[str] | None) -> dict:
                     (json.dumps(new_pub), letter_id))
         conn.commit()
     period = L["period"] or (f"YTD {L['year']}" if L.get("year") else "the latest quarter")
-    if fund_ids is None:
-        email = _qletter_email_lps(period, target_fund_id=None)
-    else:
-        # one fund → email only its holders (union if several)
-        agg = {"sent": 0, "skipped": 0, "errors": []}
-        seen = set()
-        for fid in targets:
-            r = _qletter_email_lps(period, target_fund_id=fid)
-            agg["errors"] += r["errors"]
-        # recompute sent uniquely by re-running once per fund is wasteful; simplest: sum
-            agg["sent"] += r["sent"]; agg["skipped"] += r["skipped"]
-        email = agg
-    print(f"🗒️ [qletter] publish {letter_id} funds={fund_ids or 'ALL'} → {new_pub}", flush=True)
+    agg = {"sent": 0, "skipped": 0, "errors": [], "fallback": False}
+    for fid in targets:
+        sec = secs.get(fid) or {}
+        if not isinstance(sec, dict):
+            sec = {}
+        r = _qletter_email_lps(
+            period,
+            target_fund_id=fid,
+            fallback_email=actor_email,
+            section_name=str(sec.get("name") or ""),
+            section_md=str(sec.get("md") or ""),
+        )
+        agg["errors"] += r.get("errors") or []
+        agg["sent"] += int(r.get("sent") or 0)
+        agg["skipped"] += int(r.get("skipped") or 0)
+        agg["fallback"] = bool(agg["fallback"] or r.get("fallback"))
+    email = agg
+    print(
+        f"🗒️ [qletter] publish {letter_id} funds={fund_ids or 'ALL'} "
+        f"sent={email['sent']} fallback={email['fallback']}",
+        flush=True,
+    )
     return {"published_fund_ids": new_pub, "email": email}
 
 
@@ -32433,7 +32525,7 @@ def quarterly_letter_publish_fund(letter_id: str, request: Request):
     fund_id = str((body or {}).get("fund_id") or "").strip()
     if not fund_id:
         raise HTTPException(400, "fund_id required")
-    res = _qletter_publish(letter_id, [fund_id])
+    res = _qletter_publish(letter_id, [fund_id], actor_email=claims.get("email"))
     return {"ok": True, **res}
 
 
@@ -32445,7 +32537,7 @@ def quarterly_letter_publish_all(letter_id: str, request: Request):
         raise HTTPException(403, "GP only")
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         raise HTTPException(503, "Database not available.")
-    res = _qletter_publish(letter_id, None)
+    res = _qletter_publish(letter_id, None, actor_email=claims.get("email"))
     return {"ok": True, **res}
 
 

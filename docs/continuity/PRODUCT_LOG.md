@@ -196,7 +196,7 @@ Managed SMAs/IRAs first, LP funds second, Planning third.
 
 ### 5.9 Memos (`/memos`)
 
-IC memos / PDF. Snapshot table required when assigned to a book.
+IC memos / PDF. Snapshot table required when assigned to a book. Publish to LP asks before it emails. The message goes to the investors assigned to that account, with the section in the body. When the account has no investor login, the letter goes to the GP who confirmed. Demo logins are not recipients.
 
 ### 5.10 Settings (`/settings`)
 
