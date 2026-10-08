@@ -249,9 +249,9 @@ A situation memorandum: navy masthead, the spread tape, then numbered sections f
 
 The night-city page was taken off the site in `ui722-20261007-city-off`. It did not write portfolio rows. Do not turn the route back on.
 
-### 5.19 Ship (`/ship`)
+### 5.19 City (`/ship`)
 
-Lab menu, labeled Ship. The page is Portfolio Campus. One building is one company and one neighborhood is one sector. Height and footprint follow public market cap on a log scale, and a missing cap stays the modest building. Drag rotates. Scroll or pinch zooms in. Double-click frames that building. A click selects the neighborhood in the right pane, and Escape clears it. Company names are labels, not text baked into the pictures. Empty neighborhoods stay off. Demo and non-GP logins see weights only.
+Lab menu, labeled City. The page is Portfolio City. The route stays `/ship`. One building is one company and one district is one sector. Height and footprint follow public market cap on a log scale, and a missing cap stays the modest building. Drag rotates. Scroll or pinch zooms in. Double-click frames that building. A click on a building shows that company's market cap, balance-sheet structure, profit and loss, and cash flow on the card. A click on the district shows the companies in that sector. Escape clears the card. Company names are labels, not text baked into the pictures. Empty districts stay off. Demo and non-GP logins see weights only. The ground is a coastal plain with water and mountains. The sky is painted. The shadow stays still while the view rotates.
 
 Technology (core) on the bridge is TSLA, META, and AMZN, plus Information Technology names such as MSFT. The stern is each Fannie and Freddie symbol plus IBRX. Aerospace (SpaceX and the GE Aerospace note) is the gantry, separate from Industrials on the crane. Uber is Consumer Discretionary. Nike is the Consumer Staples sleeve. Howard Hughes, the data-center landlords, Iron Mountain, and Simon are Real Estate. Cash is the anchor. Broad index funds are their own sleeve. GP and admin see position dollars. Demo, a non-GP, and weights mode see percents only. The page does not write portfolio rows. GICS in the classifier stays GICS; the ship sleeves above are the story. The city route stays off.
 

@@ -130,17 +130,28 @@ export function paintFacade(kind: string, slot: 'upper' | 'base'): HTMLCanvasEle
 
 export function paintSky(): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
-  canvas.width = 32
-  canvas.height = 512
+  canvas.width = 2048
+  canvas.height = 1024
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
-  const sky = ctx.createLinearGradient(0, 0, 0, 512)
-  sky.addColorStop(0, '#6aa6dc')
-  sky.addColorStop(0.38, '#9dcef2')
-  sky.addColorStop(0.68, '#d9eefb')
-  sky.addColorStop(1, '#f3efe4')
+  const sky = ctx.createLinearGradient(0, 0, 0, 1024)
+  sky.addColorStop(0, '#4e92d0')
+  sky.addColorStop(0.42, '#8ec4ee')
+  sky.addColorStop(0.72, '#d5ecfa')
+  sky.addColorStop(1, '#f4f0e6')
   ctx.fillStyle = sky
-  ctx.fillRect(0, 0, 32, 512)
+  ctx.fillRect(0, 0, 2048, 1024)
+  const rand = mulberry(19)
+  for (let i = 0; i < 7; i += 1) {
+    const x = rand() * 2048
+    const y = 620 + rand() * 280
+    const rx = 90 + rand() * 180
+    const ry = 18 + rand() * 28
+    ctx.fillStyle = `rgba(255,255,255,${0.18 + rand() * 0.22})`
+    ctx.beginPath()
+    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
   return canvas
 }
 
@@ -150,12 +161,16 @@ export function paintGrass(): HTMLCanvasElement {
   canvas.height = 512
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
-  ctx.fillStyle = '#6a8a4c'
+  const field = ctx.createLinearGradient(0, 0, 512, 512)
+  field.addColorStop(0, '#d5d7b8')
+  field.addColorStop(0.45, '#c9d2a4')
+  field.addColorStop(1, '#b7c48e')
+  ctx.fillStyle = field
   ctx.fillRect(0, 0, 512, 512)
   const rand = mulberry(41)
-  for (let i = 0; i < 7000; i += 1) {
-    ctx.fillStyle = rand() > 0.62 ? '#7b9a58' : '#587642'
-    ctx.fillRect(rand() * 512, rand() * 512, 2, 3)
+  for (let i = 0; i < 80; i += 1) {
+    ctx.fillStyle = rand() > 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(70,90,40,0.05)'
+    ctx.fillRect(rand() * 512, rand() * 512, 40 + rand() * 80, 24 + rand() * 40)
   }
   return canvas
 }

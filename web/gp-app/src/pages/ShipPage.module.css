@@ -59,6 +59,7 @@
   background: #0e1722;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   min-height: 0;
+  overflow: auto;
 }
 
 .kicker {
@@ -178,11 +179,66 @@
   margin: 12px 0;
 }
 
-.chip {
+.chip,
+.chipBtn {
   border-radius: 999px;
   padding: 4px 8px;
   background: rgba(255, 255, 255, 0.08);
   font-size: 12px;
+}
+
+.chipBtn {
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chipBtn:hover,
+.chipBtn:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  outline: none;
+}
+
+.head {
+  margin: 4px 0 0;
+  color: #8ea0b5;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 12px;
+}
+
+.line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.line span:last-child {
+  color: #f4f7fb;
+}
+
+.stack {
+  display: flex;
+  height: 10px;
+  margin-top: 8px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stack i {
+  display: block;
+  height: 100%;
 }
 
 .close {

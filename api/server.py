@@ -395,6 +395,7 @@ _TICKER_ALIASES: dict[str, str] = {
     "BRKB":   "BRK-B",
     # Annaly Capital preferred F  (Fidelity: NLYPRF, Yahoo: NLY-PF)
     "NLYPRF": "NLY-PF",
+    "NLYPF": "NLY-PF",
     # Flagstar preferred A (Fidelity: FLGPRA, SnapTrade: FLG.PA, Yahoo: FLG-PA)
     "FLGPRA": "FLG-PA",
     "FLG.PA": "FLG-PA",
@@ -8792,7 +8793,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui730-20261008-lp-roster"
+WEB_BUILD_VERSION = "ui731-20261008-city-view"
 
 
 @app.get("/api/build")

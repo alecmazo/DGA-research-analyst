@@ -269,3 +269,102 @@ def test_caps_hook_is_optional_and_a_failure_keeps_the_book():
     tsla = next(item for item in shown["sectors"][0]["holdings"] if item["symbol"] == "TSLA")
     assert tsla["market_cap"] == 2_000_000_000
     assert tsla["market_value"] is None
+
+
+def test_preferreds_stay_in_financials_and_a_new_name_uses_its_sector():
+    assert part_for("NLY") == "bow"
+    assert part_for("NLYPF") == "bow"
+    assert part_for("NLY-PF") == "bow"
+    assert part_for("NLYPRF") == "bow"
+    assert part_for("WFC", sector_fn=lambda _sym: "Health Care") == "bow"
+
+    def looked(sym):
+        assert sym == "XYZ"
+        return "Health Care"
+
+    assert part_for("XYZ", sector_fn=looked) == "hull"
+    assert part_for("XYZ") == "deck"
+
+    def refuse(_sym):
+        raise AssertionError("a known sleeve must not ask for a sector")
+
+    payload = build_ship(
+        _book([
+            _row("WFC", 50, "Wells Fargo"),
+            _row("C", 40, "Citigroup"),
+            _row("NLYPF", 10, "Annaly preferred"),
+        ]),
+        0,
+        privacy=True,
+        caps={"WFC": 250_000_000_000, "C": 150_000_000_000, "NLYPF": 800_000_000},
+        sector_fn=refuse,
+    )
+    bow = next(row for row in payload["sectors"] if row["part"] == "bow")
+    caps = {item["symbol"]: item["market_cap"] for item in bow["holdings"]}
+    assert caps == {
+        "WFC": 250_000_000_000,
+        "C": 150_000_000_000,
+        "NLYPF": 800_000_000,
+    }
+    assert "$" not in json.dumps(payload)
+
+
+def test_company_card_uses_the_issuer_and_does_not_invent_numbers():
+    from api.domains.portfolio_ship import (
+        build_company_card,
+        choose_statement_row,
+        statement_candidates,
+    )
+
+    assert "NLY" in statement_candidates("NLYPRF")
+    assert "NLY" in statement_candidates("NLYPF")
+    annual = {
+        "period_type": "annual",
+        "period_end": "2025-12-31",
+        "entity_name": "Annaly Capital Management",
+        "revenue": 100,
+        "operating_income": 20,
+        "net_income": 10,
+        "operating_cash_flow": 40,
+        "capex": -3,
+        "free_cash_flow": 37,
+        "cash": 5,
+        "total_assets": 1000,
+        "total_liabilities": 800,
+        "stockholders_equity": 200,
+        "total_debt": 700,
+    }
+    thin = {"period_type": "annual", "period_end": "2024-12-31", "revenue": 1}
+    assert choose_statement_row([thin, annual])["period_end"] == "2025-12-31"
+    assert choose_statement_row([{"period_type": "annual"}]) is None
+
+    def rows(ticker):
+        return [annual] if ticker == "NLY" else []
+
+    card = build_company_card("NLYPRF", rows)
+    assert card["symbol"] == "NLYPRF"
+    assert card["statement_symbol"] == "NLY"
+    assert card["balance_sheet"]["equity"] == 200
+    assert card["income"]["net_income"] == 10
+    assert card["cash_flow"]["free_cash_flow"] == 37
+    assert "market_value" not in card
+    empty = build_company_card("ZZZZ", lambda _ticker: [])
+    assert empty["ok"] is True
+    assert empty["statement_symbol"] is None
+    assert empty["balance_sheet"] is None
+    assert empty["income"] is None
+    assert empty["cash_flow"] is None
+
+
+def test_company_route_is_registered_after_the_book():
+    def claims(_request):
+        return {"role": "gp"}
+
+    routes = create_router(
+        claims,
+        positions_fn=lambda _request: _book([]),
+        spx_fn=lambda: 0,
+        caps_fn=lambda _symbols: {},
+    ).routes
+    assert routes[0].path == "/api/v2/gp/portfolio-ship"
+    assert routes[1].path == "/api/v2/gp/portfolio-ship/company/{symbol}"

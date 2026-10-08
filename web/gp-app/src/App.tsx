@@ -222,7 +222,7 @@ export default function App() {
               <Route
                 path="ship"
                 element={
-                  <ErrorBoundary label="Ship">
+                  <ErrorBoundary label="City">
                     <ShipPage />
                   </ErrorBoundary>
                 }

@@ -5,6 +5,7 @@ import {
   BoxGeometry,
   CanvasTexture,
   ClampToEdgeWrapping,
+  ConeGeometry,
   EquirectangularReflectionMapping,
   CylinderGeometry,
   DirectionalLight,
@@ -13,7 +14,6 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
-  MirroredRepeatWrapping,
   PMREMGenerator,
   PCFShadowMap,
   PerspectiveCamera,
@@ -41,7 +41,7 @@ type Props = {
   sectors: ShipSector[]
   active: string | null
   hover: string | null
-  onSelect: (part: string | null) => void
+  onSelect: (part: string | null, symbol: string | null) => void
   onHover: (part: string | null) => void
 }
 
@@ -162,14 +162,16 @@ function settleLabels(root: HTMLElement) {
   }
 }
 
-function partOf(object: Object3D): string | null {
+function pickTarget(object: Object3D): { part: string; symbol: string | null } | null {
+  let part: string | null = null
+  let symbol: string | null = null
   let current: Object3D | null = object
   while (current) {
-    const part = current.userData?.part
-    if (typeof part === 'string') return part
+    if (part == null && typeof current.userData?.part === 'string') part = current.userData.part
+    if (symbol == null && typeof current.userData?.symbol === 'string') symbol = current.userData.symbol
     current = current.parent
   }
-  return null
+  return part ? { part, symbol } : null
 }
 
 export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props) {
@@ -280,13 +282,15 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
     sun.shadow.bias = -0.00035
     sun.shadow.normalBias = 0.04
     const shadow = sun.shadow.camera
-    shadow.left = -span * 1.2
-    shadow.right = span * 1.2
-    shadow.top = span * 1.2
-    shadow.bottom = -span * 1.2
+    // Frozen once. Moving this frustum every frame crawls the shadow on the lit district.
+    shadow.left = -span * 1.35
+    shadow.right = span * 1.35
+    shadow.top = span * 1.35
+    shadow.bottom = -span * 1.35
     shadow.near = 0.5
-    shadow.far = span * 5
+    shadow.far = span * 6
     sun.target.position.set(cx, 0, cz)
+    shadow.updateProjectionMatrix()
     scene.add(sun)
     scene.add(sun.target)
     const fill = new DirectionalLight('#d5e4f4', 0.55)
@@ -295,6 +299,9 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
 
     const skyMap = new CanvasTexture(paintSky())
     skyMap.colorSpace = SRGBColorSpace
+    skyMap.wrapS = ClampToEdgeWrapping
+    skyMap.wrapT = ClampToEdgeWrapping
+    skyMap.anisotropy = 8
     const envMap = skyMap.clone()
     envMap.mapping = EquirectangularReflectionMapping
     envMap.needsUpdate = true
@@ -309,7 +316,7 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
       pmremOpen = false
       pmrem.dispose()
     }
-    const skyGeo = new SphereGeometry(span * 9, 64, 40)
+    const skyGeo = new SphereGeometry(span * 9, 128, 80)
     geos.push(skyGeo)
     const skyMat = new MeshBasicMaterial({ map: skyMap, side: BackSide, depthWrite: false })
     mats.push(skyMat)
@@ -320,26 +327,64 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
 
     const lawnW = Math.max(48, layout.bounds.maxX - layout.bounds.minX + 28)
     const lawnD = Math.max(48, layout.bounds.maxZ - layout.bounds.minZ + 28)
-    grass.repeat.set(lawnW / 16, lawnD / 16)
+    grass.repeat.set(Math.max(1, lawnW / 72), Math.max(1, lawnD / 72))
     const grassMat = new MeshStandardMaterial({ map: grass, color: '#ffffff', roughness: 1, metalness: 0 })
     grassMat.userData.hex = '#ffffff'
     mats.push(grassMat)
-    const farMat = new MeshStandardMaterial({ color: '#e6eadc', roughness: 1, metalness: 0 })
-    farMat.userData.hex = '#e6eadc'
-    mats.push(farMat)
-    const far = new Mesh(groundGeo, farMat)
+    const plainMat = new MeshStandardMaterial({ color: '#d4d8c4', roughness: 1, metalness: 0 })
+    plainMat.userData.hex = '#d4d8c4'
+    mats.push(plainMat)
+    const waterMat = new MeshStandardMaterial({ color: '#1e5f86', roughness: 0.42, metalness: 0.08 })
+    waterMat.userData.hex = '#1e5f86'
+    mats.push(waterMat)
     // PlaneGeometry faces +z. A negative quarter-turn lays it on xz, facing +y.
-    far.rotation.x = -Math.PI / 2
-    far.position.set(cx, -0.04, cz)
-    far.scale.set(span * 8, span * 8, 1)
-    far.receiveShadow = true
-    scene.add(far)
+    const lay = (mesh: Mesh, x: number, y: number, z: number, w: number, d: number) => {
+      mesh.rotation.x = -Math.PI / 2
+      mesh.position.set(x, y, z)
+      mesh.scale.set(w, d, 1)
+      mesh.castShadow = false
+      mesh.receiveShadow = false
+      scene.add(mesh)
+    }
+    const plain = new Mesh(groundGeo, plainMat)
+    lay(plain, cx, -0.08, cz, span * 2.6, span * 2.4)
+    const west = new Mesh(groundGeo, waterMat)
+    lay(west, layout.bounds.minX - span * 1.15, -0.18, cz, span * 2.8, span * 5.2)
+    // Opening camera sits on +z, so the far shore is world −z.
+    const inlet = new Mesh(groundGeo, waterMat)
+    lay(inlet, cx + span * 0.15, -0.22, layout.bounds.minZ - span * 2.05, span * 5.4, span * 2.6)
     const ground = new Mesh(groundGeo, grassMat)
     ground.rotation.x = -Math.PI / 2
     ground.position.set(cx, 0, cz)
     ground.scale.set(lawnW, lawnD, 1)
     ground.receiveShadow = true
     scene.add(ground)
+    const cone = new ConeGeometry(1, 1, 7)
+    geos.push(cone)
+    const rockMat = new MeshStandardMaterial({ color: '#8d8172', roughness: 0.94, metalness: 0 })
+    rockMat.userData.hex = '#8d8172'
+    mats.push(rockMat)
+    const ridgeMat = new MeshStandardMaterial({ color: '#7f8b78', roughness: 0.92, metalness: 0 })
+    ridgeMat.userData.hex = '#7f8b78'
+    mats.push(ridgeMat)
+    const ridgeZ = layout.bounds.minZ - 42
+    const ridges: { dx: number; dz: number; r: number; h: number; rock: boolean }[] = [
+      { dx: -0.62, dz: 4, r: 14, h: 26, rock: true },
+      { dx: -0.34, dz: -6, r: 11, h: 34, rock: false },
+      { dx: -0.06, dz: 2, r: 16, h: 22, rock: true },
+      { dx: 0.22, dz: -8, r: 12, h: 36, rock: false },
+      { dx: 0.48, dz: 0, r: 14, h: 28, rock: true },
+      { dx: 0.74, dz: -5, r: 10, h: 20, rock: false },
+    ]
+    for (const ridge of ridges) {
+      const mesh = new Mesh(cone, ridge.rock ? rockMat : ridgeMat)
+      mesh.scale.set(ridge.r, ridge.h, ridge.r)
+      // ConeGeometry is centered, so half the scaled height puts the base on the plain.
+      mesh.position.set(cx + ridge.dx * span, ridge.h / 2 - 0.6, ridgeZ + ridge.dz)
+      mesh.castShadow = false
+      mesh.receiveShadow = false
+      scene.add(mesh)
+    }
 
     const walkMat = new MeshStandardMaterial({ color: '#d7d1c4', roughness: 0.96 })
     walkMat.userData.hex = '#d7d1c4'
@@ -387,7 +432,7 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
     let cancelled = false
     let frame = 0
     let stop = false
-    const sunDir = new Vector3(-0.72, 1.7, 0.62).normalize()
+    let dragging = false
     const tick = () => {
       if (stop) return
       frame = requestAnimationFrame(tick)
@@ -397,18 +442,9 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
         camera.position.y += lift
         controls.target.y += lift
       }
-      const distNow = camera.position.distanceTo(controls.target)
-      const reach = Math.min(span * 1.25, Math.max(16, distNow * 1.25))
-      sun.target.position.set(controls.target.x, 0, controls.target.z)
-      sun.position.copy(sun.target.position).addScaledVector(sunDir, span * 2.2)
-      shadow.left = -reach
-      shadow.right = reach
-      shadow.top = reach
-      shadow.bottom = -reach
-      shadow.updateProjectionMatrix()
       renderer.render(scene, camera)
       labels.render(scene, camera)
-      settleLabels(host)
+      if (!dragging) settleLabels(host)
     }
 
     const resize = () => {
@@ -431,7 +467,7 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
       ndc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
       raycaster.setFromCamera(ndc, camera)
       const hits = raycaster.intersectObjects([...groups, ...pads], true)
-      return hits.length ? partOf(hits[0].object) : null
+      return hits.length ? pickTarget(hits[0].object) : null
     }
     let downX = 0
     let downY = 0
@@ -442,11 +478,12 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
     const onUp = (event: PointerEvent) => {
       if (event.button !== 0) return
       if (Math.hypot(event.clientX - downX, event.clientY - downY) > 5) return
-      onSelectRef.current(pick(event))
+      const hit = pick(event)
+      onSelectRef.current(hit?.part ?? null, hit?.symbol ?? null)
     }
     const onMove = (event: PointerEvent) => {
       if (event.buttons) return
-      onHoverRef.current(pick(event))
+      onHoverRef.current(pick(event)?.part ?? null)
     }
     const onLeave = () => onHoverRef.current(null)
     const onDouble = (event: MouseEvent) => {
@@ -490,18 +527,22 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
     renderer.domElement.addEventListener('dblclick', onDouble)
     const onMenu = (event: Event) => event.preventDefault()
     renderer.domElement.addEventListener('contextmenu', onMenu)
-    const onDragStart = () => host.classList.add('is-drag')
-    const onDragEnd = () => host.classList.remove('is-drag')
+    const onDragStart = () => {
+      dragging = true
+      host.classList.add('is-drag')
+    }
+    const onDragEnd = () => {
+      dragging = false
+      host.classList.remove('is-drag')
+      settleLabels(host)
+    }
     controls.addEventListener('start', onDragStart)
     controls.addEventListener('end', onDragEnd)
 
     const loader = new TextureLoader()
-    const files = [...new Set([
-      ...Object.values(TEX).flatMap((spec) => [spec.upper, spec.base].filter((name): name is string => Boolean(name))),
-      'sky.jpg',
-      'lawn.jpg',
-      'park.jpg',
-    ])]
+    const files = [...new Set(
+      Object.values(TEX).flatMap((spec) => [spec.upper, spec.base].filter((name): name is string => Boolean(name))),
+    )]
     const loadOne = async (file: string): Promise<[string, Texture | null]> => {
       try {
         const tex = await loader.loadAsync(`${import.meta.env.BASE_URL}ship/campus/${file}`)
@@ -544,36 +585,6 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
           maps.push(tex)
         }
       })
-
-      const maxAniso = renderer.capabilities.getMaxAnisotropy()
-      const skyTex = loaded.get('sky.jpg')
-      if (skyTex) {
-        skyTex.colorSpace = SRGBColorSpace
-        skyTex.wrapS = RepeatWrapping
-        skyTex.wrapT = ClampToEdgeWrapping
-        skyTex.anisotropy = maxAniso
-        skyMat.map = skyTex
-        skyMat.needsUpdate = true
-        const envPhoto = skyTex.clone()
-        envPhoto.mapping = EquirectangularReflectionMapping
-        envPhoto.colorSpace = SRGBColorSpace
-        envPhoto.needsUpdate = true
-        maps.push(envPhoto)
-        const nextEnv = pmrem.fromEquirectangular(envPhoto).texture
-        scene.environment = nextEnv
-        maps.push(nextEnv)
-      }
-      const lawnTex = loaded.get('lawn.jpg')
-      if (lawnTex) {
-        lawnTex.colorSpace = SRGBColorSpace
-        lawnTex.wrapS = MirroredRepeatWrapping
-        lawnTex.wrapT = MirroredRepeatWrapping
-        lawnTex.anisotropy = maxAniso
-        lawnTex.repeat.set(lawnW / 16, lawnD / 16)
-        grassMat.map = lawnTex
-        grassMat.color.set('#ffffff')
-        grassMat.needsUpdate = true
-      }
 
       const sourceFor = (kind: FacadeKind, slot: 'upper' | 'base') => {
         const spec = TEX[kind]
@@ -707,6 +718,7 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
         const group = new Group()
         group.position.set(building.x, 0, building.z)
         group.userData.part = building.part
+        group.userData.symbol = building.symbol
         group.userData.color = sector?.color || '#ffffff'
         group.userData.height = building.height
         group.userData.focus = new Vector3(building.x, building.height * 0.42, building.z)
@@ -938,19 +950,6 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
       camera.position.set(cx, targetY, cz).addScaledVector(eye, dist)
       controls.minDistance = MIN_ZOOM
       controls.maxDistance = dist * 2.35
-      const parkTex = loaded.get('park.jpg')
-      const farSpan = Math.max(span * 14, dist * 6)
-      far.scale.set(farSpan, farSpan, 1)
-      if (parkTex) {
-        parkTex.colorSpace = SRGBColorSpace
-        parkTex.wrapS = MirroredRepeatWrapping
-        parkTex.wrapT = MirroredRepeatWrapping
-        parkTex.anisotropy = maxAniso
-        parkTex.repeat.set(Math.max(1, farSpan / 160), Math.max(1, farSpan / 160))
-        farMat.map = parkTex
-        farMat.color.set('#ffffff')
-        farMat.needsUpdate = true
-      }
       dropPmrem()
       controls.update()
       const polar = controls.getPolarAngle()
@@ -1003,7 +1002,7 @@ export function ShipCampus({ sectors, active, hover, onSelect, onHover }: Props)
       className="dga-campus"
       data-campus="mount"
       role="img"
-      aria-label="Portfolio campus. Drag to rotate. Scroll or pinch to zoom into a building. Double-click a building to move closer. Each building is a company."
+      aria-label="Portfolio city. Drag to rotate. Scroll or pinch to zoom into a building. Double-click a building to move closer. Click a building for its statements."
     />
   )
 }

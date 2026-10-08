@@ -382,7 +382,7 @@ export const FLOW_ROOT: FlowNode = {
     {
       id: 'lab',
       label: 'Lab',
-      hint: 'Credit, transcripts, Munger, merger arb, and the ship.',
+      hint: 'Credit, transcripts, Munger, merger arb, and the city.',
       to: '/credit',
       children: [
         { id: 'credit', label: 'Credit', hint: 'Bond issuers and a typed-in book.', to: '/credit' },
@@ -396,8 +396,8 @@ export const FLOW_ROOT: FlowNode = {
         },
         {
           id: 'ship',
-          label: 'Ship',
-          hint: 'The book as a vessel. The sea follows the S&P.',
+          label: 'City',
+          hint: 'The book as a city. Buildings follow market cap.',
           to: '/ship',
         },
       ],

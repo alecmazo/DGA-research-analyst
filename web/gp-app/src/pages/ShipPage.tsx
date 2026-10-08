@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/api'
-import { fmtUsd } from '@/lib/format'
+import { fmtCap, fmtUsd } from '@/lib/format'
 import type { ShipHolding, ShipSector } from './ship/ShipScene'
 import type { ShipPart } from './ship/pins'
 import styles from './ShipPage.module.css'
@@ -81,29 +81,110 @@ function weightText(n: number): string {
   return Number.isInteger(rounded) ? `${rounded.toFixed(0)}%` : `${rounded.toFixed(1)}%`
 }
 
+type MoneyBlock = Record<string, number | null | undefined>
+
+type CompanyCard = {
+  symbol?: string
+  statement_symbol?: string | null
+  name?: string | null
+  period_end?: string | null
+  balance_sheet?: MoneyBlock | null
+  income?: MoneyBlock | null
+  cash_flow?: MoneyBlock | null
+}
+
+function knownMoney(value: number | null | undefined): boolean {
+  return value != null && Number.isFinite(Number(value))
+}
+
+function moneyLine(label: string, value: number | null | undefined) {
+  if (!knownMoney(value)) return null
+  return (
+    <div className={styles.line}>
+      <span>{label}</span>
+      <span>{fmtCap(value)}</span>
+    </div>
+  )
+}
+
+function Structure({ sheet }: { sheet: MoneyBlock }) {
+  const equity = sheet.equity
+  const debt = sheet.debt
+  const assets = sheet.total_assets
+  if (!knownMoney(equity) || !knownMoney(debt) || !knownMoney(assets)) return null
+  if (!(equity! > 0 && debt! > 0 && assets! > 0)) return null
+  if (equity! + debt! > assets! * 1.05) return null
+  return (
+    <div className={styles.stack} aria-label="Balance sheet structure">
+      <i style={{ width: `${(equity! / assets!) * 100}%`, background: '#2ec4a6' }} />
+      <i style={{ width: `${(debt! / assets!) * 100}%`, background: '#c98b4a' }} />
+    </div>
+  )
+}
+
 export function ShipPage() {
   const [book, setBook] = useState<ShipBook | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [active, setActive] = useState<string | null>(null)
   const [hover, setHover] = useState<string | null>(null)
+  const [symbol, setSymbol] = useState<string | null>(null)
+  const [card, setCard] = useState<CompanyCard | null>(null)
+  const [cardErr, setCardErr] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
-    api<ShipBook>('/api/v2/gp/portfolio-ship')
-      .then((data) => {
-        if (alive) setBook(data)
-      })
-      .catch((error: unknown) => {
-        if (alive) setErr(error instanceof Error ? error.message : 'Could not load the book')
-      })
+    let ticket = 0
+    const load = () => {
+      const mine = ++ticket
+      api<ShipBook>('/api/v2/gp/portfolio-ship')
+        .then((data) => {
+          if (!alive || mine !== ticket) return
+          setBook(data)
+          setErr(null)
+        })
+        .catch((error: unknown) => {
+          if (alive && mine === ticket) setErr(error instanceof Error ? error.message : 'Could not load the book')
+        })
+    }
+    load()
+    const onVis = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    window.addEventListener('focus', load)
+    document.addEventListener('visibilitychange', onVis)
     return () => {
       alive = false
+      window.removeEventListener('focus', load)
+      document.removeEventListener('visibilitychange', onVis)
     }
   }, [])
 
   useEffect(() => {
+    if (!symbol) {
+      setCard(null)
+      setCardErr(null)
+      return
+    }
+    let alive = true
+    setCard(null)
+    setCardErr(null)
+    api<CompanyCard>(`/api/v2/gp/portfolio-ship/company/${encodeURIComponent(symbol)}`)
+      .then((data) => {
+        if (alive) setCard(data)
+      })
+      .catch(() => {
+        if (alive) setCardErr('Statements could not be read.')
+      })
+    return () => {
+      alive = false
+    }
+  }, [symbol])
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setActive(null)
+      if (event.key !== 'Escape') return
+      setActive(null)
+      setSymbol(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -115,17 +196,36 @@ export function ShipPage() {
     () => sectors.find((sector) => sector.part === active) || null,
     [sectors, active],
   )
+  const picked = useMemo(() => {
+    if (!symbol) return null
+    for (const sector of sectors) {
+      const holding = sector.holdings.find((row) => row.symbol === symbol)
+      if (holding) return { sector, holding }
+    }
+    return null
+  }, [sectors, symbol])
+  const clear = () => {
+    setActive(null)
+    setSymbol(null)
+  }
+  const statementsReady = Boolean(card) || Boolean(cardErr)
+  const statementMissing = Boolean(
+    card && !card.balance_sheet && !card.income && !card.cash_flow,
+  )
 
   return (
     <div className={styles.page} data-ship>
       <div className={styles.stage}>
         {(book || preview) ? (
-          <Suspense fallback={<div className={styles.opening}>Opening the campus…</div>}>
+          <Suspense fallback={<div className={styles.opening}>Opening the city…</div>}>
             <ShipCampus
               sectors={sectors}
               active={active}
               hover={hover}
-              onSelect={setActive}
+              onSelect={(part, next) => {
+                setActive(part)
+                setSymbol(next)
+              }}
               onHover={setHover}
             />
           </Suspense>
@@ -140,10 +240,10 @@ export function ShipPage() {
       <aside className={styles.aside}>
         <div>
           <p className={styles.kicker}>Lab</p>
-          <h1>Portfolio Campus</h1>
+          <h1>Portfolio City</h1>
         </div>
         <p className={styles.note}>
-          Each building is one company. Each neighborhood is one sector. Height and footprint follow
+          Each building is one company. Each district is one sector. Height and footprint follow
           public market cap. A company without a published market cap stays modest.
           {book?.as_of ? ` Book as of ${book.as_of}.` : ''}
         </p>
@@ -159,7 +259,10 @@ export function ShipPage() {
                 type="button"
                 className={active === sector.part ? styles.on : undefined}
                 aria-label={`Show ${sector.name}`}
-                onClick={() => setActive(sector.part)}
+                onClick={() => {
+                  setActive(sector.part)
+                  setSymbol(null)
+                }}
                 onMouseEnter={() => setHover(sector.part)}
                 onMouseLeave={() => setHover(null)}
                 onFocus={() => setHover(sector.part)}
@@ -172,15 +275,80 @@ export function ShipPage() {
             </li>
           ))}
         </ul>
-        <div className={selected ? `${styles.panel} open` : styles.panel}>
-          {!selected && <p className={styles.hint}>Select a neighborhood to see the companies in that sector.</p>}
-          {selected && (
+        <div className={selected || symbol ? `${styles.panel} open` : styles.panel}>
+          {!selected && !symbol && (
+            <p className={styles.hint}>Select a district, or click a building to read that company.</p>
+          )}
+          {symbol && (
             <>
-              <p className={styles.part}>Neighborhood</p>
+              <p className={styles.part}>Company</p>
+              <h2>
+                <span className={styles.dot} style={{ background: picked?.sector.color || '#9fb4c8' }} />
+                {picked?.holding.name || card?.name || symbol}
+                <button type="button" className={styles.close} aria-label="Close panel" onClick={clear}>
+                  ×
+                </button>
+              </h2>
+              <p className={styles.head}>{symbol}</p>
+              <p className={styles.dollars}>
+                {knownMoney(picked?.holding.market_cap) && Number(picked?.holding.market_cap) > 0
+                  ? `Market cap ${fmtCap(picked?.holding.market_cap)}`
+                  : 'Market cap not published'}
+              </p>
+              {book?.show_dollars && picked?.holding.market_value != null && (
+                <p className={styles.dollars}>{fmtUsd(picked.holding.market_value)}</p>
+              )}
+              {!statementsReady && <p className={styles.hint}>Reading statements…</p>}
+              {cardErr && <p className={styles.note}>{cardErr}</p>}
+              {card?.statement_symbol && card.statement_symbol !== symbol && (
+                <p className={styles.note}>Statements are for {card.statement_symbol}.</p>
+              )}
+              {statementMissing && <p className={styles.note}>Statements are not on file.</p>}
+              {card?.balance_sheet && (
+                <>
+                  <p className={styles.part}>Balance sheet</p>
+                  <Structure sheet={card.balance_sheet} />
+                  <div className={styles.lines}>
+                    {moneyLine('Cash', card.balance_sheet.cash)}
+                    {moneyLine('Assets', card.balance_sheet.total_assets)}
+                    {moneyLine('Liabilities', card.balance_sheet.total_liabilities)}
+                    {moneyLine('Equity', card.balance_sheet.equity)}
+                    {moneyLine('Debt', card.balance_sheet.debt)}
+                  </div>
+                </>
+              )}
+              {card?.income && (
+                <>
+                  <p className={styles.part}>Profit and loss</p>
+                  <div className={styles.lines}>
+                    {moneyLine('Revenue', card.income.revenue)}
+                    {moneyLine('Operating income', card.income.operating_income)}
+                    {moneyLine('Net income', card.income.net_income)}
+                  </div>
+                </>
+              )}
+              {card?.cash_flow && (
+                <>
+                  <p className={styles.part}>Cash flow</p>
+                  <div className={styles.lines}>
+                    {moneyLine('Operating cash flow', card.cash_flow.operating)}
+                    {moneyLine('Capex', card.cash_flow.capex)}
+                    {moneyLine('Free cash flow', card.cash_flow.free_cash_flow)}
+                  </div>
+                </>
+              )}
+              {card?.period_end && (
+                <p className={styles.hint}>Annual period ending {card.period_end}.</p>
+              )}
+            </>
+          )}
+          {selected && !symbol && (
+            <>
+              <p className={styles.part}>District</p>
               <h2>
                 <span className={styles.dot} style={{ background: selected.color }} />
                 {selected.name}
-                <button type="button" className={styles.close} aria-label="Close panel" onClick={() => setActive(null)}>
+                <button type="button" className={styles.close} aria-label="Close panel" onClick={clear}>
                   ×
                 </button>
               </h2>
@@ -193,12 +361,17 @@ export function ShipPage() {
               )}
               <div className={styles.chips}>
                 {selected.holdings.map((holding) => (
-                  <span key={holding.symbol} className={styles.chip}>
+                  <button
+                    key={holding.symbol}
+                    type="button"
+                    className={styles.chipBtn}
+                    onClick={() => setSymbol(holding.symbol)}
+                  >
                     {holding.symbol} {weightText(holding.weight_pct)}
                     {book?.show_dollars && holding.market_value != null
                       ? ` · ${fmtUsd(holding.market_value)}`
                       : ''}
-                  </span>
+                  </button>
                 ))}
               </div>
               <p className={styles.note}>{selected.rationale}</p>

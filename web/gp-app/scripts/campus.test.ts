@@ -49,6 +49,14 @@ describe('campus scale', () => {
     assert.ok(large.height / buildingScale(1e8).height > 4)
     assert.ok(buildingScale(1e12).height / buildingScale(1e10).height < 3)
   })
+
+  it('makes a bank much taller than a preferred', () => {
+    const bank = buildingScale(2.5e11)
+    const preferred = buildingScale(8e8)
+    assert.ok(bank.height > preferred.height * 1.8)
+    assert.ok(bank.foot > preferred.foot)
+    assert.ok(preferred.height > buildingScale(null).height)
+  })
 })
 
 describe('campus layout', () => {

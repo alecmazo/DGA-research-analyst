@@ -10,8 +10,10 @@ live here. GICS classification stays in portfolio_classify.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
+from datetime import date, datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -206,8 +208,34 @@ def _is_stern(sym: str) -> bool:
     return sym in STERN or _is_gse(sym)
 
 
-def part_for(symbol: str | None) -> str:
-    """Story part. This is not a GICS assignment."""
+# Yahoo's sector names, used only when a new symbol is not on the hand map.
+_YAHOO_SECTOR = {
+    "Technology": "Information Technology",
+    "Information Technology": "Information Technology",
+    "Financial Services": "Financials",
+    "Financials": "Financials",
+    "Healthcare": "Health Care",
+    "Health Care": "Health Care",
+    "Consumer Cyclical": "Consumer Discretionary",
+    "Consumer Discretionary": "Consumer Discretionary",
+    "Consumer Defensive": "Consumer Staples",
+    "Consumer Staples": "Consumer Staples",
+    "Basic Materials": "Materials",
+    "Materials": "Materials",
+    "Real Estate": "Real Estate",
+    "Communication Services": "Communication Services",
+    "Energy": "Energy",
+    "Utilities": "Utilities",
+    "Industrials": "Industrials",
+}
+
+
+def part_for(symbol: str | None, sector_fn=None) -> str:
+    """Story part. This is not a GICS assignment.
+
+    sector_fn is asked only for a symbol the hand map does not know.
+    A known sleeve never moves because a lookup returned something else.
+    """
     sym = _symbol(symbol)
     if not sym:
         return "deck"
@@ -222,6 +250,15 @@ def part_for(symbol: str | None) -> str:
     info = classify(sym)
     if info.get("archetype") == "aero_gantry":
         return "aero"
+    note = info.get("industry_note") or ""
+    if sector_fn is not None and "not on the hand map" in note:
+        try:
+            looked = sector_fn(sym)
+        except Exception:
+            looked = None
+        mapped = SECTOR_PART.get(_YAHOO_SECTOR.get(str(looked or ""), looked or ""))
+        if mapped:
+            return mapped
     return SECTOR_PART.get(info["sector"], "deck")
 
 
@@ -280,6 +317,7 @@ def build_ship(
     *,
     privacy: bool,
     caps: dict | None = None,
+    sector_fn=None,
 ) -> dict:
     """Group the open book onto the ship. Drop a part with no weight.
 
@@ -303,10 +341,12 @@ def build_ship(
         if name and not slot["name"]:
             slot["name"] = name
     total = sum(slot["market_value"] for slot in rolled.values())
+    for slot in rolled.values():
+        slot["part"] = part_for(slot["symbol"], sector_fn)
     grouped: dict[str, list[dict]] = {part: [] for part in PARTS}
     for slot in rolled.values():
         weight = (slot["market_value"] / total * 100.0) if total else 0.0
-        grouped[part_for(slot["symbol"])].append({
+        grouped[slot["part"]].append({
             "symbol": slot["symbol"],
             "name": slot["name"] or slot["symbol"],
             "weight_pct": round(weight, 2),
@@ -323,7 +363,7 @@ def build_ship(
         part_value = sum(
             slot["market_value"]
             for slot in rolled.values()
-            if part_for(slot["symbol"]) == part
+            if slot.get("part") == part
         )
         sectors.append({
             "id": meta["id"],
@@ -404,8 +444,9 @@ def market_cap_from_nasdaq(payload) -> float | None:
 _ETF = frozenset({"SPY", "IWM", "QQQM", "QQQ", "VOO", "VTI", "IVV"})
 _CAP_CACHE: dict[str, tuple[float, float | None]] = {}
 _CAP_LOCK = threading.Lock()
-_CAP_TTL = 6 * 3600
-_CAP_DOWN_UNTIL = 0.0
+_CAP_TTL_HIT = 6 * 3600
+_CAP_TTL_MISS = 15 * 60
+_SECTOR_CACHE: dict[str, tuple[float, str | None]] = {}
 
 
 def _nasdaq_symbol(symbol: str) -> str:
@@ -430,8 +471,31 @@ def _symbols_in(book: dict) -> list[str]:
     return seen
 
 
-def _fetch_one_cap(symbol: str) -> tuple[str, float | None, bool]:
-    """Return symbol, cap, and whether the answer is worth caching."""
+def _quote_symbols(symbol: str) -> list[str]:
+    """Broker spelling first, then the quote symbol a preferred actually trades under."""
+    sym = _symbol(symbol)
+    found: list[str] = []
+
+    def add(item: str | None) -> None:
+        text = _symbol(item)
+        if text and text not in found:
+            found.append(text)
+
+    add(sym)
+    try:
+        from api.server import _resolve_ticker_alias
+        add(_resolve_ticker_alias(sym))
+    except Exception:
+        pass
+    preferred = re.fullmatch(r"([A-Z]{1,5})PR([A-Z])", sym)
+    if preferred:
+        add(f"{preferred.group(1)}-P{preferred.group(2)}")
+    if sym.endswith("PF") and len(sym) > 3:
+        add(f"{sym[:-2]}-PF")
+    return found
+
+
+def _nasdaq_cap(symbol: str) -> float | None:
     asset = "etf" if symbol in _ETF else "stocks"
     nasdaq = quote(_nasdaq_symbol(symbol), safe=".")
     url = f"https://api.nasdaq.com/api/quote/{nasdaq}/summary?assetclass={asset}"
@@ -440,74 +504,249 @@ def _fetch_one_cap(symbol: str) -> tuple[str, float | None, bool]:
         response = requests.get(
             url,
             headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-            timeout=(1.2, 2.0),
+            timeout=(1.2, 2.2),
         )
     except Exception:
-        return symbol, None, False
-    if response.status_code == 404:
-        return symbol, None, True
+        return None
     if response.status_code != 200:
-        return symbol, None, False
+        return None
     try:
-        value = market_cap_from_nasdaq(response.json())
+        return market_cap_from_nasdaq(response.json())
     except Exception:
-        return symbol, None, False
-    return symbol, value, True
+        return None
+
+
+def _yahoo_cap(symbol: str) -> float | None:
+    """Public market cap when Nasdaq has no field. Never raises."""
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        raw = None
+        info = getattr(ticker, "fast_info", None)
+        if info is not None:
+            raw = info.get("market_cap") if hasattr(info, "get") else getattr(info, "market_cap", None)
+        if not raw:
+            slow = getattr(ticker, "info", None) or {}
+            raw = slow.get("marketCap")
+        return parse_market_cap(raw)
+    except Exception:
+        return None
+
+
+def _fetch_one_cap(symbol: str) -> tuple[str, float | None]:
+    """Try the broker symbol and its quote alias. A miss is cached only briefly."""
+    for quote_sym in _quote_symbols(symbol):
+        value = _nasdaq_cap(quote_sym)
+        if value:
+            return symbol, value
+    for quote_sym in _quote_symbols(symbol):
+        value = _yahoo_cap(quote_sym)
+        if value:
+            return symbol, value
+    return symbol, None
 
 
 def fetch_market_caps(symbols: list[str]) -> dict[str, float | None]:
     """Best-effort public market caps. Never raises. Missing stays None.
 
-    Yahoo's quote endpoint rejects this host. Nasdaq's summary field is the
-    public cap. Cash is skipped. A failed batch does not cache, so the next
-    page load can try again. A process-wide pause avoids stalling every
-    request when Nasdaq is down.
+    Cash is skipped. A found cap is kept for hours. A miss is kept for a
+    short while so the next page load can try again. One slow quote does
+    not blank the caps that already came back.
     """
-    global _CAP_DOWN_UNTIL
     now = time.time()
     out: dict[str, float | None] = {}
     need: list[str] = []
     with _CAP_LOCK:
-        if now < _CAP_DOWN_UNTIL:
-            return {sym: None for sym in symbols}
         for sym in symbols:
             if not sym or sym in CASH_PART:
                 out[sym] = None
                 continue
             hit = _CAP_CACHE.get(sym)
-            if hit and now - hit[0] < _CAP_TTL:
+            ttl = _CAP_TTL_HIT if hit and hit[1] else _CAP_TTL_MISS
+            if hit and now - hit[0] < ttl:
                 out[sym] = hit[1]
             elif sym not in need:
                 need.append(sym)
     if not need:
         return out
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    errors = 0
-    found = 0
-    attempts = 0
-    pool = ThreadPoolExecutor(max_workers=6)
+    pool = ThreadPoolExecutor(max_workers=8)
     futures = [pool.submit(_fetch_one_cap, sym) for sym in need]
     try:
-        for fut in as_completed(futures, timeout=3.5):
-            sym, value, cacheable = fut.result()
-            attempts += 1
+        for fut in as_completed(futures, timeout=12):
+            sym, value = fut.result()
             out[sym] = value
-            if value:
-                found += 1
-            if not cacheable:
-                errors += 1
-            elif cacheable:
-                with _CAP_LOCK:
-                    _CAP_CACHE[sym] = (time.time(), value)
+            with _CAP_LOCK:
+                _CAP_CACHE[sym] = (time.time(), value)
     except TimeoutError:
         pass
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-    if need and found == 0 and attempts and errors == attempts:
-        _CAP_DOWN_UNTIL = time.time() + 600
     for sym in need:
         out.setdefault(sym, None)
     return out
+
+
+def _yahoo_sector(symbol: str) -> str | None:
+    """Sector for a symbol the hand map does not list. Cached. Never raises."""
+    sym = _symbol(symbol)
+    if not sym:
+        return None
+    now = time.time()
+    hit = _SECTOR_CACHE.get(sym)
+    if hit and now - hit[0] < _CAP_TTL_HIT:
+        return hit[1]
+    sector = None
+    try:
+        import yfinance as yf
+        quote_sym = _quote_symbols(sym)[-1]
+        info = yf.Ticker(quote_sym).info or {}
+        raw = str(info.get("sector") or "")
+        sector = _YAHOO_SECTOR.get(raw)
+    except Exception:
+        sector = None
+    _SECTOR_CACHE[sym] = (now, sector)
+    return sector
+
+
+_STATEMENT_FIELDS = (
+    "revenue", "operating_income", "net_income",
+    "operating_cash_flow", "capex", "free_cash_flow",
+    "cash", "total_assets", "total_liabilities",
+    "stockholders_equity", "total_debt", "long_term_debt", "short_term_debt",
+)
+
+
+def statement_candidates(symbol: str | None) -> list[str]:
+    """Ticker to look up, then the common stock when this line is a preferred."""
+    sym = _symbol(symbol)
+    found: list[str] = []
+
+    def add(item: str | None) -> None:
+        text = _symbol(item)
+        if text and text not in found:
+            found.append(text)
+
+    add(sym)
+    preferred = re.fullmatch(r"([A-Z]{1,5})PR[A-Z]", sym)
+    if preferred:
+        add(preferred.group(1))
+    dashed = re.fullmatch(r"([A-Z]{1,5})-P[A-Z]+", sym)
+    if dashed:
+        add(dashed.group(1))
+    if sym.endswith("PF") and len(sym) > 3:
+        add(sym[:-2])
+    return found
+
+
+def choose_statement_row(rows: list | None) -> dict | None:
+    """Prefer a complete annual statement. Skip a row with no figures."""
+    pool = [row for row in (rows or []) if isinstance(row, dict)]
+    annual = [row for row in pool if str(row.get("period_type") or "") == "annual"]
+    if annual:
+        pool = annual
+
+    def score(row: dict) -> int:
+        return sum(1 for key in _STATEMENT_FIELDS if _num(row.get(key)) is not None)
+
+    best = None
+    best_score = 0
+    for row in pool:
+        ranked = score(row)
+        if ranked > best_score:
+            best = row
+            best_score = ranked
+    return best
+
+
+def _iso_day(value) -> str | None:
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    text = str(value or "").strip()
+    return text[:10] if text else None
+
+
+def build_company_card(symbol: str | None, rows_fn) -> dict:
+    """Public statements for one building. No position value is included."""
+    sym = _symbol(symbol)
+    for candidate in statement_candidates(sym):
+        try:
+            rows = rows_fn(candidate) if rows_fn else None
+        except Exception:
+            rows = None
+        chosen = choose_statement_row(rows)
+        if not chosen:
+            continue
+        debt = _num(chosen.get("total_debt"))
+        if debt is None:
+            long_debt = _num(chosen.get("long_term_debt"))
+            short_debt = _num(chosen.get("short_term_debt"))
+            if long_debt is not None or short_debt is not None:
+                debt = (long_debt or 0.0) + (short_debt or 0.0)
+        return {
+            "ok": True,
+            "symbol": sym,
+            "statement_symbol": candidate,
+            "name": (chosen.get("entity_name") or "").strip() or None,
+            "period_end": _iso_day(chosen.get("period_end")),
+            "balance_sheet": {
+                "cash": _money(chosen.get("cash")),
+                "total_assets": _money(chosen.get("total_assets")),
+                "total_liabilities": _money(chosen.get("total_liabilities")),
+                "equity": _money(chosen.get("stockholders_equity")),
+                "debt": _money(debt),
+            },
+            "income": {
+                "revenue": _money(chosen.get("revenue")),
+                "operating_income": _money(chosen.get("operating_income")),
+                "net_income": _money(chosen.get("net_income")),
+            },
+            "cash_flow": {
+                "operating": _money(chosen.get("operating_cash_flow")),
+                "capex": _money(chosen.get("capex")),
+                "free_cash_flow": _money(chosen.get("free_cash_flow")),
+            },
+        }
+    return {
+        "ok": True,
+        "symbol": sym,
+        "statement_symbol": None,
+        "name": None,
+        "period_end": None,
+        "balance_sheet": None,
+        "income": None,
+        "cash_flow": None,
+    }
+
+
+def _money(value) -> float | None:
+    number = _num(value)
+    if number is None:
+        return None
+    return round(number, 2)
+
+
+def _statement_rows(ticker: str) -> list[dict]:
+    from api.server import _RealDictCursor, _fund_conn
+    with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT entity_name, period_type, period_end,
+                   revenue, operating_income, net_income,
+                   operating_cash_flow, capex, free_cash_flow,
+                   cash, total_assets, total_liabilities,
+                   stockholders_equity, total_debt,
+                   long_term_debt, short_term_debt
+              FROM company_financials
+             WHERE ticker = %s
+             ORDER BY period_end DESC
+             LIMIT 12
+            """,
+            (ticker,),
+        )
+        return [dict(row) for row in (cur.fetchall() or [])]
 
 
 def create_router(claims_fn, *, positions_fn=None, spx_fn=None, caps_fn=None) -> APIRouter:
@@ -544,10 +783,19 @@ def create_router(claims_fn, *, positions_fn=None, spx_fn=None, caps_fn=None) ->
                 found = None
             if not isinstance(found, dict):
                 found = None
-        payload = build_ship(book, _num(spx), privacy=hide, caps=found)
+        payload = build_ship(book, _num(spx), privacy=hide, caps=found, sector_fn=_yahoo_sector)
         if positions_fn is None and key is not None:
             from api.server import _user_cache_put
             _user_cache_put(key, payload)
         return payload
+
+    @router.get("/api/v2/gp/portfolio-ship/company/{symbol}")
+    def portfolio_ship_company(symbol: str, request: Request):
+        claims_fn(request)
+        try:
+            card = build_company_card(symbol, _statement_rows)
+        except Exception:
+            card = build_company_card(symbol, lambda _ticker: [])
+        return card
 
     return router

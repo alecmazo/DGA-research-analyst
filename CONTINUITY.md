@@ -311,6 +311,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Letter mail** | **`ui728-20261008-letter-mail`** | Publishing a quarterly-letter section emails the investors assigned to that account, and the section is in the message. An account with no investor login emails the GP who confirmed. Demo logins are not recipients. |
 | **Portfolio campus** | **`ui729-20261008-campus`** | The ship page is the daylight campus. One building per company, sized by public market cap. Drag rotates, scroll zooms into a building, and a double-click frames that building. The right pane still selects the neighborhood. |
 | **LP roster** | **`ui730-20261008-lp-roster`** | Settings keeps every LP login. Edit shows the managed accounts already assigned to that person, and Save does not clear them or remove anyone else. |
+| **Portfolio city** | **`ui731-20261008-city-view`** | The ship page is labeled City. Buildings follow public market cap, and a click on one building shows that company's market cap, balance sheet, profit and loss, and cash flow. The ground is a coastal plain. The night-city route stays off. |
 
 ### One-click handoff (preferred)
 
@@ -508,4 +509,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-08 · Agent: Grok Build · Built: `ui730-20261008-lp-roster` · Live until the next upload: `ui729-20261008-campus` · Next: `ui731-YYYYMMDD-slug`*
+*Last updated: 2026-10-08 · Agent: Grok Build · Built: `ui731-20261008-city-view` · Live until the next upload: `ui730-20261008-lp-roster` · Next: `ui732-YYYYMMDD-slug`*
