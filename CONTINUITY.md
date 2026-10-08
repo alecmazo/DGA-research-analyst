@@ -307,6 +307,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Ship plates** | **`ui724-20261007-ship-real`** | The ship is a photoreal plate. Clear, flat, and storm stills crossfade with the S&P day move. Held sleeves are clickable pins and the picture does not zoom. Industrials and aerospace are separate. Microsoft and the other software names sit on the bridge, Nike on Consumer Staples, Howard Hughes and the other property names on Real Estate, Uber with consumer discretionary, and the Fannie and Freddie lines stay on the stern. |
 | **Ship sea** | **`ui725-20261007-ship-live`** | The same three plates loop as muted sea video. The stills stay underneath, and a reduced-motion setting shows the stills only. Pins stay clickable and the picture does not zoom. |
 | **Ship washes** | **`ui726-20261007-ship-wash`** | The deck ship keeps its photograph. Each held sleeve is a color wash on that part of the hull, and the heavier company names sit in the wash. The sea still follows the S&P print. A click selects the sleeve and does not zoom. |
+| **Index tape** | **`ui727-20261008-index-tape`** | The desk index row shows each print and its signed day percent, green when up and red when down. A chart session date stays that session, so today's move is kept. The tape does not scroll. |
 
 ### One-click handoff (preferred)
 
@@ -504,4 +505,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-07 · Agent: Grok Build · Built: `ui726-20261007-ship-wash` · Live until the next upload: `ui725-20261007-ship-live` · Next: `ui727-YYYYMMDD-slug`*
+*Last updated: 2026-10-08 · Agent: Grok Build · Built: `ui727-20261008-index-tape` · Live until the next upload: `ui726-20261007-ship-wash` · Next: `ui728-YYYYMMDD-slug`*

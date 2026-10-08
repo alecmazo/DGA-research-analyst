@@ -251,6 +251,12 @@ def _as_of_et_date(as_of) -> str | None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.astimezone(et).date().isoformat()
         s = str(as_of).strip().replace("Z", "+00:00")
+        # Chart quotes stamp as_of as the ET session date (YYYY-MM-DD).
+        # Parsing that bare date as UTC midnight is the previous evening
+        # in New York, and the day percent is then dropped as stale.
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
+            datetime.fromisoformat(s)
+            return s
         dt = datetime.fromisoformat(s[:32])
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -8743,7 +8749,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui726-20261007-ship-wash"
+WEB_BUILD_VERSION = "ui727-20261008-index-tape"
 
 
 @app.get("/api/build")

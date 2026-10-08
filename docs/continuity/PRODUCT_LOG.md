@@ -130,7 +130,7 @@ Chrome-less windows: `/gp/report`, `/gp/research`, `/gp/valuation`.
 
 ### 5.1 Desk (`/` · `DeskPage.tsx`)
 
-Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status dot** sits after Reset layout (green = 0 open tickets, red = ≥1, hover = count). Polls `GET /api/support/open-count`.
+Free-form board (`DeskBoard`) with reset / collapse / expand. **Ticket status dot** sits after Reset layout (green = 0 open tickets, red = ≥1, hover = count). Polls `GET /api/support/open-count`. The black index row shows each print and its signed day percent, green when up and red when down. The tape does not scroll.
 
 | Card | What it does |
 |------|----------------|
