@@ -10,6 +10,9 @@ live here. GICS classification stays in portfolio_classify.
 from __future__ import annotations
 
 import json
+import threading
+import time
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -261,8 +264,28 @@ def _live_spx_pct() -> float | None:
     return None
 
 
-def build_ship(book: dict | None, spx_pct: float | None, *, privacy: bool) -> dict:
-    """Group the open book onto the ship. Drop a part with no weight."""
+def _public_cap(caps: dict | None, symbol: str) -> int | None:
+    """Public market cap in dollars. Missing and non-positive stay None."""
+    if not caps:
+        return None
+    number = _num(caps.get(symbol))
+    if number is None or number <= 0:
+        return None
+    return int(round(number))
+
+
+def build_ship(
+    book: dict | None,
+    spx_pct: float | None,
+    *,
+    privacy: bool,
+    caps: dict | None = None,
+) -> dict:
+    """Group the open book onto the ship. Drop a part with no weight.
+
+    caps maps a symbol to a public market cap. It is not a position value.
+    A symbol left out of caps is drawn as a modest building.
+    """
     book = book or {}
     rolled: dict[str, dict] = {}
     for row in book.get("positions") or []:
@@ -288,6 +311,7 @@ def build_ship(book: dict | None, spx_pct: float | None, *, privacy: bool) -> di
             "name": slot["name"] or slot["symbol"],
             "weight_pct": round(weight, 2),
             "market_value": None if privacy else round(slot["market_value"], 2),
+            "market_cap": _public_cap(caps, slot["symbol"]),
         })
 
     sectors = []
@@ -336,7 +360,157 @@ def build_ship(book: dict | None, spx_pct: float | None, *, privacy: bool) -> di
     }
 
 
-def create_router(claims_fn, *, positions_fn=None, spx_fn=None) -> APIRouter:
+def parse_market_cap(raw) -> float | None:
+    """Accept 4946697311000, '4,946,697,311,000', or '$1.2T'."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        number = float(raw)
+        if number != number or number <= 0:
+            return None
+        return number
+    text = str(raw).strip().replace("$", "").replace(",", "").replace(" ", "")
+    if not text or text.upper() in {"N/A", "NA", "NONE", "--"}:
+        return None
+    mult = 1.0
+    suffix = text[-1:].upper()
+    if suffix in {"T", "B", "M"} and len(text) > 1:
+        text = text[:-1]
+        mult = {"T": 1e12, "B": 1e9, "M": 1e6}[suffix]
+    try:
+        number = float(text) * mult
+    except ValueError:
+        return None
+    if number != number or number <= 0:
+        return None
+    return number
+
+
+def market_cap_from_nasdaq(payload) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    summary = data.get("summaryData")
+    if not isinstance(summary, dict):
+        return None
+    field = summary.get("MarketCap")
+    if not isinstance(field, dict):
+        return None
+    return parse_market_cap(field.get("value"))
+
+
+_ETF = frozenset({"SPY", "IWM", "QQQM", "QQQ", "VOO", "VTI", "IVV"})
+_CAP_CACHE: dict[str, tuple[float, float | None]] = {}
+_CAP_LOCK = threading.Lock()
+_CAP_TTL = 6 * 3600
+_CAP_DOWN_UNTIL = 0.0
+
+
+def _nasdaq_symbol(symbol: str) -> str:
+    try:
+        from api.server import _resolve_ticker_alias
+        aliased = _resolve_ticker_alias(symbol) or symbol
+    except Exception:
+        aliased = symbol
+    return str(aliased).replace("-", ".")
+
+
+def _symbols_in(book: dict) -> list[str]:
+    seen: list[str] = []
+    found: set[str] = set()
+    for row in book.get("positions") or []:
+        if not isinstance(row, dict):
+            continue
+        sym = _symbol(row.get("symbol"))
+        if sym and sym not in found:
+            found.add(sym)
+            seen.append(sym)
+    return seen
+
+
+def _fetch_one_cap(symbol: str) -> tuple[str, float | None, bool]:
+    """Return symbol, cap, and whether the answer is worth caching."""
+    asset = "etf" if symbol in _ETF else "stocks"
+    nasdaq = quote(_nasdaq_symbol(symbol), safe=".")
+    url = f"https://api.nasdaq.com/api/quote/{nasdaq}/summary?assetclass={asset}"
+    try:
+        import requests
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            timeout=(1.2, 2.0),
+        )
+    except Exception:
+        return symbol, None, False
+    if response.status_code == 404:
+        return symbol, None, True
+    if response.status_code != 200:
+        return symbol, None, False
+    try:
+        value = market_cap_from_nasdaq(response.json())
+    except Exception:
+        return symbol, None, False
+    return symbol, value, True
+
+
+def fetch_market_caps(symbols: list[str]) -> dict[str, float | None]:
+    """Best-effort public market caps. Never raises. Missing stays None.
+
+    Yahoo's quote endpoint rejects this host. Nasdaq's summary field is the
+    public cap. Cash is skipped. A failed batch does not cache, so the next
+    page load can try again. A process-wide pause avoids stalling every
+    request when Nasdaq is down.
+    """
+    global _CAP_DOWN_UNTIL
+    now = time.time()
+    out: dict[str, float | None] = {}
+    need: list[str] = []
+    with _CAP_LOCK:
+        if now < _CAP_DOWN_UNTIL:
+            return {sym: None for sym in symbols}
+        for sym in symbols:
+            if not sym or sym in CASH_PART:
+                out[sym] = None
+                continue
+            hit = _CAP_CACHE.get(sym)
+            if hit and now - hit[0] < _CAP_TTL:
+                out[sym] = hit[1]
+            elif sym not in need:
+                need.append(sym)
+    if not need:
+        return out
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    errors = 0
+    found = 0
+    attempts = 0
+    pool = ThreadPoolExecutor(max_workers=6)
+    futures = [pool.submit(_fetch_one_cap, sym) for sym in need]
+    try:
+        for fut in as_completed(futures, timeout=3.5):
+            sym, value, cacheable = fut.result()
+            attempts += 1
+            out[sym] = value
+            if value:
+                found += 1
+            if not cacheable:
+                errors += 1
+            elif cacheable:
+                with _CAP_LOCK:
+                    _CAP_CACHE[sym] = (time.time(), value)
+    except TimeoutError:
+        pass
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    if need and found == 0 and attempts and errors == attempts:
+        _CAP_DOWN_UNTIL = time.time() + 600
+    for sym in need:
+        out.setdefault(sym, None)
+    return out
+
+
+def create_router(claims_fn, *, positions_fn=None, spx_fn=None, caps_fn=None) -> APIRouter:
     router = APIRouter(tags=["portfolio-ship"])
 
     @router.get("/api/v2/gp/portfolio-ship")
@@ -353,7 +527,7 @@ def create_router(claims_fn, *, positions_fn=None, spx_fn=None) -> APIRouter:
         if positions_fn is None:
             from api.server import _user_cache_get, _user_cache_put, lp_me_positions
             user = str(claims.get("sub") or claims.get("email") or "")
-            key = ("portfolio-ship", user, "weights" if hide else "dollars", spx_key)
+            key = ("portfolio-ship", user, "weights" if hide else "dollars", spx_key, "cap")
             cached = _user_cache_get(key)
             if cached is not None:
                 return cached
@@ -361,7 +535,16 @@ def create_router(claims_fn, *, positions_fn=None, spx_fn=None) -> APIRouter:
         else:
             book = _positions_dict(positions_fn(request))
             key = None
-        payload = build_ship(book, _num(spx), privacy=hide)
+        found = None
+        if caps_fn is not None:
+            try:
+                found = caps_fn(_symbols_in(book))
+            except Exception as exc:
+                print(f"[portfolio-ship] caps failed: {exc!s:.140}", flush=True)
+                found = None
+            if not isinstance(found, dict):
+                found = None
+        payload = build_ship(book, _num(spx), privacy=hide, caps=found)
         if positions_fn is None and key is not None:
             from api.server import _user_cache_put
             _user_cache_put(key, payload)

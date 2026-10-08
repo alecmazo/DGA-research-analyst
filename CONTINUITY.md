@@ -309,6 +309,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Ship washes** | **`ui726-20261007-ship-wash`** | The deck ship keeps its photograph. Each held sleeve is a color wash on that part of the hull, and the heavier company names sit in the wash. The sea still follows the S&P print. A click selects the sleeve and does not zoom. |
 | **Index tape** | **`ui727-20261008-index-tape`** | The desk index row shows each print and its signed day percent, green when up and red when down. A chart session date stays that session, so today's move is kept. The tape does not scroll. |
 | **Letter mail** | **`ui728-20261008-letter-mail`** | Publishing a quarterly-letter section emails the investors assigned to that account, and the section is in the message. An account with no investor login emails the GP who confirmed. Demo logins are not recipients. |
+| **Portfolio campus** | **`ui729-20261008-campus`** | The ship page is the daylight campus. One building per company, sized by public market cap. Drag rotates, scroll zooms into a building, and a double-click frames that building. The right pane still selects the neighborhood. |
 
 ### One-click handoff (preferred)
 
@@ -506,4 +507,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-08 · Agent: Grok Build · Built: `ui728-20261008-letter-mail` · Live until the next upload: `ui727-20261008-index-tape` · Next: `ui729-YYYYMMDD-slug`*
+*Last updated: 2026-10-08 · Agent: Grok Build · Built: `ui729-20261008-campus` · Live until the next upload: `ui728-20261008-letter-mail` · Next: `ui730-YYYYMMDD-slug`*

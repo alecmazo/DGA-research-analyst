@@ -8,6 +8,7 @@ export type ShipHolding = {
   name: string
   weight_pct: number
   market_value: number | null
+  market_cap?: number | null
 }
 
 export type ShipSector = {

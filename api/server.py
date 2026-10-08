@@ -8749,7 +8749,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui728-20261008-letter-mail"
+WEB_BUILD_VERSION = "ui729-20261008-campus"
 
 
 @app.get("/api/build")
@@ -44172,8 +44172,8 @@ _mount_credit()
 
 def _mount_portfolio_ship() -> None:
     try:
-        from api.domains.portfolio_ship import create_router
-        app.include_router(create_router(_claims_or_401))
+        from api.domains.portfolio_ship import create_router, fetch_market_caps
+        app.include_router(create_router(_claims_or_401, caps_fn=fetch_market_caps))
     except Exception as exc:
         print(f"[portfolio-ship] mount failed: {exc!r}", flush=True)
 

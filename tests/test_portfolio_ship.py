@@ -203,6 +203,69 @@ def test_industrials_aerospace_and_the_misfiled_names():
 def test_ship_route_is_mounted_and_the_city_route_stays_off():
     server = (ROOT / "api" / "server.py").read_text()
     assert "def _mount_portfolio_ship" in server
-    assert "from api.domains.portfolio_ship import create_router" in server
+    assert "from api.domains.portfolio_ship import create_router, fetch_market_caps" in server
+    assert "caps_fn=fetch_market_caps" in server
     assert "def _mount_portfolio_city" not in server
     assert "from api.domains.portfolio_city import create_router" not in server
+
+
+def test_market_cap_is_public_and_a_missing_cap_stays_empty():
+    from api.domains.portfolio_ship import market_cap_from_nasdaq, parse_market_cap
+
+    assert parse_market_cap("4,946,697,311,000") == 4946697311000
+    assert parse_market_cap("$1.2T") == 1.2e12
+    assert parse_market_cap("N/A") is None
+    assert parse_market_cap(None) is None
+    assert market_cap_from_nasdaq(
+        {"data": {"summaryData": {"MarketCap": {"value": "1,000"}}}}
+    ) == 1000
+    payload = build_ship(
+        _book([_row("TSLA", 80, "Tesla"), _row("WFC", 20, "Wells")]),
+        0,
+        privacy=True,
+        caps={"TSLA": 800_000_000_000, "WFC": None, "NOPE": 5},
+    )
+    blob = json.dumps(payload)
+    assert "$" not in blob
+    by = {row["part"]: row for row in payload["sectors"]}
+    caps = {item["symbol"]: item["market_cap"] for item in by["bridge"]["holdings"]}
+    caps.update({item["symbol"]: item["market_cap"] for item in by["bow"]["holdings"]})
+    assert caps["TSLA"] == 800_000_000_000
+    assert caps["WFC"] is None
+    assert by["bridge"]["market_value"] is None
+
+
+def test_caps_hook_is_optional_and_a_failure_keeps_the_book():
+    book = _book([_row("TSLA", 80), _row("WFC", 20)])
+
+    def claims(_request):
+        return {"role": "gp", "demo_mode": True, "email": "demo@dgacapital.com"}
+
+    def boom(_symbols):
+        raise RuntimeError("nasdaq down")
+
+    hidden = create_router(
+        claims,
+        positions_fn=lambda _request: book,
+        spx_fn=lambda: 0,
+        caps_fn=boom,
+    ).routes[0].endpoint(object(), privacy="auto")
+    assert hidden["sectors"]
+    assert hidden["sectors"][0]["holdings"][0]["market_cap"] is None
+    assert "$" not in json.dumps(hidden)
+
+    def caps(symbols):
+        return {sym: 2_000_000_000 if sym == "TSLA" else None for sym in symbols}
+
+    shown = create_router(
+        claims,
+        positions_fn=lambda _request: book,
+        spx_fn=lambda: 1,
+        caps_fn=caps,
+    ).routes[0].endpoint(object(), privacy="dollars")
+    blob = json.dumps(shown)
+    assert "$" not in blob
+    assert shown["show_dollars"] is False
+    tsla = next(item for item in shown["sectors"][0]["holdings"] if item["symbol"] == "TSLA")
+    assert tsla["market_cap"] == 2_000_000_000
+    assert tsla["market_value"] is None
