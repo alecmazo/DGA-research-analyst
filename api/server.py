@@ -1578,6 +1578,17 @@ async def auth_middleware(request: Request, call_next):
                 return _blk
             return await call_next(request)
 
+    # Fund City's local client sends FUND_CITY_FEED_TOKEN. The check is this
+    # path only — the same secret does not open any other route. A GP session
+    # already returned above. A wrong or missing token falls through to 401.
+    if path.rstrip("/") == "/api/v2/gp/fund-city":
+        try:
+            from api.domains.fund_city_feed import attach_service_claims
+            if attach_service_claims(request):
+                return await call_next(request)
+        except Exception as exc:
+            print(f"[fund-city] auth hook failed: {exc!r}", flush=True)
+
     return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
 
@@ -44256,6 +44267,22 @@ def _mount_portfolio_ship() -> None:
 
 
 _mount_portfolio_ship()
+
+
+def _mount_fund_city_feed() -> None:
+    try:
+        from api.domains.fund_city_feed import create_router
+        from api.domains.portfolio_ship import _yahoo_sector, fetch_market_caps
+        app.include_router(create_router(
+            _claims_or_401,
+            caps_fn=fetch_market_caps,
+            sector_fn=_yahoo_sector,
+        ))
+    except Exception as exc:
+        print(f"[fund-city] mount failed: {exc!r}", flush=True)
+
+
+_mount_fund_city_feed()
 
 
 if BRANDING_DIR.exists():

@@ -1,0 +1,105 @@
+{
+  "note": "Synthetic book. Not a real account, not a Desktop export, and not the live DGA book.",
+  "synthetic": true,
+  "positions": {
+    "account_count": 2,
+    "as_of": "21:00 UTC",
+    "book_as_of": "2026-10-07",
+    "positions": [
+      {
+        "symbol": "TSLA",
+        "name": "Tesla lot A",
+        "account_name": "Sample Managed",
+        "fund_id": "sample-fund",
+        "source_type": "managed_account",
+        "total_cost": 99999,
+        "total_qty": 12.5,
+        "market_value": 4242
+      },
+      {
+        "symbol": "TSLA",
+        "name": "Tesla lot B",
+        "account_name": "Sample LP",
+        "fund_id": "sample-fund",
+        "source_type": "lp_fund",
+        "total_qty": 3.25,
+        "market_value": 1117
+      },
+      {
+        "symbol": "C",
+        "name": "Citigroup",
+        "account_name": "Sample Managed",
+        "total_qty": 10,
+        "market_value": 808
+      },
+      {
+        "symbol": "SPAXX*",
+        "name": "Sample Gov MM",
+        "account_name": "Sample Managed",
+        "total_qty": 500,
+        "market_value": 500
+      },
+      {
+        "symbol": "SPY",
+        "name": "Sample index",
+        "total_qty": 1,
+        "market_value": 300
+      },
+      {
+        "symbol": "QQQ",
+        "name": "Sample nasdaq",
+        "total_qty": 2,
+        "market_value": 200
+      },
+      {
+        "symbol": "FMCC",
+        "name": "Freddie",
+        "total_qty": 40,
+        "market_value": 150
+      },
+      {
+        "symbol": "FMCCJ",
+        "name": "Freddie preferred lot",
+        "total_qty": 20,
+        "market_value": 80
+      },
+      {
+        "symbol": "NLYPRF",
+        "name": "Sample preferred",
+        "total_qty": 15,
+        "market_value": 40
+      },
+      {
+        "symbol": "36966TKX9",
+        "name": "Sample cusip",
+        "total_qty": 25,
+        "market_value": 25
+      },
+      {
+        "symbol": "$00000TEST9",
+        "name": "Synthetic bond",
+        "total_qty": 10,
+        "market_value": 10
+      },
+      {
+        "symbol": "ZZZZ",
+        "name": "Empty",
+        "market_value": 0
+      },
+      {
+        "symbol": "NOPE",
+        "name": "Missing",
+        "market_value": null
+      }
+    ]
+  },
+  "caps": {
+    "TSLA": 88000000013,
+    "C": 150000000017,
+    "SPY": 512000000003,
+    "QQQ": 203000000009,
+    "SPAXX": 99,
+    "36966TKX9": 77,
+    "00000TEST9": 77
+  }
+}
