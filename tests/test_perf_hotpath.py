@@ -50,7 +50,7 @@ def test_list_reports_sql_skips_valuation_json():
     assert "_quote_from_current_session" in fill
     assert "_batch_quotes_fast" not in fill
     assert "_reports_attach_store_prices(out)" in fn
-    assert 'WEB_BUILD_VERSION = "ui731-20261008-city-view"' in src
+    assert 'WEB_BUILD_VERSION = "ui732-20261014-load"' in src
 
 
 def test_positions_use_newest_print_not_yahoo():
@@ -161,8 +161,16 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "watchlist_get(" in body
     assert "fresh=False" in body
     assert "lite=True" in body
+    assert "threading.Thread" in body
     wl = _fn_src(ROOT / "api/server.py", "watchlist_get")
     assert "if need and (not lite)" in wl
+    assert "_wl_lite_paint(" in wl
+    assert "if lite:" in wl
+    paint = _fn_src(ROOT / "api/server.py", "_wl_lite_paint")
+    assert "_watchlist_migrate_legacy_once" not in paint
+    assert "yf.Ticker" not in paint
+    assert "_batch_quotes_fast" not in paint
+    assert "analyst_reports" not in paint
     rep = _fn_src(ROOT / "api/server.py", "get_report")
     assert "as_stored" in rep
     assert "if not as_stored" in rep
@@ -170,8 +178,24 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui731-20261008-city-view"' in src
+    assert 'WEB_BUILD_VERSION = "ui732-20261014-load"' in src
     assert "if (not lite) and _wl_left()" in wl
+
+
+def test_gp_desk_is_the_only_eager_page():
+    app = (ROOT / "web/gp-app/src/App.tsx").read_text(encoding="utf-8")
+    assert "import { DeskPage } from '@/pages/DeskPage'" in app
+    assert "lazyExport(() => import('@/pages/GurusPage')" in app
+    assert "lazyExport(() => import('@/pages/ShipPage')" in app
+    assert "lazyExport(() => import('@/pages/BuilderPage')" in app
+    assert "import { GurusPage }" not in app
+    assert "import { ShipPage }" not in app
+    html = (ROOT / "web/gp-app/index.html").read_text(encoding="utf-8")
+    assert 'media="print"' in html
+    assert "this.media='all'" in html
+    desk = (ROOT / "web/gp-app/src/pages/DeskPage.tsx").read_text(encoding="utf-8")
+    assert "from '@/lib/openWindows'" in desk
+    assert "from '@/pages/ReportPage'" not in desk
 
 
 def test_mobile_fund_bars_have_yaxis():

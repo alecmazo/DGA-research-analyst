@@ -4,7 +4,7 @@ import { api } from '@/lib/api'
 import { getCachedUser } from '@/lib/auth'
 import { ensureOllama, ollamaChat } from '@/lib/localOllama'
 import { renderMd } from '@/lib/md'
-import { openReportWindow } from '@/pages/ReportPage'
+import { openReportWindow } from '@/lib/openWindows'
 import styles from './GrokBot.module.css'
 
 type Role = 'user' | 'assistant'

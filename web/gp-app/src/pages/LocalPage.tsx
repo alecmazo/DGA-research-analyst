@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
-import { openReportWindow } from '@/pages/ReportPage'
-import { openPortfolioReport } from '@/pages/LocalPortfolioPage'
+import { openPortfolioReport, openReportWindow } from '@/lib/openWindows'
 import {
   ensureOllama,
   isModelRefusal,

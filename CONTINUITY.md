@@ -312,6 +312,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Portfolio campus** | **`ui729-20261008-campus`** | The ship page is the daylight campus. One building per company, sized by public market cap. Drag rotates, scroll zooms into a building, and a double-click frames that building. The right pane still selects the neighborhood. |
 | **LP roster** | **`ui730-20261008-lp-roster`** | Settings keeps every LP login. Edit shows the managed accounts already assigned to that person, and Save does not clear them or remove anyone else. |
 | **Portfolio city** | **`ui731-20261008-city-view`** | The ship page is labeled City. Buildings follow public market cap, and a click on one building shows that company's market cap, balance sheet, profit and loss, and cash flow. The ground is a coastal plain. The night-city route stays off. |
+| **Load times** | **`ui732-20261014-load`** | Desk first paint loads only the desk chunk. Other GP pages load when opened. Markets home reads indices and the lite watchlist together, and lite uses one database connection. |
 
 ### One-click handoff (preferred)
 
@@ -509,4 +510,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-08 · Agent: Grok Build · Built: `ui731-20261008-city-view` · Live until the next upload: `ui730-20261008-lp-roster` · Next: `ui732-YYYYMMDD-slug`*
+*Last updated: 2026-10-14 · Agent: Grok Build · Built: `ui732-20261014-load` · Live until the next upload: `ui731-20261008-city-view` · Next: `ui733-YYYYMMDD-slug`*

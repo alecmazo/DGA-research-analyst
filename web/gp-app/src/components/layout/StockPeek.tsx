@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { openFinancialsPage } from '@/lib/financialsNav'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
-import { openReportWindow } from '@/pages/ReportPage'
+import { openReportWindow } from '@/lib/openWindows'
 import styles from './StockPeek.module.css'
 
 export type StockInfo = {

@@ -11,7 +11,6 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppResume } from '../hooks/useAppResume';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import Markdown from 'react-native-markdown-display';
 import { api } from '../api/client';
 import { readScreenCache, patchScreenCache, putWatchlist } from '../api/screenCache';
 import AppHeader from '../components/AppHeader';
@@ -19,6 +18,11 @@ import { StockSnapshotSheet } from '../components/StockInfoCard';
 import { spacing, radius, fontSize, Card, haptics, makeMdStyles, useTheme } from '../design';
 
 const QUOTE_POLL_MS = 60_000;
+
+function BriefMarkdown({ style, children }) {
+  const Markdown = require('react-native-markdown-display').default;
+  return <Markdown style={style}>{children}</Markdown>;
+}
 
 // ── format helpers ───────────────────────────────────────────────────────────
 function fmtPct(p) {
@@ -778,7 +782,7 @@ export default function MarketsScreen({ navigation }) {
                 <Ionicons name={briefOpen ? 'chevron-up' : 'chevron-down'} size={18} color={t.textDim} />
               </TouchableOpacity>
               {briefOpen
-                ? <Markdown style={md}>{brief.markdown}</Markdown>
+                ? <BriefMarkdown style={md}>{brief.markdown}</BriefMarkdown>
                 : <Text style={s.muted} numberOfLines={2}>{(brief.markdown || '').replace(/[#*>`]/g, '').replace(/\n+/g, ' ').trim()}</Text>}
             </View>
           )}
@@ -863,7 +867,7 @@ export default function MarketsScreen({ navigation }) {
                   ) : head}
                   {canExpand && open && (
                     <View style={{ marginTop: 6 }}>
-                      <Markdown style={md}>{r.markdown}</Markdown>
+                      <BriefMarkdown style={md}>{r.markdown}</BriefMarkdown>
                     </View>
                   )}
                 </View>

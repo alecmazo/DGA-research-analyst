@@ -12,18 +12,7 @@ type Report = {
   text?: string
 }
 
-/** Open a saved portfolio recommendation in its own window. */
-export function openPortfolioReport(id: string) {
-  const reportId = id.trim()
-  if (!reportId) return
-  const url = `/gp/local-portfolio?id=${encodeURIComponent(reportId)}`
-  const win = window.open(
-    url,
-    `dga-portfolio-${reportId}`,
-    'width=1180,height=900,menubar=no,toolbar=no,location=no,status=no',
-  )
-  if (!win) window.location.href = url
-}
+export { openPortfolioReport } from '@/lib/openWindows'
 
 function stampOf(iso: string | undefined): string {
   if (!iso) return ''

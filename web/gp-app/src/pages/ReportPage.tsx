@@ -575,24 +575,4 @@ export function ReportPage() {
   )
 }
 
-/** Open saved report in a real browser window (legacy behavior). */
-export function openReportWindow(ticker: string, provider = 'grok') {
-  const tk = ticker.trim().toUpperCase()
-  if (!tk) return
-  const pv = (provider || 'grok').toLowerCase()
-  const local = pv === 'local'
-  const url = local
-    ? `/gp/local-report?ticker=${encodeURIComponent(tk)}`
-    : `/gp/report?ticker=${encodeURIComponent(tk)}&provider=${encodeURIComponent(pv)}`
-  const name = local ? `dga-local-report-${tk}` : `dga-report-${tk}-${pv}`
-  // Do not use noopener alone in a way that breaks same-origin localStorage —
-  // omit noreferrer so the session token still works; popup is same-origin SPA.
-  const win = window.open(
-    url,
-    name,
-    'width=1040,height=900,menubar=no,toolbar=no,location=no,status=no',
-  )
-  if (!win) {
-    window.location.href = url
-  }
-}
+export { openReportWindow } from '@/lib/openWindows'

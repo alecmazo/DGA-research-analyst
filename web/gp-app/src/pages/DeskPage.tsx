@@ -31,7 +31,7 @@ import {
 import { publishQuotes } from '@/lib/quoteBook'
 import { saveSupportLog } from '@/lib/supportLog'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
-import { openReportWindow } from '@/pages/ReportPage'
+import { openReportWindow } from '@/lib/openWindows'
 import styles from './DeskPage.module.css'
 
 function earnChipClass(earn: WatchlistEarning): string {

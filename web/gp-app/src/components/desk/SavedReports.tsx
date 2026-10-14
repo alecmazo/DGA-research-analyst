@@ -5,8 +5,7 @@ import { api, type Quote, type SavedReport } from '@/lib/api'
 import { readQuote, subscribeQuoteBook } from '@/lib/quoteBook'
 import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
-import { openReportWindow } from '@/pages/ReportPage'
-import { openValuationWindow } from '@/pages/ValuationBridgePage'
+import { openReportWindow, openValuationWindow } from '@/lib/openWindows'
 import styles from './deskWidgets.module.css'
 
 function tsMs(v?: string | null): number {

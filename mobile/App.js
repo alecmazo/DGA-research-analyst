@@ -7,25 +7,11 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as Updates from 'expo-updates';
 
-import MarketsScreen          from './src/screens/MarketsScreen';
-import HomeScreen             from './src/screens/HomeScreen';
-import AnalystScreen          from './src/screens/AnalystScreen';
-import StrategistScreen       from './src/screens/StrategistScreen';
-import AnalysisScreen         from './src/screens/AnalysisScreen';
-import ReportScreen           from './src/screens/ReportScreen';
-import PortfolioSummaryScreen from './src/screens/PortfolioSummaryScreen';
-import PaperTrackerScreen     from './src/screens/PaperTrackerScreen';
-import PodcastScreen          from './src/screens/PodcastScreen';
-import SettingsScreen         from './src/screens/SettingsScreen';
-import FundScreen             from './src/screens/FundScreen';
-import LoginScreen            from './src/screens/LoginScreen';
-import LockScreen             from './src/screens/LockScreen';
-import LPPerformanceScreen    from './src/screens/LPPerformanceScreen';
-import LPPlanningScreen       from './src/screens/LPPlanningScreen';
-import WatchlistScreen        from './src/screens/WatchlistScreen';
-import FinancialsScreen       from './src/screens/FinancialsScreen';
-import MoreScreen             from './src/screens/MoreScreen';
-import CustomTabBar           from './src/components/CustomTabBar';
+import MarketsScreen from './src/screens/MarketsScreen';
+import LoginScreen from './src/screens/LoginScreen';
+import LockScreen from './src/screens/LockScreen';
+import WatchlistScreen from './src/screens/WatchlistScreen';
+import CustomTabBar from './src/components/CustomTabBar';
 
 import { whoamiV2, getV2User, logoutV2 } from './src/api/client';
 import { isBiometricEnabled, disableBiometric } from './src/api/biometric';
@@ -66,11 +52,11 @@ class BootBoundary extends React.Component {
 function HomeStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Home"        component={HomeScreen} />
-      <Stack.Screen name="Analyst"     component={AnalystScreen} />
-      <Stack.Screen name="Strategist"  component={StrategistScreen} />
-      <Stack.Screen name="Analysis"    component={AnalysisScreen} />
-      <Stack.Screen name="Report"      component={ReportScreen} />
+      <Stack.Screen name="Home" getComponent={() => require('./src/screens/HomeScreen').default} />
+      <Stack.Screen name="Analyst" getComponent={() => require('./src/screens/AnalystScreen').default} />
+      <Stack.Screen name="Strategist" getComponent={() => require('./src/screens/StrategistScreen').default} />
+      <Stack.Screen name="Analysis" getComponent={() => require('./src/screens/AnalysisScreen').default} />
+      <Stack.Screen name="Report" getComponent={() => require('./src/screens/ReportScreen').default} />
     </Stack.Navigator>
   );
 }
@@ -78,10 +64,13 @@ function HomeStack() {
 function FundStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="FundHome"        component={FundScreen} />
-      <Stack.Screen name="PortfolioSummary" component={PortfolioSummaryScreen} />
+      <Stack.Screen name="FundHome" getComponent={() => require('./src/screens/FundScreen').default} />
+      <Stack.Screen name="PortfolioSummary" getComponent={() => require('./src/screens/PortfolioSummaryScreen').default} />
       <Stack.Screen name="Planning">
-        {() => <LPPlanningScreen gpMode />}
+        {() => {
+          const LPPlanningScreen = require('./src/screens/LPPlanningScreen').default;
+          return <LPPlanningScreen gpMode />;
+        }}
       </Stack.Screen>
     </Stack.Navigator>
   );
@@ -91,14 +80,20 @@ function FundStack() {
 function MoreStack({ onLogout, isDemo, onSwitchToLP }) {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="MoreHome"      component={MoreScreen} />
+      <Stack.Screen name="MoreHome" getComponent={() => require('./src/screens/MoreScreen').default} />
       <Stack.Screen name="Planning">
-        {() => <LPPlanningScreen gpMode />}
+        {() => {
+          const LPPlanningScreen = require('./src/screens/LPPlanningScreen').default;
+          return <LPPlanningScreen gpMode />;
+        }}
       </Stack.Screen>
-      <Stack.Screen name="Podcast"       component={PodcastScreen} />
-      <Stack.Screen name="PaperTracker"  component={PaperTrackerScreen} />
+      <Stack.Screen name="Podcast" getComponent={() => require('./src/screens/PodcastScreen').default} />
+      <Stack.Screen name="PaperTracker" getComponent={() => require('./src/screens/PaperTrackerScreen').default} />
       <Stack.Screen name="Settings">
-        {() => <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={onSwitchToLP} isLpMode={false} />}
+        {() => {
+          const SettingsScreen = require('./src/screens/SettingsScreen').default;
+          return <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={onSwitchToLP} isLpMode={false} />;
+        }}
       </Stack.Screen>
     </Stack.Navigator>
   );
@@ -112,11 +107,11 @@ function GPTabs({ onLogout, isDemo, onSwitchToLP }) {
         tabBar={(props) => <CustomTabBar {...props} />}
         screenOptions={{ headerShown: false }}
       >
-        <Tab.Screen name="Markets"    component={MarketsScreen} />
-        <Tab.Screen name="Research"   component={HomeStack} />
-        <Tab.Screen name="Financials" component={FinancialsScreen} />
-        <Tab.Screen name="Positions"  component={WatchlistScreen} />
-        <Tab.Screen name="Fund"       component={FundStack} />
+        <Tab.Screen name="Markets" component={MarketsScreen} />
+        <Tab.Screen name="Research" component={HomeStack} />
+        <Tab.Screen name="Financials" getComponent={() => require('./src/screens/FinancialsScreen').default} />
+        <Tab.Screen name="Positions" component={WatchlistScreen} />
+        <Tab.Screen name="Fund" component={FundStack} />
         <Tab.Screen name="More">
           {() => <MoreStack onLogout={onLogout} isDemo={isDemo} onSwitchToLP={onSwitchToLP} />}
         </Tab.Screen>
@@ -135,12 +130,18 @@ function LPTabs({ onLogout, isDemo, onSwitchToAdmin }) {
       >
         <Tab.Screen name="Positions" component={WatchlistScreen} />
         <Tab.Screen name="Performance">
-          {() => <LPPerformanceScreen onLogout={onLogout} isDemo={isDemo} onSwitchToAdmin={onSwitchToAdmin} />}
+          {() => {
+            const LPPerformanceScreen = require('./src/screens/LPPerformanceScreen').default;
+            return <LPPerformanceScreen onLogout={onLogout} isDemo={isDemo} onSwitchToAdmin={onSwitchToAdmin} />;
+          }}
         </Tab.Screen>
-        <Tab.Screen name="Documents" component={LPPlanningScreen} />
-        <Tab.Screen name="Podcast"   component={PodcastScreen} />
+        <Tab.Screen name="Documents" getComponent={() => require('./src/screens/LPPlanningScreen').default} />
+        <Tab.Screen name="Podcast" getComponent={() => require('./src/screens/PodcastScreen').default} />
         <Tab.Screen name="Settings">
-          {() => <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={null} isLpMode={true} onSwitchToAdmin={onSwitchToAdmin} />}
+          {() => {
+            const SettingsScreen = require('./src/screens/SettingsScreen').default;
+            return <SettingsScreen onLogout={onLogout} isDemo={isDemo} onSwitchToLP={null} isLpMode={true} onSwitchToAdmin={onSwitchToAdmin} />;
+          }}
         </Tab.Screen>
       </Tab.Navigator>
     </View>

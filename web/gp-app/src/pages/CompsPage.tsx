@@ -252,15 +252,4 @@ export function CompsPage() {
   )
 }
 
-export function openCompsWindow(ticker: string) {
-  const tk = ticker.trim().toUpperCase()
-  if (!tk) return
-  const url = `/gp/comps?ticker=${encodeURIComponent(tk)}`
-  const name = `dga-comps-${tk}`
-  const win = window.open(
-    url,
-    name,
-    'width=1200,height=820,menubar=no,toolbar=no,location=no,status=no',
-  )
-  if (!win) window.location.href = url
-}
+export { openCompsWindow } from '@/lib/openWindows'

@@ -1,0 +1,2 @@
+import{t as e}from"./jsx-runtime-Cltr0gcK.js";var t={empty:`_empty_1hxar_1`,title:`_title_1hxar_6`,sub:`_sub_1hxar_12`,spinWrap:`_spinWrap_1hxar_22`,spin:`_spin_1hxar_22`},n=e();function r({title:e,sub:r}){return(0,n.jsxs)(`div`,{className:t.empty,children:[(0,n.jsx)(`div`,{className:t.title,children:e}),r&&(0,n.jsx)(`div`,{className:t.sub,children:r})]})}function i({label:e=`Loading…`}){return(0,n.jsxs)(`div`,{className:t.spinWrap,children:[(0,n.jsx)(`div`,{className:t.spin}),(0,n.jsx)(`span`,{children:e})]})}export{i as n,r as t};
+//# sourceMappingURL=Empty-CsuT6SXp.js.map

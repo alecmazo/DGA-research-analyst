@@ -496,17 +496,4 @@ function MdMiniTable({
   )
 }
 
-export function openValuationWindow(ticker: string, focus?: string) {
-  const tk = ticker.trim().toUpperCase()
-  if (!tk) return
-  const q = new URLSearchParams({ ticker: tk })
-  if (focus) q.set('focus', focus)
-  const url = `/gp/valuation?${q.toString()}`
-  const name = `dga-val-${tk}-${focus || 'style'}`
-  const win = window.open(
-    url,
-    name,
-    'width=1100,height=920,menubar=no,toolbar=no,location=no,status=no',
-  )
-  if (!win) window.location.href = url
-}
+export { openValuationWindow } from '@/lib/openWindows'

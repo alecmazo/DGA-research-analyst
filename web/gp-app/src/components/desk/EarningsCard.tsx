@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { api, type EarningsCardPayload } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
-import { openReportWindow } from '@/pages/ReportPage'
+import { openReportWindow } from '@/lib/openWindows'
 import styles from './EarningsCard.module.css'
 
 function fmtEps(v: number | null | undefined): string {

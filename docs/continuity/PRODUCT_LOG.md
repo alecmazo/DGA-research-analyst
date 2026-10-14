@@ -255,6 +255,12 @@ Lab menu, labeled City. The page is Portfolio City. The route stays `/ship`. One
 
 Technology (core) on the bridge is TSLA, META, and AMZN, plus Information Technology names such as MSFT. The stern is each Fannie and Freddie symbol plus IBRX. Aerospace (SpaceX and the GE Aerospace note) is the gantry, separate from Industrials on the crane. Uber is Consumer Discretionary. Nike is the Consumer Staples sleeve. Howard Hughes, the data-center landlords, Iron Mountain, and Simon are Real Estate. Cash is the anchor. Broad index funds are their own sleeve. GP and admin see position dollars. Demo, a non-GP, and weights mode see percents only. The page does not write portfolio rows. GICS in the classifier stays GICS; the ship sleeves above are the story. The city route stays off.
 
+### 5.20 First paint
+
+Desk is the only GP page in the first JavaScript chunk. Other routes, including City, load when opened. Report / valuation / comps / portfolio popups live in `lib/openWindows.ts` so Desk does not download those pages. Inter fonts start print-media and swap to all after load.
+
+Markets home (`GET /api/mobile/home`) reads store-only indices and a lite watchlist in parallel. Lite uses one pooled connection for the ticker list and last prints, and skips migrate, Yahoo, YTD, report flags, and earnings. Brief and pulse still wait 12 seconds. Do not publish a mobile OTA as part of a speed audit.
+
 ---
 
 ## 6. LP portal & mobile

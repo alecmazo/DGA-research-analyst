@@ -11,8 +11,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { fmtCap, fmtPct, pctClass } from '@/lib/format'
-import { openValuationWindow } from '@/pages/ValuationBridgePage'
-import { openCompsWindow } from '@/pages/CompsPage'
+import { openCompsWindow, openValuationWindow } from '@/lib/openWindows'
 import styles from './deskWidgets.module.css'
 
 type PulseResp = MarketPulseResponse

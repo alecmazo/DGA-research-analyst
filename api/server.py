@@ -4634,6 +4634,65 @@ def _watchlist_fill_ytd(tickers: list[str], quotes: dict, budget_s: float = 2.0)
     return _watchlist_apply_ytd(tickers, quotes, ytd_map)
 
 
+def _wl_lite_paint(lp_id: str) -> tuple[list[str], dict]:
+    """Ticker list + store quotes on one pooled connection.
+
+    Lite Markets first paint. Skips migrate, Yahoo, YTD, report flags,
+    earnings, and the duplicate last-close query (same 5-day window).
+    """
+    tickers: list[str] = []
+    quotes: dict = {}
+    if not _watchlist_db_available():
+        return tickers, quotes
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT ticker FROM watchlists
+                 WHERE lp_id = %s
+                 ORDER BY added_at ASC
+                """,
+                (lp_id,),
+            )
+            tickers = [
+                (r[0] or "").strip().upper()
+                for r in (cur.fetchall() or [])
+                if r and r[0]
+            ]
+            if not tickers:
+                return tickers, quotes
+            cur.execute(
+                """
+                SELECT upper(symbol), price, pct_change, updated_at
+                  FROM market_quotes
+                 WHERE upper(symbol) = ANY(%s)
+                   AND updated_at > now() - interval '5 days'
+                """,
+                (tickers,),
+            )
+            now = time.time()
+            live = _us_session_live()
+            for sym, price, pct, updated_at in (cur.fetchall() or []):
+                tk = (sym or "").upper()
+                if not tk:
+                    continue
+                as_of = updated_at.isoformat() if updated_at else None
+                _watchlist_set_price(quotes, tk, price, pct=pct, as_of=as_of)
+                current = (not live) or _quote_from_current_session(as_of)
+                if current:
+                    row = quotes.get(tk) or {}
+                    _QUOTE_CACHE[tk] = {
+                        "price": row.get("price"),
+                        "pct_change": row.get("pct"),
+                        "as_of": as_of,
+                        "_ts": now,
+                    }
+        return tickers, quotes
+    except Exception as e:
+        print(f"[watchlist] lite paint: {e!s:.120}", flush=True)
+        return tickers, quotes
+
+
 @app.get("/api/watchlist")
 def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
     """Fast watchlist for login / desk paint.
@@ -4665,13 +4724,17 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
                 cached["timing_ms"] = 1
                 cached["cache"] = "watchlist"
                 return cached
-        try:
-            _watchlist_migrate_legacy_once()
-        except Exception as e:
-            print(f"[watchlist] migrate: {e!s:.100}", flush=True)
-        tickers = list(_wl_get_db(lp_id) or [])
+        if lite:
+            tickers, quotes = _wl_lite_paint(lp_id)
+            marks.append(("store", time.time()))
+        else:
+            try:
+                _watchlist_migrate_legacy_once()
+            except Exception as e:
+                print(f"[watchlist] migrate: {e!s:.100}", flush=True)
+            tickers = list(_wl_get_db(lp_id) or [])
 
-        if tickers:
+        if tickers and (not lite):
             now = time.time()
             live = _us_session_live()
             need: list[str] = []
@@ -4884,12 +4947,39 @@ def mobile_home(request: Request):
         body["cache"] = "home"
         return body
     t0 = time.time()
-    try:
-        idx = market_indices(store_only=True) or {}
-    except Exception as e:
-        print(f"[mobile-home] indices: {e!s:.120}", flush=True)
-        idx = {"indices": []}
-    wl = watchlist_get(request, fresh=False, lite=True)
+    idx_box: dict = {"indices": []}
+    wl_box: dict = {}
+    wl_err: list = []
+
+    def _load_idx():
+        try:
+            got = market_indices(store_only=True) or {}
+            if isinstance(got, dict):
+                idx_box.clear()
+                idx_box.update(got)
+        except Exception as e:
+            print(f"[mobile-home] indices: {e!s:.120}", flush=True)
+            idx_box.clear()
+            idx_box["indices"] = []
+
+    def _load_wl():
+        try:
+            got = watchlist_get(request, fresh=False, lite=True)
+            if isinstance(got, dict):
+                wl_box.update(got)
+        except Exception as e:
+            wl_err.append(e)
+
+    th_idx = threading.Thread(target=_load_idx, name="mobile-home-idx")
+    th_wl = threading.Thread(target=_load_wl, name="mobile-home-wl")
+    th_idx.start()
+    th_wl.start()
+    th_idx.join()
+    th_wl.join()
+    if wl_err:
+        raise wl_err[0]
+    idx = idx_box
+    wl = wl_box
     body = {
         "ok": True,
         "indices": (idx or {}).get("indices") or [],
@@ -8793,7 +8883,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui731-20261008-city-view"
+WEB_BUILD_VERSION = "ui732-20261014-load"
 
 
 @app.get("/api/build")

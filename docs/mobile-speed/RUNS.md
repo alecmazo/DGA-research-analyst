@@ -4,6 +4,45 @@ Newest run first. Each block comes from `python3 docs/mobile-speed/measure.py`. 
 
 The Budget column in each run is the limit that was in force that day. Current limits are in `CHECKLIST.md` (revised 2026-09-24, after Run 002). Do not rewrite these cells when a budget changes.
 
+## Run 003 — 2026-10-14
+
+Demo book, 10 names. Live `ui731-20261008-city-view` before the load-time change. An earlier pass the same day, right after a 16 s demo login, was home first 1871 ms / server 1722 ms (over the 1 s budget). That cold handler is the API step this change targets. The table below is a second `ui731` pass with a warm worker.
+
+### Before — build `ui731-20261008-city-view`
+
+| Step | Result | Client | Server | Size | Counts | Budget |
+|---|---|---|---|---|---|---|
+| 1 health | OK | 121 ms | — | 123 B | | under 300 ms, inside |
+| 2 login demo | OK | 3990 ms | — | 694 B | | not the GP budget |
+| 3 home first | OK | 433 ms | 175 ms | 2076 B | 11 indices, 10 tickers, 10 priced | under 1 s, inside |
+| 3 home second | OK | 322 ms | 1 ms | 2089 B | same | under 400 ms, inside |
+| 4 reports first | OK | 271 ms | — | 1671 B | 10 rows | under 300 ms, inside |
+| 4 reports second | OK | 330 ms | — | 1671 B | 10 rows | under 300 ms, over |
+| 5 watchlist first | OK | 2160 ms | 1974 ms | 2292 B | 10 tickers, 10 priced | under 2 s, over |
+| 5 watchlist second | OK | 168 ms | 1 ms | 2309 B | 10 tickers, 10 priced | under 400 ms, inside |
+| 6 report open | OK | 195 ms | — | 1193 B | RKLB, 1067 chars, not incomplete | under 800 ms, inside |
+
+### Compared with Run 002
+
+| Step | Run 002 after | This before | Change |
+|---|---|---|---|
+| 1 health | 100 ms | 121 ms | same |
+| 3 home first | 311 ms | 433 ms warm; 1871 ms cold | warm same; cold worse, over |
+| 3 home second | 87 ms | 322 ms | worse |
+| 4 reports | 93 ms then 112 ms | 271 ms then 330 ms | worse; second over |
+| 5 watchlist | 1626 ms then 91 ms | 2160 ms then 168 ms | worse; first over |
+| 6 report open | 104 ms | 195 ms | same, inside |
+
+### What changed
+
+One API step: `GET /api/mobile/home`. Lite watchlist now reads the ticker list and store quotes on one pooled connection and skips migrate / Yahoo / YTD / report flags / the duplicate last-close query. Indices and lite watchlist run at the same time. Full `/api/watchlist` is unchanged.
+
+GP site first paint is a separate client split: Desk is the only eager page, Inter fonts start as print-media, popup helpers left the report pages. Not a mobile OTA.
+
+### After — build `ui732-20261014-load`
+
+Filled after that build is live.
+
 ## Run 002 — 2026-09-24
 
 Demo book, 10 names. Two passes: `ui662` before the read-path change, `ui663` after it. The `ui663` block below is the one that counts. A first pass on `ui663` returned 0 tickers because the demo login's watchlist rows were still on a previous user id; those 10 names were copied onto the current demo user before this pass.

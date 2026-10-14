@@ -26,7 +26,7 @@ import {
   openPendingResearchWindow,
   openResearchWindow,
   writeResearchSeed,
-} from '@/pages/ResearchAnswerPage'
+} from '@/lib/openResearch'
 import styles from './deskWidgets.module.css'
 
 const ENGINE_KEY = 'dga.agentic.engine.v2'
