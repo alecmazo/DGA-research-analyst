@@ -4639,12 +4639,16 @@ def _wl_lite_paint(lp_id: str) -> tuple[list[str], dict]:
 
     Lite Markets first paint. Skips migrate, Yahoo, YTD, report flags,
     earnings, and the duplicate last-close query (same 5-day window).
+    Also fills the index ribbon cache so mobile_home does not open a
+    second connection for market_indices.
     """
     tickers: list[str] = []
     quotes: dict = {}
     if not _watchlist_db_available():
         return tickers, quotes
     try:
+        idx_syms = [sym for _, sym in _INDEX_TICKERS]
+        idx_aliases = [_INDEX_ALIASES[s] for s in idx_syms if s in _INDEX_ALIASES]
         with _fund_conn() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -4659,25 +4663,40 @@ def _wl_lite_paint(lp_id: str) -> tuple[list[str], dict]:
                 for r in (cur.fetchall() or [])
                 if r and r[0]
             ]
-            if not tickers:
+            want = list(dict.fromkeys([*tickers, *idx_syms, *idx_aliases]))
+            if not want:
                 return tickers, quotes
             cur.execute(
                 """
-                SELECT upper(symbol), price, pct_change, updated_at
+                SELECT symbol, price, pct_change, updated_at
                   FROM market_quotes
-                 WHERE upper(symbol) = ANY(%s)
+                 WHERE symbol = ANY(%s)
                    AND updated_at > now() - interval '5 days'
                 """,
-                (tickers,),
+                (want,),
             )
             now = time.time()
             live = _us_session_live()
+            store: dict = {}
             for sym, price, pct, updated_at in (cur.fetchall() or []):
-                tk = (sym or "").upper()
+                tk = (sym or "").strip()
                 if not tk:
                     continue
                 as_of = updated_at.isoformat() if updated_at else None
-                _watchlist_set_price(quotes, tk, price, pct=pct, as_of=as_of)
+                store[tk.upper()] = {
+                    "price": price,
+                    "pct_change": pct,
+                    "as_of": as_of,
+                    "_sym": tk,
+                }
+                store[tk] = store[tk.upper()]
+            for tk in tickers:
+                q = store.get(tk) or {}
+                if q.get("price") is None:
+                    continue
+                as_of = q.get("as_of")
+                _watchlist_set_price(
+                    quotes, tk, q.get("price"), pct=q.get("pct_change"), as_of=as_of)
                 current = (not live) or _quote_from_current_session(as_of)
                 if current:
                     row = quotes.get(tk) or {}
@@ -4687,6 +4706,33 @@ def _wl_lite_paint(lp_id: str) -> tuple[list[str], dict]:
                         "as_of": as_of,
                         "_ts": now,
                     }
+            if not (
+                _INDICES_CACHE.get("data")
+                and (now - float(_INDICES_CACHE.get("ts") or 0)) < _INDICES_TTL
+            ):
+                out = []
+                for label, sym in _INDEX_TICKERS:
+                    q = store.get(sym) or store.get(_INDEX_ALIASES.get(sym) or "") or {}
+                    last = q.get("price")
+                    pct = q.get("pct_change")
+                    try:
+                        last = float(last) if last is not None else None
+                    except (TypeError, ValueError):
+                        last = None
+                    try:
+                        pct = float(pct) if pct is not None else None
+                    except (TypeError, ValueError):
+                        pct = None
+                    out.append({
+                        "label": label,
+                        "symbol": sym,
+                        "price": last,
+                        "prev": None,
+                        "pct": pct,
+                    })
+                if any(r.get("price") is not None for r in out):
+                    _INDICES_CACHE.update(
+                        data={"indices": out, "fetched_at": int(now)}, ts=now)
         return tickers, quotes
     except Exception as e:
         print(f"[watchlist] lite paint: {e!s:.120}", flush=True)
@@ -4947,39 +4993,13 @@ def mobile_home(request: Request):
         body["cache"] = "home"
         return body
     t0 = time.time()
-    idx_box: dict = {"indices": []}
-    wl_box: dict = {}
-    wl_err: list = []
-
-    def _load_idx():
-        try:
-            got = market_indices(store_only=True) or {}
-            if isinstance(got, dict):
-                idx_box.clear()
-                idx_box.update(got)
-        except Exception as e:
-            print(f"[mobile-home] indices: {e!s:.120}", flush=True)
-            idx_box.clear()
-            idx_box["indices"] = []
-
-    def _load_wl():
-        try:
-            got = watchlist_get(request, fresh=False, lite=True)
-            if isinstance(got, dict):
-                wl_box.update(got)
-        except Exception as e:
-            wl_err.append(e)
-
-    th_idx = threading.Thread(target=_load_idx, name="mobile-home-idx")
-    th_wl = threading.Thread(target=_load_wl, name="mobile-home-wl")
-    th_idx.start()
-    th_wl.start()
-    th_idx.join()
-    th_wl.join()
-    if wl_err:
-        raise wl_err[0]
-    idx = idx_box
-    wl = wl_box
+    # Lite watchlist first. That one connection fills the index ribbon cache.
+    wl = watchlist_get(request, fresh=False, lite=True)
+    try:
+        idx = market_indices(store_only=True) or {}
+    except Exception as e:
+        print(f"[mobile-home] indices: {e!s:.120}", flush=True)
+        idx = {"indices": []}
     body = {
         "ok": True,
         "indices": (idx or {}).get("indices") or [],
@@ -8883,7 +8903,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui732-20261014-load"
+WEB_BUILD_VERSION = "ui733-20261014-home"
 
 
 @app.get("/api/build")

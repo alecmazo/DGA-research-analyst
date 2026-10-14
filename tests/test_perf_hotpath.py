@@ -50,7 +50,7 @@ def test_list_reports_sql_skips_valuation_json():
     assert "_quote_from_current_session" in fill
     assert "_batch_quotes_fast" not in fill
     assert "_reports_attach_store_prices(out)" in fn
-    assert 'WEB_BUILD_VERSION = "ui732-20261014-load"' in src
+    assert 'WEB_BUILD_VERSION = "ui733-20261014-home"' in src
 
 
 def test_positions_use_newest_print_not_yahoo():
@@ -161,7 +161,8 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "watchlist_get(" in body
     assert "fresh=False" in body
     assert "lite=True" in body
-    assert "threading.Thread" in body
+    assert body.find("watchlist_get(") < body.find("market_indices(store_only=True)")
+    assert "threading.Thread" not in body
     wl = _fn_src(ROOT / "api/server.py", "watchlist_get")
     assert "if need and (not lite)" in wl
     assert "_wl_lite_paint(" in wl
@@ -171,6 +172,8 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "yf.Ticker" not in paint
     assert "_batch_quotes_fast" not in paint
     assert "analyst_reports" not in paint
+    assert "_INDICES_CACHE" in paint
+    assert "_INDEX_TICKERS" in paint
     rep = _fn_src(ROOT / "api/server.py", "get_report")
     assert "as_stored" in rep
     assert "if not as_stored" in rep
@@ -178,7 +181,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui732-20261014-load"' in src
+    assert 'WEB_BUILD_VERSION = "ui733-20261014-home"' in src
     assert "if (not lite) and _wl_left()" in wl
 
 

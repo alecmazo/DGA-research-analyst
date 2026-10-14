@@ -41,6 +41,26 @@ GP site first paint is a separate client split: Desk is the only eager page, Int
 
 ### After — build `ui732-20261014-load`
 
+| Step | Result | Client | Server | Size | Counts | Budget |
+|---|---|---|---|---|---|---|
+| 1 health | OK | 94 ms | — | 114 B | | under 300 ms, inside |
+| 2 login demo | OK | 7605 ms | — | 694 B | | not the GP budget |
+| 3 home first | OK | 1980 ms | 1852 ms | 2036 B | 11 indices, 10 tickers, 10 priced | under 1 s, over |
+| 3 home second | OK | 99 ms | 1 ms | 2048 B | same | under 400 ms, inside |
+| 4 reports first | OK | 118 ms | — | 1671 B | 10 rows | under 300 ms, inside |
+| 4 reports second | OK | 202 ms | — | 1671 B | 10 rows | under 300 ms, inside |
+| 5 watchlist first | OK | 2591 ms | 2449 ms | 1792 B | 10 tickers, 10 priced | under 2 s, over |
+| 5 watchlist second | OK | 134 ms | 1 ms | 1809 B | 10 tickers, 10 priced | under 400 ms, inside |
+| 6 report open | OK | 125 ms | — | 1182 B | RKLB, 1056 chars, not incomplete | under 800 ms, inside |
+
+Two threads each opened a new pooled connection, so the cold home stay over budget. ui733 keeps lite on one connection and fills the index ribbon from that same read.
+
+## Run 003b — 2026-10-14
+
+Same demo book. After `ui733-20261014-home`.
+
+### After — build `ui733-20261014-home`
+
 Filled after that build is live.
 
 ## Run 002 — 2026-09-24
