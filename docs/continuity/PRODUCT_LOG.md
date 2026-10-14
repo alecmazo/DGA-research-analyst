@@ -259,7 +259,7 @@ Technology (core) on the bridge is TSLA, META, and AMZN, plus Information Techno
 
 Desk is the only GP page in the first JavaScript chunk. Other routes, including City, load when opened. Report / valuation / comps / portfolio popups live in `lib/openWindows.ts` so Desk does not download those pages. Inter fonts start print-media and swap to all after load.
 
-Markets home (`GET /api/mobile/home`) reads store-only indices and a lite watchlist in parallel. Lite uses one pooled connection for the ticker list and last prints, and skips migrate, Yahoo, YTD, report flags, and earnings. Brief and pulse still wait 12 seconds. Do not publish a mobile OTA as part of a speed audit.
+Markets home (`GET /api/mobile/home`) reads a lite watchlist on one pooled connection and fills the index ribbon from that same read. Lite skips migrate, Yahoo, YTD, report flags, and earnings. Brief and pulse still wait 12 seconds. Do not publish a mobile OTA as part of a speed audit.
 
 ---
 

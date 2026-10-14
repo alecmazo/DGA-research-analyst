@@ -61,7 +61,29 @@ Same demo book. After `ui733-20261014-home`.
 
 ### After — build `ui733-20261014-home`
 
-Filled after that build is live.
+| Step | Result | Client | Server | Size | Counts | Budget |
+|---|---|---|---|---|---|---|
+| 1 health | OK | 120 ms | — | 114 B | | under 300 ms, inside |
+| 2 login demo | OK | 10673 ms | — | 694 B | | not the GP budget |
+| 3 home first | OK | 205 ms | 79 ms | 2060 B | 11 indices, 10 tickers, 10 priced | under 1 s, inside |
+| 3 home second | OK | 220 ms | 1 ms | 2074 B | same | under 400 ms, inside |
+| 4 reports first | OK | 129 ms | — | 1668 B | 10 rows | under 300 ms, inside |
+| 4 reports second | OK | 128 ms | — | 1668 B | 10 rows | under 300 ms, inside |
+| 5 watchlist first | OK | 2467 ms | 2215 ms | 1677 B | 10 tickers, 10 priced | under 2 s, over |
+| 5 watchlist second | OK | 148 ms | 1 ms | 1694 B | 10 tickers, 10 priced | under 400 ms, inside |
+| 6 report open | OK | 213 ms | — | 1194 B | RKLB, 1068 chars, not incomplete | under 800 ms, inside |
+
+### Compared with ui732 after
+
+| Step | ui732 after | ui733 after | Change |
+|---|---|---|---|
+| 3 home first | 1980 ms / 1852 ms | 205 ms / 79 ms | better, inside |
+| 3 home second | 99 ms | 220 ms | same, inside |
+| 5 watchlist first | 2591 ms | 2467 ms | same, still over |
+
+Home first is the step this pass changed. Full watchlist is still the report-table flag query. Do not retune it in this run.
+
+GP site first JS is 410 KB (128 KB gzip), down from 942 KB (270 KB gzip). CSS is 83 KB (17 KB gzip), down from 245 KB (46 KB gzip). City still loads Three.js only when opened. No mobile OTA.
 
 ## Run 002 — 2026-09-24
 
