@@ -246,3 +246,44 @@ def test_pending_sec_runs_before_yahoo_calendar(monkeypatch):
     assert "_left() > 0.2" in fn
     assert "_EARNINGS_PENDING_TTL_S" in src
     assert md._EARNINGS_PENDING_TTL_S == 60
+
+
+def test_pending_skips_yf_surprise_and_always_hits_sec(monkeypatch):
+    md._EARNINGS_CARD_CACHE.clear()
+
+    def boom(*_a, **_k):
+        raise AssertionError("yfinance surprise must not run after print window")
+
+    monkeypatch.setattr(md, "earnings_upcoming", lambda *_a, **_k: {
+        "TSM": {
+            "date": "2026-10-15",
+            "days_until": 0,
+            "time": "time-pre-market",
+            "fiscal_quarter": "Sep 2026",
+            "eps_forecast": "4.45",
+            "name": "TSMC",
+        }
+    })
+    monkeypatch.setattr(md, "nasdaq_earnings_surprise", lambda _s: {
+        "history": [], "latest": None, "source": "nasdaq",
+    })
+    monkeypatch.setattr(md, "yfinance_earnings_surprise", boom)
+    monkeypatch.setattr(md, "yfinance_earnings_calendar_context", lambda _s: {})
+    monkeypatch.setattr(md, "yfinance_quarterly_actuals", lambda *_a, **_k: {})
+    monkeypatch.setattr(md, "sec_8k_earnings_release_actuals", lambda *_a, **_k: {
+        "eps_actual": 4.60,
+        "revenue_actual": 46.72e9,
+        "source": "sec_8k_ex99",
+        "filed": "2026-10-15",
+        "form": "6-K",
+    })
+    monkeypatch.setattr(md, "company_ir_links", lambda _s: {})
+    monkeypatch.setattr(md, "_earnings_report_window_passed", lambda *_a, **_k: True)
+    monkeypatch.setattr(md, "_actuals_from_yahoo_headlines", lambda *_a, **_k: {})
+    out = md.earnings_card("TSM", horizon_days=5, include_past_days=1)
+    assert out.get("status") == "reported"
+    assert out.get("result", {}).get("eps_actual") == 4.60
+    src = Path(md.__file__).read_text(encoding="utf-8")
+    fn = src.split("def earnings_card")[1].split("\ndef _fiscal_quarter_labels_match")[0]
+    assert 'status == "pending_update" or _left() > 0.2' in fn
+    assert "status != \"pending_update\"" in fn

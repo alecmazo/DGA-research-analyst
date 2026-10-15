@@ -1578,8 +1578,28 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         status = "reported" if latest.get("eps_actual") is not None else "pending_update"
         result_source = latest.get("source") or "nasdaq"
 
-    # Nasdaq lag: yfinance often has Reported EPS same morning for BMO
-    if _left() > 0.8 and (status != "reported" or (result and result.get("eps_actual") is None)):
+    # After the expected print window, never keep saying "scheduled / AWAITING"
+    if upcoming and status != "reported":
+        du = upcoming.get("days_until")
+        try:
+            du_i = int(du) if du is not None else 0
+        except (TypeError, ValueError):
+            du_i = 0
+        past_window = du_i < 0 or (
+            du_i == 0 and _earnings_report_window_passed(
+                str(upcoming.get("date") or ""), session)
+        )
+        if past_window:
+            status = "pending_update"
+        else:
+            status = "scheduled"
+
+    # Nasdaq lag: yfinance often has Reported EPS same morning for BMO.
+    # Skip it once the print window has passed — that Yahoo call was eating
+    # the 3.2s budget (TSM live: 8-K skip at leftover -5.93s) while the 6-K
+    # already had ADR actuals.
+    if (_left() > 0.8 and status != "pending_update"
+            and (status != "reported" or (result and result.get("eps_actual") is None))):
         yf_s = yfinance_earnings_surprise(sym)
         yf_latest = yf_s.get("latest")
         if yf_latest and yf_latest.get("eps_actual") is not None and _match_event(yf_latest):
@@ -1605,22 +1625,6 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                 for h in history
             ):
                 history = [result] + history
-
-    # After the expected print window, never keep saying "scheduled / AWAITING"
-    if upcoming and status != "reported":
-        du = upcoming.get("days_until")
-        try:
-            du_i = int(du) if du is not None else 0
-        except (TypeError, ValueError):
-            du_i = 0
-        past_window = du_i < 0 or (
-            du_i == 0 and _earnings_report_window_passed(
-                str(upcoming.get("date") or ""), session)
-        )
-        if past_window:
-            status = "pending_update"
-        else:
-            status = "scheduled"
 
     eps_est = None
     if result and result.get("eps_estimate") is not None:
@@ -1689,7 +1693,9 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                     rd = _dt.strptime(str(rd)[:10], "%m/%d/%Y").date().isoformat()
             except Exception:
                 pass
-            if _left() > 0.2:
+            # Pending same-day prints always hit EDGAR even if Nasdaq already
+            # blew the 3.2s budget. Reported cards still respect leftover.
+            if status == "pending_update" or _left() > 0.2:
                 k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
                 press_release_url = k8.get("press_release_url") or None
                 filing_url = k8.get("filing_url") or None
