@@ -102,6 +102,15 @@ If a public credit or arb page is exposed, it is research commentary for accredi
 - Replacing Word report generation or Gamma as an internal drafting tool. Gamma stays the draft format. The site stops depending on the embed.
 - Mobile app logo copy (`mobile/assets/dga_logo_small.png`) unless the header work touches it.
 
+## Fund City data feed (stable — do not redesign)
+
+DGA Fund City, the Unreal client, does not read the Ship page or the unmounted Portfolio City scene. It polls a read-only JSON feed built from the same positions book as Portfolio Ship. The contract is `docs/FUND_CITY_FEED.md`.
+
+- Path: `GET /api/v2/gp/fund-city`. `schema_version` is `1.0`. Do not rename the path or the fields that doc lists.
+- Do not mount `portfolio_city.create_router` on this path. That scene payload stays unmounted. Do not put position dollars on a public dgacapital.com page.
+- Privacy stays `decide_privacy` in `api/domains/portfolio_city.py`. Do not add a dollar field that skips it.
+- This is not one of the graphic packages above. Leave the feed alone when restyling `/portfolio` or the housing page.
+
 ## Acceptance
 
 - `/portfolio` renders without a Gamma iframe.

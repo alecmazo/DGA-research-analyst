@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://portfolio.dgacapital.com/gp/fund-city.schema.json",
+  "title": "FundCityFeed",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ok", "fund", "holdings", "provenance"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "ok": {"type": "boolean"},
+    "fund": {"$ref": "#/$defs/fund"},
+    "holdings": {"type": "array", "items": {"$ref": "#/$defs/holding"}},
+    "provenance": {"$ref": "#/$defs/provenance"}
+  },
+  "$defs": {
+    "fund": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["as_of", "book_as_of", "generated_at", "nav", "cash", "cash_weight", "currency", "holdings_count"],
+      "properties": {
+        "as_of": {"type": ["string", "null"]},
+        "book_as_of": {"type": ["string", "null"]},
+        "generated_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+        "nav": {"type": ["number", "null"], "minimum": 0},
+        "cash": {"type": ["number", "null"], "minimum": 0},
+        "cash_weight": {"type": "number", "minimum": 0, "maximum": 1},
+        "currency": {"const": "USD"},
+        "holdings_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "holding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ticker", "name", "sector", "story_part", "story_name", "shares", "market_value", "weight", "currency", "market_cap", "flags"],
+      "properties": {
+        "ticker": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "sector": {"enum": ["Information Technology", "Communication Services", "Consumer Discretionary", "Consumer Staples", "Financials", "Health Care", "Energy", "Utilities", "Industrials", "Materials", "Real Estate", "Cash"]},
+        "story_part": {"enum": ["keel", "engine", "cargo", "staples", "bow", "stern", "midship", "bridge", "mast", "market", "deck", "aero", "hull", "anchor", "cabins"]},
+        "story_name": {"type": "string"},
+        "shares": {"type": ["number", "null"], "minimum": 0},
+        "market_value": {"type": ["number", "null"], "minimum": 0},
+        "weight": {"type": "number", "minimum": 0, "maximum": 1},
+        "currency": {"const": "USD"},
+        "market_cap": {"type": ["number", "null"], "minimum": 0},
+        "flags": {"$ref": "#/$defs/flags"}
+      }
+    },
+    "flags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cash", "index_fund", "gse_preferred", "gse_common", "bond_cusip", "preferred", "non_equity"],
+      "properties": {
+        "cash": {"type": "boolean"},
+        "index_fund": {"type": "boolean"},
+        "gse_preferred": {"type": "boolean"},
+        "gse_common": {"type": "boolean"},
+        "bond_cusip": {"type": "boolean"},
+        "preferred": {"type": "boolean"},
+        "non_equity": {"type": "boolean"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "is_live", "is_demo", "privacy", "show_dollars", "withheld_reason", "book_status"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "is_live": {"type": "boolean"},
+        "is_demo": {"type": "boolean"},
+        "privacy": {"enum": ["dollars", "weights"]},
+        "show_dollars": {"type": "boolean"},
+        "withheld_reason": {"type": ["string", "null"]},
+        "book_status": {"enum": ["ok", "empty", "unavailable"]}
+      }
+    }
+  }
+}
