@@ -50,7 +50,7 @@ def test_list_reports_sql_skips_valuation_json():
     assert "_quote_from_current_session" in fill
     assert "_batch_quotes_fast" not in fill
     assert "_reports_attach_store_prices(out)" in fn
-    assert 'WEB_BUILD_VERSION = "ui734-20261015-mobile-watchlist-koyfin"' in src
+    assert 'WEB_BUILD_VERSION = "ui735-20261015-index-board"' in src
 
 
 def test_positions_use_newest_print_not_yahoo():
@@ -151,6 +151,11 @@ def test_market_indices_never_loops_yfinance_tickers():
     assert "_batch_quotes_fast" in fn
     assert "_INDICES_TTL" in fn
     assert "_INDEX_ALIASES" in fn
+    assert "_indices_payload_complete" in fn
+    assert "if still and not store_only" not in fn
+    assert "_persist_market_quotes" in fn
+    src = (ROOT / "api/server.py").read_text(encoding="utf-8")
+    assert '"DIA"' in src and '"QQQ"' in src and '"VIXY"' in src
 
 
 def test_mobile_home_is_cheap_bootstrap():
@@ -183,7 +188,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui734-20261015-mobile-watchlist-koyfin"' in src
+    assert 'WEB_BUILD_VERSION = "ui735-20261015-index-board"' in src
     assert "if (not lite) and _wl_left()" in wl
 
 

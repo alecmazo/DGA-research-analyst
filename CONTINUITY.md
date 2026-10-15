@@ -315,6 +315,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Load times** | **`ui732-20261014-load`** | Desk first paint loads only the desk chunk. Other GP pages load when opened. Markets home reads indices and the lite watchlist together, and lite uses one database connection. |
 | **Home paint** | **`ui733-20261014-home`** | Markets home uses one database connection for the ticker list, last prints, and the index ribbon. |
 | **Mobile watchlist** | **`ui734-20261015-mobile-watchlist-koyfin`** | GP phone: Markets is the Koyfin index board (fixed roster, two-column grid). Watchlist is its own tab with two-line name rows and the idea feed. Fund moved under More. Lite paint matches index symbols case-insensitively and attaches security_meta names. Desktop unchanged. No OTA. |
+| **Index board** | **`ui735-20261015-index-board`** | Phone Markets fills missing index prints with one short quote batch and writes them to market_quotes. A half-empty store (only SPY and IWM) no longer caches a two-name board. |
 
 ### One-click handoff (preferred)
 
@@ -512,4 +513,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-15 · Agent: Grok Build · Built: `ui734-20261015-mobile-watchlist-koyfin` · Live until the next upload: `ui733-20261014-home` · Next: `ui735-YYYYMMDD-slug`*
+*Last updated: 2026-10-15 · Agent: Grok Build · Built: `ui735-20261015-index-board` · Live until the next upload: `ui734-20261015-mobile-watchlist-koyfin` · Next: `ui736-YYYYMMDD-slug`*

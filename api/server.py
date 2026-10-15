@@ -2448,6 +2448,9 @@ _INDEX_ALIASES = {
     "GC=F": "GLD",
     "CL=F": "USO",
     "DX-Y.NYB": "UUP",
+    "^VIX": "VIXY",
+    "BTC-USD": "IBIT",
+    "ETH-USD": "ETHA",
 }
 _INDICES_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
 _INDICES_TTL = 60  # seconds — mobile polls this; Yahoo-per-name was 6s×11
@@ -3706,17 +3709,66 @@ def news_desk_feeds(request: Request, market_limit: int = 12, filings_limit: int
     }
 
 
+def _indices_payload_complete(payload) -> bool:
+    rows = (payload or {}).get("indices") or []
+    if len(rows) < len(_INDEX_TICKERS):
+        return False
+    return all(r.get("price") is not None for r in rows)
+
+
+def _persist_market_quotes(qmap: dict) -> None:
+    """Write index/quote prints into market_quotes so the next phone paint is store-only."""
+    if not qmap or not globals().get("_PSYCOPG2_OK") or not os.environ.get("DATABASE_URL"):
+        return
+    rows = []
+    for sym, q in qmap.items():
+        tk = str(sym or "").strip()
+        if not tk or not isinstance(q, dict):
+            continue
+        px = _clean_quote_px(q.get("price"))
+        if px is None:
+            continue
+        rows.append((
+            tk,
+            px,
+            _clean_quote_pct(q.get("pct_change")),
+            (q.get("source") or "index")[:40],
+        ))
+    if not rows:
+        return
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO market_quotes (symbol, price, pct_change, source, updated_at)
+                     VALUES (%s, %s, %s, %s, now())
+                ON CONFLICT (symbol) DO UPDATE SET
+                     price = EXCLUDED.price,
+                     pct_change = COALESCE(EXCLUDED.pct_change, market_quotes.pct_change),
+                     source = EXCLUDED.source,
+                     updated_at = now()
+                """,
+                rows,
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[indices] persist: {e!s:.120}", flush=True)
+
+
 @app.get("/api/market/indices")
 def market_indices(store_only: bool = False):
     """Index ribbon. Store + a short batch — never 11 sequential yfinance
     fast_info calls (that froze mobile Markets for tens of seconds).
 
-    ``store_only`` is the phone's first paint. A missing index stays blank
-    until the next cached refresh rather than waiting on Yahoo.
+    ``store_only`` is kept on the phone call site. A half-empty store (only
+    SPY/IWM) still runs one ``_batch_quotes_fast`` for the misses and persists
+    them, so the board is not permanently two names.
     """
     now = time.time()
-    if _INDICES_CACHE["data"] and (now - _INDICES_CACHE["ts"]) < _INDICES_TTL:
-        return _INDICES_CACHE["data"]
+    cached = _INDICES_CACHE.get("data")
+    if (_indices_payload_complete(cached)
+            and (now - float(_INDICES_CACHE.get("ts") or 0)) < _INDICES_TTL):
+        return cached
 
     symbols = [sym for _, sym in _INDEX_TICKERS]
     aliases = [_INDEX_ALIASES[s] for s in symbols if s in _INDEX_ALIASES]
@@ -3726,21 +3778,33 @@ def market_indices(store_only: bool = False):
         qmap = _db_quotes(want) or {}
     except Exception as e:
         print(f"[indices] store: {e!s:.120}", flush=True)
-    still = [s for s in want if (qmap.get(s) or {}).get("price") is None]
-    if still and not store_only:
+    still = [
+        s for s in want
+        if ((qmap.get(s) or qmap.get((s or "").upper()) or {}).get("price") is None)
+    ]
+    if still:
         try:
             extra = _batch_quotes_fast(still) or {}
             for s, q in extra.items():
                 if (q or {}).get("price") is not None:
                     qmap[s] = q
+                    qmap[str(s).upper()] = q
+            _persist_market_quotes(extra)
         except Exception as e:
             print(f"[indices] fast: {e!s:.120}", flush=True)
 
     out = []
     for label, sym in _INDEX_TICKERS:
-        q = qmap.get(sym) or qmap.get(_INDEX_ALIASES.get(sym) or "") or {}
+        alias = _INDEX_ALIASES.get(sym) or ""
+        q = (
+            qmap.get(sym)
+            or qmap.get((sym or "").upper())
+            or qmap.get(alias)
+            or qmap.get(alias.upper())
+            or {}
+        )
         last = q.get("price")
-        pct = q.get("pct_change")
+        pct = q.get("pct") if q.get("pct") is not None else q.get("pct_change")
         try:
             last = float(last) if last is not None else None
         except (TypeError, ValueError):
@@ -3757,8 +3821,8 @@ def market_indices(store_only: bool = False):
             "pct": pct,
         })
 
-    if not any(r.get("price") is not None for r in out) and _INDICES_CACHE.get("data"):
-        return _INDICES_CACHE["data"]
+    if not any(r.get("price") is not None for r in out) and cached:
+        return cached
     payload = {"indices": out, "fetched_at": int(now)}
     _INDICES_CACHE.update(data=payload, ts=now)
     return payload
@@ -4770,7 +4834,7 @@ def _wl_lite_paint(lp_id: str) -> tuple[list[str], dict]:
                         "prev": None,
                         "pct": pct,
                     })
-                if any(r.get("price") is not None for r in out):
+                if _indices_payload_complete({"indices": out}):
                     _INDICES_CACHE.update(
                         data={"indices": out, "fetched_at": int(now)}, ts=now)
         return tickers, quotes
@@ -8943,7 +9007,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui734-20261015-mobile-watchlist-koyfin"
+WEB_BUILD_VERSION = "ui735-20261015-index-board"
 
 
 @app.get("/api/build")
