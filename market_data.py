@@ -1697,9 +1697,9 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                 )
         rev_actual = actuals.get("revenue_actual")
     # Yahoo quarterly income stmt often lags the print by days while Nasdaq/YF
-    # already have EPS (TREX ticket SUP_20260805). Pull revenue from the Item
-    # 2.02 8-K exhibit 99 press release when statement actuals are missing.
-    # Always keep press_release_url when an 8-K is found (IR deep-link).
+    # already have EPS (TREX ticket SUP_20260805). Pull revenue + EPS from the
+    # Item 2.02 8-K exhibit 99 or a same-day 6-K earnings exhibit (TSM ADR).
+    # Always keep press_release_url when a filing is found (IR deep-link).
     press_release_url = None
     filing_url = None
     if not event_still_future and status in ("reported", "pending_update", "scheduled"):
@@ -1725,14 +1725,27 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                 k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
                 press_release_url = k8.get("press_release_url") or None
                 filing_url = k8.get("filing_url") or None
+                used_sec = False
+                street_rev = street_range.get("revenue_avg")
                 if rev_actual is None and k8.get("revenue_actual") is not None:
-                    rev_actual = k8["revenue_actual"]
+                    if _revenue_plausible_vs_estimate(k8["revenue_actual"], street_rev):
+                        rev_actual = k8["revenue_actual"]
+                        used_sec = True
+                if (eps_actual_final is None and k8.get("eps_actual") is not None
+                        and status in ("reported", "pending_update")
+                        and _revenue_plausible_vs_estimate(k8["eps_actual"], eps_est)):
+                    eps_actual_final = k8["eps_actual"]
+                    used_sec = True
+                    if status == "pending_update":
+                        status = "reported"
+                if used_sec:
                     result_source = (
                         (result_source or "") + "+sec8k" if result_source else "sec8k"
                     )
                     if not actuals:
                         actuals = {
                             "revenue_actual": rev_actual,
+                            "eps_actual": eps_actual_final,
                             "period_label": (
                                 (upcoming or {}).get("fiscal_quarter")
                                 or (result or {}).get("fiscal_quarter")
@@ -1743,12 +1756,39 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                         }
                     else:
                         actuals = dict(actuals)
-                        actuals["revenue_actual"] = rev_actual
+                        if rev_actual is not None:
+                            actuals["revenue_actual"] = rev_actual
+                        if eps_actual_final is not None:
+                            actuals["eps_actual"] = eps_actual_final
                         actuals["source"] = (
                             str(actuals.get("source") or "") + "+sec8k"
                         ).strip("+")
         except Exception as e:
             print(f"[market_data] 8-K rev fill {sym}: {e!s:.120}", flush=True)
+
+    # Same-day headlines when Nasdaq/Yahoo stmt/SEC still lag (free, no LLM).
+    if (not event_still_future and status in ("reported", "pending_update")
+            and (eps_actual_final is None or rev_actual is None)
+            and _left() > 0.4):
+        try:
+            hl = _actuals_from_yahoo_headlines(
+                sym, eps_est=eps_est, rev_est=street_range.get("revenue_avg"),
+            ) or {}
+            used_hl = False
+            if eps_actual_final is None and hl.get("eps_actual") is not None:
+                eps_actual_final = hl["eps_actual"]
+                used_hl = True
+                if status == "pending_update":
+                    status = "reported"
+            if rev_actual is None and hl.get("revenue_actual") is not None:
+                rev_actual = hl["revenue_actual"]
+                used_hl = True
+            if used_hl:
+                result_source = (
+                    (result_source or "") + "+yahoo_hl" if result_source else "yahoo_hl"
+                )
+        except Exception as e:
+            print(f"[market_data] headline actuals {sym}: {e!s:.120}", flush=True)
 
     # Company IR site (Yahoo free profile) — always try for the earnings card link.
     ir_links: dict = {}
@@ -2077,9 +2117,33 @@ def _score_earnings_revenue_hit(val: float, snip: str) -> tuple[int, float]:
         sc -= 10
     if any(x in s for x in ("full year", "full-year", "fy ", "guidance")):
         sc -= 8
+    # NYSE/Nasdaq Street is USD. Local-currency totals (TSM NT$1,494B vs
+    # US$46.72B) must lose to the dollar print, then the 5× Street guard.
+    if any(x in s for x in (
+        "nt$", "twd", "nt dollar", "new taiwan", "rmb", "cny", "yuan",
+        "¥", "yen", "jpy", "krw", "won",
+    )):
+        sc -= 20
+    if any(x in s for x in (
+        "us$", "u.s.$", "usd", "u.s. dollar", "us dollar",
+        "in us dollars", "in u.s.",
+    )):
+        sc += 8
     if val >= 1_000_000_000:
         sc += 1
     return (sc, float(val))
+
+
+def _plain_earnings_text(text: str) -> str:
+    """Strip HTML/entities from an 8-K / 6-K exhibit so regex can see the print."""
+    import re as _re
+    if not text:
+        return ""
+    t = _re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
+    t = _re.sub(r"(?is)<style[^>]*>.*?</style>", " ", t)
+    t = _re.sub(r"(?is)<[^>]+>", " ", t)
+    t = _re.sub(r"&#\d+;|&[a-z]+;", " ", t, flags=_re.I)  # &#8226; bullets, etc.
+    return _re.sub(r"\s+", " ", t)
 
 
 def _extract_revenue_from_earnings_text(text: str) -> dict:
@@ -2089,14 +2153,9 @@ def _extract_revenue_from_earnings_text(text: str) -> dict:
     Returns {revenue_actual, snippet, method} or {}.
     """
     import re as _re
-    if not text:
+    t = _plain_earnings_text(text)
+    if not t:
         return {}
-    # Strip HTML / collapse whitespace
-    t = _re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
-    t = _re.sub(r"(?is)<style[^>]*>.*?</style>", " ", t)
-    t = _re.sub(r"(?is)<[^>]+>", " ", t)
-    t = _re.sub(r"&#\d+;|&[a-z]+;", " ", t, flags=_re.I)  # &#8226; bullets, etc.
-    t = _re.sub(r"\s+", " ", t)
 
     # High-confidence prose patterns (quarter just reported)
     # Note: "revenues" (plural) and "sales" used by many industrial filers (CMI).
@@ -2174,6 +2233,120 @@ def _extract_revenue_from_earnings_text(text: str) -> dict:
     return {}
 
 
+def _score_earnings_eps_hit(val: float, snip: str) -> tuple[int, float]:
+    """Rank ADR / USD EPS over local-currency prints (TSM NT$29.43 vs US$4.60)."""
+    s = (snip or "").lower()
+    sc = 0
+    if any(x in s for x in (
+        "per adr", "per ads", "adr unit", "ads unit", "american depositary",
+    )):
+        sc += 12
+    if any(x in s for x in (
+        "us$", "u.s.$", "usd", "u.s. dollar", "us dollar", "in us dollars",
+    )):
+        sc += 8
+    if any(x in s for x in (
+        "nt$", "twd", "nt dollar", "new taiwan", "rmb", "cny", "yuan",
+        "yen", "jpy", "krw", "won",
+    )):
+        sc -= 20
+    if any(x in s for x in (
+        "diluted eps", "diluted earnings", "earnings per share", "eps of",
+    )):
+        sc += 6
+    if any(q in s for q in (
+        "quarter", "q1", "q2", "q3", "q4", "quarterly",
+    )):
+        sc += 3
+    if any(x in s for x in (
+        "guidance", "expects", "expected to", "outlook", "forecast", "between",
+    )):
+        sc -= 8
+    if 0.05 <= val <= 80:
+        sc += 2
+    return (sc, 0.0)
+
+
+def _extract_eps_from_earnings_text(text: str) -> dict:
+    """Pull diluted EPS from an 8-K / 6-K exhibit or a headline. Prefers US$/ADR.
+
+    TSM Q3'26: 'diluted earnings per share of NT$29.43 (US$4.60 per ADR unit)'.
+    Returns {eps_actual, snippet, method} or {}.
+    """
+    import re as _re
+    t = _plain_earnings_text(text)
+    if not t:
+        return {}
+    num = r"([0-9]+(?:\.[0-9]+)?)"
+    ccy = r"(?:US\$|U\.S\.\$|USD|NT\$|TWD|\$)"
+    patterns = [
+        r"(?:US\$|U\.S\.\$)\s*" + num + r"\s*per\s+AD[RS]",
+        r"\$\s*" + num + r"\s*per\s+AD[RS]",
+        r"(?:diluted\s+)?(?:earnings\s+per\s+share|eps)\s+(?:of|:)?\s*"
+        + ccy + r"?\s*" + num,
+        r"earnings\s+of\s+" + ccy + r"?\s*" + num + r"(?:\s*per\s+AD[RS])?",
+        r"(?:US\$|U\.S\.\$)\s*" + num,
+    ]
+    hits: list[tuple[float, str]] = []
+    for pat in patterns:
+        for m in _re.finditer(pat, t, _re.I):
+            try:
+                val = float(m.group(1))
+            except (TypeError, ValueError):
+                continue
+            if val < 0.01 or val > 200:
+                continue
+            if 1900 <= val <= 2100 and "." not in m.group(1):
+                continue
+            ctx = t[max(0, m.start() - 70): m.end() + 50]
+            ctx_l = ctx.lower()
+            if any(x in ctx_l for x in ("billion", "million", "revenue", "net sales")) \
+                    and "per adr" not in ctx_l and "per ads" not in ctx_l \
+                    and "earnings per share" not in ctx_l and " eps" not in ctx_l \
+                    and not ctx_l.strip().startswith("eps"):
+                continue
+            hits.append((val, ctx[:220]))
+    if not hits:
+        return {}
+    hits.sort(key=lambda item: _score_earnings_eps_hit(item[0], item[1]), reverse=True)
+    val, snip = hits[0]
+    return {"eps_actual": float(val), "snippet": snip, "method": "prose"}
+
+
+def _actuals_from_yahoo_headlines(
+    symbol: str, *, eps_est=None, rev_est=None,
+) -> dict:
+    """Last-resort same-day actuals from free Yahoo headlines (no LLM)."""
+    out: dict = {}
+    try:
+        rows = yahoo_earnings_headlines(symbol, limit=6) or []
+    except Exception:
+        return {}
+    for h in rows:
+        title = (h.get("title") or "") if isinstance(h, dict) else ""
+        if not title:
+            continue
+        if out.get("eps_actual") is None:
+            ep = _extract_eps_from_earnings_text(title)
+            v = ep.get("eps_actual")
+            if v is not None and _revenue_plausible_vs_estimate(v, eps_est):
+                out["eps_actual"] = v
+                out["eps_snippet"] = ep.get("snippet")
+                out["eps_title"] = title[:180]
+        if out.get("revenue_actual") is None:
+            rv = _extract_revenue_from_earnings_text(title)
+            v = rv.get("revenue_actual")
+            if v is not None and _revenue_plausible_vs_estimate(v, rev_est):
+                out["revenue_actual"] = v
+                out["rev_snippet"] = rv.get("snippet")
+                out["rev_title"] = title[:180]
+        if out.get("eps_actual") is not None and out.get("revenue_actual") is not None:
+            break
+    if out:
+        out["source"] = "yahoo_headline"
+    return out
+
+
 # Serialize SEC 8-K revenue pulls — concurrent card opens must not stampede EDGAR.
 _SEC8K_FETCH_LOCK = __import__("threading").Semaphore(2)
 
@@ -2188,10 +2361,12 @@ def sec_8k_earnings_release_actuals(
     *,
     max_age_days: int = 21,
 ) -> dict:
-    """Actual revenue (and optional EPS hint) from the latest Item 2.02 8-K exhibit 99.
+    """Actual revenue + EPS from the latest Item 2.02 8-K exhibit 99, or a 6-K
+    earnings exhibit for foreign issuers (TSM files Form 6-K, not 8-K).
 
     Free SEC EDGAR only. Used when Yahoo quarterly income stmt still lags the print
-    (ticket SUP_20260805 — TREX etc. showed EPS from Nasdaq but Actual Revenue blank).
+    (ticket SUP_20260805 — TREX etc. showed EPS from Nasdaq but Actual Revenue blank;
+    SUP_20261015_a64c30f6 — TSM BMO ADR actuals were public in the 6-K EX-99.1).
 
     Hardened after ui418 deploy: company_tickers map is process-cached (see
     sec_edgar_xbrl.resolve_cik) and 8-K fetches are concurrency-limited so a
@@ -2255,12 +2430,16 @@ def sec_8k_earnings_release_actuals(
             today = date.today()
             floor = today - timedelta(days=max_age_days)
 
-            chosen = None
+            eightk = None
+            sixks: list[dict] = []
             for i, form in enumerate(forms[:80]):
-                if form not in ("8-K", "8-K/A"):
+                form_u = str(form or "").strip()
+                is_8k = form_u in ("8-K", "8-K/A")
+                is_6k = form_u in ("6-K", "6-K/A")
+                if not (is_8k or is_6k):
                     continue
                 it = str(items[i] if i < len(items) else "") or ""
-                if "2.02" not in it:
+                if is_8k and "2.02" not in it:
                     continue
                 filed_s = str(dates[i] if i < len(dates) else "")[:10]
                 if not filed_s:
@@ -2273,41 +2452,18 @@ def sec_8k_earnings_release_actuals(
                     continue
                 if target is not None and abs((filed_d - target).days) > 5:
                     continue
-                chosen = {
+                row = {
                     "filed": filed_s,
                     "accession": accs[i] if i < len(accs) else None,
                     "primary": primaries[i] if i < len(primaries) else None,
                     "items": it,
+                    "form": form_u,
                 }
-                break
-            if not chosen or not chosen.get("accession"):
-                out = {}
-                raise _Sec8kDone()
-
-            acc = str(chosen["accession"]).replace("-", "")
-            # Filing index for exhibit list
-            idx_url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/index.json"
-            idx = _req.get(
-                idx_url,
-                headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
-                timeout=3.5,
-            )
-            docs: list[str] = []
-            if idx.status_code == 200:
-                try:
-                    items_d = ((idx.json().get("directory") or {}).get("item")) or []
-                    for it in items_d:
-                        name = str(it.get("name") or "")
-                        if not name:
-                            continue
-                        low = name.lower()
-                        if not (low.endswith(".htm") or low.endswith(".html") or low.endswith(".txt")):
-                            continue
-                        docs.append(name)
-                except Exception:
-                    pass
-            if chosen.get("primary"):
-                docs.insert(0, str(chosen["primary"]))
+                if is_8k:
+                    eightk = row
+                    break
+                if is_6k and len(sixks) < 3:
+                    sixks.append(row)
 
             def _doc_score(name: str) -> int:
                 low = name.lower()
@@ -2318,20 +2474,74 @@ def sec_8k_earnings_release_actuals(
                     sc += 20
                 if any(x in low for x in ("earn", "release", "press", "news", "results")):
                     sc += 15
+                # TSM 6-K exhibit a3q26e_withguidancexfinal.htm
+                if _re.search(r"(?:[1-4]q|q[1-4])\d{0,2}", low):
+                    sc += 15
                 if low.endswith(".htm") or low.endswith(".html"):
                     sc += 5
                 # Prefer larger narrative exhibits over thin cover 8-K shells
                 if low.endswith(".txt"):
                     sc += 8  # full submission text usually includes ex99
-                if "8-k" in low or (low.startswith("form") and "ex" not in low):
+                if "8-k" in low or "6-k" in low or (low.startswith("form") and "ex" not in low):
                     sc -= 5
+                if "presentation" in low or "slide" in low:
+                    sc -= 25
                 if "graph" in low or "image" in low or low.endswith(".jpg") or low.endswith(".png"):
                     sc -= 30
                 if "index" in low or "header" in low:
                     sc -= 40
                 return sc
 
-            docs = sorted(set(docs), key=_doc_score, reverse=True)
+            def _list_docs(row: dict) -> list[str]:
+                acc_n = str(row.get("accession") or "").replace("-", "")
+                if not acc_n:
+                    return []
+                idx_url = (
+                    f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_n}/index.json"
+                )
+                found: list[str] = []
+                try:
+                    idx = _req.get(
+                        idx_url,
+                        headers={"User-Agent": ua, "Accept-Encoding": "gzip, deflate"},
+                        timeout=3.5,
+                    )
+                except Exception:
+                    idx = None
+                if idx is not None and getattr(idx, "status_code", 0) == 200:
+                    try:
+                        items_d = ((idx.json().get("directory") or {}).get("item")) or []
+                        for dit in items_d:
+                            name = str(dit.get("name") or "")
+                            if not name:
+                                continue
+                            low = name.lower()
+                            if not (low.endswith(".htm") or low.endswith(".html")
+                                    or low.endswith(".txt")):
+                                continue
+                            found.append(name)
+                    except Exception:
+                        pass
+                if row.get("primary"):
+                    found.insert(0, str(row["primary"]))
+                return sorted(set(found), key=_doc_score, reverse=True)
+
+            chosen = None
+            docs: list[str] = []
+            for cand in ([eightk] if eightk else sixks):
+                if not cand or not cand.get("accession"):
+                    continue
+                dlist = _list_docs(cand)
+                is_6k_form = str(cand.get("form") or "") in ("6-K", "6-K/A")
+                if is_6k_form and (not dlist or _doc_score(dlist[0]) < 15):
+                    continue
+                chosen = cand
+                docs = dlist
+                break
+            if not chosen or not chosen.get("accession"):
+                out = {}
+                raise _Sec8kDone()
+            acc = str(chosen["accession"]).replace("-", "")
             filing_base = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/"
             # Always expose the filing folder (and best exhibit guess) so the
             # earnings card can deep-link the IR / press-release PDF or HTML.
@@ -2343,6 +2553,7 @@ def sec_8k_earnings_release_actuals(
                 "filing_url": filing_base,
                 "press_release_url": (filing_base + str(best_doc)) if best_doc else filing_base,
                 "source": "sec_8k",
+                "form": chosen.get("form"),
             }
             # Cap downloads (prefer ex99 / earnings release first)
             for name in docs[:8]:
@@ -2358,19 +2569,20 @@ def sec_8k_earnings_release_actuals(
                 if pr.status_code != 200 or len(pr.text or "") < 400:
                     continue
                 parsed = _extract_revenue_from_earnings_text(pr.text)
-                if parsed.get("revenue_actual"):
-                    out = {
-                        "revenue_actual": parsed["revenue_actual"],
-                        "source": "sec_8k_ex99",
-                        "filed": chosen.get("filed"),
-                        "accession": chosen.get("accession"),
-                        "document": name,
-                        "snippet": parsed.get("snippet"),
-                        "method": parsed.get("method"),
-                        "filing_url": filing_base,
-                        "press_release_url": url,
-                    }
-                    break
+                parsed_eps = _extract_eps_from_earnings_text(pr.text)
+                if parsed.get("revenue_actual") or parsed_eps.get("eps_actual"):
+                    if parsed.get("revenue_actual") is not None:
+                        out["revenue_actual"] = parsed["revenue_actual"]
+                        out["snippet"] = parsed.get("snippet")
+                        out["method"] = parsed.get("method")
+                    if parsed_eps.get("eps_actual") is not None:
+                        out["eps_actual"] = parsed_eps["eps_actual"]
+                        out["eps_snippet"] = parsed_eps.get("snippet")
+                    out["source"] = "sec_8k_ex99"
+                    out["document"] = name
+                    out["press_release_url"] = url
+                    if out.get("revenue_actual") is not None:
+                        break
                 # tiny pause between SEC hits
                 _time.sleep(0.12)
         except _Sec8kDone:
@@ -2379,10 +2591,11 @@ def sec_8k_earnings_release_actuals(
             print(f"[market_data] 8-K earnings release {sym}: {e!s:.140}", flush=True)
             out = {}
         _EARNINGS_DETAIL_CACHE[cache_key] = (_time.time(), out)
-        if out:
+        if out and (out.get("revenue_actual") is not None or out.get("eps_actual") is not None):
             print(
-                f"[market_data] 8-K rev {sym}: ${out.get('revenue_actual'):,.0f} "
-                f"from {out.get('document')} filed {out.get('filed')}",
+                f"[market_data] 8-K rev {sym}: rev={out.get('revenue_actual')} "
+                f"eps={out.get('eps_actual')} from {out.get('document')} "
+                f"filed {out.get('filed')}",
                 flush=True,
             )
         return out

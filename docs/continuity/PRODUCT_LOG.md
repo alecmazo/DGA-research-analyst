@@ -306,7 +306,7 @@ Engines: **Grok**, **Claude (Opus 5 default, thinking off for reports)**, **Deep
 | Feed | Notes |
 |------|--------|
 | Quotes | Fast path: cache/store; skip yfinance on Railway when it 401s |
-| Earnings | Nasdaq surprise + Yahoo calendar; **8-K ex99** for actual revenue (company total, not Services line). Reject actuals 5× off Street |
+| Earnings | Nasdaq surprise + Yahoo calendar; **8-K Item 2.02 ex99** and **6-K earnings exhibits** for actual EPS + revenue (company total, USD/ADR over local currency). Reject actuals 5× off Street |
 | Market Pulse | Public RSS per ticker |
 | Top Movers | Yahoo screeners, $1B+ |
 | SnapTrade | Live holdings → tax_lots. Residual CASH lot. Tax YTD for Planning. Morning sync |
