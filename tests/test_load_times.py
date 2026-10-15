@@ -84,9 +84,9 @@ def test_financials_hot_path_uses_cache_not_live_http():
 
 
 def test_mobile_earnings_strip_uses_batch():
-    home = Path(ROOT / "mobile" / "src" / "screens" / "HomeScreen.js").read_text()
+    mkt = Path(ROOT / "mobile" / "src" / "screens" / "MarketsScreen.js").read_text()
     client = Path(ROOT / "mobile" / "src" / "api" / "client.js").read_text()
     assert "getEarningsBatch" in client
-    assert "api.getEarningsBatch" in home
-    assert "tickers.map(async (tk)" not in home
-    assert "api.getEarnings(tk)" not in home
+    assert "api.getEarningsBatch" in mkt
+    assert "tickers.map(async (tk)" not in mkt
+    assert "api.getEarnings(tk)" not in mkt

@@ -63,6 +63,30 @@ export function fmtChg(n) {
   return sign + body;
 }
 
+export function wireRelAge(pubTs) {
+  if (pubTs == null) return '';
+  const sec = Math.max(0, Date.now() / 1000 - Number(pubTs));
+  if (sec < 3600) return Math.max(1, Math.floor(sec / 60)) + 'm';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+  return Math.floor(sec / 86400) + 'd';
+}
+
+export function fmtRevShort(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Math.abs(Number(v));
+  const sign = Number(v) < 0 ? '-' : '';
+  if (n >= 1e9) return sign + (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return sign + (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return sign + (n / 1e3).toFixed(0) + 'K';
+  return sign + String(Math.round(n));
+}
+
+export function fmtEps(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  const n = Number(v);
+  return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
+}
+
 export function fmtClock(d) {
   if (!d) return '';
   try {

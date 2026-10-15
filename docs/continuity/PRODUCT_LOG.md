@@ -277,8 +277,11 @@ Performance by fund/SMA, documents / planning (shared worksheet), quarterly lett
 - Icon: glass Option A; splash navy `#0A1628`
 - Production EAS profile (store). `preview` is simulator-only
 - GP tabs: Markets, Watchlist, Research, Financials, Positions, More (Fund is under More)
+- Markets (home tab): index board, Watchlist CTA, earnings (±14d watchlist), Market Wire (free RSS), Market Pulse (Yahoo/Google RSS, ranked by |day %|, no LLM). Daily Brief is not on Markets.
+- Research: Analyze + saved reports. Earnings and Market Wire live on Markets.
 - LP tabs: Positions, Performance, Documents, Podcast, Settings
 - OTA via `updates.url` / runtimeVersion appVersion
+- APP_BUILD `mobile-ui32-markets-news-20261015` (production OTA)
 - Last TestFlight path: EAS production iOS 1.0.0 (build numbers autoIncrement). Do not App Store review unless asked
 
 ---

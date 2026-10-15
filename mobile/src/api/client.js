@@ -428,7 +428,19 @@ export const api = {
   // Live index ribbon (S&P, Nasdaq, Dow, VIX, …)
   getMarketIndices: () => request('/api/market/indices'),
   getMobileHome: () => request('/api/mobile/home'),
-  // Desk Market Wire — free macro RSS (no LLM). Used on Research tab.
+  // Desk Market Pulse — newest public headline per ticker, no LLM.
+  getMarketPulse: (tickers, opts = {}) => {
+    const tks = (tickers || [])
+      .map((t) => String(t || '').toUpperCase().trim())
+      .filter(Boolean);
+    const qs = new URLSearchParams();
+    qs.set('limit', String(opts.limit != null ? opts.limit : 6));
+    if (tks.length) qs.set('tickers', tks.join(','));
+    if (opts.force) qs.set('force', 'true');
+    if (opts.merge) qs.set('merge', 'true');
+    return request(`/api/market/pulse?${qs.toString()}`);
+  },
+  // Desk Market Wire — free macro RSS (no LLM). Used on Markets tab.
   // Server path is public; still send tokens when present. Multiple
   // fallbacks so a single auth mode never blanks the card.
   getMarketWire: async (limit = 10) => {

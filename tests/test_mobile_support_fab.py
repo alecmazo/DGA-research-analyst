@@ -20,11 +20,25 @@ def test_markets_does_not_block_on_brief():
     )
     fn = src.split("const loadAll")[1].split("useFocusEffect")[0]
     assert "await loadQuotes({ ideas: false })" in fn
-    assert "12000" in fn
-    assert "loadBriefAndPulse" in fn
+    assert "loadDeskNews" in fn
     assert "await Promise.all" not in fn
-    assert "getLatestDailyBrief" in src
-    assert "getLatestScan" in src
+    assert "getLatestDailyBrief" not in src
+    assert "getLatestScan" not in src
+    assert "startScan" not in src
+    assert "getMarketPulse" in src
+    assert "getMarketWire" in src
+    assert "getEarningsBatch" in src
+    assert "Math.abs(pct)" in src
+    client = (ROOT / "mobile" / "src" / "api" / "client.js").read_text(
+        encoding="utf-8"
+    )
+    assert "/api/market/pulse" in client
+    home = (ROOT / "mobile" / "src" / "screens" / "HomeScreen.js").read_text(
+        encoding="utf-8"
+    )
+    assert "MARKET WIRE" not in home
+    assert "getEarningsBatch" not in home
+    assert "loadMarketWire" not in home
 
 
 def test_markets_uses_mobile_home_and_skips_idea_feed_on_poll():
@@ -60,7 +74,7 @@ def test_ota_cold_start_never_reloads():
     settings = (ROOT / "mobile" / "src" / "screens" / "SettingsScreen.js").read_text(
         encoding="utf-8"
     )
-    assert "APP_BUILD = 'mobile-ui31-fast-20260918'" in settings
+    assert "APP_BUILD = 'mobile-ui32-markets-news-20261015'" in settings
 
 
 def test_gp_tabs_split_markets_and_watchlist():
