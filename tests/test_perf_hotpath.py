@@ -50,7 +50,7 @@ def test_list_reports_sql_skips_valuation_json():
     assert "_quote_from_current_session" in fill
     assert "_batch_quotes_fast" not in fill
     assert "_reports_attach_store_prices(out)" in fn
-    assert 'WEB_BUILD_VERSION = "ui735-20261015-index-board"' in src
+    assert 'WEB_BUILD_VERSION = "ui736-20261015-index-feed"' in src
 
 
 def test_positions_use_newest_print_not_yahoo():
@@ -150,12 +150,15 @@ def test_market_indices_never_loops_yfinance_tickers():
     assert "_db_quotes" in fn
     assert "_batch_quotes_fast" in fn
     assert "_INDICES_TTL" in fn
-    assert "_INDEX_ALIASES" in fn
+    assert "_INDEX_PX_FLOOR" in fn or "_index_px_plausible" in fn
     assert "_indices_payload_complete" in fn
     assert "if still and not store_only" not in fn
     assert "_persist_market_quotes" in fn
+    assert "max_age_s=90" in fn
+    assert "qmap.get(alias)" not in fn
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert '"DIA"' in src and '"QQQ"' in src and '"VIXY"' in src
+    assert "_INDEX_ALIASES" not in src
+    assert "_INDEX_PX_FLOOR" in src
 
 
 def test_mobile_home_is_cheap_bootstrap():
@@ -177,8 +180,8 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "yf.Ticker" not in paint
     assert "_batch_quotes_fast" not in paint
     assert "analyst_reports" not in paint
-    assert "_INDICES_CACHE" in paint
-    assert "_INDEX_TICKERS" in paint
+    assert "_INDICES_CACHE" not in paint
+    assert "_INDEX_TICKERS" not in paint
     assert "upper(symbol)" in paint
     assert "security_meta" in paint
     rep = _fn_src(ROOT / "api/server.py", "get_report")
@@ -188,7 +191,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui735-20261015-index-board"' in src
+    assert 'WEB_BUILD_VERSION = "ui736-20261015-index-feed"' in src
     assert "if (not lite) and _wl_left()" in wl
 
 

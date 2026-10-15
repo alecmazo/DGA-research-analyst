@@ -65,6 +65,7 @@ Copy these into every new agent session:
 - **Grok Analyze:** never persist `web_search` tool dumps as `report_md`.
 - **Financials `@media print`:** scoped to `.shell`, never `body *` (that blanked Saved Report print).
 - **Watchlist day-%:** session prior close, not Yahoo `previousClose`.
+- **Index tape:** cash index levels (`^GSPC`, `^DJI`, `^IXIC`, …). Never paint SPY/DIA/QQQ/IWM/GLD as those labels. Store older than 90s refreshes from Yahoo.
 - **Watchlist load:** independent of Daily Pulse.
 - **Watchlist YTD:** calendar Jan 1; this-year IPOs = % since first print + IPO tag.
 - **Accounts rebalance target:** Grok 12m PT vs **live last** (not frozen report %).

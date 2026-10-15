@@ -316,6 +316,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Home paint** | **`ui733-20261014-home`** | Markets home uses one database connection for the ticker list, last prints, and the index ribbon. |
 | **Mobile watchlist** | **`ui734-20261015-mobile-watchlist-koyfin`** | GP phone: Markets is the Koyfin index board (fixed roster, two-column grid). Watchlist is its own tab with two-line name rows and the idea feed. Fund moved under More. Lite paint matches index symbols case-insensitively and attaches security_meta names. Desktop unchanged. No OTA. |
 | **Index board** | **`ui735-20261015-index-board`** | Phone Markets fills missing index prints with one short quote batch and writes them to market_quotes. A half-empty store (only SPY and IWM) no longer caches a two-name board. |
+| **Index feed** | **`ui736-20261015-index-feed`** | Desk tape and phone Markets paint cash index levels (^GSPC/^DJI/^IXIC), not ETF stand-ins. Store prints older than 90s refresh from Yahoo so the day-% matches the session. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
 ### One-click handoff (preferred)
@@ -514,4 +515,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-15 · Agent: Grok Build · Built: `ui735-20261015-index-board` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui736-YYYYMMDD-slug`*
+*Last updated: 2026-10-15 · Agent: Grok Build · Built: `ui736-20261015-index-feed` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui737-YYYYMMDD-slug`*
