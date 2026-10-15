@@ -1201,6 +1201,7 @@ _EARNINGS_DETAIL_CACHE: dict = {}  # symbol -> (epoch, payload)
 _EARNINGS_DETAIL_TTL_S = 30 * 60
 _EARNINGS_CARD_CACHE: dict = {}  # (sym, horizon, past) -> (epoch, payload)
 _EARNINGS_CARD_TTL_S = 10 * 60
+_EARNINGS_PENDING_TTL_S = 60  # same-day lagging prints must retry free sources
 _EARNINGS_CARD_BUDGET_S = float(os.environ.get("EARNINGS_CARD_BUDGET_S") or "3.2")
 
 
@@ -1516,10 +1517,16 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         return {"ok": False, "error": "invalid ticker"}
     ck = (sym, int(horizon_days), int(include_past_days))
     hit = _EARNINGS_CARD_CACHE.get(ck)
-    if hit and _time.time() - hit[0] < _EARNINGS_CARD_TTL_S:
+    if hit:
         cached = hit[1]
         if isinstance(cached, dict):
-            return dict(cached)
+            ttl = (
+                _EARNINGS_PENDING_TTL_S
+                if cached.get("status") == "pending_update"
+                else _EARNINGS_CARD_TTL_S
+            )
+            if _time.time() - hit[0] < ttl:
+                return dict(cached)
     t0 = _time.time()
     budget = _EARNINGS_CARD_BUDGET_S
 
@@ -1635,15 +1642,6 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         except Exception:
             pass
 
-    # Street range / revenue consensus from Yahoo calendar (free, no LLM)
-    street_range: dict = {}
-    if _left() > 0.7:
-        try:
-            street_range = yfinance_earnings_calendar_context(sym) or {}
-        except Exception as e:
-            print(f"[market_data] calendar context {sym}: {e!s:.100}", flush=True)
-
-    # Actual quarterly revenue (+ EPS fallback) from Yahoo income stmt (free).
     # CRITICAL: never treat a prior filed quarter's statement as "this" print
     # when the calendar event is still in the future (TSLA ticket 68525f84 —
     # card showed $0.13 actual for a Jun/2026 print still days away).
@@ -1660,22 +1658,6 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                 str(upcoming.get("date") or ""), session):
             event_still_future = True
 
-    try:
-        fq_hint = (
-            (upcoming or {}).get("fiscal_quarter")
-            or (result or {}).get("fiscal_quarter")
-            or ""
-        )
-        # Only pull statement actuals when print window is open/past —
-        # never for pure future events.
-        if not event_still_future and _left() > 0.7:
-            actuals = yfinance_quarterly_actuals(sym, fiscal_quarter_hint=fq_hint) or {}
-            if actuals and fq_hint and not _fiscal_quarter_labels_match(
-                    fq_hint, actuals.get("period_label") or ""):
-                actuals = {}
-    except Exception as e:
-        print(f"[market_data] quarterly actuals {sym}: {e!s:.100}", flush=True)
-
     # Future print: never show actuals / beat / miss for this event
     if event_still_future:
         result = None
@@ -1686,25 +1668,15 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         rev_actual = None
     else:
         eps_actual_final = (result or {}).get("eps_actual")
-        # Statement fill-in only after a real report match or post-window pending
-        if (eps_actual_final is None and actuals.get("eps_actual") is not None
-                and status in ("reported", "pending_update")):
-            eps_actual_final = actuals.get("eps_actual")
-            if status == "pending_update":
-                status = "reported"
-                result_source = (
-                    (result_source or "") + "+yf_stmt" if result_source else "yf_stmt"
-                )
-        rev_actual = actuals.get("revenue_actual")
-    # Yahoo quarterly income stmt often lags the print by days while Nasdaq/YF
-    # already have EPS (TREX ticket SUP_20260805). Pull revenue + EPS from the
-    # Item 2.02 8-K exhibit 99 or a same-day 6-K earnings exhibit (TSM ADR).
-    # Always keep press_release_url when a filing is found (IR deep-link).
+        rev_actual = None
+
+    # Same-day lag: pull 8-K / 6-K BEFORE Yahoo stmt/calendar. Those feeds
+    # often eat the 3.2s card budget while the print is already on EDGAR
+    # (SUP_20261015_a64c30f6 TSM BMO). Leftover floor is 0.2s, not 0.7s.
     press_release_url = None
     filing_url = None
-    if not event_still_future and status in ("reported", "pending_update", "scheduled"):
-        # For scheduled (today) we still try IR/SEC links after window; for past
-        # prints we also want the 8-K URL even when Yahoo already has revenue.
+    street_range: dict = {}
+    if not event_still_future and status in ("reported", "pending_update"):
         try:
             rd = (
                 (result or {}).get("date_reported")
@@ -1717,22 +1689,16 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                     rd = _dt.strptime(str(rd)[:10], "%m/%d/%Y").date().isoformat()
             except Exception:
                 pass
-            # Only hit SEC when print window is open/past (not pure future).
-            if _left() > 0.7 and (status in ("reported", "pending_update") or (
-                upcoming and (upcoming.get("days_until") is not None)
-                and int(upcoming.get("days_until") or 0) <= 0
-            )):
+            if _left() > 0.2:
                 k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
                 press_release_url = k8.get("press_release_url") or None
                 filing_url = k8.get("filing_url") or None
                 used_sec = False
-                street_rev = street_range.get("revenue_avg")
                 if rev_actual is None and k8.get("revenue_actual") is not None:
-                    if _revenue_plausible_vs_estimate(k8["revenue_actual"], street_rev):
+                    if _revenue_plausible_vs_estimate(k8["revenue_actual"], None):
                         rev_actual = k8["revenue_actual"]
                         used_sec = True
                 if (eps_actual_final is None and k8.get("eps_actual") is not None
-                        and status in ("reported", "pending_update")
                         and _revenue_plausible_vs_estimate(k8["eps_actual"], eps_est)):
                     eps_actual_final = k8["eps_actual"]
                     used_sec = True
@@ -1742,29 +1708,64 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                     result_source = (
                         (result_source or "") + "+sec8k" if result_source else "sec8k"
                     )
-                    if not actuals:
-                        actuals = {
-                            "revenue_actual": rev_actual,
-                            "eps_actual": eps_actual_final,
-                            "period_label": (
-                                (upcoming or {}).get("fiscal_quarter")
-                                or (result or {}).get("fiscal_quarter")
-                                or ""
-                            ),
-                            "source": "sec_8k_ex99",
-                            "filed": k8.get("filed"),
-                        }
-                    else:
-                        actuals = dict(actuals)
-                        if rev_actual is not None:
-                            actuals["revenue_actual"] = rev_actual
-                        if eps_actual_final is not None:
-                            actuals["eps_actual"] = eps_actual_final
-                        actuals["source"] = (
-                            str(actuals.get("source") or "") + "+sec8k"
-                        ).strip("+")
+                    actuals = {
+                        "revenue_actual": rev_actual,
+                        "eps_actual": eps_actual_final,
+                        "period_label": (
+                            (upcoming or {}).get("fiscal_quarter")
+                            or (result or {}).get("fiscal_quarter")
+                            or ""
+                        ),
+                        "source": "sec_8k_ex99",
+                        "filed": k8.get("filed"),
+                    }
+            else:
+                print(
+                    f"[market_data] 8-K skip {sym}: budget {_left():.2f}s",
+                    flush=True,
+                )
         except Exception as e:
             print(f"[market_data] 8-K rev fill {sym}: {e!s:.120}", flush=True)
+
+    # Street range / revenue consensus from Yahoo calendar (free, no LLM)
+    if _left() > 0.7:
+        try:
+            street_range = yfinance_earnings_calendar_context(sym) or {}
+        except Exception as e:
+            print(f"[market_data] calendar context {sym}: {e!s:.100}", flush=True)
+
+    # Yahoo quarterly income stmt often lags the print by days. Only fill
+    # holes the 8-K / 6-K did not cover, and never for a future event.
+    try:
+        fq_hint = (
+            (upcoming or {}).get("fiscal_quarter")
+            or (result or {}).get("fiscal_quarter")
+            or ""
+        )
+        if (not event_still_future and _left() > 0.7
+                and (eps_actual_final is None or rev_actual is None)):
+            yf_act = yfinance_quarterly_actuals(sym, fiscal_quarter_hint=fq_hint) or {}
+            if yf_act and fq_hint and not _fiscal_quarter_labels_match(
+                    fq_hint, yf_act.get("period_label") or ""):
+                yf_act = {}
+            if yf_act:
+                if not actuals:
+                    actuals = dict(yf_act)
+                if (eps_actual_final is None and yf_act.get("eps_actual") is not None
+                        and status in ("reported", "pending_update")):
+                    eps_actual_final = yf_act.get("eps_actual")
+                    if status == "pending_update":
+                        status = "reported"
+                        result_source = (
+                            (result_source or "") + "+yf_stmt"
+                            if result_source else "yf_stmt"
+                        )
+                if rev_actual is None and yf_act.get("revenue_actual") is not None:
+                    rev_actual = yf_act.get("revenue_actual")
+                    actuals = dict(actuals)
+                    actuals["revenue_actual"] = rev_actual
+    except Exception as e:
+        print(f"[market_data] quarterly actuals {sym}: {e!s:.100}", flush=True)
 
     # Same-day headlines when Nasdaq/Yahoo stmt/SEC still lag (free, no LLM).
     if (not event_still_future and status in ("reported", "pending_update")

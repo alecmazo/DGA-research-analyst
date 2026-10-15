@@ -196,3 +196,53 @@ def test_earnings_card_fills_tsm_from_6k(monkeypatch):
     assert out.get("result", {}).get("eps_actual") == 4.60
     assert out.get("result", {}).get("revenue_actual") == 46.72e9
     assert out.get("result", {}).get("beat") == "beat"
+
+
+def test_pending_sec_runs_before_yahoo_calendar(monkeypatch):
+    md._EARNINGS_CARD_CACHE.clear()
+    order: list[str] = []
+
+    def cal(_s):
+        order.append("cal")
+        return {"eps_avg": 4.45, "revenue_avg": 45.62e9}
+
+    def k8(*_a, **_k):
+        order.append("k8")
+        return {
+            "eps_actual": 4.60,
+            "revenue_actual": 46.72e9,
+            "source": "sec_8k_ex99",
+            "filed": "2026-10-15",
+            "form": "6-K",
+        }
+
+    monkeypatch.setattr(md, "earnings_upcoming", lambda *_a, **_k: {
+        "TSM": {
+            "date": "2026-10-15",
+            "days_until": 0,
+            "time": "time-pre-market",
+            "fiscal_quarter": "Sep 2026",
+            "eps_forecast": "4.45",
+            "name": "TSMC",
+        }
+    })
+    monkeypatch.setattr(md, "nasdaq_earnings_surprise", lambda _s: {
+        "history": [], "latest": None, "source": "nasdaq",
+    })
+    monkeypatch.setattr(md, "yfinance_earnings_surprise", lambda _s: {
+        "history": [], "latest": None, "source": "yfinance",
+    })
+    monkeypatch.setattr(md, "yfinance_earnings_calendar_context", cal)
+    monkeypatch.setattr(md, "yfinance_quarterly_actuals", lambda *_a, **_k: order.append("stmt") or {})
+    monkeypatch.setattr(md, "sec_8k_earnings_release_actuals", k8)
+    monkeypatch.setattr(md, "company_ir_links", lambda _s: {})
+    monkeypatch.setattr(md, "_earnings_report_window_passed", lambda *_a, **_k: True)
+    monkeypatch.setattr(md, "_actuals_from_yahoo_headlines", lambda *_a, **_k: {})
+    out = md.earnings_card("TSM", horizon_days=5, include_past_days=1)
+    assert order[0] == "k8"
+    assert out.get("result", {}).get("eps_actual") == 4.60
+    src = Path(md.__file__).read_text(encoding="utf-8")
+    fn = src.split("def earnings_card")[1].split("\ndef _fiscal_quarter_labels_match")[0]
+    assert "_left() > 0.2" in fn
+    assert "_EARNINGS_PENDING_TTL_S" in src
+    assert md._EARNINGS_PENDING_TTL_S == 60

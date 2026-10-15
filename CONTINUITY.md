@@ -318,6 +318,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Index board** | **`ui735-20261015-index-board`** | Phone Markets fills missing index prints with one short quote batch and writes them to market_quotes. A half-empty store (only SPY and IWM) no longer caches a two-name board. |
 | **Index feed** | **`ui736-20261015-index-feed`** | Desk tape and phone Markets paint cash index levels (^GSPC/^DJI/^IXIC), not ETF stand-ins. Store prints older than 90s refresh from Yahoo so the day-% matches the session. |
 | **Earnings 6-K** | **`ui737-20261015-earnings-6k`** | Desk earnings card reads Form 6-K earnings exhibits for foreign issuers (TSM ADR) as well as 8-K Item 2.02. Prefers US$/ADR actuals over local currency. |
+| **Earnings SEC first** | **`ui738-20261015-earnings-sec`** | Same-day pending cards hit 8-K/6-K before Yahoo calendar/stmt so the print is not starved by the 3.2s budget. Pending cards cache 60s. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
 ### One-click handoff (preferred)
@@ -516,4 +517,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-15 · Agent: Grok Build · Built: `ui737-20261015-earnings-6k` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui738-YYYYMMDD-slug`*
+*Last updated: 2026-10-15 · Agent: Grok Build · Built: `ui738-20261015-earnings-sec` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui739-YYYYMMDD-slug`*
