@@ -604,7 +604,10 @@ export function CompanyDashboard({
           {/* Pre-React multi-card fundamentals charts */}
           {Array.isArray(dash.series) && dash.series.length > 0 && (
             <>
-              <FundCharts series={dash.series} />
+              <FundCharts
+                series={dash.series}
+                nextEarningsDate={dash.next_earnings_date}
+              />
               {typeof dash.notes === 'object' &&
                 dash.notes &&
                 !Array.isArray(dash.notes) &&

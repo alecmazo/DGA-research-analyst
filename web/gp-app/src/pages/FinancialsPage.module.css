@@ -510,6 +510,16 @@
   flex-shrink: 0;
 }
 
+.chartSwatchHollow {
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  background: transparent;
+}
+
 .chartSvgWrap {
   position: relative;
 }

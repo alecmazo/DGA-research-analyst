@@ -8993,7 +8993,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui739-20261015-earnings-edgar"
+WEB_BUILD_VERSION = "ui740-20261015-style-fwd"
 
 
 @app.get("/api/build")
@@ -14128,6 +14128,191 @@ def _builder_list_id() -> str:
 
 _DGA_SCORED_BOARD_NAME = "DGA Scored"
 _DCF_VALUE_BOARD_NAME = "Top 10 Value"
+_STYLE_WATCHLIST_SOURCE = "stock_style"
+_STYLE_WATCHLIST_SPECS = (
+    ("Value", "Report style VALUE / GARP", -18),
+    ("Growth", "Report style GROWTH / GARP", -17),
+    ("Rich", "Report style RICH", -16),
+)
+_STYLE_WL_BACKFILL_TS: dict[str, float] = {}
+
+
+def _style_watchlist_owner_ids() -> list[str]:
+    """GP desk plus anyone who already has the auto style boards."""
+    ids: list[str] = ["gp_alec"]
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return ids
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT lp_id FROM builder_lists WHERE source=%s",
+                (_STYLE_WATCHLIST_SOURCE,),
+            )
+            for r in (cur.fetchall() or []):
+                lid = (r[0] or "").strip()
+                if lid and lid not in ids:
+                    ids.append(lid)
+    except Exception as e:
+        print(f"[style-wl] owners: {e!s:.120}", flush=True)
+    return ids
+
+
+def _ensure_style_watchlists(lp_id: str) -> dict[str, str]:
+    """Create Growth / Value / Rich boards if missing. Return name → id."""
+    out: dict[str, str] = {}
+    if not lp_id or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return out
+    _ensure_builder_lists_tables()
+    with _fund_conn() as conn, conn.cursor() as cur:
+        for name, sector, so in _STYLE_WATCHLIST_SPECS:
+            cur.execute(
+                """
+                SELECT id FROM builder_lists
+                 WHERE lp_id=%s AND lower(name)=lower(%s)
+                 LIMIT 1
+                """,
+                (lp_id, name),
+            )
+            row = cur.fetchone()
+            if row:
+                lid = row[0]
+                cur.execute(
+                    """
+                    UPDATE builder_lists
+                       SET source=%s, sort_order=%s
+                     WHERE id=%s AND lp_id=%s
+                       AND (source IS DISTINCT FROM %s OR sort_order IS DISTINCT FROM %s)
+                    """,
+                    (_STYLE_WATCHLIST_SOURCE, so, lid, lp_id,
+                     _STYLE_WATCHLIST_SOURCE, so),
+                )
+            else:
+                lid = _builder_list_id()
+                cur.execute(
+                    """
+                    INSERT INTO builder_lists
+                        (id, lp_id, name, sector, source, sort_order)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (lid, lp_id, name, sector, _STYLE_WATCHLIST_SOURCE, so),
+                )
+            out[name] = lid
+        conn.commit()
+    return out
+
+
+def _place_ticker_on_style_watchlists(
+    lp_id: str, ticker: str, style: str | None, note: str | None = None,
+) -> None:
+    """Add ticker to Growth/Value/Rich matching the stamp; drop from the others."""
+    tk = (ticker or "").strip().upper().replace(".", "-")
+    if not tk or not lp_id:
+        return
+    try:
+        import excel_model as _em
+        want = set(_em.style_watchlist_names(style))
+    except Exception:
+        want = set()
+    ids = _ensure_style_watchlists(lp_id)
+    if not ids:
+        return
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    text = (note or "").strip()[:2000]
+    with _fund_conn() as conn, conn.cursor() as cur:
+        for name, lid in ids.items():
+            if name in want:
+                cur.execute(
+                    """
+                    INSERT INTO builder_list_tickers
+                        (list_id, ticker, entry_date, note)
+                    VALUES (%s, %s, %s::date, %s)
+                    ON CONFLICT (list_id, ticker) DO UPDATE SET note=EXCLUDED.note
+                    """,
+                    (lid, tk, today, text),
+                )
+            else:
+                cur.execute(
+                    "DELETE FROM builder_list_tickers WHERE list_id=%s AND ticker=%s",
+                    (lid, tk),
+                )
+        cur.execute(
+            """
+            UPDATE builder_lists SET updated_at=now()
+             WHERE lp_id=%s AND source=%s
+            """,
+            (lp_id, _STYLE_WATCHLIST_SOURCE),
+        )
+        conn.commit()
+
+
+def _place_ticker_on_style_watchlists_all(
+    ticker: str, style: str | None, note: str | None = None,
+) -> None:
+    for lp_id in _style_watchlist_owner_ids():
+        try:
+            _place_ticker_on_style_watchlists(lp_id, ticker, style, note)
+        except Exception as e:
+            print(f"[style-wl] place {ticker} {lp_id}: {e!s:.120}", flush=True)
+
+
+def _backfill_style_watchlists(lp_id: str) -> int:
+    """Cheap: ticker + stock_style only. No markdown, no universe score."""
+    if not lp_id or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return 0
+    try:
+        _ensure_analyst_reports_table_schema()
+    except Exception:
+        pass
+    _ensure_style_watchlists(lp_id)
+    rows: list = []
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT ticker, stock_style, stock_style_note
+                  FROM analyst_reports
+                 WHERE archived IS NOT TRUE
+                   AND stock_style IS NOT NULL
+                """
+            )
+            rows = cur.fetchall() or []
+    except Exception as e:
+        print(f"[style-wl] backfill select: {e!s:.120}", flush=True)
+        return 0
+    n = 0
+    for r in rows:
+        tk = (r[0] or "").strip().upper()
+        if not tk:
+            continue
+        try:
+            _place_ticker_on_style_watchlists(lp_id, tk, r[1], r[2])
+            n += 1
+        except Exception:
+            continue
+    if n:
+        print(f"[style-wl] backfilled {n} name(s) → {lp_id}", flush=True)
+    return n
+
+
+def _kick_style_watchlist_backfill(lp_id: str) -> None:
+    """Once per process: fill Growth/Value/Rich from already-stamped reports."""
+    if not lp_id:
+        return
+    if lp_id in _STYLE_WL_BACKFILL_TS:
+        return
+    _STYLE_WL_BACKFILL_TS[lp_id] = time.time()
+
+    def _run():
+        try:
+            _backfill_style_watchlists(lp_id)
+        except Exception as e:
+            print(f"[style-wl] bg backfill {lp_id}: {e!s:.120}", flush=True)
+            _STYLE_WL_BACKFILL_TS.pop(lp_id, None)
+
+    threading.Thread(
+        target=_run, daemon=True, name="style-watchlists",
+    ).start()
 
 
 def _builder_parse_dga_note(note: str | None) -> float | None:
@@ -14921,6 +15106,11 @@ def builder_lists_get(request: Request):
     claims = _claims_or_401(request)
     lp_id = claims.get("lp_id") or claims.get("sub") or "gp"
     _ensure_builder_lists_tables()
+    try:
+        _ensure_style_watchlists(lp_id)
+        _kick_style_watchlist_backfill(lp_id)
+    except Exception as e:
+        print(f"[style-wl] get lists {lp_id}: {e!s:.120}", flush=True)
     lists = _builder_lists_for_user(lp_id)
     return {"ok": True, "lists": lists, "seeded": len(lists) > 0}
 
@@ -15562,6 +15752,11 @@ def builder_lists_seed(request: Request):
         _builder_sync_dcf_value_board(lp_id, force=True)
     except Exception as e:
         print(f"[builder-lists] seed dcf value: {e!s:.120}", flush=True)
+    try:
+        _ensure_style_watchlists(lp_id)
+        _backfill_style_watchlists(lp_id)
+    except Exception as e:
+        print(f"[builder-lists] seed style wl: {e!s:.120}", flush=True)
     return {"ok": True, "created": created, "lists": _builder_lists_for_user(lp_id)}
 
 
@@ -17116,6 +17311,13 @@ def _stamp_stock_style(ticker: str, md_text: str, summary: dict | None = None) -
               flush=True)
     except Exception as e:
         print(f"[stock-style] update {tk}: {e!s:.160}", flush=True)
+        return
+    try:
+        _place_ticker_on_style_watchlists_all(
+            tk, st.get("style"), st.get("note") or st.get("label"),
+        )
+    except Exception as e:
+        print(f"[stock-style] watchlist {tk}: {e!s:.160}", flush=True)
 
 
 def _backfill_stock_styles(limit: int = 48) -> None:

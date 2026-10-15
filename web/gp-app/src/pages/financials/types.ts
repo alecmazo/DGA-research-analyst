@@ -20,6 +20,7 @@ export type SheetLink = {
 export type DashSeriesPoint = {
   label?: string
   period_end?: string | null
+  forecast?: boolean
   revenue?: number | null
   net_income?: number | null
   ebitda?: number | null
@@ -134,6 +135,7 @@ export type Dashboard = {
   business_summary?: string
   period_type?: string
   series?: DashSeriesPoint[]
+  next_earnings_date?: string | null
   price?: number | null
   rating?: string | null
   dga_value?: number | null

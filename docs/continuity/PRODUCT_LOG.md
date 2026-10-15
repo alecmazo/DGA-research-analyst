@@ -155,13 +155,13 @@ Support FAB files tickets with screenshot. GPT-oss sits above it on the main des
 
 ### 5.2 Financials (`/financials`)
 
-Company dashboard (DGA Score, ranks, snapshots), Value Line sheet, SEC store, series tables, fund charts, history screen. The Balance sheet chart plots assets, liabilities, and equity. Net income stays on the income chart only. Income statement, balance sheet, cash flow, and comprehensive income follow Annual / Quarterly; quarterly adds a TTM column (sum of the last four quarters for flows, latest quarter-end for the balance sheet). Analyze uses `company_financials` as primary (SEC 10-K/10-Q Excel, 10-Q merge). Nightly/monthly refresh. Print CSS **must stay `.shell`-scoped**.
+Company dashboard (DGA Score, ranks, snapshots), Value Line sheet, SEC store, series tables, fund charts, history screen. The Balance sheet chart plots assets, liabilities, and equity. Net income stays on the income chart only. The annual Revenue / NI / EBITDA card paints Yahoo analyst estimates for the next three fiscal years as unfilled outline bars (GuruFocus style) and titles the card with the next earnings date when Yahoo has one. Quarterly view stays actuals only. Income statement, balance sheet, cash flow, and comprehensive income follow Annual / Quarterly; quarterly adds a TTM column (sum of the last four quarters for flows, latest quarter-end for the balance sheet). Analyze uses `company_financials` as primary (SEC 10-K/10-Q Excel, 10-Q merge). Nightly/monthly refresh. Print CSS **must stay `.shell`-scoped**.
 
 DGA Score: negative book equity is **not** a free 100 on ROE; no-debt is fortress on Financial Strength.
 
 ### 5.3 Watchlists (`/builder`)
 
-The menu and the page title say Watchlists. The route stays `/builder` (the Builder page). Sector / GuruFocus boards. Date first added, cost, split-adjusted since-add %, notes/FV. Hover snapshot. New-tab financials. Watchlist dropdown, compact rows, add/delete lists. Board switch must stay fast (cache + `_batch_quotes_fast`, no force DCF).
+The menu and the page title say Watchlists. The route stays `/builder` (the Builder page). Sector / GuruFocus boards. Auto boards **Value**, **Growth**, and **Rich** collect tickers when a Local or Saved Report is stamped VALUE / GROWTH / GARP / RICH (GARP → Value and Growth; CORE stays off these three). Date first added, cost, split-adjusted since-add %, notes/FV. Hover snapshot. New-tab financials. Watchlist dropdown, compact rows, add/delete lists. Board switch must stay fast (cache + `_batch_quotes_fast`, no force DCF). GET `/api/v2/builder/lists` does not score the universe.
 
 ### 5.3b Gurus (`/gurus`)
 
@@ -298,6 +298,7 @@ Engines: **Grok**, **Claude (Opus 5 default, thinking off for reports)**, **Deep
 - Style classification: VALUE / GROWTH / GARP / RICH / CORE (`excel_model.style_from_metrics`)
   - `VALUE_CUT=0.05` (DCF/last − 1), `GROWTH_CUT=0.15` fwd rev/EPS
   - cheap+growth=GARP, cheap=VALUE, growth=GROWTH, rich=RICH, else CORE
+  - Stamp also places the ticker on Watchlists named Value / Growth / Rich (`excel_model.style_watchlist_names`)
 
 ---
 

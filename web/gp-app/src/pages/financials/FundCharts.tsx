@@ -21,6 +21,8 @@ type SeriesCfg = {
   values: Array<number | null>
   axis?: 'L' | 'R'
   type?: 'bar' | 'line'
+  /** Per-point outline bars (GuruFocus forecast years). */
+  hollow?: boolean[] | boolean
 }
 
 type ChartCfg = {
@@ -197,6 +199,8 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
         const nm = s.name
         const barY = Math.min(y, y0)
         const barH = Math.max(1, Math.abs(y0 - y))
+        const isHollow = Array.isArray(s.hollow) ? !!s.hollow[i] : !!s.hollow
+        const tipName = isHollow ? `${nm} Forecast` : nm
         bars.push(
           <rect
             key={`b${si}-${i}`}
@@ -204,14 +208,16 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
             y={barY}
             width={bw - 1}
             height={barH}
-            fill={col}
+            fill={isHollow ? 'none' : col}
+            stroke={isHollow ? col : undefined}
+            strokeWidth={isHollow ? 1.25 : undefined}
             rx={1}
             style={{ cursor: 'pointer' }}
             onMouseEnter={(e) =>
-              showTip(`${cfg.labels[i]} · ${nm}: ${fmtVal(v, a)}`, e)
+              showTip(`${cfg.labels[i]} · ${tipName}: ${fmtVal(v, a)}`, e)
             }
             onMouseMove={(e) =>
-              showTip(`${cfg.labels[i]} · ${nm}: ${fmtVal(v, a)}`, e)
+              showTip(`${cfg.labels[i]} · ${tipName}: ${fmtVal(v, a)}`, e)
             }
             onMouseLeave={hideTip}
           />,
@@ -312,6 +318,21 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
             {s.name}
           </span>
         ))}
+        {cfg.series
+          .filter(
+            (s) =>
+              Array.isArray(s.hollow) && s.hollow.some(Boolean) &&
+              s.values.some((v, i) => s.hollow && (s.hollow as boolean[])[i] && v != null),
+          )
+          .map((s) => (
+            <span key={`${s.name}-fc`} className={styles.chartLegItem}>
+              <span
+                className={styles.chartSwatchHollow}
+                style={{ border: `1.5px solid ${s.color}` }}
+              />
+              {s.name} Forecast
+            </span>
+          ))}
       </div>
       <div className={styles.chartSvgWrap}>
         <svg viewBox={`0 0 ${W} ${H}`} className={styles.chartSvg}>
@@ -328,27 +349,50 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
 }
 
 /** Pre-React multi-panel fundamentals grid (7 charts). */
-export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
+export function FundCharts({
+  series,
+  nextEarningsDate,
+}: {
+  series: DashSeriesPoint[]
+  nextEarningsDate?: string | null
+}) {
   if (!series.length) return null
-  const labels = series.map((s) => s.label || '—')
-  const isAnnual = labels.some((l) => /FY|20\d{2}$/i.test(l) && !/Q\d/i.test(l))
+  const hist = series.filter((s) => !s.forecast)
+  const labelsAll = series.map((s) => s.label || '—')
+  const labels = (hist.length ? hist : series).map((s) => s.label || '—')
+  const isAnnual = labelsAll.some((l) => /FY|20\d{2}$/i.test(l) && !/Q\d/i.test(l))
   const shareDeltaName = isAnnual ? 'Share Δ % (YoY)' : 'Share Δ % (QoQ)'
   const shareDeltaNeg = isAnnual ? 'Dilution % (YoY)' : 'Dilution % (QoQ)'
+  const hollow = series.map((s) => !!s.forecast)
+  const hasFwd = hollow.some(Boolean)
+  const histSeries = hist.length ? hist : series
+  const ed = (nextEarningsDate || '').slice(0, 10)
+  const revTitle = ed
+    ? `Financials (Next Earnings Date: ${ed} Est.)`
+    : 'Financials'
 
   const charts: ChartCfg[] = [
     {
-      labels,
+      title: revTitle,
+      labels: hasFwd ? labelsAll : labels,
       series: [
-        { name: 'Revenue', color: COLORS.blue, values: col(series, 'revenue') },
+        {
+          name: 'Revenue',
+          color: COLORS.blue,
+          values: col(hasFwd ? series : histSeries, 'revenue'),
+          hollow: hasFwd ? hollow : undefined,
+        },
         {
           name: 'Net Income',
           color: COLORS.green,
-          values: col(series, 'net_income'),
+          values: col(hasFwd ? series : histSeries, 'net_income'),
+          hollow: hasFwd ? hollow : undefined,
         },
         {
           name: 'EBITDA',
           color: COLORS.orange,
-          values: col(series, 'ebitda'),
+          values: col(hasFwd ? series : histSeries, 'ebitda'),
+          hollow: hasFwd ? hollow : undefined,
         },
       ],
     },
@@ -359,26 +403,26 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'Gross Margin %',
           color: COLORS.blue,
-          values: col(series, 'gross_margin_pct'),
+          values: col(histSeries, 'gross_margin_pct'),
         },
         {
           name: 'Op. Margin %',
           color: COLORS.orange,
-          values: col(series, 'operating_margin_pct'),
+          values: col(histSeries, 'operating_margin_pct'),
         },
         {
           name: 'Net Margin %',
           color: COLORS.green,
-          values: col(series, 'net_margin_pct'),
+          values: col(histSeries, 'net_margin_pct'),
         },
       ],
     },
     {
       labels,
       series: [
-        { name: 'Cash + STI', color: COLORS.green, values: col(series, 'cash') },
-        { name: 'Borrowings', color: COLORS.orange, values: col(series, 'borrowings') },
-        { name: 'Lease liabilities *', color: COLORS.purple, values: col(series, 'leases') },
+        { name: 'Cash + STI', color: COLORS.green, values: col(histSeries, 'cash') },
+        { name: 'Borrowings', color: COLORS.orange, values: col(histSeries, 'borrowings') },
+        { name: 'Lease liabilities *', color: COLORS.purple, values: col(histSeries, 'leases') },
       ],
     },
     {
@@ -387,22 +431,22 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'OCF',
           color: COLORS.orange,
-          values: col(series, 'ocf'),
+          values: col(histSeries, 'ocf'),
         },
         {
           name: 'FCF',
           color: COLORS.blue,
-          values: col(series, 'fcf'),
+          values: col(histSeries, 'fcf'),
         },
         {
           name: 'Dividends',
           color: COLORS.purple,
-          values: col(series, 'dividends'),
+          values: col(histSeries, 'dividends'),
         },
         {
           name: 'Buybacks',
           color: COLORS.pink,
-          values: col(series, 'buybacks'),
+          values: col(histSeries, 'buybacks'),
         },
       ],
     },
@@ -413,18 +457,18 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'ROIC %',
           color: COLORS.green,
-          values: col(series, 'roic_pct'),
+          values: col(histSeries, 'roic_pct'),
         },
         {
           name: 'WACC % (est.)',
           color: COLORS.red,
-          values: col(series, 'wacc_pct'),
+          values: col(histSeries, 'wacc_pct'),
         },
         {
           name: 'ROIC − WACC',
           color: 'var(--text-primary)',
           type: 'line',
-          values: series.map((x) =>
+          values: histSeries.map((x) =>
             x.roic_pct != null && x.wacc_pct != null
               ? x.roic_pct - x.wacc_pct
               : null,
@@ -441,14 +485,14 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'Shares Outstanding',
           color: COLORS.blue,
-          values: col(series, 'shares'),
+          values: col(histSeries, 'shares'),
         },
         {
           name: shareDeltaName,
           nameNeg: shareDeltaNeg,
           color: COLORS.green,
           axis: 'R',
-          values: col(series, 'buyback_ratio_pct'),
+          values: col(histSeries, 'buyback_ratio_pct'),
         },
       ],
     },
@@ -459,17 +503,17 @@ export function FundCharts({ series }: { series: DashSeriesPoint[] }) {
         {
           name: 'Total Assets',
           color: COLORS.blue,
-          values: col(series, 'assets'),
+          values: col(histSeries, 'assets'),
         },
         {
           name: 'Total Liabilities',
           color: COLORS.orange,
-          values: col(series, 'liabilities'),
+          values: col(histSeries, 'liabilities'),
         },
         {
           name: 'Stockholders Equity',
           color: COLORS.green,
-          values: col(series, 'equity'),
+          values: col(histSeries, 'equity'),
         },
       ],
     },

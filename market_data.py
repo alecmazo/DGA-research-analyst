@@ -2655,6 +2655,339 @@ def yfinance_earnings_calendar_context(symbol: str) -> dict:
     return out
 
 
+# Yahoo analyst annuals for the Financials revenue card (GuruFocus-style
+# unfilled forward bars). Cached 6h. Fail-open. No LLM.
+_FWD_ANN_RAW_CACHE: dict[str, tuple[float, dict]] = {}
+_FWD_ANN_TTL_S = 6 * 3600
+_FWD_PERIODS = ("0y", "+1y", "+2y")
+
+
+def _align_est_units(est: float | None, last: float | None) -> float | None:
+    """Yahoo avg is usually dollars; a millions-scale print is ~1e6 too small."""
+    if est is None:
+        return None
+    try:
+        est_f = float(est)
+    except (TypeError, ValueError):
+        return None
+    if last is None:
+        return est_f
+    try:
+        last_f = float(last)
+    except (TypeError, ValueError):
+        return est_f
+    if last_f == 0:
+        return est_f
+    ratio = abs(est_f / last_f)
+    if ratio < 0.002:
+        return est_f * 1e6
+    if ratio > 400:
+        return est_f / 1e6
+    return est_f
+
+
+def _growth_pair(a: float | None, b: float | None) -> float | None:
+    if not a or not b or a == 0:
+        return None
+    try:
+        g = float(b) / float(a) - 1.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    if g <= -0.8 or g >= 2.0:
+        return None
+    return g
+
+
+def _period_avgs_from_yf(df) -> dict[str, float]:
+    """yfinance estimate frame → {0y/+1y/+2y: avg}."""
+    out: dict[str, float] = {}
+    if df is None:
+        return out
+    if isinstance(df, dict):
+        for k, v in df.items():
+            ks = str(k).strip().lower()
+            if ks not in _FWD_PERIODS:
+                continue
+            raw = v
+            if isinstance(v, dict):
+                raw = v.get("avg") or v.get("average") or v.get("Avg. Estimate")
+            try:
+                if raw is None:
+                    continue
+                out[ks] = float(raw)
+            except (TypeError, ValueError):
+                pass
+        return out
+    try:
+        idx_map = {str(i).strip().lower(): i for i in df.index}
+        col_map = {str(c).strip().lower(): c for c in df.columns}
+    except Exception:
+        return out
+
+    def _f(v):
+        try:
+            if v is None:
+                return None
+            n = float(v)
+            if n != n:  # NaN
+                return None
+            return n
+        except (TypeError, ValueError):
+            return None
+
+    avg_key = None
+    for k in ("avg", "average", "avg. estimate", "avg estimate"):
+        if k in idx_map:
+            avg_key = idx_map[k]
+            break
+    if avg_key is not None:
+        try:
+            row = df.loc[avg_key]
+            for p in _FWD_PERIODS:
+                if p in col_map:
+                    n = _f(row[col_map[p]])
+                    if n is not None:
+                        out[p] = n
+        except Exception:
+            pass
+        if out:
+            return out
+    # Transposed: periods on the index, avg on columns.
+    for p in _FWD_PERIODS:
+        if p not in idx_map:
+            continue
+        try:
+            row = df.loc[idx_map[p]]
+        except Exception:
+            continue
+        n = None
+        for k in ("avg", "average", "avg. estimate", "avg estimate"):
+            if k in col_map:
+                n = _f(row[col_map[k]])
+                if n is not None:
+                    break
+        if n is None:
+            try:
+                n = _f(row.iloc[0] if hasattr(row, "iloc") else row)
+            except Exception:
+                n = None
+        if n is not None:
+            out[p] = n
+    return out
+
+
+def fwd_annuals_from_estimates(
+    rev_by_period: dict | None,
+    eps_by_period: dict | None = None,
+    *,
+    last_fy: int | None,
+    last_rev: float | None = None,
+    last_ni: float | None = None,
+    last_ebitda: float | None = None,
+    shares: float | None = None,
+    today_year: int | None = None,
+    next_earnings_date: str | None = None,
+) -> dict:
+    """Up to three forward fiscal years from Yahoo 0y/+1y (+ synth +2y).
+
+    Skip 0y when last reported FY is this calendar year or later (already
+    in actuals). Years are labeled FY{last_fy+1} … so they sit to the right
+    of the filled history bars.
+    """
+    from datetime import date as _date
+    rev_in = {str(k).strip().lower(): v for k, v in (rev_by_period or {}).items()}
+    eps_in = {str(k).strip().lower(): v for k, v in (eps_by_period or {}).items()}
+    cal_y = int(today_year) if today_year else _date.today().year
+    keys: list[str] = []
+    for p in _FWD_PERIODS:
+        if p in rev_in or p in eps_in:
+            keys.append(p)
+    if last_fy is not None:
+        try:
+            last_fy_i = int(last_fy)
+        except (TypeError, ValueError):
+            last_fy_i = None
+    else:
+        last_fy_i = None
+    if last_fy_i is not None and last_fy_i >= cal_y:
+        keys = [k for k in keys if k != "0y"]
+    if not keys:
+        return {
+            "points": [],
+            "next_earnings_date": next_earnings_date,
+            "growth": None,
+        }
+    start_fy = (last_fy_i + 1) if last_fy_i is not None else cal_y
+    target_fys = [start_fy, start_fy + 1, start_fy + 2]
+
+    def _rev(p: str) -> float | None:
+        if p not in rev_in:
+            return None
+        return _align_est_units(rev_in.get(p), last_rev)
+
+    def _eps(p: str) -> float | None:
+        try:
+            v = eps_in.get(p)
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    mapped: dict[int, dict] = {}
+    for i, p in enumerate(keys[:3]):
+        mapped[target_fys[i]] = {"period": p, "rev": _rev(p), "eps": _eps(p)}
+
+    revs = [mapped[y]["rev"] for y in target_fys if y in mapped and mapped[y]["rev"]]
+    g = None
+    if len(revs) >= 2:
+        g = _growth_pair(revs[0], revs[1])
+    if g is None and last_rev and revs:
+        g = _growth_pair(last_rev, revs[0])
+    if g is None:
+        g = 0.0
+
+    ni_margin = None
+    if last_rev and last_ni is not None and last_rev != 0:
+        try:
+            ni_margin = float(last_ni) / float(last_rev)
+        except (TypeError, ValueError, ZeroDivisionError):
+            ni_margin = None
+    ebitda_margin = None
+    if last_rev and last_ebitda is not None and last_rev != 0:
+        try:
+            ebitda_margin = float(last_ebitda) / float(last_rev)
+        except (TypeError, ValueError, ZeroDivisionError):
+            ebitda_margin = None
+
+    points = []
+    prev_rev = revs[-1] if revs else last_rev
+    for fy in target_fys:
+        row = mapped.get(fy) or {}
+        rev = row.get("rev")
+        if rev is None and prev_rev:
+            rev = prev_rev * (1.0 + g)
+        if rev is not None:
+            prev_rev = rev
+        eps = row.get("eps")
+        ni = None
+        if eps is not None and shares:
+            try:
+                ni = float(eps) * float(shares)
+            except (TypeError, ValueError):
+                ni = None
+            ni = _align_est_units(ni, last_ni)
+        if ni is None and rev is not None and ni_margin is not None:
+            ni = rev * ni_margin
+        ebitda = None
+        if rev is not None and ebitda_margin is not None:
+            ebitda = rev * ebitda_margin
+        if rev is None and ni is None and ebitda is None:
+            continue
+        points.append({
+            "label": f"FY{fy}",
+            "fy": fy,
+            "forecast": True,
+            "revenue": rev,
+            "net_income": ni,
+            "ebitda": ebitda,
+        })
+        if len(points) >= 3:
+            break
+    return {
+        "points": points,
+        "next_earnings_date": next_earnings_date,
+        "growth": g,
+    }
+
+
+def _yahoo_fwd_raw(symbol: str) -> dict:
+    """One yfinance round-trip: revenue + EPS annual avgs + next earnings date."""
+    import time as _time
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {}
+    hit = _FWD_ANN_RAW_CACHE.get(sym)
+    if hit and _time.time() - hit[0] < _FWD_ANN_TTL_S:
+        return hit[1]
+
+    def _pull():
+        import yfinance as yf
+        t = yf.Ticker(sym)
+        rev_df = None
+        eps_df = None
+        next_ed = None
+        for attr, getter in (
+            ("get_revenue_estimate", lambda: t.get_revenue_estimate()),
+            ("revenue_estimate", lambda: getattr(t, "revenue_estimate", None)),
+        ):
+            try:
+                rev_df = getter()
+                if rev_df is not None:
+                    break
+            except Exception:
+                continue
+        for getter in (
+            lambda: t.get_earnings_estimate(),
+            lambda: getattr(t, "earnings_estimate", None),
+        ):
+            try:
+                eps_df = getter()
+                if eps_df is not None:
+                    break
+            except Exception:
+                continue
+        try:
+            cal = getattr(t, "calendar", None) or {}
+            if isinstance(cal, dict):
+                ed = cal.get("Earnings Date")
+                if isinstance(ed, (list, tuple)) and ed:
+                    d0 = ed[0]
+                    next_ed = d0.isoformat() if hasattr(d0, "isoformat") else str(d0)[:10]
+                elif ed is not None and not isinstance(ed, (list, tuple)):
+                    next_ed = ed.isoformat() if hasattr(ed, "isoformat") else str(ed)[:10]
+        except Exception:
+            next_ed = None
+        if next_ed:
+            next_ed = str(next_ed)[:10]
+        return {
+            "rev": _period_avgs_from_yf(rev_df),
+            "eps": _period_avgs_from_yf(eps_df),
+            "next_earnings_date": next_ed,
+        }
+
+    raw = _bounded(_pull, 1.8, {}) or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    _FWD_ANN_RAW_CACHE[sym] = (_time.time(), raw)
+    return raw
+
+
+def yahoo_fwd_annuals(
+    symbol: str,
+    *,
+    last_fy: int | None,
+    last_rev: float | None = None,
+    last_ni: float | None = None,
+    last_ebitda: float | None = None,
+    shares: float | None = None,
+) -> dict:
+    """Cached Yahoo annual estimates → up to 3 forecast years. Fail-open."""
+    raw = _yahoo_fwd_raw(symbol) or {}
+    try:
+        return fwd_annuals_from_estimates(
+            raw.get("rev") or {},
+            raw.get("eps") or {},
+            last_fy=last_fy,
+            last_rev=last_rev,
+            last_ni=last_ni,
+            last_ebitda=last_ebitda,
+            shares=shares,
+            next_earnings_date=raw.get("next_earnings_date"),
+        )
+    except Exception as e:
+        print(f"[market_data] fwd annuals {symbol}: {e!s:.120}", flush=True)
+        return {"points": [], "next_earnings_date": raw.get("next_earnings_date")}
+
+
 def sort_news_newest(items: list, limit: int | None = None) -> list:
     """Order news dicts by pub_ts descending (newest first). Missing timestamps
     sort last. No network. Pass limit=None for the full ranked list."""

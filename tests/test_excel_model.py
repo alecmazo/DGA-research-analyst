@@ -386,6 +386,14 @@ def test_classify_stock_style():
     assert empty["style"] is None
     assert "cuts" in cheap and cheap["cuts"]["value_cut"] == 0.05
     assert any(r.get("id") == "dcf_cheap" for r in (cheap.get("rules") or []))
+    assert em.style_watchlist_names("value") == ("Value",)
+    assert em.style_watchlist_names("growth") == ("Growth",)
+    assert em.style_watchlist_names("garp") == ("Value", "Growth")
+    assert em.style_watchlist_names("expensive") == ("Rich",)
+    assert em.style_watchlist_names("rich") == ("Rich",)
+    assert em.style_watchlist_names("core") == ()
+    assert em.style_watchlist_names(None) == ()
+    assert em.STYLE_WATCHLIST_BOARD_NAMES == ("Value", "Growth", "Rich")
 
 
 def test_dcf_user_uses_sec_shares_not_report_7m():

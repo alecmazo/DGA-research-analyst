@@ -125,16 +125,18 @@ export function SeriesPanel({
   ticker?: string
 }) {
   if (!series.length) return null
-  const labels = series.map((s) => s.label || '—')
-  const rev = col(series, 'revenue')
-  const ni = col(series, 'net_income')
-  const fcf = col(series, 'fcf')
-  const gm = col(series, 'gross_margin_pct')
-  const om = col(series, 'operating_margin_pct')
-  const nm = col(series, 'net_margin_pct')
-  const roic = col(series, 'roic_pct')
-  const cash = col(series, 'cash')
-  const debt = col(series, 'debt')
+  const hist = series.filter((s) => !s.forecast)
+  if (!hist.length) return null
+  const labels = hist.map((s) => s.label || '—')
+  const rev = col(hist, 'revenue')
+  const ni = col(hist, 'net_income')
+  const fcf = col(hist, 'fcf')
+  const gm = col(hist, 'gross_margin_pct')
+  const om = col(hist, 'operating_margin_pct')
+  const nm = col(hist, 'net_margin_pct')
+  const roic = col(hist, 'roic_pct')
+  const cash = col(hist, 'cash')
+  const debt = col(hist, 'debt')
 
   const cards = [
     { label: 'Revenue', vals: rev, fmt: (v: number | null) => (v != null ? `$${gfMoney(v)}` : '—') },
@@ -145,7 +147,7 @@ export function SeriesPanel({
   ]
 
   // Show last ≤8 periods in table for scanability
-  const show = series.slice(-8)
+  const show = hist.slice(-8)
 
   return (
     <div className={styles.seriesPanel}>

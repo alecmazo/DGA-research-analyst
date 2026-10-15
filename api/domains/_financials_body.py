@@ -5316,8 +5316,9 @@ def financials_debt_maturities(ticker: str, request: Request):
 def financials_dashboard(ticker: str, request: Request, period_type: str = "annual"):
     """Chart-ready company dashboard: fundamentals series, ROIC/WACC, DGA Score,
     DGA Value (mean of saved Grok/Claude targets), valuation anchors, TTM block,
-    and sector peer comps. Pure DB — no LLM tokens, no live network on the
-    request path (price history has its own free market-data endpoint)."""
+    and sector peer comps. No LLM tokens. Annual revenue card may append
+    cached Yahoo analyst estimates (6h, 1.8s timeout, fail-open) as forecast
+    years — not on the quarterly path."""
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
@@ -5438,6 +5439,50 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "roic_pct": round(roic, 2) if roic is not None else None,
             "wacc_pct": round(wacc, 2) if wacc is not None else None,
         })
+
+    next_earnings_date = None
+    if pt == "annual" and series:
+        try:
+            import market_data as _md
+            last_row = rows[-1] if rows else {}
+            try:
+                last_fy = int(last_row.get("fy")) if last_row.get("fy") is not None else None
+            except (TypeError, ValueError):
+                last_fy = None
+            fwd = _md.yahoo_fwd_annuals(
+                tk,
+                last_fy=last_fy,
+                last_rev=_dash_f(last_row.get("revenue")),
+                last_ni=_dash_f(last_row.get("net_income")),
+                last_ebitda=_dash_f(last_row.get("ebitda")),
+                shares=(_dash_f(last_row.get("shares_outstanding"))
+                        or _dash_f(last_row.get("diluted_shares"))),
+            ) or {}
+            next_earnings_date = fwd.get("next_earnings_date")
+            if next_earnings_date:
+                next_earnings_date = str(next_earnings_date)[:10]
+            have_fy = {str(p.get("label") or "") for p in series}
+            for p in (fwd.get("points") or []):
+                lab = p.get("label") or ""
+                if not lab or lab in have_fy:
+                    continue
+                series.append({
+                    "label": lab,
+                    "period_end": None,
+                    "forecast": True,
+                    "revenue": p.get("revenue"),
+                    "net_income": p.get("net_income"),
+                    "ebitda": p.get("ebitda"),
+                    "cash": None, "debt": None, "leases": None, "borrowings": None,
+                    "ocf": None, "fcf": None, "dividends": None, "buybacks": None,
+                    "sbc": None, "shares": None, "buyback_ratio_pct": None,
+                    "equity": None, "assets": None, "liabilities": None,
+                    "gross_margin_pct": None, "operating_margin_pct": None,
+                    "net_margin_pct": None, "roic_pct": None, "wacc_pct": None,
+                })
+                have_fy.add(lab)
+        except Exception as _fe:
+            print(f"[fin-dash] fwd annuals {tk}: {_fe!s:.120}", flush=True)
 
     # ── DGA Score (0-100) from ANNUAL history ──────────────────────────
     def _col(rs, k):
@@ -5647,6 +5692,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "sector": meta.get("sector") or peers.get("sector"),
             "industry": meta.get("industry") or peers.get("industry"),
             "period_type": pt, "series": series,
+            "next_earnings_date": next_earnings_date,
             "business_summary": _company_business_summary(
                 tk, (rows[-1].get("entity_name") if rows else None) or meta.get("name") or ""),
             "price": price, "rating": rating,

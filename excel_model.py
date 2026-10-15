@@ -443,6 +443,23 @@ STYLE_LABELS = {
     "core": "CORE",
 }
 
+# Builder watchlists the desk keeps for the researched universe.
+# GARP is cheap + growing → both Value and Growth. CORE stays off these three.
+STYLE_WATCHLIST_BOARD_NAMES = ("Value", "Growth", "Rich")
+STYLE_WATCHLISTS = {
+    "value": ("Value",),
+    "growth": ("Growth",),
+    "garp": ("Value", "Growth"),
+    "expensive": ("Rich",),
+    "rich": ("Rich",),
+}
+
+
+def style_watchlist_names(style: Optional[str]) -> tuple[str, ...]:
+    """Builder list titles for a stamped report style. Empty → drop from all three."""
+    s = (style or "").strip().lower()
+    return STYLE_WATCHLISTS.get(s, ())
+
 
 def style_from_metrics(
     dcf_value: Optional[float],
