@@ -259,7 +259,9 @@ Technology (core) on the bridge is TSLA, META, and AMZN, plus Information Techno
 
 Desk is the only GP page in the first JavaScript chunk. Other routes, including City, load when opened. Report / valuation / comps / portfolio popups live in `lib/openWindows.ts` so Desk does not download those pages. Inter fonts start print-media and swap to all after load.
 
-Markets home (`GET /api/mobile/home`) reads a lite watchlist on one pooled connection and fills the index ribbon from that same read. Lite skips migrate, Yahoo, YTD, report flags, and earnings. Brief and pulse still wait 12 seconds. Do not publish a mobile OTA as part of a speed audit.
+Markets home (`GET /api/mobile/home`) reads a lite watchlist on one pooled connection and fills the index ribbon from that same read. Lite skips migrate, Yahoo, YTD, report flags, and earnings. Brief and pulse still wait 12 seconds. Lite matches `market_quotes` with `upper(symbol)` and attaches `security_meta` names on that same connection.
+
+On the GP phone, Markets is the index board (session, two-column index grid, brief, pulse). Watchlist is a separate tab: Koyfin two-line rows (ticker + company, last, signed change, percent pill) plus Idea Generator. Fund admin lives under More. Do not publish a mobile OTA as part of this restyle. Desktop `web/gp-app` is unchanged.
 
 ---
 
@@ -274,7 +276,7 @@ Performance by fund/SMA, documents / planning (shared worksheet), quarterly lett
 - Expo app **DGA Capital**, bundle `com.dgacapital.research`, ASC 6764731342
 - Icon: glass Option A; splash navy `#0A1628`
 - Production EAS profile (store). `preview` is simulator-only
-- GP tabs: Markets, Research, Financials, Positions, Fund, More
+- GP tabs: Markets, Watchlist, Research, Financials, Positions, More (Fund is under More)
 - LP tabs: Positions, Performance, Documents, Podcast, Settings
 - OTA via `updates.url` / runtimeVersion appVersion
 - Last TestFlight path: EAS production iOS 1.0.0 (build numbers autoIncrement). Do not App Store review unless asked

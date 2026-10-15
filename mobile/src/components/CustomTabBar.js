@@ -28,9 +28,13 @@ const LABEL_OVERRIDE = {
 // ── Icon config per route name ────────────────────────────────────────────────
 const TAB_CONFIG = {
   Markets: {
-    // Dashboard — the combined home tab (live markets, ideas, watchlist, brief)
+    // Index board — Koyfin Markets home
     inactive: { family: 'mci', name: 'view-dashboard-outline' },
     active:   { family: 'mci', name: 'view-dashboard' },
+  },
+  Watchlist: {
+    inactive: { family: 'mci', name: 'star-outline' },
+    active:   { family: 'mci', name: 'star' },
   },
   Positions: {
     // Trending bars — live watchlist / positions

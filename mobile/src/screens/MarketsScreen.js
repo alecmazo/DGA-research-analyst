@@ -1,12 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// MarketsScreen — the mobile home/dashboard tab (opens first).
-//   Koyfin-style live board: dense index ribbon, movers, watchlist, brief, pulse.
-//   Auto-polls quotes while focused. Market Wire lives on Research only.
+// MarketsScreen — GP home tab. Koyfin-style index board, session, brief, pulse.
+// Watchlist names + Idea Generator live on the Watchlist tab.
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, RefreshControl, TouchableOpacity,
-  ActivityIndicator, StyleSheet, Linking, Alert,
+  ActivityIndicator, StyleSheet, Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppResume } from '../hooks/useAppResume';
@@ -14,198 +13,20 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { api } from '../api/client';
 import { readScreenCache, patchScreenCache, putWatchlist } from '../api/screenCache';
 import AppHeader from '../components/AppHeader';
-import { StockSnapshotSheet } from '../components/StockInfoCard';
-import { spacing, radius, fontSize, Card, haptics, makeMdStyles, useTheme } from '../design';
-
-const QUOTE_POLL_MS = 60_000;
-
-function BriefMarkdown({ style, children }) {
-  const Markdown = require('react-native-markdown-display').default;
-  return <Markdown style={style}>{children}</Markdown>;
-}
-
-// ── format helpers ───────────────────────────────────────────────────────────
-function fmtPct(p) {
-  if (p == null || isNaN(p)) return '—';
-  return (p >= 0 ? '+' : '') + Number(p).toFixed(2) + '%';
-}
-function fmtPx(p) {
-  if (p == null || isNaN(p)) return '—';
-  const n = Number(p);
-  return n >= 1000
-    ? n.toLocaleString('en-US', { maximumFractionDigits: 0 })
-    : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-function fmtClock(d) {
-  if (!d) return '';
-  try {
-    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
-
-/** Active US session date (ET). Before 4am ET still belongs to yesterday. */
-function etSessionDate(now = new Date()) {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: 'numeric',
-      hour12: false,
-    }).formatToParts(now);
-    const g = (t) => parts.find((p) => p.type === t)?.value;
-    let y = Number(g('year'));
-    let m = Number(g('month'));
-    let d = Number(g('day'));
-    const hour = Number(g('hour'));
-    if (hour < 4) {
-      const utc = Date.UTC(y, m - 1, d) - 86400000;
-      const x = new Date(utc);
-      y = x.getUTCFullYear();
-      m = x.getUTCMonth() + 1;
-      d = x.getUTCDate();
-    }
-    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-  } catch {
-    return '';
-  }
-}
-
-function mergeWatchQuotes(base, overlay) {
-  if (!overlay || typeof overlay !== 'object') return base;
-  const quotes = { ...((base && base.quotes) || {}) };
-  let n = 0;
-  Object.keys(overlay).forEach((raw) => {
-    const tk = String(raw || '').trim().toUpperCase();
-    const q = overlay[raw];
-    if (!tk || !q || q.price == null) return;
-    const prev = quotes[tk] || {};
-    const pct = q.pct != null ? q.pct : q.pct_change;
-    quotes[tk] = {
-      ...prev,
-      price: q.price,
-      pct: pct != null ? pct : prev.pct,
-      pct_change: pct != null ? pct : prev.pct_change,
-      as_of: q.as_of || prev.as_of,
-    };
-    n += 1;
-  });
-  if (!n) return base;
-  return { ...(base || { tickers: [], quotes: {} }), quotes };
-}
-
-function overlayFromMovers(movers) {
-  const overlay = {};
-  (movers || []).forEach((m) => {
-    const tk = String(m?.ticker || '').trim().toUpperCase();
-    if (!tk || m.price == null) return;
-    overlay[tk] = { price: m.price, pct: m.pct_change, pct_change: m.pct_change };
-  });
-  return overlay;
-}
-
-/** US equity session label from local clock → America/New_York. */
-function usEquitySession(now = new Date()) {
-  let parts;
-  try {
-    parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      weekday: 'short',
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: false,
-    }).formatToParts(now);
-  } catch {
-    return { key: 'unknown', label: 'Markets', live: false, color: '#94a3b8' };
-  }
-  const get = (t) => parts.find((p) => p.type === t)?.value;
-  const wd = get('weekday');
-  const hour = Number(get('hour'));
-  const minute = Number(get('minute'));
-  const mins = hour * 60 + minute;
-  const weekend = wd === 'Sat' || wd === 'Sun';
-  if (weekend) return { key: 'closed', label: 'Weekend', live: false, color: '#94a3b8' };
-  // Pre-market 4:00–9:30 · RTH 9:30–16:00 · After-hours 16:00–20:00 ET
-  if (mins >= 4 * 60 && mins < 9 * 60 + 30) {
-    return { key: 'pre', label: 'Pre-Market', live: true, color: '#F5C542' };
-  }
-  if (mins >= 9 * 60 + 30 && mins < 16 * 60) {
-    return { key: 'open', label: 'US Open', live: true, color: '#16A34A' };
-  }
-  if (mins >= 16 * 60 && mins < 20 * 60) {
-    return { key: 'ah', label: 'After-Hours', live: true, color: '#F5C542' };
-  }
-  return { key: 'closed', label: 'US Closed', live: false, color: '#94a3b8' };
-}
-
-function PctPill({ p, size = 12, t }) {
-  const up = p == null ? null : p >= 0;
-  const bg = p == null ? t.pillFlatBg : up ? t.pillUpBg : t.pillDownBg;
-  const fg = p == null ? t.pillFlatFg : up ? t.pillUpFg : t.pillDownFg;
-  return (
-    <View style={[styles.pill, { backgroundColor: bg }]}>
-      {p != null && <Ionicons name={up ? 'caret-up' : 'caret-down'} size={size - 1} color={fg} />}
-      <Text style={{ color: fg, fontWeight: '800', fontSize: size, fontVariant: ['tabular-nums'] }}>{fmtPct(p)}</Text>
-    </View>
-  );
-}
-
-function pulseSummary(md) {
-  if (!md) return '';
-  const clean = (ln) => ln.replace(/[*_`#>\[\]]/g, '').replace(/📰/g, '').trim();
-  const lines = String(md).split('\n');
-  for (const ln of lines) {
-    const idx = ln.toLowerCase().indexOf('s move:');
-    if (idx >= 0) return clean(ln.slice(idx + 7));
-  }
-  for (const ln of lines) {
-    const txt = clean(ln);
-    if (txt.length > 25 && !txt.startsWith('HIGH') && !txt.startsWith('MED') && !txt.startsWith('LOW')) {
-      return txt;
-    }
-  }
-  return '';
-}
-
-function SentimentPill({ sentiment, t }) {
-  const sUp = String(sentiment || '').toUpperCase();
-  const bg = sUp === 'BULLISH' ? t.pillUpBg : sUp === 'BEARISH' ? t.pillDownBg : t.pillFlatBg;
-  const fg = sUp === 'BULLISH' ? t.pillUpFg : sUp === 'BEARISH' ? t.pillDownFg : t.pillFlatFg;
-  const label = sUp ? sUp.charAt(0) + sUp.slice(1).toLowerCase() : 'Neutral';
-  return (
-    <View style={[styles.pill, { backgroundColor: bg }]}>
-      <Text style={{ color: fg, fontWeight: '800', fontSize: 11 }}>{label}</Text>
-    </View>
-  );
-}
-
-function SectionHeader({ icon, children, right, t, s }) {
-  return (
-    <View style={styles.sectionRow}>
-      <View style={[styles.sectionIcon, { backgroundColor: t.surfaceTint }]}>
-        <MaterialCommunityIcons name={icon} size={15} color={t.primary} />
-      </View>
-      <Text style={s.sectionLabel}>{children}</Text>
-      <View style={{ flex: 1 }} />
-      {right}
-    </View>
-  );
-}
+import { spacing, radius, Card, haptics, makeMdStyles, useTheme } from '../design';
+import {
+  QUOTE_POLL_MS, fmtPct, fmtPx, fmtClock,
+  etSessionDate, usEquitySession, paintMarketIndices,
+  BriefMarkdown, SentimentPill, SectionHeader, pulseSummary,
+} from './marketsShared';
 
 export default function MarketsScreen({ navigation }) {
   const { theme: t } = useTheme();
   const s = useMemo(() => makeStyles(t), [t]);
   const md = useMemo(() => makeMdStyles(t), [t]);
   const [indices, setIndices]   = useState([]);
-  const [movers, setMovers]     = useState(null);   // null = loading
-  const [moversAsOf, setAsOf]   = useState('');
-  const [expanded, setExpanded] = useState({});     // ticker → bool
-  const [peekTk, setPeekTk] = useState(null); // watchlist snapshot sheet
-  const [watch, setWatch]       = useState(null);   // { tickers, quotes }
-  const [brief, setBrief]       = useState(undefined); // undefined=loading, null=none, obj=brief
+  const [watch, setWatch]       = useState(null);
+  const [brief, setBrief]       = useState(undefined);
   const [briefOpen, setBriefOpen] = useState(false);
   const [briefBusy, setBriefBusy] = useState(false);
   const [pulse, setPulse]           = useState(undefined);
@@ -216,49 +37,31 @@ export default function MarketsScreen({ navigation }) {
   const [quotesBusy, setQuotesBusy] = useState(false);
   const [lastQuotesAt, setLastQuotesAt] = useState(null);
   const [sessionTick, setSessionTick] = useState(0);
-  const moversRef = useRef([]);
   const pollRef = useRef(null);
   const focusedRef = useRef(false);
   const lastLiveRefreshDateRef = useRef('');
   const lastQuotesAtRef = useRef(0);
 
   const session = useMemo(() => usEquitySession(new Date()), [sessionTick, lastQuotesAt]);
+  const boardIndices = useMemo(() => paintMarketIndices(indices), [indices]);
 
   const loadQuotes = useCallback(async (opts = {}) => {
     const live = usEquitySession().live;
     const sdate = etSessionDate();
     const firstLiveToday = live && lastLiveRefreshDateRef.current !== sdate;
     const fresh = !!opts.fresh || firstLiveToday;
-    let wl = null;
     try {
       const home = await api.getMobileHome();
       if (Array.isArray(home?.indices)) setIndices(home.indices);
-      wl = home?.watchlist || { tickers: [], quotes: {} };
+      const wl = home?.watchlist || { tickers: [], quotes: {} };
       setWatch(wl);
       putWatchlist(wl);
       patchScreenCache('markets', {
         indices: home?.indices || [],
         watch: wl,
-        movers: moversRef.current,
       });
     } catch {
       /* keep last painted board */
-    }
-    // Idea-feed is Yahoo-heavy. First paint + pull-to-refresh only — never the 60s poll.
-    if (opts.ideas !== false) {
-      api.getIdeaFeed(4, 60).then((d) => {
-        const moversList = d.movers || [];
-        moversRef.current = moversList;
-        setMovers(moversList);
-        setAsOf(d.as_of || '');
-        patchScreenCache('markets', { movers: moversList, asOf: d.as_of || '' });
-        const moverOverlay = overlayFromMovers(moversList);
-        if (Object.keys(moverOverlay).length) {
-          setWatch((prev) => mergeWatchQuotes(prev, moverOverlay));
-        }
-      }).catch(() => {
-        setMovers((prev) => (prev == null ? [] : prev));
-      });
     }
     if (fresh && sdate) lastLiveRefreshDateRef.current = sdate;
     const now = new Date();
@@ -280,10 +83,8 @@ export default function MarketsScreen({ navigation }) {
     }).catch(() => setPulse(null));
   }, []);
   const loadAll = useCallback(async () => {
-    // Board only. Idea-feed / brief / pulse share the one API worker and
-    // used to stall the indices. They load after the board, or on pull-to-refresh.
+    // Board only. Idea-feed lives on Watchlist. Brief / pulse wait 12s.
     await loadQuotes({ ideas: false });
-    setMovers((prev) => (prev == null ? [] : prev));
     if (extrasTimer.current) clearTimeout(extrasTimer.current);
     extrasTimer.current = setTimeout(() => {
       extrasTimer.current = null;
@@ -291,8 +92,6 @@ export default function MarketsScreen({ navigation }) {
     }, 12000);
   }, [loadQuotes, loadBriefAndPulse]);
 
-  // Focus: paint cache, then cheap /api/mobile/home. Poll quotes every 60s while
-  // live+focused. Never auto-run brief / pulse (AI cost). Idea-feed is not on the poll.
   useEffect(() => {
     readScreenCache('markets').then((c) => {
       if (!c) return;
@@ -301,11 +100,6 @@ export default function MarketsScreen({ navigation }) {
         setWatch(c.watch);
         putWatchlist(c.watch);
       }
-      if (Array.isArray(c.movers)) {
-        setMovers(c.movers);
-        moversRef.current = c.movers;
-      }
-      if (c.asOf) setAsOf(c.asOf);
       if (c.brief !== undefined) setBrief(c.brief);
       if (c.pulse !== undefined) setPulse(c.pulse);
     }).catch(() => {});
@@ -344,7 +138,6 @@ export default function MarketsScreen({ navigation }) {
     setSessionTick((n) => n + 1);
   });
 
-  // Keep session label fresh even between quote polls.
   useEffect(() => {
     const id = setInterval(() => setSessionTick((n) => n + 1), 60_000);
     return () => clearInterval(id);
@@ -356,7 +149,7 @@ export default function MarketsScreen({ navigation }) {
       clearTimeout(extrasTimer.current);
       extrasTimer.current = null;
     }
-    await loadQuotes({ ideas: true });
+    await loadQuotes({ ideas: false });
     loadBriefAndPulse();
     setRefreshing(false);
   }, [loadQuotes, loadBriefAndPulse]);
@@ -371,20 +164,6 @@ export default function MarketsScreen({ navigation }) {
       setQuotesBusy(false);
     }
   }, [loadQuotes, quotesBusy]);
-
-  const toggleMover = useCallback(async (m) => {
-    const tk = m.ticker;
-    setExpanded(e => ({ ...e, [tk]: !e[tk] }));
-    haptics.onPressPrimary?.();
-    if ((!m.news || !m.news.length) && !m._newsTried) {
-      m._newsTried = true;
-      try {
-        const d = await api.getNews(tk, 6);
-        const items = (d.news && d.news[tk]) || [];
-        if (items.length) { m.news = items; setMovers([...moversRef.current]); }
-      } catch (e) { /* leave "no headlines" */ }
-    }
-  }, []);
 
   const runBrief = useCallback(async () => {
     setBriefBusy(true);
@@ -440,23 +219,6 @@ export default function MarketsScreen({ navigation }) {
     );
   }, [watch]);
 
-  // Watchlist rows sorted by |day %| so the board feels alive (Koyfin density).
-  const watchRows = useMemo(() => {
-    const tks = (watch && watch.tickers) || [];
-    const quotes = (watch && watch.quotes) || {};
-    return tks
-      .map((tk) => {
-        const q = quotes[tk] || quotes[String(tk || '').toUpperCase()] || {};
-        const pct = q.pct != null ? Number(q.pct) : (q.pct_change != null ? Number(q.pct_change) : null);
-        const ytdIpo = q.ytd_status === 'ipo' || q.ytd_label === 'IPO';
-        const ytdRaw = q.ytd != null ? q.ytd : q.ytd_pct;
-        const ytd = ytdRaw != null && !isNaN(Number(ytdRaw)) ? Number(ytdRaw) : null;
-        return { tk, q, pct, ytd, ytdIpo, abs: pct == null || isNaN(pct) ? -1 : Math.abs(pct) };
-      })
-      .sort((a, b) => b.abs - a.abs);
-  }, [watch]);
-
-  // Breadth from indices + watchlist day moves.
   const breadth = useMemo(() => {
     let up = 0, down = 0, flat = 0;
     const push = (p) => {
@@ -465,10 +227,9 @@ export default function MarketsScreen({ navigation }) {
       else if (p < -0.02) down += 1;
       else flat += 1;
     };
-    indices.forEach((ix) => push(ix.pct));
-    watchRows.forEach((r) => push(r.pct));
+    boardIndices.forEach((ix) => push(ix.pct));
     return { up, down, flat, total: up + down + flat };
-  }, [indices, watchRows]);
+  }, [boardIndices]);
 
   const cardStyle = [s.card, { backgroundColor: t.surface, borderColor: t.border, borderWidth: 1 }];
 
@@ -491,6 +252,11 @@ export default function MarketsScreen({ navigation }) {
     ? `${session.label} · auto 60s`
     : `${session.label} · tap ↻ for quotes`;
 
+  const openWatchlist = useCallback(() => {
+    haptics.onPressPrimary?.();
+    navigation?.navigate('Watchlist');
+  }, [navigation]);
+
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <AppHeader
@@ -503,7 +269,6 @@ export default function MarketsScreen({ navigation }) {
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
       >
-        {/* ── Live session strip (Koyfin-style status) ───────────────── */}
         <View style={s.liveStrip}>
           <View style={s.liveLeft}>
             <View style={[s.liveDot, { backgroundColor: session.color }]} />
@@ -536,7 +301,6 @@ export default function MarketsScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
-        {/* Breadth bar */}
         {breadth.total > 0 && (
           <View style={s.breadthRow}>
             <Text style={[s.breadthTxt, { color: t.pillUpFg }]}>▲ {breadth.up}</Text>
@@ -564,7 +328,6 @@ export default function MarketsScreen({ navigation }) {
           </View>
         )}
 
-        {/* ── 1. Live Markets ─────────────────────────────────────────── */}
         <SectionHeader
           icon="pulse"
           t={t}
@@ -586,182 +349,57 @@ export default function MarketsScreen({ navigation }) {
             </TouchableOpacity>
           }
         >Indices</SectionHeader>
-        {indices.length === 0 ? (
-          <Card style={cardStyle}><ActivityIndicator color={t.primary} /></Card>
-        ) : (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: spacing.md }}>
-            {indices.map((ix) => {
-              const up = ix.pct == null ? null : ix.pct >= 0;
-              const edge = up == null ? t.border : up ? t.pillUpFg : t.pillDownFg;
-              const tint = up == null
-                ? t.surface
-                : up
-                  ? (t.isDark ? 'rgba(74,222,128,0.08)' : 'rgba(22,163,74,0.06)')
-                  : (t.isDark ? 'rgba(248,113,113,0.08)' : 'rgba(220,38,38,0.05)');
-              return (
-                <View
-                  key={ix.symbol}
+        <View style={s.idxGrid}>
+          {boardIndices.map((ix) => {
+            const up = ix.pct == null ? null : ix.pct >= 0;
+            const edge = up == null ? t.border : up ? t.pillUpFg : t.pillDownFg;
+            const tint = up == null
+              ? t.surface
+              : up
+                ? (t.isDark ? 'rgba(74,222,128,0.08)' : 'rgba(22,163,74,0.06)')
+                : (t.isDark ? 'rgba(248,113,113,0.08)' : 'rgba(220,38,38,0.05)');
+            return (
+              <View
+                key={ix.symbol}
+                style={[
+                  s.idxCell,
+                  {
+                    borderLeftColor: edge,
+                    backgroundColor: tint,
+                  },
+                ]}
+              >
+                <Text style={s.idxLabel} numberOfLines={1}>{ix.label}</Text>
+                <Text style={s.idxPx}>{fmtPx(ix.price)}</Text>
+                <Text
                   style={[
-                    s.idxChip,
-                    {
-                      borderLeftColor: edge,
-                      borderLeftWidth: 3,
-                      backgroundColor: tint,
-                    },
+                    s.idxChg,
+                    { color: up == null ? t.textDim : up ? t.pillUpFg : t.pillDownFg },
                   ]}
                 >
-                  <Text style={s.idxLabel} numberOfLines={1}>{ix.label}</Text>
-                  <Text style={s.idxPx}>{fmtPx(ix.price)}</Text>
-                  <Text
-                    style={[
-                      s.idxChg,
-                      { color: up == null ? t.textDim : up ? t.pillUpFg : t.pillDownFg },
-                    ]}
-                  >
-                    {fmtPct(ix.pct)}
-                  </Text>
-                </View>
-              );
-            })}
-          </ScrollView>
-        )}
+                  {fmtPct(ix.pct)}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
 
-        {/* ── 2. Idea Generator ──────────────────────────────────────── */}
-        <SectionHeader icon="lightbulb-on-outline" t={t} s={s}
-          right={moversAsOf ? <Text style={s.asOf}>{moversAsOf}</Text> : null}>
-          Idea Generator
-        </SectionHeader>
-        {movers == null ? (
-          <Card style={cardStyle}><ActivityIndicator color={t.primary} /></Card>
-        ) : movers.length === 0 ? (
-          <Card style={cardStyle}><Text style={s.muted}>No movers ≥ ±4% in your universe right now.</Text></Card>
-        ) : (
-          <Card style={[...cardStyle, { padding: 0 }]}>
-            {movers.map((m, i) => {
-              const open = !!expanded[m.ticker];
-              const up = m.pct_change == null ? null : m.pct_change >= 0;
-              return (
-                <View
-                  key={m.ticker}
-                  style={[
-                    s.moverWrap,
-                    i < movers.length - 1 && s.divider,
-                    up != null && {
-                      borderLeftWidth: 3,
-                      borderLeftColor: up ? t.pillUpFg : t.pillDownFg,
-                    },
-                  ]}
-                >
-                  <TouchableOpacity style={s.moverRow} onPress={() => toggleMover(m)} activeOpacity={0.7}>
-                    <View style={{ flex: 1 }}>
-                      <View style={s.moverHead}>
-                        <Text style={s.moverTk}>{m.ticker}</Text>
-                        {(m.reason_class && m.reason_class !== 'unknown') ? (
-                          <Text style={s.reasonChip}>{String(m.reason_class).replace('_', ' ')}</Text>
-                        ) : null}
-                      </View>
-                      {!!m.reason_text && <Text style={s.reasonTxt} numberOfLines={open ? 0 : 1}>{m.reason_text}</Text>}
-                    </View>
-                    <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                      <PctPill p={m.pct_change} t={t} />
-                      <Text style={s.moverPx}>${fmtPx(m.price)}</Text>
-                    </View>
-                    <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={t.textDim} style={{ marginLeft: 8 }} />
-                  </TouchableOpacity>
-                  {open && (
-                    <View style={s.moverDetail}>
-                      {m.sector && m.sector !== 'Unknown' ? (
-                        <Text style={s.detailMeta}>
-                          {m.sector}{m.sector_etf ? `  ·  ${m.sector_etf} ${fmtPct(m.sector_pct_change)}` : ''}
-                        </Text>
-                      ) : null}
-                      {(m.news && m.news.length) ? m.news.map((n, j) => (
-                        <TouchableOpacity key={j} style={s.newsItem}
-                          onPress={() => n.url && Linking.openURL(n.url).catch(() => {})} activeOpacity={n.url ? 0.6 : 1}>
-                          <Text style={s.newsTitle}>{n.title}</Text>
-                          <Text style={s.newsMeta}>{n.publisher || ''}</Text>
-                        </TouchableOpacity>
-                      )) : <Text style={s.muted}>No recent headlines.</Text>}
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-          </Card>
-        )}
+        <TouchableOpacity
+          style={s.wlCta}
+          onPress={openWatchlist}
+          activeOpacity={0.75}
+          accessibilityLabel="Open Watchlist"
+        >
+          <View style={[s.wlCtaIcon, { backgroundColor: t.surfaceTint }]}>
+            <MaterialCommunityIcons name="star-outline" size={16} color={t.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.wlCtaTitle}>Watchlist</Text>
+            <Text style={s.wlCtaSub}>Your names and ideas</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={t.textDim} />
+        </TouchableOpacity>
 
-        {/* ── 3. Watchlist (sorted by |day %|) ───────────────────────── */}
-        {/* Tap row → same fact-sheet snapshot as desktop StockPeek. */}
-        <SectionHeader
-          icon="star-outline"
-          t={t}
-          s={s}
-          right={<Text style={s.asOf}>tap for snapshot · by day %</Text>}
-        >Watchlist</SectionHeader>
-        {watch == null ? (
-          <Card style={cardStyle}><ActivityIndicator color={t.primary} /></Card>
-        ) : !watchRows.length ? (
-          <Card style={cardStyle}><Text style={s.muted}>No tickers followed yet.</Text></Card>
-        ) : (
-          <Card style={[...cardStyle, { padding: 0 }]}>
-            {watchRows.map((row, i) => {
-              const { tk, q, pct, ytd, ytdIpo } = row;
-              const up = pct == null || isNaN(pct) ? null : pct >= 0;
-              const pxColor = up == null ? t.textSecondary : up ? t.pillUpFg : t.pillDownFg;
-              const ytdUp = ytd == null || isNaN(ytd) ? null : ytd >= 0;
-              return (
-                <View
-                  key={tk}
-                  style={[
-                    i < watchRows.length - 1 && s.divider,
-                    up != null && Math.abs(pct) >= 1.5 && {
-                      backgroundColor: up
-                        ? (t.isDark ? 'rgba(74,222,128,0.06)' : 'rgba(22,163,74,0.04)')
-                        : (t.isDark ? 'rgba(248,113,113,0.06)' : 'rgba(220,38,38,0.04)'),
-                    },
-                  ]}
-                >
-                  <TouchableOpacity
-                    style={s.wlRow}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      haptics.onPressPrimary?.();
-                      setPeekTk(tk);
-                    }}
-                  >
-                    <Text style={s.wlTk}>{tk}</Text>
-                    <Text style={[s.wlPx, { color: pxColor }]}>${fmtPx(q.price)}</Text>
-                    <View style={{ width: 72, alignItems: 'flex-end' }}><PctPill p={pct} t={t} /></View>
-                    <View style={{ width: 64, alignItems: 'flex-end', marginLeft: 4 }}>
-                      <Text
-                        style={[
-                          s.wlYtd,
-                          {
-                            color: ytdUp == null
-                              ? t.textDim
-                              : ytdUp ? t.pillUpFg : t.pillDownFg,
-                          },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {ytd == null || isNaN(ytd) ? '—' : fmtPct(ytd)}
-                      </Text>
-                      <Text style={s.wlYtdLbl}>{ytdIpo ? 'IPO' : 'YTD'}</Text>
-                    </View>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={16}
-                      color={t.textDim}
-                      style={{ marginLeft: 6 }}
-                    />
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
-          </Card>
-        )}
-
-        {/* ── 4. Daily Brief ─────────────────────────────────────────── */}
         <SectionHeader icon="newspaper-variant-outline" t={t} s={s}
           right={
             <TouchableOpacity onPress={runBrief} disabled={briefBusy} style={s.runBtn} activeOpacity={0.8}>
@@ -788,7 +426,6 @@ export default function MarketsScreen({ navigation }) {
           )}
         </Card>
 
-        {/* ── 5. Market Pulse ────────────────────────────────────────── */}
         <SectionHeader icon="radar" t={t} s={s}
           right={
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -876,56 +513,9 @@ export default function MarketsScreen({ navigation }) {
           )}
         </Card>
       </ScrollView>
-      <StockSnapshotSheet
-        ticker={peekTk}
-        visible={!!peekTk}
-        onClose={() => setPeekTk(null)}
-        onOpenReport={peekTk ? () => {
-          const tk = peekTk;
-          setPeekTk(null);
-          try {
-            navigation?.navigate('Research', {
-              screen: 'Report',
-              params: { ticker: tk },
-            });
-          } catch { /* ignore */ }
-        } : undefined}
-        onRunAnalysis={peekTk ? () => {
-          const tk = peekTk;
-          Alert.alert(
-            'Run AI analysis?',
-            `${tk} full equity report costs tokens (Grok). This is deliberate — not automatic.`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Run',
-                onPress: async () => {
-                  try {
-                    haptics.onPressPrimary?.();
-                    setPeekTk(null);
-                    const job = await api.startAnalysis(tk, false, 'grok');
-                    navigation?.navigate('Research', {
-                      screen: 'Analysis',
-                      params: { jobId: job.job_id, ticker: tk },
-                    });
-                  } catch (e) {
-                    Alert.alert('Analysis failed', e.message || String(e));
-                  }
-                },
-              },
-            ],
-          );
-        } : undefined}
-      />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  sectionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md, marginTop: spacing.xs, gap: 8 },
-  sectionIcon: { width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 1, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
-});
 
 function makeStyles(t) {
   return StyleSheet.create({
@@ -934,7 +524,6 @@ function makeStyles(t) {
     asOf: { fontSize: 10, color: t.textDim, fontWeight: '500' },
     muted: { fontSize: 13, color: t.textSecondary },
 
-    // Live session strip
     liveStrip: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
       backgroundColor: t.surface, borderRadius: radius.xl, borderWidth: 1, borderColor: t.border,
@@ -963,14 +552,18 @@ function makeStyles(t) {
     breadthUp: { height: 6 },
     breadthDown: { height: 6 },
 
-    idxChip: {
-      backgroundColor: t.surface, borderRadius: radius.xl, paddingVertical: 10, paddingHorizontal: 12,
-      marginRight: 8, minWidth: 104, borderWidth: 1, borderColor: t.border,
-      shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: t.cardShadowOpacity, shadowRadius: 8, elevation: 3,
+    idxGrid: {
+      flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between',
+      marginBottom: spacing.md,
     },
-    idxLabel: { fontSize: 10, color: t.textSecondary, fontWeight: '700', marginBottom: 3, letterSpacing: 0.3 },
-    idxPx: { fontSize: 17, color: t.textPrimary, fontWeight: '800', fontVariant: ['tabular-nums'] },
-    idxChg: { fontSize: 12, fontWeight: '800', marginTop: 3, fontVariant: ['tabular-nums'] },
+    idxCell: {
+      width: '48.5%',
+      borderRadius: radius.lg, paddingVertical: 10, paddingHorizontal: 10,
+      marginBottom: 8, borderWidth: 1, borderColor: t.border, borderLeftWidth: 3,
+    },
+    idxLabel: { fontSize: 10, color: t.textSecondary, fontWeight: '700', marginBottom: 4, letterSpacing: 0.3 },
+    idxPx: { fontSize: 16, color: t.textPrimary, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    idxChg: { fontSize: 12, fontWeight: '800', marginTop: 2, fontVariant: ['tabular-nums'] },
 
     quotesRefreshBtn: {
       width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
@@ -983,31 +576,18 @@ function makeStyles(t) {
     },
     quotesRefreshTxt: { fontSize: 11, fontWeight: '700', color: t.primary },
 
-    moverWrap: { paddingHorizontal: 14 },
-    divider: { borderBottomWidth: 1, borderBottomColor: t.border },
-    moverRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11 },
-    moverHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    moverTk: { fontSize: 15, fontWeight: '800', color: t.textPrimary, letterSpacing: 0.5 },
-    reasonChip: {
-      fontSize: 9, fontWeight: '700', color: t.textSecondary, backgroundColor: t.surfaceAlt,
-      borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden', textTransform: 'uppercase',
+    wlCta: {
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      backgroundColor: t.surface, borderRadius: radius.xl, borderWidth: 1, borderColor: t.border,
+      paddingVertical: 12, paddingHorizontal: 12, marginBottom: spacing.md,
     },
-    reasonTxt: { fontSize: 11.5, color: t.textSecondary, marginTop: 2 },
-    moverPx: { fontSize: 11, color: t.textDim, fontVariant: ['tabular-nums'] },
-    moverDetail: { paddingBottom: 12, paddingTop: 2 },
-    detailMeta: { fontSize: 11, color: t.textSecondary, marginBottom: 6, fontWeight: '600' },
-    newsItem: { paddingVertical: 5, borderTopWidth: 1, borderTopColor: t.borderSubtle },
-    newsTitle: { fontSize: 12.5, color: t.textPrimary, fontWeight: '600', lineHeight: 17 },
-    newsMeta: { fontSize: 10, color: t.textDim, marginTop: 1 },
+    wlCtaIcon: {
+      width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+    },
+    wlCtaTitle: { fontSize: 14, fontWeight: '800', color: t.textPrimary, letterSpacing: 0.2 },
+    wlCtaSub: { fontSize: 11, color: t.textSecondary, marginTop: 1 },
 
-    wlRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14 },
-    wlTk: { flex: 1, fontSize: 14, fontWeight: '800', color: t.textPrimary, letterSpacing: 0.5 },
-    wlPx: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'], width: 86, textAlign: 'right', marginRight: 8 },
-    wlYtd: { fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
-    wlYtdLbl: {
-      fontSize: 8, fontWeight: '700', color: t.textDim, letterSpacing: 0.4,
-      marginTop: 1, textTransform: 'uppercase',
-    },
+    divider: { borderBottomWidth: 1, borderBottomColor: t.border },
 
     runBtn: {
       backgroundColor: t.gold, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 5,

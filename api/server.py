@@ -4666,14 +4666,15 @@ def _wl_lite_paint(lp_id: str) -> tuple[list[str], dict]:
             want = list(dict.fromkeys([*tickers, *idx_syms, *idx_aliases]))
             if not want:
                 return tickers, quotes
+            want_u = [w.upper() for w in want]
             cur.execute(
                 """
                 SELECT symbol, price, pct_change, updated_at
                   FROM market_quotes
-                 WHERE symbol = ANY(%s)
+                 WHERE upper(symbol) = ANY(%s)
                    AND updated_at > now() - interval '5 days'
                 """,
-                (want,),
+                (want_u,),
             )
             now = time.time()
             live = _us_session_live()
@@ -4690,13 +4691,45 @@ def _wl_lite_paint(lp_id: str) -> tuple[list[str], dict]:
                     "_sym": tk,
                 }
                 store[tk] = store[tk.upper()]
+            names: dict = {}
+            if tickers:
+                cur.execute(
+                    """
+                    SELECT symbol, name
+                      FROM security_meta
+                     WHERE upper(symbol) = ANY(%s)
+                    """,
+                    ([tk.upper() for tk in tickers],),
+                )
+                for sym, name in (cur.fetchall() or []):
+                    tk = (sym or "").strip().upper()
+                    nm = (name or "").strip()
+                    if tk and nm:
+                        names[tk] = nm
             for tk in tickers:
-                q = store.get(tk) or {}
+                q = store.get(tk) or store.get(tk.upper()) or {}
+                nm = names.get(tk)
                 if q.get("price") is None:
+                    if nm:
+                        quotes.setdefault(tk, {})["name"] = nm
                     continue
                 as_of = q.get("as_of")
                 _watchlist_set_price(
                     quotes, tk, q.get("price"), pct=q.get("pct_change"), as_of=as_of)
+                row = quotes.get(tk)
+                if row is not None:
+                    if nm:
+                        row["name"] = nm
+                    pct_v = row.get("pct")
+                    px_v = row.get("price")
+                    if pct_v is not None and px_v is not None:
+                        try:
+                            pc = float(pct_v)
+                            p = float(px_v)
+                            if pc != -100:
+                                row["change"] = p - p / (1.0 + pc / 100.0)
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            pass
                 current = (not live) or _quote_from_current_session(as_of)
                 if current:
                     row = quotes.get(tk) or {}
@@ -4712,7 +4745,14 @@ def _wl_lite_paint(lp_id: str) -> tuple[list[str], dict]:
             ):
                 out = []
                 for label, sym in _INDEX_TICKERS:
-                    q = store.get(sym) or store.get(_INDEX_ALIASES.get(sym) or "") or {}
+                    alias = _INDEX_ALIASES.get(sym) or ""
+                    q = (
+                        store.get(sym)
+                        or store.get((sym or "").upper())
+                        or store.get(alias)
+                        or store.get(alias.upper())
+                        or {}
+                    )
                     last = q.get("price")
                     pct = q.get("pct_change")
                     try:
@@ -8903,7 +8943,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui733-20261014-home"
+WEB_BUILD_VERSION = "ui734-20261015-mobile-watchlist-koyfin"
 
 
 @app.get("/api/build")

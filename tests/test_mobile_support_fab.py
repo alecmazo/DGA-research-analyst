@@ -31,8 +31,12 @@ def test_markets_uses_mobile_home_and_skips_idea_feed_on_poll():
     src = (ROOT / "mobile" / "src" / "screens" / "MarketsScreen.js").read_text(
         encoding="utf-8"
     )
+    shared = (ROOT / "mobile" / "src" / "screens" / "marketsShared.js").read_text(
+        encoding="utf-8"
+    )
     assert "getMobileHome" in src
-    assert "QUOTE_POLL_MS = 60_000" in src
+    assert "QUOTE_POLL_MS = 60_000" in shared
+    assert "QUOTE_POLL_MS" in src
     poll = src.split("pollRef.current = setInterval")[1].split("QUOTE_POLL_MS")[0]
     assert "loadQuotes({ ideas: false })" in poll
     assert "getIdeaFeed" not in poll
@@ -57,6 +61,56 @@ def test_ota_cold_start_never_reloads():
         encoding="utf-8"
     )
     assert "APP_BUILD = 'mobile-ui31-fast-20260918'" in settings
+
+
+def test_gp_tabs_split_markets_and_watchlist():
+    app = (ROOT / "mobile" / "App.js").read_text(encoding="utf-8")
+    gp = app.split("function GPTabs")[1].split("function LPTabs")[0]
+    assert '<Tab.Screen name="Markets"' in gp
+    assert '<Tab.Screen name="Watchlist"' in gp
+    assert "WatchlistBoardScreen" in gp
+    assert '<Tab.Screen name="Fund"' not in gp
+    assert '<Tab.Screen name="Positions"' in gp
+    more = app.split("function MoreStack")[1].split("function GPTabs")[0]
+    assert '<Stack.Screen name="Fund"' in more
+    bar = (ROOT / "mobile" / "src" / "components" / "CustomTabBar.js").read_text(
+        encoding="utf-8"
+    )
+    assert "Watchlist:" in bar
+    more_src = (ROOT / "mobile" / "src" / "screens" / "MoreScreen.js").read_text(
+        encoding="utf-8"
+    )
+    assert "route: 'Fund'" in more_src
+    lp = app.split("function LPTabs")[1].split("function applyPendingUpdate")[0]
+    assert '<Tab.Screen name="Watchlist"' not in lp
+    assert '<Tab.Screen name="Positions"' in lp
+
+
+def test_markets_is_index_board_watchlist_is_koyfin_rows():
+    mkt = (ROOT / "mobile" / "src" / "screens" / "MarketsScreen.js").read_text(
+        encoding="utf-8"
+    )
+    assert "paintMarketIndices" in mkt
+    assert "idxGrid" in mkt
+    assert "wlYtd" not in mkt
+    assert "getIdeaFeed" not in mkt
+    assert "navigate('Watchlist')" in mkt
+    shared = (ROOT / "mobile" / "src" / "screens" / "marketsShared.js").read_text(
+        encoding="utf-8"
+    )
+    assert "S&P 500" in shared
+    assert "^GSPC" in shared
+    board = (ROOT / "mobile" / "src" / "screens" / "WatchlistBoardScreen.js").read_text(
+        encoding="utf-8"
+    )
+    assert "setPeekTk" in board
+    assert "caret={false}" in board
+    assert "getIdeaFeed" in board
+    assert "wlYtd" not in board
+    assert "companyName" in board
+    poll = board.split("pollRef.current = setInterval")[1].split("QUOTE_POLL_MS")[0]
+    assert "ideas: false" in poll
+    assert "getIdeaFeed" not in poll
 
 
 def test_positions_and_financials_paint_from_cache():

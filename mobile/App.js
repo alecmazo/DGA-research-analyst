@@ -76,11 +76,12 @@ function FundStack() {
   );
 }
 
-// ── More stack: lower-traffic destinations behind a single tab ───────────────
+// ── More stack: Fund + lower-traffic destinations behind a single tab ────────
 function MoreStack({ onLogout, isDemo, onSwitchToLP }) {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="MoreHome" getComponent={() => require('./src/screens/MoreScreen').default} />
+      <Stack.Screen name="Fund" component={FundStack} />
       <Stack.Screen name="Planning">
         {() => {
           const LPPlanningScreen = require('./src/screens/LPPlanningScreen').default;
@@ -99,7 +100,7 @@ function MoreStack({ onLogout, isDemo, onSwitchToLP }) {
   );
 }
 
-// ── GP navigator: five primary tabs + a More hub (Podcast, Settings) ─────────
+// ── GP navigator: Markets home, Watchlist board, Research, Financials, Positions, More
 function GPTabs({ onLogout, isDemo, onSwitchToLP }) {
   return (
     <View style={{ flex: 1 }}>
@@ -108,10 +109,10 @@ function GPTabs({ onLogout, isDemo, onSwitchToLP }) {
         screenOptions={{ headerShown: false }}
       >
         <Tab.Screen name="Markets" component={MarketsScreen} />
+        <Tab.Screen name="Watchlist" getComponent={() => require('./src/screens/WatchlistBoardScreen').default} />
         <Tab.Screen name="Research" component={HomeStack} />
         <Tab.Screen name="Financials" getComponent={() => require('./src/screens/FinancialsScreen').default} />
         <Tab.Screen name="Positions" component={WatchlistScreen} />
-        <Tab.Screen name="Fund" component={FundStack} />
         <Tab.Screen name="More">
           {() => <MoreStack onLogout={onLogout} isDemo={isDemo} onSwitchToLP={onSwitchToLP} />}
         </Tab.Screen>
