@@ -1,0 +1,5 @@
+---
+description: Sync with origin/main before editing
+alwaysApply: true
+---
+Sync before you start. Run `git fetch origin && git status -sb`. If you're behind, run `git pull --ff-only origin main`. If local uncommitted changes conflict, stop and ask. Commit and push promptly when done. Cloud agents work on a branch/PR from the latest `main`. See LLM_COORDINATION.md for the full rules.

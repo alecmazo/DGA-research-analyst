@@ -3,6 +3,20 @@
 **Purpose:** Keep Grok, Fable, Claude/Opus, and any other agents working **in concert**, not on top of each other.  
 **Owner of this file:** whoever last edited the **Active claims** section (update when you start or finish work).
 
+## ⚠️ Sync before you start (every tool, every session)
+
+Local (Mac worktree), Cursor, Grok Build and cloud agents all edit this repo. Stale copies cause conflicts.
+
+1. Before any edit: `git fetch origin && git status -sb`
+2. If behind: `git pull --ff-only origin main`
+3. If local uncommitted changes conflict with the pull: **stop and ask Alec**. Do not stash-drop, reset or force anything.
+4. When you finish: commit and push promptly so other tools see your work.
+5. Cloud agents: branch from the latest `main` and open a PR. Do not push to `main` directly.
+
+Note: the Mac worktree may also be auto-pulled every 5 minutes by a launchd job (`com.alecmazo.dga-autopull`). It only fast-forwards a clean `main` checkout.
+
+---
+
 ## Ship path (2026-10-02)
 
 This is the path. Do not invent a second one.
