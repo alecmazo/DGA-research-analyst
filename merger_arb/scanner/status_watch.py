@@ -54,7 +54,30 @@ def _vote_from(record: SourceRecord) -> str:
     return str(votes[-1].value) if votes else ""
 
 
-def detect_alerts(deal: dict, records: list[SourceRecord], *, stored_cash: str = "", stored_vote: str = "") -> list[dict]:
+def spread_move_alert(deal: dict, prev_gross, new_gross, *, pts: float = 1.0, pulled_at: str = "") -> dict | None:
+    if prev_gross in (None, "") or new_gross in (None, ""):
+        return None
+    try:
+        before = float(prev_gross)
+        after = float(new_gross)
+    except (TypeError, ValueError):
+        return None
+    delta = abs(after - before) * (100.0 if abs(after) <= 1.5 and abs(before) <= 1.5 else 1.0)
+    if delta < float(pts or 1.0):
+        return None
+    return {
+        "desk_deal_id": deal.get("id") or "",
+        "alert_type": "SPREAD_MOVE",
+        "certainty": "confirmed",
+        "source_url": "",
+        "source_name": "spread_history",
+        "pulled_at": pulled_at,
+        "evidence": f"Gross spread moved {delta:.2f} pts",
+        "details": {"before": before, "after": after, "pts": round(delta, 2), "threshold": pts},
+    }
+
+
+def detect_alerts(deal: dict, records: list[SourceRecord], *, stored_cash: str = "", stored_vote: str = "", stored_close: str = "") -> list[dict]:
     """One alert per type. 25-NSE alone does not confirm a close."""
     matched = [row for row in records if _matches(row, deal)]
     if not matched:
@@ -138,4 +161,24 @@ def detect_alerts(deal: dict, records: list[SourceRecord], *, stored_cash: str =
     hsr = [row for row in matched if row.event_type == "HSR_ET" or row.source == "ftc_et"]
     if hsr:
         add("HSR_ET", "confirmed", hsr[0], {"transaction": hsr[0].external_id, "title": hsr[0].title})
+
+    used = {row.get("source_url") for row in alerts}
+    filings = [
+        row for row in matched
+        if (row.form or "").upper().split("/")[0] in {"8-K", "S-4", "F-4", "425", "SC TO-T", "SC 14D9", "DEFM14A"}
+        and row.url not in used
+    ]
+    if filings:
+        add("NEW_FILING", "confirmed" if filings[0].source.startswith("sec") else "reported", filings[0], {
+            "form": filings[0].form,
+            "title": filings[0].title,
+        })
+
+    stored = str(stored_close or deal.get("expected_close") or "")[:10]
+    for row in matched:
+        terms = extract_terms(row.text or row.raw_excerpt or "", source_name=row.source, source_url=row.url, pulled_at=row.pulled_at)
+        close = next((str(item.value)[:10] for item in terms if item.field_name == "expected_close"), "")
+        if stored and close and close > stored:
+            add("DATE_SLIP", "reported", row, {"before": stored, "after": close})
+            break
     return alerts

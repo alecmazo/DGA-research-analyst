@@ -40,7 +40,7 @@ from merger_arb.scanner.sources.sec_index import parse_form_index
 from merger_arb.scanner.sources.sec_submissions import parse_submissions
 from merger_arb.scanner.sources.sec_tickers import parse_company_tickers
 from merger_arb.scanner.sources.trackers import enabled_adapters
-from merger_arb.scanner.status_watch import detect_alerts
+from merger_arb.scanner.status_watch import detect_alerts, spread_move_alert
 from merger_arb.scanner.store import ScannerStore
 from merger_arb.store import MemoryStore
 
@@ -366,6 +366,22 @@ def test_status_watch_and_daily_due():
     assert detect_alerts(deal, [result])[0]["alert_type"] == "VOTE_RESULT"
     hsr = parse_ftc(_json("ftc_et_api.json"), pulled_at=PULLED)[0]
     assert detect_alerts(deal, [hsr])[0]["alert_type"] == "HSR_ET"
+    filing = SourceRecord(
+        source="sec_efts", external_id="s4", form="S-4", cik="0001819928",
+        title="Form S-4", url="https://example.invalid/s4", pulled_at=PULLED,
+    )
+    assert detect_alerts(deal, [filing])[0]["alert_type"] == "NEW_FILING"
+    slip = SourceRecord(
+        source="yahoo_rss", external_id="slip", tickers=["ACME"],
+        text="The merger is expected to close in the second half of 2027.",
+        url="https://example.invalid/slip", pulled_at=PULLED,
+    )
+    slipped = detect_alerts(deal, [slip], stored_close="2026-12-31")
+    assert slipped[0]["alert_type"] == "DATE_SLIP"
+    assert slipped[0]["details"]["after"] == "2027-12-31"
+    move = spread_move_alert(deal, 0.05, 0.07, pts=1.0, pulled_at=PULLED)
+    assert move and move["alert_type"] == "SPREAD_MOVE"
+    assert spread_move_alert(deal, 0.05, 0.055, pts=1.0) is None
     moment = datetime(2026, 10, 2, 6, 30, tzinfo=timezone.utc)
     assert daily_due(moment, "06:30", None) is True
     assert daily_due(moment, "06:30", moment.date()) is False

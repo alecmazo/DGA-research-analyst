@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import styles from './MergerArbPage.module.css'
@@ -8,7 +8,6 @@ type ScoreComponent = {
   weight?: number
   contribution?: number | null
   available?: boolean
-  input?: Record<string, unknown>
 }
 
 type Deal = {
@@ -42,6 +41,25 @@ type Field = {
   conflict?: boolean
 }
 
+type AnalysisRow = {
+  id: string
+  label: string
+  display: string
+  value?: unknown
+  unverified?: boolean
+}
+
+type AnalysisView = {
+  empty?: boolean
+  sections?: { id: string; rows: AnalysisRow[]; blocks: { rows: AnalysisRow[] }[] }[]
+  stage1_notes?: { text: string; field_ids: string[] }[]
+  versions?: { version: number; stage: string; model: string; created_at_pt: string; diff: { id: string; before: unknown; after: unknown }[] }[]
+  answer?: string
+  answer_note?: string
+  citations?: string[]
+  escalate?: boolean
+}
+
 type Detail = {
   deal?: Deal
   terms?: Record<string, unknown>
@@ -51,13 +69,12 @@ type Detail = {
     score_band?: string
     coverage?: number
     components?: Record<string, ScoreComponent>
-    p_house?: number
     house_source?: string
   }
   fields?: Field[]
-  regulatory?: { regulator?: string; stage?: string; filed_on?: string; deadline?: string }[]
+  regulatory?: { regulator?: string; stage?: string; filed_on?: string }[]
   events?: { kind?: string; expected_on?: string; actual_on?: string }[]
-  spread_history?: { d?: string; gross_pct?: number; implied_p?: number }[]
+  spread_history?: { d?: string; gross_pct?: number }[]
   filings?: { title?: string; url?: string; source_name?: string }[]
 }
 
@@ -92,6 +109,39 @@ function signed(value: number | null | undefined) {
   return `${prefix}${shown.toFixed(1)}%`
 }
 
+function analysisRows(view: AnalysisView | null, sectionId: string): AnalysisRow[] {
+  const card = (view?.sections || []).find((item) => item.id === sectionId)
+  if (!card) return []
+  return [...card.rows, ...card.blocks.flatMap((block) => block.rows)]
+}
+
+function Sensitivity({ value }: { value: unknown }) {
+  if (!Array.isArray(value) || !value.length) return null
+  const table = value as { downside?: string; close?: string; implied_probability?: number | null; annualized?: number | null }[]
+  return (
+    <table className={styles.table}>
+      <thead>
+        <tr>
+          <th>Downside</th>
+          <th>Close</th>
+          <th>Implied P</th>
+          <th>Ann.</th>
+        </tr>
+      </thead>
+      <tbody>
+        {table.map((item, index) => (
+          <tr key={`${item.downside}-${item.close}-${index}`}>
+            <td>{item.downside}</td>
+            <td>{item.close}</td>
+            <td>{pct(item.implied_probability, 1)}</td>
+            <td>{pct(item.annualized, 1)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 export function DealDrawer({
   dealId,
   onClose,
@@ -102,15 +152,26 @@ export function DealDrawer({
   onChanged?: () => void
 }) {
   const [detail, setDetail] = useState<Detail | null>(null)
+  const [analysis, setAnalysis] = useState<AnalysisView | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
+  const [provider, setProvider] = useState<'grok' | 'claude'>('grok')
+  const [question, setQuestion] = useState('')
+
+  const load = useCallback(async () => {
+    const [dealBody, analysisBody] = await Promise.all([
+      api<Detail>(`/api/merger-arb/deals/${encodeURIComponent(dealId)}`),
+      api<AnalysisView>(`/api/merger-arb/analysis/${encodeURIComponent(dealId)}`).catch(() => ({ empty: true } as AnalysisView)),
+    ])
+    setDetail(dealBody)
+    setAnalysis(analysisBody)
+  }, [dealId])
 
   useEffect(() => {
     setErr('')
-    api<Detail>(`/api/merger-arb/deals/${encodeURIComponent(dealId)}`)
-      .then(setDetail)
-      .catch((error) => setErr(error instanceof Error ? error.message : 'Could not load the deal'))
-  }, [dealId])
+    setQuestion('')
+    load().catch((error) => setErr(error instanceof Error ? error.message : 'Could not load the deal'))
+  }, [dealId, load])
 
   const patchStage = async (stage: string) => {
     setBusy('stage')
@@ -119,11 +180,47 @@ export function DealDrawer({
         method: 'PATCH',
         body: JSON.stringify({ stage }),
       })
-      const next = await api<Detail>(`/api/merger-arb/deals/${encodeURIComponent(dealId)}`)
-      setDetail(next)
+      await load()
       onChanged?.()
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not update stage')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const run = async (path: string, body: unknown, label: string) => {
+    setBusy(label)
+    setErr('')
+    try {
+      const data = await api<AnalysisView>(path, { method: 'POST', body: JSON.stringify(body) })
+      setAnalysis(data)
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'That step failed')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const confirm = (fieldId: string) => {
+    void run(`/api/merger-arb/analysis/${encodeURIComponent(dealId)}/confirm`, { field_id: fieldId }, 'confirm')
+  }
+
+  const exportPacket = async (format: 'md' | 'json') => {
+    setBusy('export')
+    try {
+      const data = await api<{ body?: string; filename?: string }>(
+        `/api/merger-arb/analysis/${encodeURIComponent(dealId)}/export?format=${format}`,
+      )
+      const blob = new Blob([data.body || ''], { type: format === 'json' ? 'application/json' : 'text/markdown' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = data.filename || `merger-arb.${format}`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Export failed')
     } finally {
       setBusy('')
     }
@@ -142,6 +239,8 @@ export function DealDrawer({
     const y = 28 - ((value - min) / (max - min || 1)) * 24
     return `${x},${y}`
   }).join(' ')
+  const sensitivity = analysisRows(analysis, 'spread').find((row) => row.id === 'spread.sensitivity')
+  const unverified = (analysis?.sections || []).flatMap((card) => [...card.rows, ...card.blocks.flatMap((block) => block.rows)]).filter((row) => row.unverified)
 
   return (
     <aside className={styles.side} aria-label="Deal terms">
@@ -164,19 +263,32 @@ export function DealDrawer({
         <Button size="sm" onClick={onClose}>Close</Button>
       </header>
       {err && <p className={styles.err}>{err}</p>}
-      <label className={styles.stagePick}>
-        Stage
-        <select
-          aria-label="Stage"
-          value={deal?.stage || 'screen'}
-          disabled={busy === 'stage'}
-          onChange={(event) => void patchStage(event.target.value)}
-        >
-          {STAGES.map((stage) => (
-            <option key={stage} value={stage}>{stage}</option>
-          ))}
-        </select>
-      </label>
+      <div className={styles.toolbar}>
+        <label className={styles.chip}>
+          Stage
+          <select aria-label="Stage" value={deal?.stage || 'screen'} disabled={busy === 'stage'} onChange={(event) => void patchStage(event.target.value)}>
+            {STAGES.map((stage) => (
+              <option key={stage} value={stage}>{stage}</option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.chip}>
+          Deep dive
+          <select aria-label="Deep dive model" value={provider} onChange={(event) => setProvider(event.target.value as 'grok' | 'claude')}>
+            <option value="grok">Grok</option>
+            <option value="claude">Claude</option>
+          </select>
+        </label>
+        <Button size="sm" variant="primary" disabled={!!busy} onClick={() => void run(`/api/merger-arb/analysis/${encodeURIComponent(dealId)}/deep-dive`, { provider }, 'deep')}>
+          {busy === 'deep' ? 'Running…' : 'Deep dive'}
+        </Button>
+        <Button size="sm" disabled={!!busy || !!analysis?.empty} onClick={() => void run(`/api/merger-arb/analysis/${encodeURIComponent(dealId)}/refresh`, {}, 'refresh')}>
+          {busy === 'refresh' ? 'Refreshing…' : 'Refresh (local)'}
+        </Button>
+        <Button size="sm" disabled={!!busy || !!analysis?.empty} onClick={() => void exportPacket('md')}>MD</Button>
+        <Button size="sm" disabled={!!busy || !!analysis?.empty} onClick={() => void exportPacket('json')}>JSON</Button>
+      </div>
+      <p className={styles.muted}>Deep dive runs only when you click it, on {provider === 'grok' ? 'Grok' : 'Claude'}. Refresh stays on the local model.</p>
       <div className={styles.strip}>
         <div><span>Offer</span><strong>{money(deal?.offer_value)}</strong></div>
         <div><span>Price</span><strong>{money(deal?.target_price)}</strong></div>
@@ -194,7 +306,6 @@ export function DealDrawer({
         <h3>Scorecard</h3>
         <p className={styles.muted}>
           {score.score ?? 'NR'} · {score.score_band || 'NR'} · coverage {Math.round((score.coverage || 0) * 100)}%
-          {score.house_source === 'override' ? ' · house P override' : ''}
         </p>
         <ul className={styles.scoreList}>
           {SCORE_ORDER.map((name) => {
@@ -223,6 +334,20 @@ export function DealDrawer({
           {!Object.keys(detail?.terms || {}).length && <p className={styles.muted}>No terms stored.</p>}
         </dl>
       </section>
+      {unverified.length > 0 && (
+        <section>
+          <h3>Confirm</h3>
+          <ul className={styles.rows}>
+            {unverified.map((row) => (
+              <li key={row.id}>
+                <strong>{row.label}</strong>
+                <span className={styles.meta}>{row.display}</span>
+                <Button size="sm" onClick={() => confirm(row.id)}>Confirm</Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section>
         <h3>Regulatory</h3>
         <ul className={styles.rows}>
@@ -257,6 +382,12 @@ export function DealDrawer({
           <p className={styles.muted}>Not enough daily snapshots.</p>
         )}
       </section>
+      {sensitivity && (
+        <section>
+          <h3>Sensitivity</h3>
+          <Sensitivity value={sensitivity.value} />
+        </section>
+      )}
       <section>
         <h3>Filings</h3>
         <ul className={styles.rows}>
@@ -284,6 +415,49 @@ export function DealDrawer({
             </li>
           ))}
           {!detail?.fields?.length && <li className={styles.muted}>No field sources.</li>}
+        </ul>
+      </section>
+      <section>
+        <h3>Ask</h3>
+        <textarea
+          aria-label="Follow-up"
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+          rows={2}
+          placeholder="Ask from this packet only"
+        />
+        <Button size="sm" variant="primary" disabled={!!busy || question.trim().length < 4 || !!analysis?.empty} onClick={() => void run(`/api/merger-arb/analysis/${encodeURIComponent(dealId)}/ask`, { question }, 'ask')}>
+          Ask
+        </Button>
+        {analysis?.answer && <p>{analysis.answer}</p>}
+        {analysis?.citations?.length ? <p className={styles.meta}>Cites {analysis.citations.join(', ')}</p> : null}
+        {analysis?.answer_note && <p className={styles.warn}>{analysis.answer_note}</p>}
+        {analysis?.escalate && (
+          <Button size="sm" onClick={() => void run(`/api/merger-arb/analysis/${encodeURIComponent(dealId)}/deep-dive`, { provider }, 'deep')}>
+            Escalate to deep dive
+          </Button>
+        )}
+      </section>
+      {analysis?.stage1_notes?.length ? (
+        <section>
+          <h3>Deep dive notes</h3>
+          <ul className={styles.rows}>
+            {analysis.stage1_notes.map((note) => (
+              <li key={note.text}>{note.text}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <section>
+        <h3>Versions</h3>
+        <ul className={styles.rows}>
+          {(analysis?.versions || []).map((item) => (
+            <li key={`${item.version}-${item.stage}`}>
+              <strong>v{item.version}</strong>
+              <span className={styles.meta}>{item.stage} · {item.model} · {item.created_at_pt}</span>
+            </li>
+          ))}
+          {!analysis?.versions?.length && <li className={styles.muted}>No packet versions.</li>}
         </ul>
       </section>
     </aside>

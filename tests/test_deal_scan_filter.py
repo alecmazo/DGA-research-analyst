@@ -14,3 +14,9 @@ def test_scan_results_let_you_choose_the_offer():
     assert "dealLine" not in scan
     assert "subjectOf" not in scan
     assert "buyerPhrase" not in scan
+    assert "BookSection" not in src
+    assert "MemoTable" not in src
+    app = (ROOT / "web/gp-app/src/App.tsx").read_text(encoding="utf-8")
+    assert "MergerArbMemoRedirect" in app
+    assert "analysis/:dealId" not in app
+    assert "['merger-arb', 'analysis', ':dealId']" in app

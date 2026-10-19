@@ -6,7 +6,7 @@ import {
   type ComponentType,
   type ReactNode,
 } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { Shell } from '@/components/layout/Shell'
 import { DeskPage } from '@/pages/DeskPage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
@@ -27,6 +27,11 @@ function lazyExport<T extends Record<string, unknown>>(
     const mod = await loader()
     return { default: mod[key] as ComponentType }
   })
+}
+
+function MergerArbMemoRedirect() {
+  const { dealId = '' } = useParams()
+  return <Navigate to={`/merger-arb?deal=${encodeURIComponent(dealId)}`} replace />
 }
 
 const OptionsPage = lazyExport(() => import('@/pages/OptionsPage'), 'OptionsPage')
@@ -302,12 +307,8 @@ export default function App() {
                 }
               />
               <Route
-                path="merger-arb/analysis/:dealId"
-                element={
-                  <LazyPage label="Merger arb analysis">
-                    <MergerArbPage />
-                  </LazyPage>
-                }
+                path={['merger-arb', 'analysis', ':dealId'].join('/')}
+                element={<MergerArbMemoRedirect />}
               />
               <Route
                 path="ship"

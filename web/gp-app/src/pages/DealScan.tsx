@@ -39,9 +39,10 @@ type Latest = {
 
 type Props = {
   onScanned?: () => void
+  onAlerts?: (alerts: ScanAlert[]) => void
 }
 
-export function ScanTools({ onScanned }: Props) {
+export function ScanTools({ onScanned, onAlerts }: Props) {
   const [open, setOpen] = useState<'scan' | 'alerts' | ''>('')
   const [mode, setMode] = useState<'incremental' | 'full'>('incremental')
   const [days, setDays] = useState(120)
@@ -53,11 +54,13 @@ export function ScanTools({ onScanned }: Props) {
 
   const load = useCallback(async () => {
     const data = await api<Latest>('/api/merger-arb/scan/latest')
-    setAlerts(data.alerts || [])
+    const next = data.alerts || []
+    setAlerts(next)
+    onAlerts?.(next)
     setLastScan(data.last_scan_pt || '')
     if (data.run?.status === 'running') setRun(data.run)
     else if (data.run) setRun(data.run)
-  }, [])
+  }, [onAlerts])
 
   useEffect(() => {
     load().catch((error) => setErr(error instanceof Error ? error.message : 'Could not load the last scan'))

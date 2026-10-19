@@ -15,7 +15,7 @@ from merger_arb.scanner.models import FieldValue, SourceRecord
 from merger_arb.scanner.resolve import TickerMap, names_match
 from merger_arb.scanner.scoring import score_candidate
 from merger_arb.scanner.sources.base import FetchContext
-from merger_arb.scanner.status_watch import detect_alerts
+from merger_arb.scanner.status_watch import detect_alerts, spread_move_alert
 
 
 def _money(value) -> str:
@@ -434,7 +434,20 @@ class ScanRunner:
                 collected,
                 stored_cash=str(deal.get("stored_cash") or ""),
                 stored_vote=str(deal.get("stored_vote") or ""),
+                stored_close=str(deal.get("expected_close") or ""),
             ))
+            if self.desk_store is not None and hasattr(self.desk_store, "list_spread_history"):
+                history = self.desk_store.list_spread_history(deal.get("id") or "")
+                if len(history) >= 2:
+                    move = spread_move_alert(
+                        deal,
+                        history[-2].get("gross_pct"),
+                        history[-1].get("gross_pct"),
+                        pts=1.0,
+                        pulled_at=now.isoformat(),
+                    )
+                    if move:
+                        alert_rows.append(move)
         self.store.add_alerts(alert_rows)
         if run.get("status") != "cancelled":
             run["status"] = "done"
