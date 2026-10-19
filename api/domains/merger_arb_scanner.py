@@ -129,6 +129,7 @@ def _runner(store, desk, config: ScannerConfig) -> ScanRunner:
         client=default_client(config),
         quotes_fn=load_quotes,
         desk_deals_fn=lambda: _desk_deals(desk),
+        desk_store=desk,
     )
 
 

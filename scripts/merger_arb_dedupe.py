@@ -23,6 +23,19 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from merger_arb.scanner.dedupe import collapse, fixture_rows  # noqa: E402
+from merger_arb.store import MemoryStore  # noqa: E402
+
+
+def _write_deals(store, rows: list[dict], aliases: list[dict] | None = None) -> int:
+    wrote = 0
+    for row in rows:
+        store.upsert_screen_deal(row)
+        wrote += 1
+    for alias in aliases or []:
+        deal_id = store.resolve_alias(alias.get("deal_key") or "")
+        if deal_id:
+            store.put_alias(alias.get("alias_key") or "", deal_id)
+    return wrote
 
 
 def _local_dsn(dsn: str) -> bool:
@@ -89,55 +102,69 @@ def _apply_postgres(dsn: str, apply: bool) -> int:
         if not apply:
             print("Dry-run only. Pass --apply to write this local database.")
             return 0
-        if report["unchanged"]:
-            print("Apply changed nothing.")
-            return 0
         by_id = {row.get("id"): row for row in collapsed}
         drop = []
-        with conn.cursor() as cur:
-            for group in report["collapsed"]:
-                keep_key = group["into"]
-                keep = next((row for row in collapsed if row.get("deal_key") == keep_key), None)
-                for member in group["members"]:
-                    if keep and member == keep.get("deal_key"):
+        if not report["unchanged"]:
+            with conn.cursor() as cur:
+                for group in report["collapsed"]:
+                    keep_key = group["into"]
+                    keep = next((row for row in collapsed if row.get("deal_key") == keep_key), None)
+                    for member in group["members"]:
+                        if keep and member == keep.get("deal_key"):
+                            continue
+                        drop.append(member)
+                for row in collapsed:
+                    if row.get("id") not in {item.get("id") for item in rows}:
                         continue
-                    drop.append(member)
-            for row in collapsed:
-                if row.get("id") not in {item.get("id") for item in rows}:
-                    continue
-                cur.execute(
-                    """
-                    UPDATE scanner_candidates
-                       SET deal_key = %s, payload_json = %s
-                     WHERE id = %s
-                    """,
-                    (row.get("deal_key") or "", json.dumps(row), row.get("id")),
-                )
-            for alias in report["aliases"]:
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS merger_arb_deal_aliases (
-                        alias_key TEXT PRIMARY KEY,
-                        deal_id TEXT
+                    cur.execute(
+                        """
+                        UPDATE scanner_candidates
+                           SET deal_key = %s, payload_json = %s
+                         WHERE id = %s
+                        """,
+                        (row.get("deal_key") or "", json.dumps(row), row.get("id")),
                     )
-                    """
-                )
-                cur.execute(
-                    """
-                    INSERT INTO merger_arb_deal_aliases (alias_key, deal_id)
-                    VALUES (%s, %s)
-                    ON CONFLICT (alias_key) DO UPDATE SET deal_id = EXCLUDED.deal_id
-                    """,
-                    (alias["alias_key"], alias["deal_key"]),
-                )
-            for key in drop:
-                cur.execute("DELETE FROM scanner_candidates WHERE deal_key = %s", (key,))
-        conn.commit()
+                for alias in report["aliases"]:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS merger_arb_deal_aliases (
+                            alias_key TEXT PRIMARY KEY,
+                            deal_id TEXT
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO merger_arb_deal_aliases (alias_key, deal_id)
+                        VALUES (%s, %s)
+                        ON CONFLICT (alias_key) DO UPDATE SET deal_id = EXCLUDED.deal_id
+                        """,
+                        (alias["alias_key"], alias["deal_key"]),
+                    )
+                for key in drop:
+                    cur.execute("DELETE FROM scanner_candidates WHERE deal_key = %s", (key,))
+            conn.commit()
+        from merger_arb.store import PostgresStore, reset_ensure_tables
+
+        reset_ensure_tables()
+
+        def connect():
+            return psycopg2.connect(dsn)
+
+        desk = PostgresStore(connect)
+        _write_deals(desk, collapsed, report["aliases"])
+        before_n = len(desk.list_deals())
+        _write_deals(desk, collapsed, report["aliases"])
+        after_n = len(desk.list_deals())
+        if before_n != after_n:
+            print("Second apply created new deal rows.", file=sys.stderr)
+            return 1
         again, second = collapse(list(by_id.values()))
         print(f"second apply: {second['before']} -> {second['after']} (unchanged={second['unchanged']})")
         if not second["unchanged"]:
             print("Second apply was not a no-op.", file=sys.stderr)
             return 1
+        print(f"Local merger_arb_deals: {after_n} rows at stage screen.")
         return 0
     finally:
         conn.close()
@@ -162,7 +189,18 @@ def main(argv: list[str] | None = None) -> int:
     if not second["unchanged"]:
         print("Second apply was not a no-op.", file=sys.stderr)
         return 1
-    print(f"In-memory result: {len(collapsed)} rows. Nothing was written to a database.")
+    store = MemoryStore()
+    _write_deals(store, collapsed, report["aliases"])
+    before_ids = {deal["id"] for deal in store.list_deals()}
+    _write_deals(store, collapsed, report["aliases"])
+    after_ids = {deal["id"] for deal in store.list_deals()}
+    if before_ids != after_ids:
+        print("Second apply created new deal rows.", file=sys.stderr)
+        return 1
+    print(
+        f"In-memory result: {len(store.list_deals())} merger_arb_deals rows at stage screen. "
+        "Nothing was written to a remote database."
+    )
     return 0
 
 

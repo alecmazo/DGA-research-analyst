@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from merger_arb.scanner.dedupe import find_match, should_merge
 from merger_arb.scanner.extract import extract_terms
 from merger_arb.scanner.models import FieldValue, SourceRecord
 from merger_arb.scanner.resolve import (
@@ -15,13 +16,15 @@ from merger_arb.scanner.resolve import (
 )
 
 _TARGET_FILER = {"DEFM14A", "DEFM14C", "PREM14A", "PREM14C", "SC 14D9", "DEFA14A"}
-_ACQUIRER_FILER = {"SC TO-T", "S-4", "F-4"}
+_ACQUIRER_FILER = {"SC TO-T", "S-4", "F-4", "425"}
 
 
 def precedence(source_name: str, method: str) -> int:
     name = (source_name or "").lower()
     sec = "sec" in name
     news = any(token in name for token in ("news", "newswire", "yahoo", "globe", "google", "business"))
+    if method == "manual":
+        return 100
     if method == "structured" and sec:
         return 50
     if method == "regex" and sec:
@@ -136,13 +139,108 @@ def parties_for(record: SourceRecord, ticker_map: TickerMap) -> dict:
 
 
 def _same_deal(left: dict, right: dict) -> bool:
-    left_id = left.get("target_cik") or left.get("target_ticker")
-    right_id = right.get("target_cik") or right.get("target_ticker")
-    if not left_id or left_id != right_id:
-        return False
-    if not left.get("acquirer_name") or not right.get("acquirer_name"):
-        return True
-    return names_match(left["acquirer_name"], right["acquirer_name"])
+    return should_merge(left, right)
+
+
+def as_field_value(row) -> FieldValue:
+    if isinstance(row, FieldValue):
+        if not row.rank:
+            row.rank = precedence(row.source_name, row.method)
+        return row
+    data = dict(row or {})
+    field = FieldValue(
+        field_name=data.get("field_name") or "",
+        value=data.get("value"),
+        raw=data.get("raw") or "",
+        source_name=data.get("source_name") or "",
+        source_url=data.get("source_url") or "",
+        pulled_at=data.get("pulled_at") or "",
+        method=data.get("method") or "",
+        evidence=data.get("evidence") or "",
+        is_current=bool(data.get("is_current", True)),
+        conflict=bool(data.get("conflict")),
+        rank=int(data.get("rank") or 0),
+    )
+    if not field.rank:
+        field.rank = precedence(field.source_name, field.method)
+    return field
+
+
+def merge_field_lists(stored, incoming) -> list[FieldValue]:
+    bucket = {"fields": [as_field_value(row) for row in stored or []]}
+    _apply_fields(bucket, [as_field_value(row) for row in incoming or []])
+    return bucket["fields"]
+
+
+def _union_sources(stored: list, incoming: list) -> list:
+    out = []
+    seen = set()
+    for row in list(stored or []) + list(incoming or []):
+        if not isinstance(row, dict):
+            continue
+        token = row.get("external_id") or row.get("url") or row.get("name") or ""
+        if token in seen:
+            continue
+        seen.add(token)
+        out.append(dict(row))
+    return out
+
+
+def merge_candidate(stored: dict, incoming: dict) -> dict:
+    """Union fields and sources, then recompute precedence. Never drop stored values."""
+    out = dict(stored)
+    incoming = dict(incoming or {})
+    merged_fields = merge_field_lists(stored.get("fields") or [], incoming.get("fields") or [])
+    out["fields"] = [row.to_dict() for row in merged_fields]
+    out["sources"] = _union_sources(stored.get("sources") or [], incoming.get("sources") or [])
+    fill = (
+        "target_cik", "target_ticker", "target_name",
+        "acquirer_cik", "acquirer_ticker", "acquirer_name",
+        "announce_date", "expected_close", "vote_date", "hsr", "form", "filer_role",
+    )
+    for key in fill:
+        if incoming.get(key) and not out.get(key):
+            out[key] = incoming[key]
+    if incoming.get("acquirer_cik") and not out.get("acquirer_cik"):
+        out["acquirer_cik"] = incoming["acquirer_cik"]
+    if incoming.get("acquirer_name") and not out.get("acquirer_name"):
+        out["acquirer_name"] = incoming["acquirer_name"]
+    sec = bool(stored.get("sec_evidence") or incoming.get("sec_evidence"))
+    if not sec:
+        sec = any(str((src.get("source") or src.get("name") or "")).lower().startswith("sec") for src in out["sources"])
+    out["sec_evidence"] = sec
+    news_names = set()
+    for src in out["sources"]:
+        token = str(src.get("source") or src.get("name") or "").lower()
+        if any(part in token for part in ("prn", "gnw", "news", "yahoo", "globe", "newswire")):
+            news_names.add(token)
+    out["news_sources"] = len(news_names)
+    out["deal_key"] = deal_key(
+        out.get("target_cik") or "",
+        out.get("target_ticker") or "",
+        out.get("acquirer_name") or "",
+    )
+    out["id"] = stored.get("id") or incoming.get("id")
+    out["first_seen_at"] = stored.get("first_seen_at") or incoming.get("first_seen_at")
+    out["ignored"] = bool(stored.get("ignored") or incoming.get("ignored"))
+    out["desk_deal_id"] = stored.get("desk_deal_id") or incoming.get("desk_deal_id") or ""
+    out["on_desk"] = bool(stored.get("on_desk") or incoming.get("on_desk"))
+    out["hidden"] = bool(stored.get("hidden") and incoming.get("hidden", stored.get("hidden")))
+    for key in (
+        "last_seen_at", "current_price", "offer_value", "gross_spread", "gross_spread_pct",
+        "annualized_pct", "confidence", "confidence_breakdown", "consideration_type",
+        "offer_terms", "needs_manual_terms", "status", "acquirer_price", "spread_with_cvr_max",
+        "annualized_assumption",
+    ):
+        if incoming.get(key) not in (None, ""):
+            out[key] = incoming[key]
+    if out.get("sec_evidence"):
+        out["news_only"] = False
+        if incoming.get("news_only") and stored.get("status"):
+            out["status"] = stored.get("status") or incoming.get("status")
+    else:
+        out["news_only"] = bool(incoming.get("news_only", stored.get("news_only")))
+    return out
 
 
 def _apply_fields(bucket: dict, incoming: list[FieldValue]) -> None:
@@ -219,8 +317,21 @@ def merge_records(records: list[SourceRecord], ticker_map: TickerMap, *, pulled_
                 "events": [],
             })
             continue
+        root = _root(record.form)
+        if root in _ACQUIRER_FILER:
+            side["filer_role"] = "acquirer"
+            side["form"] = record.form
+        elif record.form:
+            side["form"] = record.form
+        side["source"] = record.source
+        side["sec_evidence"] = bool(record.source.startswith("sec"))
+        side["news_sources"] = 1 if newsish else 0
         key = deal_key(side["target_cik"], side["target_ticker"], side["acquirer_name"])
-        bucket = next((row for row in buckets if row.get("deal_key") == key or _same_deal(row, side)), None)
+        side["deal_key"] = key
+        visible = [row for row in buckets if not row.get("hidden")]
+        bucket = find_match(side, visible)
+        if bucket is None:
+            bucket = next((row for row in buckets if row.get("deal_key") == key or _same_deal(row, side)), None)
         if bucket is None:
             bucket = {
                 **side,
@@ -236,9 +347,15 @@ def merge_records(records: list[SourceRecord], ticker_map: TickerMap, *, pulled_
             }
             buckets.append(bucket)
         else:
+            skip_fill = {"news_sources", "sec_evidence", "fields", "sources", "records", "events"}
             for field_name in side:
+                if field_name in skip_fill:
+                    continue
                 if side[field_name] and not bucket.get(field_name):
                     bucket[field_name] = side[field_name]
+            if side.get("sec_evidence"):
+                bucket["sec_evidence"] = True
+            bucket["news_sources"] = int(bucket.get("news_sources") or 0) + int(side.get("news_sources") or 0)
             bucket["deal_key"] = deal_key(
                 bucket.get("target_cik") or "",
                 bucket.get("target_ticker") or "",

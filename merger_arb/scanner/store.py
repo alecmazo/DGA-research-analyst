@@ -112,6 +112,15 @@ SCHEMA_SQL = (
 )
 
 
+_TABLES_READY = False
+_TABLES_LOCK = threading.Lock()
+
+
+def reset_ensure_tables() -> None:
+    global _TABLES_READY
+    _TABLES_READY = False
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -162,6 +171,7 @@ class ScannerStore:
         self.alerts: dict[str, dict] = {}
         self.ignored: dict[str, dict] = {}
         self.seeds: list[dict] = []
+        self.aliases: dict[str, str] = {}
         self._lock = threading.Lock()
 
     def start_run(self, mode: str) -> dict:
@@ -226,23 +236,50 @@ class ScannerStore:
             added += 1
         return added
 
+    def put_alias(self, alias_key: str, candidate_id: str) -> None:
+        if alias_key and candidate_id:
+            self.aliases[alias_key] = candidate_id
+
+    def _find_stored(self, candidate: dict) -> dict | None:
+        from merger_arb.scanner.dedupe import find_match
+
+        key = candidate.get("deal_key") or ""
+        if key and key in self.aliases:
+            found = self.candidates.get(self.aliases[key])
+            if found:
+                return found
+        if key and key in self.by_key:
+            found = self.candidates.get(self.by_key[key])
+            if found:
+                return found
+        return find_match(candidate, list(self.candidates.values()))
+
     def upsert_candidate(self, candidate: dict) -> dict:
+        from merger_arb.scanner.merge import merge_candidate
+
         key = candidate.get("deal_key") or ""
         with self._lock:
-            existing_id = self.by_key.get(key)
-            if existing_id and existing_id in self.candidates:
-                current = self.candidates[existing_id]
+            current = self._find_stored(candidate)
+            if current:
+                old_key = current.get("deal_key") or ""
+                candidate = merge_candidate(current, candidate)
                 candidate["id"] = current["id"]
                 candidate["first_seen_at"] = current.get("first_seen_at") or _now()
+                if old_key and candidate.get("deal_key") and old_key != candidate.get("deal_key"):
+                    self.put_alias(old_key, candidate["id"])
+                    if self.by_key.get(old_key) == candidate["id"]:
+                        del self.by_key[old_key]
             else:
                 candidate["id"] = candidate.get("id") or _id("c_")
                 candidate["first_seen_at"] = candidate.get("first_seen_at") or _now()
-            if key in self.ignored:
+            if key in self.ignored or candidate.get("deal_key") in self.ignored:
                 candidate["ignored"] = True
             candidate["last_seen_at"] = _now()
             self.candidates[candidate["id"]] = candidate
-            if key:
-                self.by_key[key] = candidate["id"]
+            new_key = candidate.get("deal_key") or key
+            if new_key:
+                self.by_key[new_key] = candidate["id"]
+                self.put_alias(new_key, candidate["id"])
         return candidate
 
     def list_candidates(self, *, include_ignored: bool = False, include_hidden: bool = False, include_on_desk: bool = False) -> list[dict]:
@@ -352,10 +389,20 @@ class _ClosingConnection:
 
 
 def ensure_tables(conn) -> None:
-    with conn.cursor() as cur:
-        for statement in SCHEMA_SQL:
-            cur.execute(statement)
-    conn.commit()
+    global _TABLES_READY
+    if _TABLES_READY:
+        return
+    with _TABLES_LOCK:
+        if _TABLES_READY:
+            return
+        with conn.cursor() as cur:
+            for statement in SCHEMA_SQL:
+                cur.execute(statement)
+            cur.execute("ALTER TABLE scanner_candidate_fields ADD COLUMN IF NOT EXISTS deal_id TEXT")
+            cur.execute("ALTER TABLE scanner_candidate_fields ADD COLUMN IF NOT EXISTS override_note TEXT")
+            cur.execute("ALTER TABLE scanner_candidate_fields ADD COLUMN IF NOT EXISTS user_name TEXT")
+        conn.commit()
+        _TABLES_READY = True
 
 
 class PostgresScannerStore:
@@ -514,28 +561,51 @@ class PostgresScannerStore:
         return added
 
     def upsert_candidate(self, candidate: dict) -> dict:
+        from merger_arb.scanner.dedupe import find_match
+        from merger_arb.scanner.merge import merge_candidate
+
         key = candidate.get("deal_key") or ""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, payload_json FROM scanner_candidates WHERE deal_key = %s", (key,))
-                existing = cur.fetchone()
-                cur.execute("SELECT 1 FROM scanner_ignored WHERE deal_key = %s", (key,))
+                cur.execute("SELECT id, deal_key, payload_json FROM scanner_candidates")
+                stored_rows = []
+                for candidate_id, deal_key, payload in cur.fetchall():
+                    row = _load(payload, {})
+                    row["id"] = row.get("id") or candidate_id
+                    row["deal_key"] = row.get("deal_key") or deal_key
+                    stored_rows.append(row)
+                existing = None
+                if key:
+                    cur.execute(
+                        "SELECT deal_id FROM merger_arb_deal_aliases WHERE alias_key = %s",
+                        (key,),
+                    )
+                    alias = cur.fetchone()
+                    if alias:
+                        existing = next((row for row in stored_rows if row.get("id") == alias[0] or row.get("deal_key") == alias[0]), None)
+                if existing is None:
+                    existing = find_match(candidate, stored_rows)
+                cur.execute("SELECT 1 FROM scanner_ignored WHERE deal_key = %s", (key or candidate.get("deal_key") or "",))
                 if cur.fetchone():
                     candidate["ignored"] = True
+                old_key = ""
                 if existing:
-                    prior = _load(existing[1], {})
-                    candidate["id"] = existing[0]
-                    candidate["first_seen_at"] = prior.get("first_seen_at") or _now()
+                    old_key = existing.get("deal_key") or ""
+                    candidate = merge_candidate(existing, candidate)
+                    candidate["id"] = existing["id"]
+                    candidate["first_seen_at"] = existing.get("first_seen_at") or _now()
                 else:
                     candidate["id"] = candidate.get("id") or _id("c_")
                     candidate["first_seen_at"] = candidate.get("first_seen_at") or _now()
                 candidate["last_seen_at"] = _now()
+                write_key = candidate.get("deal_key") or key
                 cur.execute(
                     """
                     INSERT INTO scanner_candidates
                         (id, deal_key, payload_json, ignored, hidden, desk_deal_id, first_seen_at, last_seen_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (deal_key) DO UPDATE SET
+                    ON CONFLICT (id) DO UPDATE SET
+                        deal_key = EXCLUDED.deal_key,
                         payload_json = EXCLUDED.payload_json,
                         ignored = EXCLUDED.ignored,
                         hidden = EXCLUDED.hidden,
@@ -543,13 +613,51 @@ class PostgresScannerStore:
                         last_seen_at = EXCLUDED.last_seen_at
                     """,
                     (
-                        candidate["id"], key, _dump(candidate),
+                        candidate["id"], write_key, _dump(candidate),
                         1 if candidate.get("ignored") else 0,
                         1 if candidate.get("hidden") else 0,
                         candidate.get("desk_deal_id") or None,
                         candidate.get("first_seen_at"), candidate.get("last_seen_at"),
                     ),
                 )
+                if old_key and write_key and old_key != write_key:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS merger_arb_deal_aliases (
+                            alias_key TEXT PRIMARY KEY,
+                            deal_id TEXT
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO merger_arb_deal_aliases (alias_key, deal_id)
+                        VALUES (%s, %s)
+                        ON CONFLICT (alias_key) DO UPDATE SET deal_id = EXCLUDED.deal_id
+                        """,
+                        (old_key, candidate["id"]),
+                    )
+                    cur.execute(
+                        "UPDATE scanner_candidates SET deal_key = %s WHERE id = %s",
+                        (write_key, candidate["id"]),
+                    )
+                if write_key:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS merger_arb_deal_aliases (
+                            alias_key TEXT PRIMARY KEY,
+                            deal_id TEXT
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO merger_arb_deal_aliases (alias_key, deal_id)
+                        VALUES (%s, %s)
+                        ON CONFLICT (alias_key) DO UPDATE SET deal_id = EXCLUDED.deal_id
+                        """,
+                        (write_key, candidate["id"]),
+                    )
                 cur.execute("DELETE FROM scanner_candidate_fields WHERE candidate_id = %s", (candidate["id"],))
                 for field_row in candidate.get("fields") or []:
                     cur.execute(

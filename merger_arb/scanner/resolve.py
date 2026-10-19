@@ -165,7 +165,10 @@ def parties_from_text(text: str) -> dict:
 
 def deal_key(target_cik: str, target_ticker: str, acquirer_name: str) -> str:
     ident = pad_cik(target_cik) or (target_ticker or "").upper()
-    acquirer = normalize_acquirer(acquirer_name) or "unknown"
+    if is_generic_acquirer(acquirer_name):
+        acquirer = "unknown"
+    else:
+        acquirer = normalize_acquirer(acquirer_name) or "unknown"
     return f"{ident}|{acquirer}"
 
 

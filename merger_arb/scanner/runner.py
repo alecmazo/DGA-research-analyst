@@ -53,6 +53,8 @@ def match_desk(candidate: dict, deals: list[dict]) -> dict | None:
     for deal in deals:
         if deal.get("id") == "fixture-acme" or deal.get("sample"):
             continue
+        if deal.get("stage") == "screen":
+            continue
         if (deal.get("target_ticker") or "").upper() != ticker:
             continue
         desk_name = deal.get("acquirer_name") or ""
@@ -78,6 +80,11 @@ def _freeze(bucket: dict) -> dict:
         "acquirer_cik": bucket.get("acquirer_cik") or "",
         "acquirer_ticker": bucket.get("acquirer_ticker") or "",
         "acquirer_name": bucket.get("acquirer_name") or "",
+        "form": bucket.get("form") or "",
+        "filer_role": bucket.get("filer_role") or "",
+        "sec_evidence": bool(bucket.get("sec_evidence")),
+        "news_sources": int(bucket.get("news_sources") or 0),
+        "stage": "screen",
         "status": bucket.get("status") or "PENDING",
         "hsr": bucket.get("hsr") or "",
         "hidden": bool(bucket.get("hidden")),
@@ -196,6 +203,7 @@ class ScanRunner:
         clock=None,
         quotes_fn=None,
         desk_deals_fn=None,
+        desk_store=None,
         llm_complete=None,
     ):
         self.store = store
@@ -205,6 +213,7 @@ class ScanRunner:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.quotes_fn = quotes_fn
         self.desk_deals_fn = desk_deals_fn or (lambda: [])
+        self.desk_store = desk_store
         self.llm_complete = llm_complete
         self._thread = None
 
@@ -345,6 +354,8 @@ class ScanRunner:
                 candidate["desk_deal_id"] = desk.get("id") or ""
                 candidate["on_desk"] = True
             self.store.upsert_candidate(candidate)
+            if self.desk_store is not None and hasattr(self.desk_store, "upsert_screen_deal") and not candidate.get("hidden"):
+                self.desk_store.upsert_screen_deal(candidate)
             saved += 1
 
         alert_rows = []

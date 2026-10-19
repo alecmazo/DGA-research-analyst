@@ -127,6 +127,60 @@ def should_merge(left: dict, right: dict) -> bool:
     return a == b
 
 
+def _acquirer_token(row: dict) -> str:
+    return acquirer_cik(row) or str(row.get("acquirer_ticker") or "").upper()
+
+
+def find_match(incoming: dict, existing: list[dict]) -> dict | None:
+    """Pick the stored deal this record belongs to, or None to create one.
+
+    Unknown acquirers attach only when there is a single open deal for the
+    target. Two named bidders stay two deals.
+    """
+    if not existing:
+        return None
+    key = str(incoming.get("deal_key") or "")
+    if key:
+        for row in existing:
+            if str(row.get("deal_key") or "") == key:
+                return row
+    mirrors = [
+        row for row in existing
+        if _mirror_of(incoming, row) or _mirror_of(row, incoming)
+    ]
+    if not mirrors:
+        incoming_acq = _acquirer_token(incoming)
+        incoming_tgt = target_cik(incoming) or target_ticker(incoming)
+        form_acquirer = is_mirror_filing(incoming) or _form(incoming) in _ACQUIRER_FORMS
+        for row in existing:
+            deal_acq = _acquirer_token(row)
+            if not deal_acq:
+                continue
+            if form_acquirer and incoming_acq and incoming_acq == deal_acq:
+                if not incoming_tgt or incoming_tgt == deal_acq:
+                    mirrors.append(row)
+                    continue
+            if incoming_tgt == deal_acq and not acquirer_identity(incoming):
+                mirrors.append(row)
+    if mirrors:
+        return mirrors[0]
+    same = [row for row in existing if same_target(incoming, row)]
+    if not same:
+        return None
+    inc_id = acquirer_identity(incoming)
+    if not inc_id:
+        if len(same) == 1:
+            return same[0]
+        return None
+    named = [row for row in same if acquirer_identity(row) == inc_id]
+    if named:
+        return named[0]
+    unknown = [row for row in same if not acquirer_identity(row)]
+    if len(unknown) == 1:
+        return unknown[0]
+    return None
+
+
 class _Union:
     def __init__(self, n: int) -> None:
         self.parent = list(range(n))
