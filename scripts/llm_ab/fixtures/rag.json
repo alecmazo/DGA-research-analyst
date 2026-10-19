@@ -1,0 +1,72 @@
+[
+  {
+    "id": "rag_01",
+    "ticker": "AAPL",
+    "question": "What was iPhone revenue and how did Services grow?",
+    "gold_chunk_id": "AAPL_0",
+    "gold_answer_contains": ["46.2", "14%"]
+  },
+  {
+    "id": "rag_02",
+    "ticker": "MSFT",
+    "question": "How fast did Azure grow and what was total revenue?",
+    "gold_chunk_id": "MSFT_0",
+    "gold_answer_contains": ["29%", "64.7"]
+  },
+  {
+    "id": "rag_03",
+    "ticker": "JPM",
+    "question": "What was net interest income and the CET1 ratio?",
+    "gold_chunk_id": "JPM_0",
+    "gold_answer_contains": ["22.9", "15.0"]
+  },
+  {
+    "id": "rag_04",
+    "ticker": "XOM",
+    "question": "What were earnings and upstream production?",
+    "gold_chunk_id": "XOM_0",
+    "gold_answer_contains": ["8.6", "3.7"]
+  },
+  {
+    "id": "rag_05",
+    "ticker": "UNH",
+    "question": "What was the medical care ratio?",
+    "gold_chunk_id": "UNH_0",
+    "gold_answer_contains": ["84.8"]
+  },
+  {
+    "id": "rag_06",
+    "ticker": "NVDA",
+    "question": "What was Data Center revenue and gross margin?",
+    "gold_chunk_id": "NVDA_0",
+    "gold_answer_contains": ["30.8", "78.4"]
+  },
+  {
+    "id": "rag_07",
+    "ticker": "JNJ",
+    "question": "What were Innovative Medicine sales?",
+    "gold_chunk_id": "JNJ_0",
+    "gold_answer_contains": ["14.0"]
+  },
+  {
+    "id": "rag_08",
+    "ticker": "WMT",
+    "question": "How much did eCommerce sales grow?",
+    "gold_chunk_id": "WMT_0",
+    "gold_answer_contains": ["22%"]
+  },
+  {
+    "id": "rag_09",
+    "ticker": "PG",
+    "question": "What was organic sales growth and EPS?",
+    "gold_chunk_id": "PG_0",
+    "gold_answer_contains": ["3%", "1.37"]
+  },
+  {
+    "id": "rag_10",
+    "ticker": "BA",
+    "question": "How many commercial airplanes were delivered?",
+    "gold_chunk_id": "BA_0",
+    "gold_answer_contains": ["126"]
+  }
+]

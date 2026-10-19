@@ -1,0 +1,152 @@
+[
+  {
+    "id": "deal_01",
+    "filing_excerpt": "Buyer Holdings Corp. will acquire Acme Target, Inc. for $50.00 per share in cash. Outside Date: June 15, 2027. Termination fee: $150 million. Subject to shareholder and Hart-Scott-Rodino approvals. No CVR. No stock exchange ratio.",
+    "gold": {
+      "acquirer": "Buyer Holdings Corp.",
+      "target": "Acme Target, Inc.",
+      "consideration": "cash",
+      "cash_per_share": "50.00",
+      "exchange_ratio": null,
+      "cvr": false,
+      "termination_fee": "150 million",
+      "outside_date": "2027-06-15",
+      "approvals": "shareholder and Hart-Scott-Rodino"
+    }
+  },
+  {
+    "id": "deal_02",
+    "filing_excerpt": "MegaBank Corp. agrees to acquire Regional Trust Co. in an all-stock merger at an exchange ratio of 0.8500 MegaBank shares per Regional share. Outside Date December 31, 2026. Termination fee $85 million. No cash. No CVR. Requires Federal Reserve and shareholder approval.",
+    "gold": {
+      "acquirer": "MegaBank Corp.",
+      "target": "Regional Trust Co.",
+      "consideration": "stock",
+      "cash_per_share": null,
+      "exchange_ratio": "0.8500",
+      "cvr": false,
+      "termination_fee": "85 million",
+      "outside_date": "2026-12-31",
+      "approvals": "Federal Reserve and shareholder"
+    }
+  },
+  {
+    "id": "deal_03",
+    "filing_excerpt": "North Pharmaceuticals will acquire BioSpark Inc. for $22.50 in cash plus 0.125 North shares per BioSpark share (mixed). Outside Date: March 31, 2027. Termination fee $40 million. Includes a CVR of up to $3.00 per share. Antitrust and shareholder approvals required.",
+    "gold": {
+      "acquirer": "North Pharmaceuticals",
+      "target": "BioSpark Inc.",
+      "consideration": "mixed",
+      "cash_per_share": "22.50",
+      "exchange_ratio": "0.125",
+      "cvr": true,
+      "termination_fee": "40 million",
+      "outside_date": "2027-03-31",
+      "approvals": "antitrust and shareholder"
+    }
+  },
+  {
+    "id": "deal_04",
+    "filing_excerpt": "Atlas Energy Partners to purchase Canyon Midstream LLC for $18.00 cash per unit. End Date / Outside Date: September 1, 2027. Break-up fee $25 million. No exchange ratio. No CVR. FERC and unitholder approvals.",
+    "gold": {
+      "acquirer": "Atlas Energy Partners",
+      "target": "Canyon Midstream LLC",
+      "consideration": "cash",
+      "cash_per_share": "18.00",
+      "exchange_ratio": null,
+      "cvr": false,
+      "termination_fee": "25 million",
+      "outside_date": "2027-09-01",
+      "approvals": "FERC and unitholder"
+    }
+  },
+  {
+    "id": "deal_05",
+    "filing_excerpt": "Pacific Semiconductor will acquire ChipFoundry Ltd in a stock-for-stock deal at 1.200 Pacific shares per ChipFoundry share. Outside Date August 15, 2027. Termination fee $220 million. No cash consideration. No CVR. CFIUS and shareholder approvals.",
+    "gold": {
+      "acquirer": "Pacific Semiconductor",
+      "target": "ChipFoundry Ltd",
+      "consideration": "stock",
+      "cash_per_share": null,
+      "exchange_ratio": "1.200",
+      "cvr": false,
+      "termination_fee": "220 million",
+      "outside_date": "2027-08-15",
+      "approvals": "CFIUS and shareholder"
+    }
+  },
+  {
+    "id": "deal_06",
+    "filing_excerpt": "Horizon Media Group agrees to buy StreamCast Inc. for $35.00 per share in cash. Outside Date: January 15, 2027. Termination fee equals $95 million. CVR of $2.00 tied to subscriber milestones. FCC and shareholder approvals required.",
+    "gold": {
+      "acquirer": "Horizon Media Group",
+      "target": "StreamCast Inc.",
+      "consideration": "cash",
+      "cash_per_share": "35.00",
+      "exchange_ratio": null,
+      "cvr": true,
+      "termination_fee": "95 million",
+      "outside_date": "2027-01-15",
+      "approvals": "FCC and shareholder"
+    }
+  },
+  {
+    "id": "deal_07",
+    "filing_excerpt": "Union Retail Corp. will acquire CornerShop Holdings for $12.00 cash plus 0.40 Union shares per CornerShop share. Outside Date May 30, 2027. Termination fee $55 million. No CVR. HSR and shareholder approvals.",
+    "gold": {
+      "acquirer": "Union Retail Corp.",
+      "target": "CornerShop Holdings",
+      "consideration": "mixed",
+      "cash_per_share": "12.00",
+      "exchange_ratio": "0.40",
+      "cvr": false,
+      "termination_fee": "55 million",
+      "outside_date": "2027-05-30",
+      "approvals": "HSR and shareholder"
+    }
+  },
+  {
+    "id": "deal_08",
+    "filing_excerpt": "Silverline Insurance to merge with Mutual Shield Co. in an all-stock transaction at an exchange ratio of 0.500 Silverline shares. Outside Date: November 1, 2026. Termination fee $30 million. No cash. No CVR. State insurance commissioner and shareholder approvals.",
+    "gold": {
+      "acquirer": "Silverline Insurance",
+      "target": "Mutual Shield Co.",
+      "consideration": "stock",
+      "cash_per_share": null,
+      "exchange_ratio": "0.500",
+      "cvr": false,
+      "termination_fee": "30 million",
+      "outside_date": "2026-11-01",
+      "approvals": "state insurance commissioner and shareholder"
+    }
+  },
+  {
+    "id": "deal_09",
+    "filing_excerpt": "Delta Logistics Inc. will acquire PortBridge Corp. for $67.25 per share in cash. Outside Date July 31, 2027. Termination fee $175 million. No stock. No CVR. DOT and shareholder approvals required.",
+    "gold": {
+      "acquirer": "Delta Logistics Inc.",
+      "target": "PortBridge Corp.",
+      "consideration": "cash",
+      "cash_per_share": "67.25",
+      "exchange_ratio": null,
+      "cvr": false,
+      "termination_fee": "175 million",
+      "outside_date": "2027-07-31",
+      "approvals": "DOT and shareholder"
+    }
+  },
+  {
+    "id": "deal_10",
+    "filing_excerpt": "Evergreen Capital Partners to purchase GreenField REIT for $28.00 cash plus a CVR of up to $1.50. Outside Date: April 15, 2027. Termination fee $48 million. No exchange ratio. REIT shareholder and FINRA-related approvals.",
+    "gold": {
+      "acquirer": "Evergreen Capital Partners",
+      "target": "GreenField REIT",
+      "consideration": "cash",
+      "cash_per_share": "28.00",
+      "exchange_ratio": null,
+      "cvr": true,
+      "termination_fee": "48 million",
+      "outside_date": "2027-04-15",
+      "approvals": "REIT shareholder and FINRA-related"
+    }
+  }
+]

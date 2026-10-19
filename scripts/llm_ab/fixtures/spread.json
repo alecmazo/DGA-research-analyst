@@ -1,0 +1,12 @@
+[
+  {"id": "spread_01", "consideration": "cash", "cash": 50.0, "ratio": null, "acquirer_price": null, "target_price": 47.5, "years_to_close": 0.5},
+  {"id": "spread_02", "consideration": "cash", "cash": 35.0, "ratio": null, "acquirer_price": null, "target_price": 33.0, "years_to_close": 0.25},
+  {"id": "spread_03", "consideration": "stock", "cash": null, "ratio": 0.85, "acquirer_price": 40.0, "target_price": 32.0, "years_to_close": 0.75},
+  {"id": "spread_04", "consideration": "stock", "cash": null, "ratio": 1.2, "acquirer_price": 55.0, "target_price": 64.0, "years_to_close": 0.4},
+  {"id": "spread_05", "consideration": "mixed", "cash": 22.5, "ratio": 0.125, "acquirer_price": 80.0, "target_price": 30.0, "years_to_close": 0.6},
+  {"id": "spread_06", "consideration": "cash", "cash": 18.0, "ratio": null, "acquirer_price": null, "target_price": 17.25, "years_to_close": 1.0},
+  {"id": "spread_07", "consideration": "mixed", "cash": 12.0, "ratio": 0.4, "acquirer_price": 25.0, "target_price": 21.0, "years_to_close": 0.5},
+  {"id": "spread_08", "consideration": "stock", "cash": null, "ratio": 0.5, "acquirer_price": 60.0, "target_price": 28.5, "years_to_close": 0.33},
+  {"id": "spread_09", "consideration": "cash", "cash": 67.25, "ratio": null, "acquirer_price": null, "target_price": 65.0, "years_to_close": 0.8},
+  {"id": "spread_10", "consideration": "cash", "cash": 28.0, "ratio": null, "acquirer_price": null, "target_price": 26.8, "years_to_close": 0.45}
+]
