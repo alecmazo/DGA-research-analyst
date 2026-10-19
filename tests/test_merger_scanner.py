@@ -31,7 +31,7 @@ from merger_arb.scanner.resolve import (
     tickers_in_text,
 )
 from merger_arb.scanner.runner import ScanRunner, _price_candidate, daily_due
-from merger_arb.scanner.sources.fmp import FmpSource
+from merger_arb.scanner.sources import build_sources
 from merger_arb.scanner.sources.ftc_et import parse_ftc
 from merger_arb.scanner.sources.rss_parse import parse_rss
 from merger_arb.scanner.sources.sec_common import parse_efts
@@ -610,5 +610,7 @@ def test_api_scan_and_placeholder_skips_sec():
     runner.scan_sync(mode="incremental")
     assert called["n"] == 0
     assert enabled_adapters(ScannerConfig()) == []
-    assert FmpSource(ScannerConfig()).enabled() is False
-    assert FmpSource(ScannerConfig(fmp_api_key="free")).enabled() is True
+    names = [getattr(src, "name", "") for src in build_sources(ScannerConfig())]
+    assert "fmp" not in names
+    assert not hasattr(ScannerConfig(), "fmp_api_key")
+    assert not (ROOT / "merger_arb" / "scanner" / "sources" / "fmp.py").exists()

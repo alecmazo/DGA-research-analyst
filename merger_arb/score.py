@@ -326,6 +326,45 @@ def score_deal(inputs: dict, *, weights: dict | None = None, thresholds: dict | 
     }
 
 
+def inputs_from_deal(deal: dict) -> dict:
+    metrics = deal.get("metrics_json") or deal.get("metrics") or {}
+    if not isinstance(metrics, dict):
+        metrics = {}
+    terms = deal.get("terms_json") or {}
+    fields = deal.get("fields") or []
+    if not fields and isinstance(terms, dict):
+        fields = [{"field_name": name, "value": value, "is_current": True} for name, value in terms.items()]
+    candidate = {
+        "metrics": metrics,
+        "current_price": deal.get("target_price") or metrics.get("target_price"),
+        "fields": fields,
+        "consideration_type": deal.get("deal_type") or metrics.get("consideration") or "",
+        "hostile": deal.get("hostile"),
+        "contested": deal.get("contested"),
+        "hsr": deal.get("hsr") or "",
+        "acquirer_kind": deal.get("acquirer_kind") or "",
+        "slips": deal.get("slips") or 0,
+        "slack_to_outside": metrics.get("slack_to_outside") or deal.get("slack_to_outside"),
+        "break_price": metrics.get("break_price") or deal.get("break_price"),
+        "regulators": deal.get("regulators") or [],
+        "annualized_assumption": metrics.get("annualized_assumption") or "",
+    }
+    inputs = inputs_from_candidate(candidate)
+    if inputs.get("net_annualized") is None:
+        inputs["net_annualized"] = deal.get("ann_pct")
+    if inputs.get("offer") is None:
+        inputs["offer"] = deal.get("offer_value")
+    if inputs.get("price") is None:
+        inputs["price"] = deal.get("target_price")
+    if inputs.get("implied_p") is None:
+        inputs["implied_p"] = deal.get("implied_p")
+    if inputs.get("tbill_pct") is None:
+        inputs["tbill_pct"] = metrics.get("tbill_pct")
+    if inputs.get("days_to_close") is None:
+        inputs["days_to_close"] = metrics.get("days_to_close")
+    return inputs
+
+
 def inputs_from_candidate(candidate: dict) -> dict:
     metrics = candidate.get("metrics") or {}
     fields = {}

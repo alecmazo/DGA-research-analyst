@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from merger_arb.scanner.sources.fmp import FmpSource
 from merger_arb.scanner.sources.ftc_et import FtcSource
 from merger_arb.scanner.sources.nasdaq_eca import NasdaqSource
 from merger_arb.scanner.sources.news_rss import (
@@ -32,7 +31,6 @@ def build_sources(config) -> list:
         YahooTickerSource(config),
         RssFeedSource("google_news", "Google News", GOOGLE_URL, config.enable_google_news),
         RssFeedSource("businesswire", "Business Wire", config.businesswire_url, bool(config.businesswire_url)),
-        FmpSource(config),
     ]
     sources.extend(enabled_adapters(config))
     return sources

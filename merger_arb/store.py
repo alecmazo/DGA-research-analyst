@@ -333,6 +333,68 @@ def _merge_deal_row(existing: dict, incoming: dict) -> dict:
     return out
 
 
+def _jsonish(value):
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+_DEAL_COLS = [
+    "id", "target_ticker", "target_name", "acquirer_ticker", "acquirer_name",
+    "announced_on", "status", "deal_key", "target_cik", "acquirer_cik", "stage",
+    "outcome", "deal_type", "is_tender", "acquirer_kind", "hostile", "sector",
+    "deal_value_usd", "announce_date", "expected_close", "outside_date",
+    "terms_json", "metrics_json", "offer_value", "target_price", "gross_pct",
+    "ann_pct", "downside_pct", "implied_p", "reg_flags", "score", "score_band",
+    "score_json", "data_confidence", "first_seen_at", "last_seen_at", "updated_at",
+]
+
+_DEAL_SELECT = """
+    SELECT id, target_ticker, target_name, acquirer_ticker, acquirer_name,
+           announced_on::text, status, deal_key, target_cik, acquirer_cik, stage,
+           outcome, deal_type, is_tender, acquirer_kind, hostile, sector,
+           deal_value_usd, announce_date::text, expected_close::text, outside_date::text,
+           terms_json, metrics_json, offer_value, target_price, gross_pct, ann_pct,
+           downside_pct, implied_p, reg_flags, score, score_band, score_json,
+           data_confidence, first_seen_at::text, last_seen_at::text, updated_at::text
+      FROM merger_arb_deals
+"""
+
+
+def _deal_from_row(row) -> dict:
+    deal = dict(zip(_DEAL_COLS, row))
+    deal["terms_json"] = _jsonish(deal.get("terms_json")) or {}
+    deal["metrics_json"] = _jsonish(deal.get("metrics_json")) or {}
+    deal["score_json"] = _jsonish(deal.get("score_json")) or {}
+    flags = deal.get("reg_flags")
+    if flags is None:
+        deal["reg_flags"] = []
+    elif isinstance(flags, str):
+        deal["reg_flags"] = [part.strip() for part in flags.strip("{}").split(",") if part.strip()]
+    else:
+        deal["reg_flags"] = list(flags)
+    for key in ("deal_value_usd", "offer_value", "target_price", "gross_pct", "ann_pct", "downside_pct", "implied_p"):
+        deal[key] = _num_or_none(deal.get(key))
+    if deal.get("score") is not None:
+        try:
+            deal["score"] = int(deal["score"])
+        except (TypeError, ValueError):
+            pass
+    return deal
+
+
 def _terms_from_fields(fields: list) -> dict:
     terms = {}
     for row in fields or []:
@@ -528,21 +590,35 @@ class MemoryStore:
         return row
 
     def rescore_all(self) -> int:
-        from merger_arb.score import inputs_from_candidate
+        from merger_arb.score import inputs_from_deal
 
         n = 0
         for deal in self.deals.values():
-            inputs = inputs_from_candidate(deal)
-            if deal.get("metrics_json"):
-                metrics = deal["metrics_json"]
-                inputs["net_annualized"] = metrics.get("annualized_pct")
-                inputs["tbill_pct"] = metrics.get("tbill_pct")
-                inputs["offer"] = metrics.get("offer_value")
-                inputs["implied_p"] = metrics.get("implied_p")
-                inputs["days_to_close"] = metrics.get("days_to_close")
-            self.score_deal_row(deal, inputs)
+            self.score_deal_row(deal, inputs_from_deal(deal))
             n += 1
         return n
+
+    def list_regulatory(self, deal_id: str) -> list[dict]:
+        return [dict(row) for (did, _reg), row in self.regulatory.items() if did == deal_id]
+
+    def upsert_regulatory(self, deal_id: str, row: dict) -> dict:
+        item = dict(row)
+        item["deal_id"] = deal_id
+        item["regulator"] = str(row.get("regulator") or "")
+        item["updated_at"] = _now()
+        self.regulatory[(deal_id, item["regulator"])] = item
+        return item
+
+    def list_events(self, deal_id: str) -> list[dict]:
+        return [dict(row) for row in self.events if row.get("deal_id") == deal_id]
+
+    def add_event(self, deal_id: str, row: dict) -> dict:
+        item = dict(row)
+        item["id"] = item.get("id") or _id("ev_")
+        item["deal_id"] = deal_id
+        item["created_at"] = item.get("created_at") or _now()
+        self.events.append(item)
+        return item
 
     def list_spread_history(self, deal_id: str) -> list[dict]:
         rows = [row for (did, _day), row in self.spread_history.items() if did == deal_id]
@@ -668,6 +744,15 @@ class PostgresStore:
         deal["score_json"] = result
         self.upsert_deal(deal)
         return result
+
+    def rescore_all(self) -> int:
+        from merger_arb.score import inputs_from_deal
+
+        n = 0
+        for deal in self.list_deals():
+            self.score_deal_row(deal, inputs_from_deal(deal))
+            n += 1
+        return n
 
     def resolve_candidate(self, candidate: dict) -> dict | None:
         from merger_arb.scanner.dedupe import find_match
@@ -949,27 +1034,121 @@ class PostgresStore:
     def list_deals(self) -> list[dict]:
         with self._connect() as conn, conn.cursor() as cur:
             ensure_tables(conn)
-            cur.execute(
-                """
-                SELECT id, target_ticker, target_name, acquirer_ticker, acquirer_name,
-                       announced_on::text, status, deal_key, target_cik, acquirer_cik, stage,
-                       announce_date::text, expected_close::text, data_confidence
-                  FROM merger_arb_deals
-                 ORDER BY created_at DESC
-                """
-            )
-            cols = [
-                "id", "target_ticker", "target_name", "acquirer_ticker", "acquirer_name",
-                "announced_on", "status", "deal_key", "target_cik", "acquirer_cik", "stage",
-                "announce_date", "expected_close", "data_confidence",
-            ]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
+            cur.execute(_DEAL_SELECT + " ORDER BY updated_at DESC NULLS LAST, id")
+            return [_deal_from_row(row) for row in cur.fetchall()]
 
     def get_deal(self, deal_id: str) -> dict | None:
-        for deal in self.list_deals():
-            if deal["id"] == deal_id:
-                return deal
-        return None
+        with self._connect() as conn, conn.cursor() as cur:
+            ensure_tables(conn)
+            cur.execute(_DEAL_SELECT + " WHERE id = %s", (deal_id,))
+            row = cur.fetchone()
+        return _deal_from_row(row) if row else None
+
+    def list_regulatory(self, deal_id: str) -> list[dict]:
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT deal_id, regulator, stage, filed_on::text, deadline::text,
+                           cleared_on::text, source_url, updated_at::text
+                      FROM merger_arb_regulatory
+                     WHERE deal_id = %s
+                     ORDER BY regulator
+                    """,
+                    (deal_id,),
+                )
+                cols = ["deal_id", "regulator", "stage", "filed_on", "deadline", "cleared_on", "source_url", "updated_at"]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def upsert_regulatory(self, deal_id: str, row: dict) -> dict:
+        item = dict(row)
+        item["deal_id"] = deal_id
+        item["regulator"] = str(row.get("regulator") or "")
+        item["updated_at"] = _now()
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO merger_arb_regulatory
+                        (deal_id, regulator, stage, filed_on, deadline, cleared_on, source_url, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (deal_id, regulator) DO UPDATE SET
+                        stage = EXCLUDED.stage,
+                        filed_on = COALESCE(EXCLUDED.filed_on, merger_arb_regulatory.filed_on),
+                        deadline = COALESCE(EXCLUDED.deadline, merger_arb_regulatory.deadline),
+                        cleared_on = COALESCE(EXCLUDED.cleared_on, merger_arb_regulatory.cleared_on),
+                        source_url = COALESCE(EXCLUDED.source_url, merger_arb_regulatory.source_url),
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (
+                        deal_id, item["regulator"], item.get("stage"),
+                        item.get("filed_on") or None, item.get("deadline") or None,
+                        item.get("cleared_on") or None, item.get("source_url") or "",
+                        item["updated_at"],
+                    ),
+                )
+            conn.commit()
+        return item
+
+    def list_events(self, deal_id: str) -> list[dict]:
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, deal_id, kind, expected_on::text, actual_on::text, source_url, created_at::text
+                      FROM merger_arb_events
+                     WHERE deal_id = %s
+                     ORDER BY created_at
+                    """,
+                    (deal_id,),
+                )
+                cols = ["id", "deal_id", "kind", "expected_on", "actual_on", "source_url", "created_at"]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def add_event(self, deal_id: str, row: dict) -> dict:
+        item = dict(row)
+        item["id"] = item.get("id") or _id("ev_")
+        item["deal_id"] = deal_id
+        item["created_at"] = item.get("created_at") or _now()
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO merger_arb_events (id, deal_id, kind, expected_on, actual_on, source_url, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        item["id"], deal_id, item.get("kind") or "",
+                        item.get("expected_on") or None, item.get("actual_on") or None,
+                        item.get("source_url") or "", item["created_at"],
+                    ),
+                )
+            conn.commit()
+        return item
+
+    def list_spread_history(self, deal_id: str) -> list[dict]:
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT deal_id, d::text, target_px, acquirer_px, offer_value,
+                           gross_pct, net_ann_pct, implied_p, score
+                      FROM merger_arb_spread_history
+                     WHERE deal_id = %s
+                     ORDER BY d
+                    """,
+                    (deal_id,),
+                )
+                cols = [
+                    "deal_id", "d", "target_px", "acquirer_px", "offer_value",
+                    "gross_pct", "net_ann_pct", "implied_p", "score",
+                ]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def save_version(self, packet: dict) -> dict:
         from merger_arb.schema import field_map

@@ -68,8 +68,6 @@ def _source_label(record: SourceRecord) -> str:
         return "Google News RSS"
     if record.source == "businesswire":
         return "Business Wire RSS"
-    if record.source == "fmp":
-        return "FMP"
     return record.source
 
 

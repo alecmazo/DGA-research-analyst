@@ -257,6 +257,7 @@ def create_router(claims_fn, *, store=None, desk_store=None, runner_factory=None
 
     @router.post("/candidates/{candidate_id}/open-analysis")
     async def open_analysis(candidate_id: str, request: Request):
+        """Alias of /add. Kept for one release."""
         gp(request)
         body = await _body(request)
         try:

@@ -48,7 +48,6 @@ class ScannerConfig:
     enable_google_news: bool = False
     businesswire_url: str = ""
     enable_trackers: bool = False
-    fmp_api_key: str = ""
     llm_enabled: bool = False
     ollama_base_url: str = ""
     local_llm_base_url: str = ""
@@ -87,7 +86,6 @@ class ScannerConfig:
             enable_google_news=_flag("SCANNER_ENABLE_GOOGLE_NEWS", False),
             businesswire_url=(os.environ.get("BUSINESSWIRE_MA_FEED_URL") or "").strip(),
             enable_trackers=_flag("SCANNER_ENABLE_TRACKERS", False),
-            fmp_api_key=(os.environ.get("FMP_API_KEY") or "").strip(),
             llm_enabled=_flag("SCANNER_LLM_ENABLED", False),
             ollama_base_url=(os.environ.get("OLLAMA_BASE_URL") or "").strip(),
             local_llm_base_url=(os.environ.get("LOCAL_LLM_BASE_URL") or "").strip(),

@@ -19,7 +19,6 @@ RSS is parsed with the standard-library XML reader, the same way Yahoo headlines
 | Yahoo ticker RSS | On | Desk tickers only. Reuses the existing Yahoo RSS URL. |
 | Google News and Business Wire | Off | Google News is disallowed by its robots file. Business Wire runs only when `BUSINESSWIRE_MA_FEED_URL` is set. |
 | Trackers | Off | The interface is there. No adapter is enabled. |
-| FMP | Off | Runs only when `FMP_API_KEY` is set. |
 | Local model | Off | `SCANNER_LLM_ENABLED=false`. It never calls Grok or Claude. |
 
 ## Config
@@ -39,7 +38,6 @@ SCANNER_ENABLE_YAHOO_TICKER_RSS=true
 SCANNER_ENABLE_GOOGLE_NEWS=false
 BUSINESSWIRE_MA_FEED_URL=
 SCANNER_ENABLE_TRACKERS=false
-FMP_API_KEY=
 SCANNER_LLM_ENABLED=false
 OLLAMA_BASE_URL=
 OLLAMA_MODEL=gpt-oss-20b-finance
