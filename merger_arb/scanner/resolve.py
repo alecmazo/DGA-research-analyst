@@ -17,6 +17,12 @@ _SUFFIXES = (
     "lp",
     "co",
 )
+# Whole-name role words. "Buyer Holdings" is a company and stays "buyer".
+_GENERIC_NAME = re.compile(
+    r"^(the company|company|merger sub(?:sidiary)?|the buyer|buyer|the acquirer|"
+    r"acquirer|the purchaser|purchaser|parent|acquisition corp(?:oration)?)$",
+    re.I,
+)
 _DISPLAY = re.compile(
     r"^(?P<title>.*?)\s*\((?P<tickers>[A-Z]{1,6}(?:\s*,\s*[A-Z]{1,6})*)\)\s*\(CIK\s+(?P<cik>\d+)\)\s*$",
     re.I,
@@ -59,6 +65,21 @@ def normalize_acquirer(name: str) -> str:
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     tokens = [tok for tok in text.split() if tok and tok not in _SUFFIXES]
     return " ".join(tokens).strip()
+
+
+def is_generic_acquirer(name: str) -> bool:
+    """True when the name is only a role word, not a company.
+
+    "Buyer Holdings, L.P." is not generic. The spoken name "buyer" is.
+    """
+    text = re.sub(r"\s+", " ", (name or "").strip())
+    if not text:
+        return True
+    if _GENERIC_NAME.match(text):
+        return True
+    if re.match(r"^merger sub\b", text, re.I):
+        return True
+    return False
 
 
 def _tokens(text: str) -> set[str]:
