@@ -1866,9 +1866,11 @@ class CreateFundRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     ticker: str
     generate_gamma: bool = False
-    llm_provider:   str  = "grok"   # 'grok' | 'claude' | 'deepseek' | 'kimi' | 'both'
+    llm_provider:   str  = "grok"   # 'grok' | 'claude' | 'deepseek' | 'kimi' | 'local' | 'both'
     # Desk Analyze Ticker: all selected engines in ONE job (sequential).
     llm_providers: list[str] | None = None
+    # Optional Ollama model when llm_provider='local' (must be in LOCAL_LLM_MODELS).
+    local_model: str | None = None
 
 
 class JobStatus(BaseModel):
@@ -7247,12 +7249,13 @@ def _persist_analysis_text(
         summary = {}
 
     if provider == "local":
+        from api.domains.local_finance_llm import local_model as _local_model
         model = ""
         if isinstance(result, dict):
             model = str(result.get("model") or "").strip()
         if not model:
-            model = (os.environ.get("LOCAL_LLM_MODEL") or "gpt-oss-20b-finance").strip()
-        summary["model"] = model or "gpt-oss-20b-finance"
+            model = _local_model()
+        summary["model"] = model or _local_model()
         try:
             ok = _db_upsert_report(
                 ticker, text, summary,
@@ -7564,7 +7567,8 @@ def _analyze_bill(results: list) -> dict:
 
 
 def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
-                  llm_provider: str = "grok", *, finalize: bool = True) -> bool:
+                  llm_provider: str = "grok", *, finalize: bool = True,
+                  local_model: str | None = None) -> bool:
     """Run a single-ticker analysis.
 
     llm_provider:
@@ -7572,6 +7576,7 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
       • 'claude'   — alternate engine; {TICKER}_DGA_Report_claude.md + *_claude cols
       • 'deepseek' — DeepSeek; {TICKER}_DGA_Report_deepseek.md + *_deepseek cols
       • 'kimi'     — Kimi K3; {TICKER}_DGA_Report_kimi.md + *_kimi cols
+      • 'local'    — Ollama on this Mac; optional local_model override
       • 'both'     — Grok then Claude sequentially (job stays running until both done)
     """
     provider = (llm_provider or "grok").lower().strip()
@@ -7580,6 +7585,17 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
         provider = "kimi" if getattr(analyst, "kimi_configured", lambda: False)() else "deepseek"
     if provider not in ("grok", "claude", "deepseek", "kimi", "local", "both"):
         provider = "grok"
+    resolved_local = None
+    if provider == "local" and local_model:
+        from api.domains.local_finance_llm import local_model as _resolve_local_model
+        try:
+            resolved_local = _resolve_local_model(local_model)
+        except ValueError as exc:
+            with _jobs_lock:
+                if _jobs.get(job_id):
+                    _jobs[job_id]["status"] = "failed"
+                    _jobs[job_id]["error"] = str(exc)[:300]
+            return False
 
     # Dispatch 'both' to the dedicated runner
     if provider == "both":
@@ -7656,6 +7672,7 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
                 llm_provider=provider,
                 reuse_user_msg=(provider in ("claude", "kimi", "local")),
                 should_cancel=_cancel_requested,
+                local_model=resolved_local,
             )
         except analyst.ClaudeCancelled:
             print(f"[run_analysis] job {job_id} ({ticker}) cancelled by user", flush=True)
@@ -9924,7 +9941,7 @@ def diagnostics(request: Request):
 
 @app.get("/api/llm/local/health")
 def local_llm_health(request: Request):
-    """Ollama is up and gpt-oss-20b-finance is installed. Never calls a paid model."""
+    """Ollama is up; reports each LOCAL_LLM_MODELS entry as installed or missing."""
     _claims_or_401(request)
     from api.domains.local_finance_llm import check_local_health
     return check_local_health()
@@ -10028,13 +10045,14 @@ def local_research_prompt(body: LocalTickerRequest, request: Request):
     )
     if not result.get("ok"):
         raise HTTPException(status_code=500, detail=str(result.get("error") or "Could not build the prompt")[:400])
+    from api.domains.local_finance_llm import local_model as _local_model
     return {
         "ok": True,
         "ticker": ticker,
         "system": result.get("system_prompt") or "",
         "user": result.get("user_msg") or "",
         "munger_system": result.get("munger_system") or "",
-        "model": "gpt-oss-20b-finance",
+        "model": _local_model(),
     }
 
 
@@ -10085,6 +10103,7 @@ def local_save_report(body: LocalSaveRequest, request: Request):
         summary = analyst.extract_summary_from_report(text)
     except Exception:
         summary = {}
+    from api.domains.local_finance_llm import local_model as _local_model
     try:
         from word_report import render_report
         render_report(
@@ -10094,7 +10113,7 @@ def local_save_report(body: LocalSaveRequest, request: Request):
             output_path=str(docx_path),
             price=(summary or {}).get("current_price"),
             rating_hint=str((summary or {}).get("rating") or ""),
-            engine_label=f"local · {os.environ.get('LOCAL_LLM_MODEL') or 'gpt-oss-20b-finance'}",
+            engine_label=f"local · {_local_model()}",
             scrub_engine_names=False,
         )
     except Exception as exc:
@@ -10111,8 +10130,7 @@ def local_save_report(body: LocalSaveRequest, request: Request):
         "cost_usd": 0,
         "tokens_per_sec": body.tokens_per_sec,
         "latency_ms": body.latency_ms,
-        "model": (os.environ.get("LOCAL_LLM_MODEL") or "gpt-oss-20b-finance").strip()
-                 or "gpt-oss-20b-finance",
+        "model": _local_model(),
     }
     persisted, chars = _persist_analysis_text(
         ticker=ticker, provider="local", result=result,
@@ -10522,6 +10540,19 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
             )
         providers = [provider]
 
+    req_local_model = (getattr(req, "local_model", None) or "").strip() or None
+    if req_local_model and "local" not in providers and provider != "local":
+        raise HTTPException(
+            status_code=422,
+            detail="local_model is only valid when llm_provider='local'",
+        )
+    if req_local_model:
+        from api.domains.local_finance_llm import local_model as _resolve_local_model
+        try:
+            req_local_model = _resolve_local_model(req_local_model)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)[:300]) from exc
+
     # DEMO: no paid LLM call ever — synthesize a sample report instantly.
     if request is not None and _request_is_demo(request):
         return _demo_instant_analysis(ticker)
@@ -10569,6 +10600,7 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
         threading.Thread(
             target=_run_analysis,
             args=(job_id, ticker, req.generate_gamma, providers[0]),
+            kwargs={"local_model": req_local_model},
             name=f"analyze-{job_id[:8]}",
             daemon=True,
         ).start()
@@ -10970,7 +11002,7 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                                        else _f(row.get("upside_pct")),
                     })
                 if provider == "local" and (row.get("report_md_local") or "").strip():
-                    from api.domains.local_finance_llm import is_model_refusal
+                    from api.domains.local_finance_llm import is_model_refusal, local_model as _local_model
                     local_md = row["report_md_local"]
                     if is_model_refusal(local_md):
                         local_md = ""
@@ -10986,7 +11018,7 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                         "has_pptx": (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Presentation_local.pptx").exists(),
                         "gamma_url": row.get("local_gamma_url"),
                         "gamma_generated_at": None,
-                        "model": row.get("local_model") or "gpt-oss-20b-finance",
+                        "model": row.get("local_model") or _local_model(),
                         "rating": row.get("local_rating"),
                         "price_target": _f(row.get("local_price_target")),
                         "upside_pct": _f(row.get("local_upside_pct")),
@@ -11668,7 +11700,8 @@ def download_xlsx(
 
     local_xlsx = (payload.get("provider") or provider) == "local"
     if local_xlsx:
-        model = str(payload.get("model") or "gpt-oss-20b-finance")
+        from api.domains.local_finance_llm import local_model as _local_model
+        model = str(payload.get("model") or _local_model())
         engine = f"local · {model}"
     else:
         engine = _print_engine_alias(payload.get("provider") or provider) or provider
@@ -17546,7 +17579,8 @@ def _db_upsert_report(
                         _stamp_report_delta(cur, ticker, provider, delta_from_prior)
 
                 elif provider == "local":
-                    local_model = str(summary.get("model") or "gpt-oss-20b-finance")[:80]
+                    from api.domains.local_finance_llm import local_model as _resolve_local_model
+                    local_model = str(summary.get("model") or _resolve_local_model())[:80]
                     cur.execute("""
                         INSERT INTO analyst_reports
                             (ticker, generated_at, report_md, has_docx, has_pptx,
@@ -33737,7 +33771,7 @@ def _print_engine_alias(provider_or_model: str | None) -> str:
         return "Kimi"
     if "deepseek" in m:
         return "DeepSeek"
-    if m == "local" or "gpt-oss" in m:
+    if m == "local" or "gpt-oss" in m or "gemma" in m:
         return "local"
     return (provider_or_model or "").strip()
 
@@ -34304,7 +34338,43 @@ _call_sync_jobs: dict[str, dict] = {}            # earnings-call sync jobs
 
 _TRANSCRIPT_EXTRACT_MODEL = (os.environ.get("TRANSCRIPT_MODEL", "").strip()
                              or "claude-sonnet-4-6")
-_EMBED_MODEL = "text-embedding-3-small"          # 1536-dim, ~$0.02/1M tokens
+# Embeddings: EMBED_PROVIDER=openai|ollama, EMBED_MODEL (default text-embedding-3-small).
+# Live OpenAI index stays in call_chunks; other models use call_chunks__<slug>.
+
+
+def _embed_table_name() -> str:
+    from api.domains.local_finance_llm import call_chunks_table
+    return call_chunks_table()
+
+
+def _ensure_call_chunks_table(cur, table: str) -> None:
+    """Create one earnings-call chunk table. Never drops or truncates."""
+    if not re.fullmatch(r"call_chunks(?:__[a-z0-9_]+)?", table or ""):
+        raise ValueError(f"refusing to create unexpected call_chunks table: {table!r}")
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table} (
+            id          BIGSERIAL PRIMARY KEY,
+            ticker      TEXT NOT NULL,
+            quarter     TEXT,
+            call_date   TEXT,
+            speaker     TEXT,
+            chunk_idx   INTEGER,
+            chunk_text  TEXT NOT NULL,
+            embedding   JSONB,
+            source      TEXT,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    try:
+        cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS source TEXT")
+    except Exception:
+        pass
+    cur.execute(f"CREATE INDEX IF NOT EXISTS {table}_ticker_idx ON {table}(ticker)")
+    cur.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {table}_uniq "
+        f"ON {table}(ticker, quarter, chunk_idx)"
+    )
+    cur.execute(f"CREATE INDEX IF NOT EXISTS {table}_source_idx ON {table}(source)")
 
 
 @_ddl_once
@@ -34351,28 +34421,12 @@ def _ensure_transcripts_tables() -> None:
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS transcript_entities_tid_idx    ON transcript_entities(transcript_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS transcript_entities_ticker_idx ON transcript_entities(ticker)")
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS call_chunks (
-                    id          BIGSERIAL PRIMARY KEY,
-                    ticker      TEXT NOT NULL,
-                    quarter     TEXT,
-                    call_date   TEXT,
-                    speaker     TEXT,
-                    chunk_idx   INTEGER,
-                    chunk_text  TEXT NOT NULL,
-                    embedding   JSONB,
-                    source      TEXT,
-                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-                )
-            """)
-            # Additive migration for DBs created before source tracking
-            try:
-                cur.execute("ALTER TABLE call_chunks ADD COLUMN IF NOT EXISTS source TEXT")
-            except Exception:
-                pass
-            cur.execute("CREATE INDEX IF NOT EXISTS call_chunks_ticker_idx ON call_chunks(ticker)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS call_chunks_uniq ON call_chunks(ticker, quarter, chunk_idx)")
-            cur.execute("CREATE INDEX IF NOT EXISTS call_chunks_source_idx ON call_chunks(source)")
+            # Always keep the live OpenAI index table; also ensure the active
+            # EMBED_* table (may be the same, or call_chunks__nomic_embed_text).
+            _ensure_call_chunks_table(cur, "call_chunks")
+            active = _embed_table_name()
+            if active != "call_chunks":
+                _ensure_call_chunks_table(cur, active)
             conn.commit()
     except Exception as e:
         print(f"❌ _ensure_transcripts_tables failed: {e!s:.300}", flush=True)
@@ -34599,20 +34653,9 @@ def _run_youtube_ingest(job_id: str, url: str, person: str, created_by: str) -> 
 
 # ── Embeddings + earnings-call RAG ─────────────────────────────────────
 def _embed_texts(texts: list[str]) -> list[list[float]]:
-    """Batch-embed with OpenAI text-embedding-3-small. Returns list of vectors."""
-    if not texts:
-        return []
-    from openai import OpenAI
-    key = os.environ.get("OPENAI_API_KEY")
-    if not key:
-        raise RuntimeError("OPENAI_API_KEY not set")
-    client = OpenAI(api_key=key)
-    out: list[list[float]] = []
-    for i in range(0, len(texts), 96):
-        batch = [t[:8000] for t in texts[i:i + 96]]
-        resp = client.embeddings.create(model=_EMBED_MODEL, input=batch)
-        out.extend([d.embedding for d in resp.data])
-    return out
+    """Batch-embed via EMBED_PROVIDER/EMBED_MODEL (default OpenAI text-embedding-3-small)."""
+    from api.domains.local_finance_llm import embed_texts
+    return embed_texts(texts)
 
 
 def _chunk_call_text(text: str, words_per_chunk: int = 300, overlap: int = 40) -> list[str]:
@@ -35346,6 +35389,7 @@ def _store_call_chunks(ticker: str, qtag: str, call_date, transcript: str,
 
     `source` is persisted so the UI can show the pull cascade track
     (motley_fool / fmp / alpha_vantage / huggingface / grok / …).
+    Writes into the active EMBED_* table only; never deletes other indexes.
     """
     chunks = _chunk_call_text(transcript)
     if not chunks:
@@ -35358,16 +35402,20 @@ def _store_call_chunks(ticker: str, qtag: str, call_date, transcript: str,
     src = (source or "unknown").strip()[:40] or "unknown"
     if not call_date:
         call_date = _quarter_end_iso(qtag)
+    table = _embed_table_name()
     try:
         with _fund_conn() as conn, conn.cursor() as cur:
+            _ensure_call_chunks_table(cur, table)
             for idx, (ch, emb) in enumerate(zip(chunks, embs)):
-                cur.execute("""
-                    INSERT INTO call_chunks
+                cur.execute(f"""
+                    INSERT INTO {table}
                         (ticker, quarter, call_date, speaker, chunk_idx, chunk_text, embedding, source)
                     VALUES (%s,%s,%s,NULL,%s,%s,%s,%s)
                     ON CONFLICT (ticker, quarter, chunk_idx) DO UPDATE
-                       SET source = COALESCE(EXCLUDED.source, call_chunks.source),
-                           call_date = COALESCE(call_chunks.call_date, EXCLUDED.call_date)
+                       SET source = COALESCE(EXCLUDED.source, {table}.source),
+                           call_date = COALESCE({table}.call_date, EXCLUDED.call_date),
+                           chunk_text = EXCLUDED.chunk_text,
+                           embedding = EXCLUDED.embedding
                 """, (ticker, qtag, call_date, idx, ch, json.dumps(emb), src))
                 n += 1
             conn.commit()
@@ -35375,9 +35423,10 @@ def _store_call_chunks(ticker: str, qtag: str, call_date, transcript: str,
         # Fallback without source column if migration lag
         try:
             with _fund_conn() as conn, conn.cursor() as cur:
+                _ensure_call_chunks_table(cur, table)
                 for idx, (ch, emb) in enumerate(zip(chunks, embs)):
-                    cur.execute("""
-                        INSERT INTO call_chunks
+                    cur.execute(f"""
+                        INSERT INTO {table}
                             (ticker, quarter, call_date, speaker, chunk_idx, chunk_text, embedding)
                         VALUES (%s,%s,%s,NULL,%s,%s,%s)
                         ON CONFLICT (ticker, quarter, chunk_idx) DO NOTHING
@@ -35386,15 +35435,20 @@ def _store_call_chunks(ticker: str, qtag: str, call_date, transcript: str,
                 conn.commit()
         except Exception as e2:
             return 0, f"store failed {e2!s:.100}"
-    print(f"📞 [calls] {ticker} {qtag}: indexed {len(chunks)} chunks via {src}", flush=True)
+    print(f"📞 [calls] {ticker} {qtag}: indexed {len(chunks)} chunks via {src} into {table}", flush=True)
     return n, None
 
 
 def _already_indexed(ticker: str, qtag: str) -> bool:
+    table = _embed_table_name()
     try:
         with _fund_conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM call_chunks WHERE ticker=%s AND quarter=%s LIMIT 1",
-                        (ticker, qtag))
+            _ensure_call_chunks_table(cur, table)
+            conn.commit()
+            cur.execute(
+                f"SELECT 1 FROM {table} WHERE ticker=%s AND quarter=%s LIMIT 1",
+                (ticker, qtag),
+            )
             return bool(cur.fetchone())
     except Exception:
         return False
@@ -35573,14 +35627,10 @@ def _sync_one_ticker_calls(ticker: str, max_quarters: int = 4,
         if got >= max_quarters:
             break
         qtag = f"{y}Q{q}"
-        try:                                  # skip if already indexed
-            with _fund_conn() as conn, conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM call_chunks WHERE ticker=%s AND quarter=%s LIMIT 1",
-                            (ticker, qtag))
-                if cur.fetchone():
-                    got += 1; found.append(qtag); continue
-        except Exception:
-            pass
+        if _already_indexed(ticker, qtag):
+            got += 1
+            found.append(qtag)
+            continue
         res = _fetch_api_ninjas_transcript(ticker, y, q)
         if not res.get("ok"):
             # Record only "real" failures (auth/quota/shape), not the expected
@@ -35589,27 +35639,16 @@ def _sync_one_ticker_calls(ticker: str, max_quarters: int = 4,
             if st not in (200,) or res.get("error") != "empty transcript":
                 errors.append(f"{qtag}: [{st}] {str(res.get('error'))[:120]}")
             continue
-        got += 1; found.append(qtag)
-        chunks = _chunk_call_text(res["transcript"])
-        if not chunks:
+        got += 1
+        found.append(qtag)
+        n, err = _store_call_chunks(
+            ticker, qtag, res.get("date"), res.get("transcript") or "",
+            source="api_ninjas",
+        )
+        if err:
+            errors.append(f"{qtag}: {err}")
             continue
-        try:
-            embs = _embed_texts(chunks)
-        except Exception as e:
-            errors.append(f"{qtag}: embed failed {e!s:.100}"); continue
-        try:
-            with _fund_conn() as conn, conn.cursor() as cur:
-                for idx, (ch, emb) in enumerate(zip(chunks, embs)):
-                    cur.execute("""
-                        INSERT INTO call_chunks (ticker, quarter, call_date, speaker, chunk_idx, chunk_text, embedding)
-                        VALUES (%s,%s,%s,NULL,%s,%s,%s)
-                        ON CONFLICT (ticker, quarter, chunk_idx) DO NOTHING
-                    """, (ticker, qtag, res.get("date"), idx, ch, json.dumps(emb)))
-                    indexed += 1
-                conn.commit()
-        except Exception as e:
-            errors.append(f"{qtag}: store failed {e!s:.100}"); continue
-        print(f"📞 [calls] {ticker} {qtag}: indexed {len(chunks)} chunks", flush=True)
+        indexed += n
     return {"indexed": indexed, "found": found, "errors": errors}
 
 
@@ -35942,20 +35981,27 @@ def _run_calls_backfill(job_id: str, tickers: list[str], years_back: int,
 
 def _search_call_chunks(ticker: str, query: str, k: int = 6) -> list[dict]:
     """Semantic retrieval over one ticker's indexed earnings-call chunks.
-    Embeds the query, cosine-ranks the ticker's chunks in Python, returns top-k."""
+    Embeds the query, cosine-ranks the ticker's chunks in Python, returns top-k.
+    Reads only the active EMBED_* table (never mixes vector spaces)."""
     ticker = (ticker or "").upper().strip()
     if not ticker or not query:
         return []
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return []
+    table = _embed_table_name()
     rows = []
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            cur.execute("""SELECT quarter, call_date, chunk_text, embedding
-                             FROM call_chunks WHERE ticker = %s""", (ticker,))
+            _ensure_call_chunks_table(cur, table)
+            conn.commit()
+            cur.execute(
+                f"""SELECT quarter, call_date, chunk_text, embedding
+                      FROM {table} WHERE ticker = %s""",
+                (ticker,),
+            )
             rows = cur.fetchall() or []
     except Exception as e:
-        print(f"⚠️ [_search_call_chunks {ticker}] {e!s:.150}", flush=True)
+        print(f"⚠️ [_search_call_chunks {ticker} {table}] {e!s:.150}", flush=True)
         return []
     if not rows:
         return []

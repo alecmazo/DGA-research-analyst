@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -191,6 +192,13 @@ def local_munger_user(note: str) -> str:
     )
 
 
+DEFAULT_LOCAL_MODEL = "gpt-oss-20b-finance"
+DEFAULT_LOCAL_MODELS = "gpt-oss-20b-finance,gemma4:26b,gemma4:12b"
+DEFAULT_FAST_MODEL = "gemma4:12b"
+DEFAULT_EMBED_PROVIDER = "openai"
+DEFAULT_EMBED_MODEL = "text-embedding-3-small"
+
+
 def _env(name: str, default: str) -> str:
     value = os.environ.get(name, "").strip()
     return value or default
@@ -200,14 +208,78 @@ def local_enabled() -> bool:
     return _env("LOCAL_LLM_ENABLED", "true").lower() not in ("0", "false", "no", "off")
 
 
-def local_settings() -> dict:
+def local_model_list() -> list[str]:
+    """Configured selectable local chat models (LOCAL_LLM_MODELS)."""
+    raw = _env("LOCAL_LLM_MODELS", DEFAULT_LOCAL_MODELS)
+    out: list[str] = []
+    for part in raw.split(","):
+        name = part.strip()
+        if name and name not in out:
+            out.append(name)
+    if DEFAULT_LOCAL_MODEL not in out:
+        out.insert(0, DEFAULT_LOCAL_MODEL)
+    return out or [DEFAULT_LOCAL_MODEL]
+
+
+def _model_installed(wanted: str, installed_names: list[str]) -> bool:
+    """True when Ollama lists this model (with or without a :tag suffix)."""
+    wanted = (wanted or "").strip()
+    if not wanted:
+        return False
+    for n in installed_names:
+        if n == wanted or n.split(":")[0] == wanted or n.startswith(wanted + ":"):
+            return True
+        # Allow matching "gemma4:26b" against "gemma4:26b-a4b-it-qat"
+        if ":" in wanted and n.startswith(wanted.split(":")[0] + ":"):
+            tag = wanted.split(":", 1)[1]
+            rest = n.split(":", 1)[1]
+            if rest == tag or rest.startswith(tag + "-") or rest.startswith(tag + ":"):
+                return True
+    return False
+
+
+def local_model(name: str | None = None) -> str:
+    """One source of truth for the active local chat model.
+
+    ``name`` is an optional per-request override. It must be in
+    ``LOCAL_LLM_MODELS``. With no name, returns ``LOCAL_LLM_MODEL``
+    (default ``gpt-oss-20b-finance``).
+    """
+    allowed = local_model_list()
+    wanted = (name or "").strip() or _env("LOCAL_LLM_MODEL", DEFAULT_LOCAL_MODEL)
+    if wanted in allowed:
+        return wanted
+    for m in allowed:
+        if wanted == m or wanted.startswith(m + ":") or m.startswith(wanted + ":"):
+            return m
+    if name is not None and str(name).strip():
+        raise ValueError(
+            f"local_model must be one of: {', '.join(allowed)}"
+        )
+    if DEFAULT_LOCAL_MODEL in allowed:
+        return DEFAULT_LOCAL_MODEL
+    return allowed[0]
+
+
+def local_fast_model() -> str:
+    """Model for structured JSON extraction (LOCAL_LLM_FAST_MODEL)."""
+    wanted = _env("LOCAL_LLM_FAST_MODEL", DEFAULT_FAST_MODEL)
+    try:
+        return local_model(wanted)
+    except ValueError:
+        return local_model(None)
+
+
+def local_settings(*, model: str | None = None) -> dict:
     timeout_ms = int(_env("LOCAL_LLM_TIMEOUT_MS", "300000"))
     timeout_ms = max(300_000, timeout_ms)
     base = _env("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
     return {
         "enabled": local_enabled(),
         "base_url": base,
-        "model": _env("LOCAL_LLM_MODEL", "gpt-oss-20b-finance"),
+        "model": local_model(model),
+        "fast_model": local_fast_model(),
+        "models": local_model_list(),
         "timeout_s": timeout_ms / 1000.0,
         "num_ctx": NUM_CTX,
         "max_tokens": int(_env("LOCAL_LLM_MAX_TOKENS", "12000")),
@@ -225,13 +297,14 @@ def _host_root(base_url: str) -> str:
 
 
 def check_local_health(timeout: float = 5.0) -> dict:
-    """Confirm Ollama is up and the finance model is installed."""
+    """Confirm Ollama is up and report each configured model as installed or missing."""
     cfg = local_settings()
     if not cfg["enabled"]:
         return {
             "ok": False,
             "message": "Local finance model is disabled (LOCAL_LLM_ENABLED=false)",
             "model": cfg["model"],
+            "models": cfg["models"],
         }
     url = _host_root(cfg["base_url"]) + "/api/tags"
     try:
@@ -244,21 +317,177 @@ def check_local_health(timeout: float = 5.0) -> dict:
             "message": OFFLINE_MESSAGE,
             "detail": str(exc)[:200],
             "model": cfg["model"],
+            "models": cfg["models"],
         }
     names = []
     for row in payload.get("models") or []:
         if isinstance(row, dict) and row.get("name"):
             names.append(str(row["name"]))
+    configured = []
+    for m in cfg["models"]:
+        configured.append({
+            "model": m,
+            "installed": _model_installed(m, names),
+        })
     wanted = cfg["model"]
-    present = any(n == wanted or n.split(":")[0] == wanted or n.startswith(wanted + ":") for n in names)
+    present = _model_installed(wanted, names)
+    missing = [c["model"] for c in configured if not c["installed"]]
     if not present:
         return {
             "ok": False,
             "message": f"Local model {wanted} is not installed in Ollama",
             "models": names,
             "model": wanted,
+            "configured": configured,
+            "missing": missing,
         }
-    return {"ok": True, "message": "ok", "model": wanted, "models": names}
+    return {
+        "ok": True,
+        "message": "ok",
+        "model": wanted,
+        "models": names,
+        "configured": configured,
+        "missing": missing,
+    }
+
+
+def embed_settings() -> dict:
+    """Active embedding provider/model. Default matches the live OpenAI path."""
+    provider = _env("EMBED_PROVIDER", DEFAULT_EMBED_PROVIDER).lower()
+    if provider not in ("openai", "ollama"):
+        provider = DEFAULT_EMBED_PROVIDER
+    model = _env("EMBED_MODEL", DEFAULT_EMBED_MODEL)
+    if provider == "ollama" and not os.environ.get("EMBED_MODEL", "").strip():
+        model = "nomic-embed-text"
+    return {
+        "provider": provider,
+        "model": model,
+        "base_url": _env("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/"),
+    }
+
+
+def embed_model_slug(model: str | None = None) -> str:
+    """Safe suffix for a per-model call_chunks table name."""
+    raw = (model or embed_settings()["model"] or DEFAULT_EMBED_MODEL).strip()
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", raw).strip("_").lower()
+    return slug or "default"
+
+
+def call_chunks_table(model: str | None = None, *, provider: str | None = None) -> str:
+    """Postgres table for one embedding model. Default keeps the live index.
+
+    The live OpenAI ``text-embedding-3-small`` index stays in ``call_chunks``.
+    Every other provider/model uses ``call_chunks__<slug>`` so A/B indexes
+    never overwrite or delete the existing rows.
+    """
+    cfg = embed_settings()
+    prov = (provider or cfg["provider"] or DEFAULT_EMBED_PROVIDER).lower()
+    model_name = (model if model is not None else cfg["model"] or DEFAULT_EMBED_MODEL).strip()
+    if prov == "openai" and model_name == DEFAULT_EMBED_MODEL:
+        return "call_chunks"
+    return f"call_chunks__{embed_model_slug(model_name)}"
+
+
+def embed_texts(texts: list[str], *, model: str | None = None,
+                provider: str | None = None) -> list[list[float]]:
+    """Embed texts via OpenAI or Ollama. Same shapes as the live path."""
+    if not texts:
+        return []
+    cfg = embed_settings()
+    prov = (provider or cfg["provider"] or DEFAULT_EMBED_PROVIDER).lower()
+    model_name = (model if model is not None else cfg["model"] or DEFAULT_EMBED_MODEL).strip()
+    if prov == "ollama":
+        return _embed_texts_ollama(texts, model=model_name, base_url=cfg["base_url"])
+    return _embed_texts_openai(texts, model=model_name)
+
+
+def _embed_texts_openai(texts: list[str], *, model: str) -> list[list[float]]:
+    from openai import OpenAI
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    client = OpenAI(api_key=key)
+    out: list[list[float]] = []
+    for i in range(0, len(texts), 96):
+        batch = [t[:8000] for t in texts[i:i + 96]]
+        resp = client.embeddings.create(model=model, input=batch)
+        out.extend([d.embedding for d in resp.data])
+    return out
+
+
+def _embed_texts_ollama(texts: list[str], *, model: str, base_url: str) -> list[list[float]]:
+    """Ollama /api/embed (preferred) with /v1/embeddings fallback."""
+    root = _host_root(base_url)
+    out: list[list[float]] = []
+    for text in texts:
+        chunk = (text or "")[:8000]
+        vec = _ollama_embed_one(root, model, chunk)
+        out.append(vec)
+    return out
+
+
+def _ollama_embed_one(root: str, model: str, text: str) -> list[float]:
+    # Native Ollama embed API first.
+    payload = json.dumps({"model": model, "input": text}).encode("utf-8")
+    req = urllib.request.Request(
+        root + "/api/embed",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+        embeddings = body.get("embeddings")
+        if isinstance(embeddings, list) and embeddings:
+            first = embeddings[0]
+            if isinstance(first, list) and first:
+                return [float(x) for x in first]
+        single = body.get("embedding")
+        if isinstance(single, list) and single:
+            return [float(x) for x in single]
+    except Exception:
+        pass
+    # OpenAI-compatible fallback on the same host.
+    payload = json.dumps({"model": model, "input": text}).encode("utf-8")
+    req = urllib.request.Request(
+        root + "/v1/embeddings",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+    data = body.get("data") or []
+    if not data or not isinstance(data[0], dict):
+        raise RuntimeError(f"Ollama embed returned no vector for {model}")
+    emb = data[0].get("embedding") or []
+    return [float(x) for x in emb]
+
+
+def unload_local_model(model: str | None = None, timeout: float = 30.0) -> None:
+    """Ask Ollama to unload a model (keep_alive=0) so the next one can load."""
+    cfg = local_settings()
+    wanted = local_model(model) if model else cfg["model"]
+    payload = {
+        "model": wanted,
+        "messages": [{"role": "user", "content": "."}],
+        "stream": False,
+        "keep_alive": 0,
+        "options": {"num_predict": 1},
+    }
+    url = _host_root(cfg["base_url"]) + "/api/chat"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp.read()
+    except Exception:
+        pass
 
 
 def _estimate_tokens(text: str) -> int:
@@ -380,9 +609,11 @@ def _delta_text(delta: dict) -> tuple[str, str]:
 
 def complete_local(system_prompt: str, user_content: str, *, on_delta=None,
                    usage_capture=None, should_cancel=None, ticker: str = "",
-                   max_tokens: int | None = None) -> str:
-    """Stream one completion from gpt-oss-20b-finance. Raises LocalLlmError."""
-    cfg = local_settings()
+                   max_tokens: int | None = None, model: str | None = None,
+                   temperature: float | None = None,
+                   keep_alive: str | int | None = "30m") -> str:
+    """Stream one completion from the configured local model. Raises LocalLlmError."""
+    cfg = local_settings(model=model)
     if max_tokens:
         cfg["max_tokens"] = max(256, min(int(max_tokens), 20000))
     if not cfg["enabled"]:
@@ -391,7 +622,14 @@ def complete_local(system_prompt: str, user_content: str, *, on_delta=None,
         raise LocalLlmError("cancelled before local LLM call")
     health = check_local_health()
     if not health.get("ok"):
-        raise LocalLlmError(health.get("message") or OFFLINE_MESSAGE)
+        # Still allow a per-request model that is installed even if default is missing.
+        installed = {
+            c["model"] for c in (health.get("configured") or []) if c.get("installed")
+        }
+        if cfg["model"] not in installed and not _model_installed(
+            cfg["model"], health.get("models") or []
+        ):
+            raise LocalLlmError(health.get("message") or OFFLINE_MESSAGE)
 
     user_content, _trim = fit_local_context(user_content, num_ctx=cfg["num_ctx"])
     dump_prompt_if_debug("local", system_prompt, user_content, ticker=ticker)
@@ -401,12 +639,13 @@ def complete_local(system_prompt: str, user_content: str, *, on_delta=None,
     if news_at >= 0:
         filings_chars = news_at
     news_items = user_content.count("\n- [")
+    temp = 0.2 if temperature is None else float(temperature)
     print(
         f"   [local] context filings_chars={filings_chars:,} "
         f"news_chars={news_chars:,} news_items={news_items} "
         f"est_tokens={_estimate_tokens(system_prompt + user_content):,} "
         f"num_ctx={cfg['num_ctx']} max_tokens={cfg['max_tokens']} "
-        f"think={cfg['think']} model={cfg['model']}",
+        f"think={cfg['think']} model={cfg['model']} temperature={temp}",
         flush=True,
     )
 
@@ -421,11 +660,11 @@ def complete_local(system_prompt: str, user_content: str, *, on_delta=None,
         ],
         "stream": True,
         "think": cfg["think"],
-        "keep_alive": "30m",
+        "keep_alive": keep_alive if keep_alive is not None else "30m",
         "options": {
             "num_ctx": cfg["num_ctx"],
             "num_predict": cfg["max_tokens"],
-            "temperature": 0.2,
+            "temperature": temp,
         },
     }
     url = _host_root(cfg["base_url"]) + "/api/chat"

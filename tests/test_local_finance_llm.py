@@ -10,8 +10,12 @@ from zoneinfo import ZoneInfo
 
 from api.domains.local_finance_llm import (
     OFFLINE_MESSAGE,
+    call_chunks_table,
     check_local_health,
     fit_local_context,
+    local_fast_model,
+    local_model,
+    local_model_list,
 )
 from api.domains.yahoo_finance_news import (
     EMPTY_NOTE,
@@ -129,6 +133,32 @@ class LocalContextTests(unittest.TestCase):
             ok = check_local_health()
         self.assertTrue(ok["ok"])
         self.assertEqual(ok["model"], "gpt-oss-20b-finance")
+        self.assertTrue(any(c["model"] == "gpt-oss-20b-finance" and c["installed"] for c in ok["configured"]))
+        self.assertTrue(any(c["model"] == "gemma4:26b" and not c["installed"] for c in ok["configured"]))
+
+
+class LocalModelHelpersTests(unittest.TestCase):
+    def test_local_model_list_and_resolve(self):
+        self.assertIn("gpt-oss-20b-finance", local_model_list())
+        self.assertEqual(local_model(), "gpt-oss-20b-finance")
+        self.assertEqual(local_model("gemma4:12b"), "gemma4:12b")
+        with self.assertRaises(ValueError):
+            local_model("not-a-real-model")
+        self.assertEqual(local_fast_model(), "gemma4:12b")
+
+    def test_call_chunks_table_keeps_live_index_separate(self):
+        self.assertEqual(
+            call_chunks_table("text-embedding-3-small", provider="openai"),
+            "call_chunks",
+        )
+        self.assertEqual(
+            call_chunks_table("nomic-embed-text", provider="ollama"),
+            "call_chunks__nomic_embed_text",
+        )
+        self.assertEqual(
+            call_chunks_table("qwen3-embedding:4b", provider="ollama"),
+            "call_chunks__qwen3_embedding_4b",
+        )
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import json
 import urllib.error
 import urllib.request
 
-from api.domains.local_finance_llm import LocalLlmError, local_settings
+from api.domains.local_finance_llm import LocalLlmError, local_fast_model, local_settings
 
 
 def _host_root(base_url: str) -> str:
@@ -17,20 +17,24 @@ def _host_root(base_url: str) -> str:
 
 
 def complete_refresh(system: str, user: str, *, num_ctx: int = 8192) -> str:
-    """One JSON completion at temperature 0. Raises LocalLlmError. No paid fallback."""
+    """One JSON completion at temperature 0. Raises LocalLlmError. No paid fallback.
+
+    Uses LOCAL_LLM_FAST_MODEL (default gemma4:12b) for structured extraction.
+    """
     cfg = local_settings()
     if not cfg["enabled"]:
         raise LocalLlmError("Local finance model is disabled (LOCAL_LLM_ENABLED=false)")
+    model = local_fast_model()
     limit = max(1024, min(32768, int(num_ctx)))
     num_predict = max(256, int(limit * 0.25))
     estimate = max(1, (len(system or "") + len(user or "")) // 4)
     print(
         f"[merger-arb] local call tokens_est={estimate} num_ctx={limit} "
-        f"temperature=0 model={cfg['model']}",
+        f"temperature=0 model={model}",
         flush=True,
     )
     payload = {
-        "model": cfg["model"],
+        "model": model,
         "messages": [
             {"role": "system", "content": system or ""},
             {"role": "user", "content": user or ""},

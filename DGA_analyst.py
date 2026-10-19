@@ -9031,8 +9031,8 @@ def _financial_tables_look_degraded(report_md: str) -> bool:
 def call_llm(provider: str, system_prompt: str, user_content: str,
              *, live_search: bool = False, search_from_date: str | None = None,
              on_delta=None, usage_capture=None,
-             should_cancel=None) -> str:
-    """Provider-routed LLM call. ``provider`` ∈ {'grok', 'claude', 'kimi', 'volume'}.
+             should_cancel=None, local_model: str | None = None) -> str:
+    """Provider-routed LLM call. ``provider`` ∈ {'grok', 'claude', 'kimi', 'volume', 'local'}.
 
     ``on_delta`` is forwarded to providers that support streaming (Claude).
     Grok / Kimi use non-streaming chat.completions so the callback is ignored
@@ -9040,6 +9040,7 @@ def call_llm(provider: str, system_prompt: str, user_content: str,
 
     Kimi = volume host (Moonshot kimi-k3 by default). No live web/X search;
     analysis is grounded in the gathered user_msg (SEC/yfinance/etc.).
+    ``local_model`` selects an Ollama tag when provider is ``local``.
     """
     p = (provider or "grok").lower().strip()
     if p != "local":
@@ -9058,6 +9059,7 @@ def call_llm(provider: str, system_prompt: str, user_content: str,
                 on_delta=on_delta,
                 usage_capture=usage_capture,
                 should_cancel=should_cancel,
+                model=local_model,
             )
         except LocalLlmError as exc:
             raise RuntimeError(str(exc)) from exc
@@ -9110,6 +9112,7 @@ def call_llm_with_heartbeat(
     progress_base: float = 0.40,
     progress_cap: float = 0.82,
     timeout_s: float | None = None,
+    local_model: str | None = None,
 ) -> str:
     """Run ``call_llm`` on a worker thread with progress heartbeats.
 
@@ -9163,6 +9166,7 @@ def call_llm_with_heartbeat(
                 on_delta=_delta_wrap,  # always wrap so char counter advances for progress
                 usage_capture=usage_capture,
                 should_cancel=should_cancel,
+                local_model=local_model,
             )
         except BaseException as e:  # noqa: BLE001
             box["err"] = e
@@ -9946,7 +9950,8 @@ def analyze_ticker(ticker: str, *, system_prompt: str, generate_gamma: bool,
                    verbose: bool = True, reuse_existing: bool = False,
                    on_progress=None, llm_provider: str = "grok",
                    on_delta=None, reuse_user_msg: bool = False,
-                   should_cancel=None, prepare_only: bool = False) -> dict:
+                   should_cancel=None, prepare_only: bool = False,
+                   local_model: str | None = None) -> dict:
     """Public wrapper around :func:`_analyze_ticker_impl` that never raises —
     EXCEPT :class:`ClaudeCancelled`, which passes through so callers can
     distinguish a user cancel from a failure.
@@ -9978,6 +9983,7 @@ def analyze_ticker(ticker: str, *, system_prompt: str, generate_gamma: bool,
             reuse_user_msg=reuse_user_msg,
             should_cancel=should_cancel,
             prepare_only=prepare_only,
+            local_model=local_model,
         )
     except ClaudeCancelled:
         raise
@@ -10013,7 +10019,8 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                          verbose: bool = True, reuse_existing: bool = False,
                          on_progress=None, llm_provider: str = "grok",
                          on_delta=None, reuse_user_msg: bool = False,
-                         should_cancel=None, prepare_only: bool = False) -> dict:
+                         should_cancel=None, prepare_only: bool = False,
+                         local_model: str | None = None) -> dict:
     """Analyze a single ticker end-to-end.
 
     When ``reuse_existing`` is True and a cached markdown report already exists
@@ -10777,10 +10784,11 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         _model_label = DEEPSEEK_MODEL
     elif _prov == "local":
         try:
-            from api.domains.local_finance_llm import local_settings
-            _model_label = local_settings()["model"]
+            from api.domains.local_finance_llm import local_model as _resolve_local_model
+            _model_label = _resolve_local_model(local_model)
         except Exception:
-            _model_label = "gpt-oss-20b-finance"
+            from api.domains.local_finance_llm import DEFAULT_LOCAL_MODEL
+            _model_label = DEFAULT_LOCAL_MODEL
     else:
         _model_label = _prov
     # Live web/X search on grok-4.7 is what made one report take ~14 minutes
@@ -10899,6 +10907,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             progress_step="grok",
             progress_base=0.40,
             progress_cap=0.82,
+            local_model=local_model if _prov == "local" else None,
         )
     except ClaudeCancelled:
         raise
@@ -10929,6 +10938,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                 progress_step="grok",
                 progress_base=0.50,
                 progress_cap=0.80,
+                local_model=local_model if _prov == "local" else None,
             )
             if report_text2 and not looks_like_unfinished_report(report_text2):
                 report_text = report_text2
@@ -10987,6 +10997,7 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                 progress_step="grok",
                 progress_base=0.72,
                 progress_cap=0.84,
+                local_model=local_model if _prov == "local" else None,
             )
             if more and not looks_like_unfinished_report(more):
                 report_text = (report_text or "").rstrip() + "\n\n" + more.strip() + "\n"
