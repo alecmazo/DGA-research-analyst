@@ -1,0 +1,117 @@
+.wrap {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm);
+}
+
+.table th,
+.table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.right,
+.table th.right,
+.table td.right {
+  text-align: right;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+.sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sort:hover {
+  color: var(--text-primary);
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:hover td {
+  background: var(--bg-hover);
+}
+
+.row[data-selected='1'] td {
+  background: color-mix(in srgb, var(--brand-500) 12%, var(--bg-surface));
+}
+
+.chooser {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+}
+
+.chooser summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.chooser summary::-webkit-details-marker {
+  display: none;
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: 22px;
+  min-width: 160px;
+  padding: 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  gap: 4px;
+}
+
+.menu label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
