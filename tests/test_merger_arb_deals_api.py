@@ -252,6 +252,39 @@ def test_detail_patch_and_score_config():
     assert desk.get_deal("cash-one")["score_json"]["weights"]["return"] == 30
 
 
+def test_screen_sync_skips_the_candidate_table_when_terms_exist(monkeypatch):
+    from api.domains.merger_arb_analysis import _sync_screen
+
+    def boom(_store):
+        raise AssertionError("candidate table was read")
+
+    monkeypatch.setattr("merger_arb.screen_facts.load_candidates", boom)
+    store = MemoryStore()
+    store.upsert_deal({
+        "id": "ampx",
+        "target_ticker": "AMPX",
+        "stage": "screen",
+        "terms_json": {"cash_per_share": 11.5},
+    })
+    _sync_screen(store)
+
+
+def test_screen_sync_still_reads_candidates_for_a_blank_row(monkeypatch):
+    from api.domains.merger_arb_analysis import _sync_screen
+
+    seen = {"n": 0}
+
+    def fake(_store):
+        seen["n"] += 1
+        return []
+
+    monkeypatch.setattr("merger_arb.screen_facts.load_candidates", fake)
+    store = MemoryStore()
+    store.upsert_deal({"id": "ampx", "target_ticker": "AMPX", "stage": "screen"})
+    _sync_screen(store)
+    assert seen["n"] == 1
+
+
 def test_scanner_terms_land_on_a_blank_desk_row():
     from merger_arb.screen_facts import sync_deals
 

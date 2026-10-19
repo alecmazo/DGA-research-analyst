@@ -210,15 +210,19 @@ def create_router(claims_fn, *, store=None, desk_store=None, runner_factory=None
         store_obj = scanner()
         run = store_obj.latest_finished() or store_obj.active_run()
         when = (run or {}).get("finished_at") or (run or {}).get("started_at") or ""
+        brief = request.query_params.get("brief") in {"1", "true", "yes"}
+        candidates = []
+        if not brief:
+            candidates = [_public_candidate(row) for row in store_obj.list_candidates(
+                include_ignored=include_ignored,
+                include_hidden=include_hidden,
+            )]
         return {
             "ok": True,
             "last_scan_at": when,
             "last_scan_pt": format_pt(when),
             "run": run,
-            "candidates": [_public_candidate(row) for row in store_obj.list_candidates(
-                include_ignored=include_ignored,
-                include_hidden=include_hidden,
-            )],
+            "candidates": candidates,
             "alerts": [_public_alert(row) for row in store_obj.list_alerts()],
         }
 

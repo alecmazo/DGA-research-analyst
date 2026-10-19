@@ -166,14 +166,26 @@ export function DealDrawer({
       api<Detail>(`/api/merger-arb/deals/${encodeURIComponent(dealId)}`),
       api<AnalysisView>(`/api/merger-arb/analysis/${encodeURIComponent(dealId)}`).catch(() => ({ empty: true } as AnalysisView)),
     ])
-    setDetail(dealBody)
-    setAnalysis(analysisBody)
+    return { dealBody, analysisBody }
   }, [dealId])
 
   useEffect(() => {
+    let cancelled = false
     setErr('')
     setQuestion('')
-    load().catch((error) => setErr(error instanceof Error ? error.message : 'Could not load the deal'))
+    load()
+      .then((data) => {
+        if (cancelled) return
+        setDetail(data.dealBody)
+        setAnalysis(data.analysisBody)
+        setErr('')
+      })
+      .catch((error) => {
+        if (!cancelled) setErr(error instanceof Error ? error.message : 'Could not load the deal')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [dealId, load])
 
   const patchStage = async (stage: string) => {
@@ -183,7 +195,9 @@ export function DealDrawer({
         method: 'PATCH',
         body: JSON.stringify({ stage }),
       })
-      await load()
+      const data = await load()
+      setDetail(data.dealBody)
+      setAnalysis(data.analysisBody)
       onChanged?.()
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not update stage')

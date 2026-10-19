@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import styles from './MergerArbPage.module.css'
@@ -51,9 +51,10 @@ export function ScanTools({ onScanned, onAlerts }: Props) {
   const [lastScan, setLastScan] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
+  const misses = useRef(0)
 
   const load = useCallback(async () => {
-    const data = await api<Latest>('/api/merger-arb/scan/latest')
+    const data = await api<Latest>('/api/merger-arb/scan/latest?brief=1')
     const next = data.alerts || []
     setAlerts(next)
     onAlerts?.(next)
@@ -71,13 +72,22 @@ export function ScanTools({ onScanned, onAlerts }: Props) {
     const timer = window.setInterval(() => {
       api<{ run: Run }>(`/api/merger-arb/scan/${encodeURIComponent(run.id || '')}`)
         .then((data) => {
+          misses.current = 0
+          setErr('')
           setRun(data.run)
           if (data.run?.status && data.run.status !== 'running') {
             load().catch(() => undefined)
             onScanned?.()
           }
         })
-        .catch((error) => setErr(error instanceof Error ? error.message : 'The scan status failed'))
+        .catch((error) => {
+          misses.current += 1
+          if (misses.current < 3) return
+          const message = error instanceof Error ? error.message : 'The scan status failed'
+          setErr(/failed to fetch|networkerror/i.test(message)
+            ? 'The scan status did not come back. It will keep trying.'
+            : message)
+        })
     }, 1500)
     return () => window.clearInterval(timer)
   }, [run?.id, run?.status, load, onScanned])
@@ -175,6 +185,7 @@ export function ScanTools({ onScanned, onAlerts }: Props) {
             </div>
             <p className={styles.muted}>Last scan: {lastScan || 'none'}</p>
             {err && <p className={styles.err}>{err}</p>}
+            {run?.status === 'error' && run.error && <p className={styles.err}>{run.error}</p>}
             {run?.sources?.length ? (
               <ul className={styles.rows}>
                 {run.sources.map((row) => (

@@ -64,8 +64,10 @@ def _ticker(value: str, *, required: bool = True) -> str:
 def _sync_screen(store) -> None:
     """Pull scanner terms onto desk rows that were saved as names only."""
     try:
-        from merger_arb.screen_facts import load_candidates, sync_deals
+        from merger_arb.screen_facts import _blank, load_candidates, sync_deals
         deals = [row for row in store.list_deals() if row.get("id") != "fixture-acme"]
+        if not any(_blank(row) for row in deals):
+            return
         candidates = load_candidates(store)
         if candidates:
             sync_deals(store, deals, candidates)

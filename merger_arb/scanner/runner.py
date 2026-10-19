@@ -418,11 +418,16 @@ class ScanRunner:
             if desk:
                 candidate["desk_deal_id"] = desk.get("id") or ""
                 candidate["on_desk"] = True
-            self.store.upsert_candidate(candidate)
-            if self.desk_store is not None and hasattr(self.desk_store, "upsert_screen_deal") and not candidate.get("hidden"):
-                deal = self.desk_store.upsert_screen_deal(candidate)
-                if hasattr(self.desk_store, "upsert_spread_history"):
-                    self.desk_store.upsert_spread_history(deal["id"], today.isoformat(), candidate)
+            try:
+                self.store.upsert_candidate(candidate)
+                if self.desk_store is not None and hasattr(self.desk_store, "upsert_screen_deal") and not candidate.get("hidden"):
+                    deal = self.desk_store.upsert_screen_deal(candidate)
+                    if hasattr(self.desk_store, "upsert_spread_history"):
+                        self.desk_store.upsert_spread_history(deal["id"], today.isoformat(), candidate)
+            except Exception as exc:
+                run["error"] = str(exc)[:500]
+                self.store.save_run(run)
+                continue
             saved += 1
 
         alert_rows = []
@@ -450,7 +455,7 @@ class ScanRunner:
                         alert_rows.append(move)
         self.store.add_alerts(alert_rows)
         if run.get("status") != "cancelled":
-            run["status"] = "done"
+            run["status"] = "error" if saved == 0 and run.get("error") else "done"
         run["finished_at"] = datetime.now(timezone.utc).isoformat()
         run["counts"] = {"new_records": new_records, "candidates": saved, "alerts": len(alert_rows)}
         self.store.save_run(run)

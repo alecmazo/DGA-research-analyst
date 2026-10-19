@@ -599,6 +599,9 @@ def test_api_scan_and_placeholder_skips_sec():
         raise AssertionError("scan did not finish")
     latest = client.get("/api/merger-arb/scan/latest").json()
     assert latest["candidates"]
+    brief = client.get("/api/merger-arb/scan/latest?brief=1").json()
+    assert brief["candidates"] == []
+    assert brief["run"]["status"] == "done"
     assert "PT" in latest["last_scan_pt"] or latest["last_scan_pt"] == ""
     candidate_id = latest["candidates"][0]["id"]
     blocked = client.post(f"/api/merger-arb/candidates/{candidate_id}/add", json={})
@@ -731,3 +734,51 @@ def test_support_stays_above_the_merger_page():
     assert "padding-bottom: 88px" in page
     assert "max-height: min(420px, calc(100vh - 220px))" in page
     assert "quotes_fn=load_quotes" in (ROOT / "api" / "server.py").read_text()
+
+
+def test_scanner_alias_does_not_point_at_the_desk():
+    from merger_arb.scanner.store import put_scanner_alias
+    import inspect
+    from merger_arb.scanner.store import PostgresScannerStore
+
+    class Cur:
+        def __init__(self):
+            self.sql = []
+            self.params = []
+
+        def execute(self, sql, params=None):
+            self.sql.append(" ".join(sql.split()))
+            self.params.append(params)
+
+    cur = Cur()
+    put_scanner_alias(cur, "AMPX|old name", "c_abc")
+    joined = "\n".join(cur.sql)
+    assert "scanner_candidate_aliases" in joined
+    assert "merger_arb_deal_aliases" not in joined
+    assert ("AMPX|old name", "c_abc") in cur.params
+    body = inspect.getsource(PostgresScannerStore.upsert_candidate)
+    assert "put_scanner_alias" in body
+    assert "INSERT INTO merger_arb_deal_aliases" not in body
+
+
+def test_scan_keeps_going_when_a_candidate_cannot_be_saved():
+    store = ScannerStore()
+    record = _eight_k()
+    source = _Fake([record])
+    config = ScannerConfig(sec_user_agent="Alec Research <a@example.com>", llm_enabled=False)
+
+    def boom(_candidate):
+        raise RuntimeError("merger_arb_deal_aliases_deal_id_fkey")
+
+    store.upsert_candidate = boom
+    runner = ScanRunner(
+        store,
+        [source],
+        config=config,
+        quotes_fn=lambda tickers: {"ACME": {"price": "40"}},
+        desk_deals_fn=lambda: [],
+    )
+    run = runner.scan_sync(mode="full", since="2026-06-01")
+    assert run["status"] == "error"
+    assert "deal_id_fkey" in run["error"]
+    assert run["counts"]["candidates"] == 0

@@ -109,7 +109,51 @@ SCHEMA_SQL = (
         created_at TEXT
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS scanner_candidate_aliases (
+        alias_key TEXT PRIMARY KEY,
+        candidate_id TEXT NOT NULL
+    )
+    """,
 )
+
+
+def ensure_scanner_aliases(cur) -> None:
+    """Scanner key history. Not merger_arb_deal_aliases: that deal_id must be a desk row."""
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scanner_candidate_aliases (
+            alias_key TEXT PRIMARY KEY,
+            candidate_id TEXT NOT NULL
+        )
+        """
+    )
+
+
+def put_scanner_alias(cur, alias_key: str, candidate_id: str) -> None:
+    if not alias_key or not candidate_id:
+        return
+    ensure_scanner_aliases(cur)
+    cur.execute(
+        """
+        INSERT INTO scanner_candidate_aliases (alias_key, candidate_id)
+        VALUES (%s, %s)
+        ON CONFLICT (alias_key) DO UPDATE SET candidate_id = EXCLUDED.candidate_id
+        """,
+        (alias_key, candidate_id),
+    )
+
+
+def scanner_alias_id(cur, alias_key: str) -> str | None:
+    if not alias_key:
+        return None
+    ensure_scanner_aliases(cur)
+    cur.execute(
+        "SELECT candidate_id FROM scanner_candidate_aliases WHERE alias_key = %s",
+        (alias_key,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
 
 
 _TABLES_READY = False
@@ -410,6 +454,7 @@ class PostgresScannerStore:
 
     def __init__(self, connect) -> None:
         self._connect = connect
+        self._rows_cache = None
 
     def _conn(self):
         return _ClosingConnection(self._connect)
@@ -567,22 +612,21 @@ class PostgresScannerStore:
         key = candidate.get("deal_key") or ""
         with self._conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, deal_key, payload_json FROM scanner_candidates")
-                stored_rows = []
-                for candidate_id, deal_key, payload in cur.fetchall():
-                    row = _load(payload, {})
-                    row["id"] = row.get("id") or candidate_id
-                    row["deal_key"] = row.get("deal_key") or deal_key
-                    stored_rows.append(row)
+                if self._rows_cache is None:
+                    cur.execute("SELECT id, deal_key, payload_json FROM scanner_candidates")
+                    stored_rows = []
+                    for candidate_id, deal_key, payload in cur.fetchall():
+                        row = _load(payload, {})
+                        row["id"] = row.get("id") or candidate_id
+                        row["deal_key"] = row.get("deal_key") or deal_key
+                        stored_rows.append(row)
+                    self._rows_cache = stored_rows
+                stored_rows = self._rows_cache
                 existing = None
                 if key:
-                    cur.execute(
-                        "SELECT deal_id FROM merger_arb_deal_aliases WHERE alias_key = %s",
-                        (key,),
-                    )
-                    alias = cur.fetchone()
-                    if alias:
-                        existing = next((row for row in stored_rows if row.get("id") == alias[0] or row.get("deal_key") == alias[0]), None)
+                    alias_id = scanner_alias_id(cur, key)
+                    if alias_id:
+                        existing = next((row for row in stored_rows if row.get("id") == alias_id), None)
                 if existing is None:
                     existing = find_match(candidate, stored_rows)
                 cur.execute("SELECT 1 FROM scanner_ignored WHERE deal_key = %s", (key or candidate.get("deal_key") or "",))
@@ -621,43 +665,13 @@ class PostgresScannerStore:
                     ),
                 )
                 if old_key and write_key and old_key != write_key:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS merger_arb_deal_aliases (
-                            alias_key TEXT PRIMARY KEY,
-                            deal_id TEXT
-                        )
-                        """
-                    )
-                    cur.execute(
-                        """
-                        INSERT INTO merger_arb_deal_aliases (alias_key, deal_id)
-                        VALUES (%s, %s)
-                        ON CONFLICT (alias_key) DO UPDATE SET deal_id = EXCLUDED.deal_id
-                        """,
-                        (old_key, candidate["id"]),
-                    )
+                    put_scanner_alias(cur, old_key, candidate["id"])
                     cur.execute(
                         "UPDATE scanner_candidates SET deal_key = %s WHERE id = %s",
                         (write_key, candidate["id"]),
                     )
                 if write_key:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS merger_arb_deal_aliases (
-                            alias_key TEXT PRIMARY KEY,
-                            deal_id TEXT
-                        )
-                        """
-                    )
-                    cur.execute(
-                        """
-                        INSERT INTO merger_arb_deal_aliases (alias_key, deal_id)
-                        VALUES (%s, %s)
-                        ON CONFLICT (alias_key) DO UPDATE SET deal_id = EXCLUDED.deal_id
-                        """,
-                        (write_key, candidate["id"]),
-                    )
+                    put_scanner_alias(cur, write_key, candidate["id"])
                 cur.execute("DELETE FROM scanner_candidate_fields WHERE candidate_id = %s", (candidate["id"],))
                 for field_row in candidate.get("fields") or []:
                     cur.execute(
@@ -677,6 +691,9 @@ class PostgresScannerStore:
                         ),
                     )
             conn.commit()
+        if self._rows_cache is not None:
+            self._rows_cache = [row for row in self._rows_cache if row.get("id") != candidate["id"]]
+            self._rows_cache.append(candidate)
         return candidate
 
     def list_candidates(self, *, include_ignored: bool = False, include_hidden: bool = False, include_on_desk: bool = False) -> list[dict]:
@@ -723,6 +740,7 @@ class PostgresScannerStore:
                         (_dump(candidate), candidate_id),
                     )
             conn.commit()
+        self._rows_cache = None
 
     def set_desk_deal(self, candidate_id: str, deal_id: str) -> None:
         candidate = self.get_candidate(candidate_id)
@@ -737,6 +755,7 @@ class PostgresScannerStore:
                     (deal_id, _dump(candidate), candidate_id),
                 )
             conn.commit()
+        self._rows_cache = None
 
     def add_alerts(self, alerts: list[dict]) -> list[dict]:
         saved = []
