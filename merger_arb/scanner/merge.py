@@ -225,6 +225,13 @@ def merge_candidate(stored: dict, incoming: dict) -> dict:
     out["ignored"] = bool(stored.get("ignored") or incoming.get("ignored"))
     out["desk_deal_id"] = stored.get("desk_deal_id") or incoming.get("desk_deal_id") or ""
     out["on_desk"] = bool(stored.get("on_desk") or incoming.get("on_desk"))
+    if stored.get("overrides") or incoming.get("overrides"):
+        merged_over = dict(stored.get("overrides") or {})
+        merged_over.update(incoming.get("overrides") or {})
+        out["overrides"] = merged_over
+    if stored.get("score_json") and (stored.get("score_json") or {}).get("overrides"):
+        out["overrides"] = dict((stored.get("score_json") or {}).get("overrides") or {})
+        out["overrides"].update(incoming.get("overrides") or {})
     out["hidden"] = bool(stored.get("hidden") and incoming.get("hidden", stored.get("hidden")))
     for key in (
         "last_seen_at", "current_price", "offer_value", "gross_spread", "gross_spread_pct",

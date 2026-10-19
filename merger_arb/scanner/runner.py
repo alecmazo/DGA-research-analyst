@@ -128,6 +128,23 @@ def _freeze(bucket: dict) -> dict:
     }
 
 
+def _apply_attractiveness(candidate: dict) -> None:
+    from merger_arb.score import inputs_from_candidate, score_deal
+
+    overrides = dict(candidate.get("overrides") or {})
+    stored = (candidate.get("score_json") or {}).get("overrides") or {}
+    merged = dict(stored)
+    merged.update(overrides)
+    try:
+        result = score_deal(inputs_from_candidate(candidate), overrides=merged)
+    except ValueError:
+        return
+    candidate["score"] = result["score"]
+    candidate["score_band"] = result["score_band"]
+    candidate["score_json"] = result
+    candidate["overrides"] = merged
+
+
 def _price_candidate(candidate: dict, quotes: dict, as_of: date, extras: dict | None = None) -> None:
     fields = candidate.get("fields") or []
     cash = _one(fields, "cash_per_share")
@@ -393,6 +410,7 @@ class ScanRunner:
             candidate = _freeze(bucket)
             extras = self._metric_extras(candidate, tbill)
             _price_candidate(candidate, quotes, today, extras)
+            _apply_attractiveness(candidate)
             score, breakdown = score_candidate(candidate)
             candidate["confidence"] = score
             candidate["confidence_breakdown"] = breakdown

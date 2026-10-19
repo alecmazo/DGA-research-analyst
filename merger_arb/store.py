@@ -369,6 +369,48 @@ class MemoryStore:
             return None
         return self.aliases.get(alias_key)
 
+    def latest_score_config(self) -> dict:
+        from merger_arb.score import DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS
+
+        if self.score_config:
+            return dict(self.score_config[-1])
+        return {"version": 0, "weights": dict(DEFAULT_WEIGHTS), "thresholds": dict(DEFAULT_THRESHOLDS), "created_by": ""}
+
+    def save_score_config(self, weights: dict, thresholds: dict | None = None, created_by: str = "") -> dict:
+        from merger_arb.score import DEFAULT_THRESHOLDS, validate_weights
+
+        errors = validate_weights(weights)
+        if errors:
+            raise ValueError("; ".join(errors))
+        row = {
+            "version": len(self.score_config) + 1,
+            "weights": dict(weights),
+            "thresholds": dict(thresholds or DEFAULT_THRESHOLDS),
+            "created_by": created_by,
+            "created_at": _now(),
+        }
+        self.score_config.append(row)
+        return row
+
+    def score_deal_row(self, deal: dict, inputs: dict, overrides: dict | None = None) -> dict:
+        from merger_arb.score import score_deal
+
+        cfg = self.latest_score_config()
+        stored = (deal.get("score_json") or {}).get("overrides") or {}
+        merged = dict(stored)
+        merged.update(overrides or {})
+        result = score_deal(
+            inputs,
+            weights=cfg.get("weights"),
+            thresholds=cfg.get("thresholds"),
+            overrides=merged,
+            config_version=int(cfg.get("version") or 0),
+        )
+        deal["score"] = result["score"]
+        deal["score_band"] = result["score_band"]
+        deal["score_json"] = result
+        return result
+
     def resolve_candidate(self, candidate: dict) -> dict | None:
         from merger_arb.scanner.dedupe import find_match
 
@@ -452,6 +494,10 @@ class MemoryStore:
             incoming["downside_pct"] = metrics.get("downside_pct")
             incoming["implied_p"] = metrics.get("implied_p")
             incoming["deal_value_usd"] = metrics.get("deal_value_usd")
+        if candidate.get("score") is not None:
+            incoming["score"] = candidate.get("score")
+            incoming["score_band"] = candidate.get("score_band")
+            incoming["score_json"] = candidate.get("score_json")
         if old_key and new_key and old_key != new_key:
             self.put_alias(old_key, deal_id)
         deal = self.upsert_deal(incoming)
@@ -480,6 +526,23 @@ class MemoryStore:
         }
         self.spread_history[(deal_id, row["d"])] = row
         return row
+
+    def rescore_all(self) -> int:
+        from merger_arb.score import inputs_from_candidate
+
+        n = 0
+        for deal in self.deals.values():
+            inputs = inputs_from_candidate(deal)
+            if deal.get("metrics_json"):
+                metrics = deal["metrics_json"]
+                inputs["net_annualized"] = metrics.get("annualized_pct")
+                inputs["tbill_pct"] = metrics.get("tbill_pct")
+                inputs["offer"] = metrics.get("offer_value")
+                inputs["implied_p"] = metrics.get("implied_p")
+                inputs["days_to_close"] = metrics.get("days_to_close")
+            self.score_deal_row(deal, inputs)
+            n += 1
+        return n
 
     def list_spread_history(self, deal_id: str) -> list[dict]:
         rows = [row for (did, _day), row in self.spread_history.items() if did == deal_id]
@@ -541,6 +604,70 @@ class PostgresStore:
                 )
                 row = cur.fetchone()
         return row[0] if row else None
+
+    def latest_score_config(self) -> dict:
+        from merger_arb.score import DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS
+
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT version, weights, thresholds, created_by, created_at
+                      FROM merger_arb_score_config
+                     ORDER BY version DESC
+                     LIMIT 1
+                    """
+                )
+                row = cur.fetchone()
+        if not row:
+            return {"version": 0, "weights": dict(DEFAULT_WEIGHTS), "thresholds": dict(DEFAULT_THRESHOLDS), "created_by": ""}
+        weights = row[1] if isinstance(row[1], dict) else json.loads(row[1] or "{}")
+        thresholds = row[2] if isinstance(row[2], dict) else json.loads(row[2] or "{}")
+        return {"version": row[0], "weights": weights, "thresholds": thresholds, "created_by": row[3] or "", "created_at": str(row[4] or "")}
+
+    def save_score_config(self, weights: dict, thresholds: dict | None = None, created_by: str = "") -> dict:
+        from merger_arb.score import DEFAULT_THRESHOLDS, validate_weights
+
+        errors = validate_weights(weights)
+        if errors:
+            raise ValueError("; ".join(errors))
+        payload = json.dumps(weights)
+        thresh = json.dumps(thresholds or DEFAULT_THRESHOLDS)
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO merger_arb_score_config (weights, thresholds, created_by)
+                    VALUES (%s, %s, %s)
+                    RETURNING version, created_at
+                    """,
+                    (payload, thresh, created_by),
+                )
+                version, created_at = cur.fetchone()
+            conn.commit()
+        return {"version": version, "weights": weights, "thresholds": thresholds or DEFAULT_THRESHOLDS, "created_by": created_by, "created_at": str(created_at or "")}
+
+    def score_deal_row(self, deal: dict, inputs: dict, overrides: dict | None = None) -> dict:
+        from merger_arb.score import score_deal
+
+        cfg = self.latest_score_config()
+        stored = (deal.get("score_json") or {}).get("overrides") or {}
+        merged = dict(stored)
+        merged.update(overrides or {})
+        result = score_deal(
+            inputs,
+            weights=cfg.get("weights"),
+            thresholds=cfg.get("thresholds"),
+            overrides=merged,
+            config_version=int(cfg.get("version") or 0),
+        )
+        deal["score"] = result["score"]
+        deal["score_band"] = result["score_band"]
+        deal["score_json"] = result
+        self.upsert_deal(deal)
+        return result
 
     def resolve_candidate(self, candidate: dict) -> dict | None:
         from merger_arb.scanner.dedupe import find_match
@@ -605,6 +732,9 @@ class PostgresStore:
                         downside_pct = COALESCE(EXCLUDED.downside_pct, merger_arb_deals.downside_pct),
                         implied_p = COALESCE(EXCLUDED.implied_p, merger_arb_deals.implied_p),
                         deal_value_usd = COALESCE(EXCLUDED.deal_value_usd, merger_arb_deals.deal_value_usd),
+                        score = COALESCE(EXCLUDED.score, merger_arb_deals.score),
+                        score_band = COALESCE(EXCLUDED.score_band, merger_arb_deals.score_band),
+                        score_json = COALESCE(EXCLUDED.score_json, merger_arb_deals.score_json),
                         data_confidence = COALESCE(EXCLUDED.data_confidence, merger_arb_deals.data_confidence),
                         last_seen_at = COALESCE(EXCLUDED.last_seen_at, merger_arb_deals.last_seen_at),
                         updated_at = EXCLUDED.updated_at
@@ -766,6 +896,10 @@ class PostgresStore:
             incoming["downside_pct"] = metrics.get("downside_pct")
             incoming["implied_p"] = metrics.get("implied_p")
             incoming["deal_value_usd"] = metrics.get("deal_value_usd")
+        if candidate.get("score") is not None:
+            incoming["score"] = candidate.get("score")
+            incoming["score_band"] = candidate.get("score_band")
+            incoming["score_json"] = candidate.get("score_json")
         if old_key and new_key and old_key != new_key:
             self.put_alias(old_key, deal_id)
         deal = self.upsert_deal(incoming)
