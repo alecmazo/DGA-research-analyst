@@ -321,6 +321,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Earnings SEC first** | **`ui738-20261015-earnings-sec`** | Same-day pending cards hit 8-K/6-K before Yahoo calendar/stmt so the print is not starved by the 3.2s budget. Pending cards cache 60s. |
 | **Earnings EDGAR** | **`ui739-20261015-earnings-edgar`** | Pending same-day cards skip Yahoo surprise and always fetch the 8-K/6-K, even if Nasdaq already used the 3.2s budget. |
 | **Style watchlists + fwd bars** | **`ui740-20261015-style-fwd`** | Stamping VALUE/GROWTH/GARP/RICH on Local or Saved Reports puts the ticker on Watchlists named Value, Growth, or Rich (GARP → both Value and Growth). Financials revenue card paints the next three fiscal years as unfilled forecast bars from Yahoo estimates. |
+| **Merger arb scorecard** | **`ui741-20261019-merger-arb-scorecard`** | One deduplicated deal table with a 0-100 scorecard (configurable weights, rule-based probability with overrides), filters, and a deal-terms drawer that replaces the memo page. One calc engine. FMP removed. Prod dedupe migration not yet run (Alec). |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
 ### One-click handoff (preferred)
@@ -381,7 +382,7 @@ React topbar at `/gp` (`web/gp-app/src/components/layout/Topbar.tsx`). Paths are
 7. Credit (`/credit`, issuer at `/credit/:issuer`)
 8. Transcripts (`/transcripts`)
 9. Munger (`/munger`)
-10. Merger Arb (`/merger-arb`, analysis at `/merger-arb/analysis/:dealId`)
+10. Merger Arb (`/merger-arb`; old analysis URLs redirect to `?deal=`)
 
 **Accounts:**
 
@@ -519,4 +520,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-15 · Agent: Grok Build · Built: `ui740-20261015-style-fwd` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui741-YYYYMMDD-slug`*
+*Last updated: 2026-10-19 · Agent: Grok Build · Built: `ui741-20261019-merger-arb-scorecard` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui742-YYYYMMDD-slug`*

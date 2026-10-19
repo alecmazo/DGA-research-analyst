@@ -1,19 +1,21 @@
 # Merger arb analysis
 
-A separate page from the main desk. The desk is unchanged. The only link into this page is **Merger Arb** in the research nav.
+The only link into this page is **Merger Arb** in the Lab nav.
 
-Open it at `/gp/merger-arb`. A deal opens at `/gp/merger-arb/analysis/:dealId`. Sign in as a GP. With no `DATABASE_URL`, the sample deal `fixture-acme` is loaded. That sample is not a live deal. Its sources use `example.invalid`.
+Open it at `/gp/merger-arb`. Click a row to open the deal-terms drawer (`?deal=<id>`). Old links to `/gp/merger-arb/analysis/:dealId` redirect there. Sign in as a GP. With no `DATABASE_URL`, the sample deal `fixture-acme` is loaded. That sample is not a live deal. Its sources use `example.invalid`.
+
+The table is the desk: one row per deal, a 0–100 scorecard, and filters. Deep dive, local refresh, Ask, confirm, export, sensitivity, notes, and versions live in the drawer. Backend routes under `/api/merger-arb/analysis/{id}/…` stay the API.
 
 ## Workflow
 
-1. Pick a deal, or add one with a target ticker and an acquirer ticker.
-2. **Deep dive** runs only when you click it. The page shows Grok or Claude before the click and calls only that provider. There is no paid fallback. Live web search is off. The app sends the deal record plus prices, SEC filings, and Yahoo headlines it fetched itself.
+1. Pick a deal from the table, or add one with a target ticker and an acquirer ticker.
+2. **Deep dive** runs only when you click it in the drawer. The drawer shows Grok or Claude before the click and calls only that provider. There is no paid fallback. Live web search is off. The app sends the deal record plus prices, SEC filings, and Yahoo headlines it fetched itself.
 3. The reply must be one JSON packet. Invalid JSON is repaired once. A number with no source, or a source that was not in the bundle, is marked `UNVERIFIED` and left out of the math.
 4. Code computes the offer value, spread, annualized return, implied probability, and the sensitivity table, then saves a version.
-5. **Refresh with Local Model (free)** calls `gpt-oss-20b-finance` through the existing `LOCAL_LLM_*` settings (`LOCAL_LLM_BASE_URL`, default `http://localhost:11434/v1`). It never calls Grok or Claude. If Ollama is down, the page gets that error and stops.
+5. **Refresh with Local Model (free)** calls `gpt-oss-20b-finance` through the existing `LOCAL_LLM_*` settings (`LOCAL_LLM_BASE_URL`, default `http://localhost:11434/v1`). It never calls Grok or Claude. If Ollama is down, the drawer gets that error and stops.
 6. The app fetches a fresh bundle first. The model only sees that bundle and the packet. It may refresh, confirm, or flag each field on the list. It may not change a judgment or a `model_estimate`.
 7. Code applies the allowed updates, recomputes, scores freshness, and saves the next version with a field diff. **Refresh complete** appears only when every refresh field has a status, stale core inputs are flagged, derived fields were recomputed, refreshed values kept a bundle source and date, and no judgment changed.
-8. **Ask a follow-up** uses the same local model. Answers cite field ids. If the packet does not contain the answer, the model says `not in packet, escalate to Deep Dive` and the page shows that button. The button runs the deep dive you already selected.
+8. **Ask a follow-up** uses the same local model. Answers cite field ids. If the packet does not contain the answer, the model says `not in packet, escalate to Deep Dive` and the drawer shows that button. The button runs the deep dive you already selected.
 
 ## Packet
 
@@ -77,7 +79,9 @@ The local system prompt is stored verbatim in `merger_arb/prompts.py` as `LOCAL_
 
 All routes are under `/api/merger-arb` and require a GP session. Demo accounts cannot POST. That is intentional.
 
-- `GET /deals`, `POST /deals`
+- `GET /deals` (filter, sort, page, facets), `POST /deals`
+- `GET /deals/{id}`, `PATCH /deals/{id}` (stage and stamped overrides)
+- `GET`/`PUT /score-config`
 - `GET /analysis/:dealId`
 - `POST /analysis/:dealId/deep-dive` with `{"provider":"grok"}` or `"claude"`
 - `POST /analysis/:dealId/confirm` with `{"field_id":"..."}`

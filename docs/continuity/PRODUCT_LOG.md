@@ -244,7 +244,7 @@ Lab menu. High-yield book. About 80 public issuers, keyed by SEC CIK, plus the P
 
 ### 5.17 Merger arb (`/merger-arb`)
 
-A situation memorandum: navy masthead, the spread tape, then numbered sections for the situation, consideration, spread, regulatory path, votes, catalysts, downside, and upside. The math is unchanged.
+One table per deal with a 0–100 scorecard, filters, and a deal-terms drawer. Old `/merger-arb/analysis/:dealId` links redirect to `?deal=`. Deep dive, local refresh, Ask, confirm, export, sensitivity, notes, and versions run from the drawer. The scanner writes stage `screen` deals. FMP is not a source. Net spread is gross plus target dividends. House probability is rule-based, with a noted override that survives re-scans.
 
 ### 5.18 City (`/city`) — offline
 

@@ -1,6 +1,6 @@
 # Merger arb deal scanner
 
-A **Scan for deals** button on Merger Arb (`/gp/merger-arb`) reads free sources in the background and lists candidate deals. Nothing is written to the desk until Add, Ignore, or Open in analysis.
+A **Scan** button on Merger Arb (`/gp/merger-arb`) reads free public sources in the background. Matching records upsert `merger_arb_deals` at stage `screen` (merge-not-replace). The table is the list. FMP is not a source.
 
 The sample deal `fixture-acme` stays in memory. Demo accounts cannot POST these routes.
 
@@ -56,7 +56,7 @@ The early-termination API takes a free api.data.gov key. Sign up with an email a
 
 ## Spread math on the scan table
 
-Cash, stock, and mixed use `Decimal`. Collar, election, and proration show "—" and `needs_manual_terms`. A CVR is not in the base offer. Quarter words map to quarter-end, and that assumption is labeled. Annualized is `(1 + spread) ** (365 / days) - 1`. After you add a deal, the analysis page recomputes with the existing packet math.
+`merger_arb/calc.py` is the only spread engine. Net spread = gross + target dividends. There is no borrow cost. Stock deals are unhedged and tagged acquirer-price sensitive. Collar, election, and proration show "—" and `needs_manual_terms` until confirmed. A CVR is not in the base offer. Quarter words map to quarter-end, and that assumption is labeled. Annualized is `(1 + spread) ** (365 / days) - 1`.
 
 ## Tests
 
