@@ -164,7 +164,52 @@ def _filings(store, deal_id: str) -> list[dict]:
     return rows
 
 
-def create_router(claims_fn, *, store=None) -> APIRouter:
+def _price_of(quote) -> float | None:
+    if quote is None or isinstance(quote, bool):
+        return None
+    raw = quote.get("price") if isinstance(quote, dict) else quote
+    try:
+        number = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number <= 0:
+        return None
+    return number
+
+
+def fill_missing_prices(rows: list[dict], quotes_fn) -> dict[str, float]:
+    """Last price for a screen row that has none. No offer still means terms are missing."""
+    remembered: dict[str, float] = {}
+    if not rows:
+        return remembered
+    need = []
+    for row in rows:
+        stage = row.get("stage") or "screen"
+        if stage in ("screen", "watch", "active") and row.get("offer_value") is None:
+            row["needs_manual_terms"] = True
+        if row.get("target_price") is None and row.get("target_ticker"):
+            need.append(row)
+    if not need or quotes_fn is None:
+        return remembered
+    try:
+        raw = quotes_fn([row.get("target_ticker") for row in need]) or {}
+    except Exception:
+        return remembered
+    for row in need:
+        ticker = str(row.get("target_ticker") or "").upper()
+        price = _price_of(raw.get(ticker) if isinstance(raw, dict) else None)
+        if price is None and isinstance(raw, dict):
+            price = _price_of(raw.get(row.get("target_ticker")))
+        if price is None:
+            continue
+        row["target_price"] = price
+        deal_id = row.get("id") or ""
+        if deal_id:
+            remembered[deal_id] = price
+    return remembered
+
+
+def create_router(claims_fn, *, store=None, quotes_fn=None) -> APIRouter:
     router = APIRouter(prefix="/api/merger-arb", tags=["merger-arb"])
 
     def gp(request: Request) -> dict:
@@ -180,6 +225,10 @@ def create_router(claims_fn, *, store=None) -> APIRouter:
     def list_deals(request: Request):
         gp(request)
         result = query_deals(desk().list_deals(), parse_query(request.query_params))
+        remembered = fill_missing_prices(result.get("deals") or [], quotes_fn)
+        book = desk()
+        if remembered and hasattr(book, "remember_prices"):
+            book.remember_prices(remembered)
         return {"ok": True, **result}
 
     @router.get("/deals/{deal_id}")
@@ -190,12 +239,16 @@ def create_router(claims_fn, *, store=None) -> APIRouter:
         if found is None:
             raise HTTPException(404, "Deal not found")
         from merger_arb.query import public_deal
+        shown = public_deal(found)
+        remembered = fill_missing_prices([shown], quotes_fn)
+        if remembered and hasattr(desk(), "remember_prices"):
+            desk().remember_prices(remembered)
         history = []
         if hasattr(desk(), "history"):
             history = version_history(desk().history(deal_id))
         return {
             "ok": True,
-            "deal": public_deal(found),
+            "deal": shown,
             "terms": found.get("terms_json") or {},
             "metrics": found.get("metrics_json") or {},
             "score": found.get("score_json") or {},

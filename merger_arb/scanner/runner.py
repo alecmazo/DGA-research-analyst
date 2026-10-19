@@ -350,7 +350,7 @@ class ScanRunner:
                 return run
             if self.client is not None and getattr(self.client, "sec_blocked", False) and source.name.startswith("sec_"):
                 row["status"] = "skipped"
-                row["detail"] = "SEC tier stopped after a block or a rate limit"
+                row["detail"] = "SEC tier stopped after a rate limit"
                 self.store.save_run(run)
                 continue
             if not source.enabled():

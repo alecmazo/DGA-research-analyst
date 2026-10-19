@@ -17,7 +17,7 @@ from merger_arb.scanner.actions import add_to_desk, apply_alert
 from merger_arb.scanner.classify import classify_filing, classify_headline
 from merger_arb.scanner.config import ScannerConfig, _rps
 from merger_arb.scanner.extract import extract_terms
-from merger_arb.scanner.http import PoliteClient, ResponseCache
+from merger_arb.scanner.http import HttpError, PoliteClient, ResponseCache
 from merger_arb.scanner.llm_extract import LlmUrlError, extract_llm_fields, resolve_llm_url
 from merger_arb.calc import deal_metrics
 from merger_arb.scanner.extract import close_from_phrase
@@ -36,7 +36,8 @@ from merger_arb.scanner.sources.ftc_et import parse_ftc
 from merger_arb.scanner.sources.rss_parse import parse_rss
 from merger_arb.scanner.sources.sec_common import parse_efts
 from merger_arb.scanner.sources.sec_efts import SecEftsSource
-from merger_arb.scanner.sources.sec_index import parse_form_index
+from merger_arb.scanner.sources.news_rss import GNW_URL, RssFeedSource
+from merger_arb.scanner.sources.sec_index import SecIndexSource, parse_form_index
 from merger_arb.scanner.sources.sec_submissions import parse_submissions
 from merger_arb.scanner.sources.sec_tickers import parse_company_tickers
 from merger_arb.scanner.sources.trackers import enabled_adapters
@@ -630,3 +631,101 @@ def test_api_scan_and_placeholder_skips_sec():
     assert "fmp" not in names
     assert not hasattr(ScannerConfig(), "fmp_api_key")
     assert not (ROOT / "merger_arb" / "scanner" / "sources" / "fmp.py").exists()
+
+
+def _client(transport):
+    return PoliteClient(
+        user_agent="Alec Research <a@example.com>",
+        sec_rps=100,
+        transport=transport,
+        cache=ResponseCache(""),
+        clock=lambda: 0,
+        sleep=lambda _seconds: None,
+        now=lambda: 0,
+    )
+
+
+def test_sec_index_403_does_not_stop_later_sec_calls():
+    calls = []
+
+    def transport(url, _headers):
+        calls.append(url)
+        if "daily-index" in url:
+            return 403, {}, b"no"
+        return 200, {}, b"ok"
+
+    client = _client(transport)
+    with pytest.raises(HttpError) as caught:
+        client.get("https://www.sec.gov/Archives/edgar/daily-index/2026/QTR4/form.20261017.idx")
+    assert caught.value.status == 403
+    assert client.sec_blocked is False
+    assert client.get("https://data.sec.gov/submissions/CIK0000000001.json") == b"ok"
+    assert any("data.sec.gov" in url for url in calls)
+
+
+def test_sec_rate_limit_still_stops_the_tier():
+    client = _client(lambda _url, _headers: (429, {}, b""))
+    with pytest.raises(HttpError):
+        client.get("https://www.sec.gov/files/x")
+    assert client.sec_blocked is True
+
+
+def test_a_wire_is_not_fetched_as_a_one_token_mozilla():
+    seen = {}
+
+    def transport(_url, headers):
+        seen.update(headers)
+        return 200, {}, b"ok"
+
+    assert _client(transport).get("https://www.globenewswire.com/RssFeed/x") == b"ok"
+    assert "Chrome" in seen["User-Agent"]
+    assert seen["User-Agent"] != "Mozilla/5.0"
+
+
+def test_globenewswire_uses_the_subject_feed_after_a_403():
+    seen = []
+
+    class Ctx:
+        now = datetime(2026, 10, 19, tzinfo=timezone.utc)
+
+        def get(self, url):
+            seen.append(url)
+            if url == GNW_URL:
+                raise RuntimeError("HTTP 403 for " + url)
+            return b"<rss><channel></channel></rss>"
+
+    result = RssFeedSource("gnw", "GlobeNewswire", GNW_URL, True).fetch({}, Ctx())
+    assert result.error == ""
+    assert seen[0] == GNW_URL
+    assert len(seen) == 2
+
+
+def test_sec_index_keeps_a_later_day_when_one_day_is_blocked():
+    good = _read("form_20260930.idx").encode()
+
+    class Ctx:
+        now = datetime(2026, 10, 19, tzinfo=timezone.utc)
+
+        def get(self, url):
+            if url.endswith("blocked.idx"):
+                raise RuntimeError("HTTP 403 for blocked")
+            return good
+
+    source = SecIndexSource(
+        ScannerConfig(sec_user_agent="Alec Research <a@example.com>"),
+        urls=["https://www.sec.gov/blocked.idx", "https://www.sec.gov/good.idx"],
+    )
+    result = source.fetch({}, Ctx())
+    assert result.error == ""
+    assert result.records
+
+
+def test_support_stays_above_the_merger_page():
+    dock = (ROOT / "web/gp-app/src/components/support/FabDock.tsx").read_text()
+    assert "createPortal" in dock
+    css = (ROOT / "web/gp-app/src/components/support/SupportFab.module.css").read_text()
+    assert "z-index: 10050" in css
+    page = (ROOT / "web/gp-app/src/pages/MergerArbPage.module.css").read_text()
+    assert "padding-bottom: 88px" in page
+    assert "max-height: min(420px, calc(100vh - 220px))" in page
+    assert "quotes_fn=load_quotes" in (ROOT / "api" / "server.py").read_text()

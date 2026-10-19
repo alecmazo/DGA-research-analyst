@@ -90,16 +90,20 @@ class SecIndexSource:
                     urls.append(index_url(day))
                 day = day - timedelta(days=1)
         records = []
+        errors = []
         for url in urls:
             try:
                 body = ctx.get(url)
             except Exception as exc:
-                return FetchResult(records=records, cursor=cursor, error=str(exc)[:300])
+                errors.append(str(exc)[:300])
+                continue
             if not body:
                 continue
             text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
             records.extend(parse_form_index(
                 text, pulled_at=ctx.now.isoformat(), allow_form_15=self.config.enable_form_15,
             ))
+        if not records and errors:
+            return FetchResult(records=[], cursor=cursor, error=errors[-1])
         fresh, new_cursor = seen_filter(records, cursor or {})
         return FetchResult(records=fresh, cursor=new_cursor)

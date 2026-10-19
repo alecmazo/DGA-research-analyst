@@ -12,7 +12,7 @@ RSS is parsed with the standard-library XML reader, the same way Yahoo headlines
 
 | Source | Default | Notes |
 |---|---|---|
-| SEC search, daily index, submissions, ticker map | On, if `SEC_USER_AGENT` is a real contact | Shared limit, hard cap 10 requests/second. A 403 or 429 stops only this scan's SEC tier. |
+| SEC search, daily index, submissions, ticker map | On, if `SEC_USER_AGENT` is a real contact | Shared limit, hard cap 10 requests/second. A 429 stops the rest of the SEC tier. A 403 is that URL only, so a blocked daily index does not skip search or submissions. |
 | FTC early-termination API | On | Blank `FTC_API_KEY` uses `DEMO_KEY`. The progress row says that limit is tiny. A missing notice is not "HSR uncleared". Notices never create a candidate by themselves. |
 | Nasdaq corporate-actions RSS | On | Completion corroboration. |
 | PR Newswire and GlobeNewswire | On | A dead feed marks that row error. The rest of the scan finishes. |

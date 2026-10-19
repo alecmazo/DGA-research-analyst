@@ -12,10 +12,14 @@ from merger_arb.score import DEFAULT_WEIGHTS
 from merger_arb.store import MemoryStore
 
 
-def _app(store=None, role="gp"):
+def _app(store=None, role="gp", quotes_fn=None):
     desk = store if store is not None else MemoryStore()
     app = FastAPI()
-    app.include_router(create_router(lambda _request: {"role": role, "email": "alec@dgacapital.com", "name": "Alec"}, store=desk))
+    app.include_router(create_router(
+        lambda _request: {"role": role, "email": "alec@dgacapital.com", "name": "Alec"},
+        store=desk,
+        quotes_fn=quotes_fn,
+    ))
     return TestClient(app), desk
 
 
@@ -246,6 +250,24 @@ def test_detail_patch_and_score_config():
     assert saved.json()["config"]["version"] == 1
     assert saved.json()["rescored"] >= 3
     assert desk.get_deal("cash-one")["score_json"]["weights"]["return"] == 30
+
+
+def test_a_blank_screen_row_shows_the_live_price():
+    store = MemoryStore()
+    store.upsert_deal({
+        "id": "ampx",
+        "target_ticker": "AMPX",
+        "target_name": "Amprius",
+        "stage": "screen",
+    })
+    client, desk = _app(store, quotes_fn=lambda _tickers: {"AMPX": {"price": 8.5}})
+    row = client.get("/api/merger-arb/deals").json()["deals"][0]
+    assert row["target_ticker"] == "AMPX"
+    assert row["target_price"] == 8.5
+    assert row["needs_manual_terms"] is True
+    assert desk.get_deal("ampx")["target_price"] == 8.5
+    again = client.get("/api/merger-arb/deals").json()["deals"][0]
+    assert again["target_price"] == 8.5
 
 
 def test_demo_cannot_patch_and_lp_is_forbidden():

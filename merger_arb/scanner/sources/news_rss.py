@@ -16,6 +16,10 @@ GNW_URL = (
     "https://www.globenewswire.com/RssFeed/subjectcode/27-Mergers%20And%20Acquisitions/"
     "feedTitle/GlobeNewswire%20-%20Mergers%20And%20Acquisitions"
 )
+# The long feedTitle URL is the one Akamai answers with 403. The subject feed is the fallback.
+GNW_FALLBACKS = (
+    "https://www.globenewswire.com/RssFeed/subjectcode/27-Mergers%20And%20Acquisitions",
+)
 GOOGLE_URL = (
     "https://news.google.com/rss/search?q="
     + quote('"definitive agreement to acquire" when:7d')
@@ -40,18 +44,33 @@ class RssFeedSource:
     def enabled(self) -> bool:
         return self._enabled
 
+    def _urls(self) -> list[str]:
+        urls = [self.url]
+        if self.name == "gnw":
+            for extra in GNW_FALLBACKS:
+                if extra not in urls:
+                    urls.append(extra)
+        return urls
+
     def fetch(self, cursor: dict, ctx) -> FetchResult:
         if not self.enabled():
             return FetchResult(cursor=cursor, detail=f"{self.label} is off")
-        try:
-            body = ctx.get(self.url)
-        except Exception as exc:
-            return FetchResult(cursor=cursor, error=str(exc)[:300])
-        if not body:
-            return FetchResult(cursor=cursor, error=f"{self.label} returned nothing")
-        text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
-        records = parse_rss(text, source=self.name, pulled_at=ctx.now.isoformat())
-        return _guid_cursor(records, cursor)
+        last = ""
+        for url in self._urls():
+            try:
+                body = ctx.get(url)
+            except Exception as exc:
+                last = str(exc)[:300]
+                if "403" not in last:
+                    return FetchResult(cursor=cursor, error=last)
+                continue
+            if not body:
+                last = f"{self.label} returned nothing"
+                continue
+            text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
+            records = parse_rss(text, source=self.name, pulled_at=ctx.now.isoformat())
+            return _guid_cursor(records, cursor)
+        return FetchResult(cursor=cursor, error=last or f"{self.label} returned nothing")
 
 
 class YahooTickerSource:

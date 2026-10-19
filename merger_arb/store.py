@@ -630,6 +630,14 @@ class MemoryStore:
     def get_deal(self, deal_id: str) -> dict | None:
         return self.deals.get(deal_id)
 
+    def remember_prices(self, prices: dict) -> None:
+        """Keep a live print on a screen row that was stored without one."""
+        for deal_id, price in (prices or {}).items():
+            deal = self.deals.get(deal_id)
+            if deal is None or deal.get("target_price") not in (None, ""):
+                continue
+            deal["target_price"] = price
+
     def save_version(self, packet: dict) -> dict:
         stored = deepcopy(packet)
         meta = stored.setdefault("packet_meta", {})
@@ -1043,6 +1051,23 @@ class PostgresStore:
             cur.execute(_DEAL_SELECT + " WHERE id = %s", (deal_id,))
             row = cur.fetchone()
         return _deal_from_row(row) if row else None
+
+    def remember_prices(self, prices: dict) -> None:
+        """Keep a live print on a screen row that was stored without one."""
+        rows = [(price, deal_id) for deal_id, price in (prices or {}).items() if price not in (None, "")]
+        if not rows:
+            return
+        with self._connect() as conn, conn.cursor() as cur:
+            ensure_tables(conn)
+            cur.executemany(
+                """
+                UPDATE merger_arb_deals
+                   SET target_price = %s
+                 WHERE id = %s AND target_price IS NULL
+                """,
+                rows,
+            )
+            conn.commit()
 
     def list_regulatory(self, deal_id: str) -> list[dict]:
         with self._connect() as conn:

@@ -1,4 +1,9 @@
-"""Polite HTTP. SEC hosts share one token bucket. A 403 or 429 stops only this scan's SEC tier."""
+"""Polite HTTP. SEC hosts share one token bucket.
+
+A 429 stops the rest of this scan's SEC calls. A 403 is that URL only:
+the daily index often refuses a cloud host while search and submissions
+still answer, and those must keep running.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,11 @@ from datetime import date
 from urllib.parse import urlparse
 
 SEC_HOSTS = {"www.sec.gov", "efts.sec.gov", "data.sec.gov"}
+# A one-token Mozilla UA is what GlobeNewswire and PR Newswire answer with 403.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
 
 
 class HttpError(Exception):
@@ -201,8 +211,13 @@ class PoliteClient:
             return {
                 "User-Agent": self.user_agent,
                 "Accept-Encoding": "gzip, deflate",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
             }
-        return {"User-Agent": "Mozilla/5.0"}
+        return {
+            "User-Agent": _BROWSER_UA,
+            "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
 
     def get(self, url: str, *, ttl: float | None = None) -> bytes:
         host = urlparse(url).hostname or ""
@@ -239,7 +254,9 @@ class PoliteClient:
                 self.cache.put(url, body or b"", etag, modified, expires)
                 return body or b""
             if status == 403 and host in SEC_HOSTS:
-                self.sec_blocked = True
+                if attempt < 2:
+                    self.sleep(0.4)
+                    continue
                 raise HttpError(status, url)
             if status == 429 or status >= 500:
                 if attempt == 2:

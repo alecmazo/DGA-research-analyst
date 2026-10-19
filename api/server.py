@@ -8993,7 +8993,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui741-20261019-merger-arb-scorecard"
+WEB_BUILD_VERSION = "ui742-20261019-merger-scan-fix"
 
 
 @app.get("/api/build")
@@ -44605,7 +44605,8 @@ _mount_sliw_agent()
 def _mount_merger_arb() -> None:
     try:
         from api.domains.merger_arb_analysis import create_router
-        app.include_router(create_router(_claims_or_401))
+        from merger_arb.scanner.runner import load_quotes
+        app.include_router(create_router(_claims_or_401, quotes_fn=load_quotes))
     except Exception as exc:
         print(f"[merger-arb] mount failed: {exc!r}", flush=True)
 

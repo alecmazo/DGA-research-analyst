@@ -73,7 +73,7 @@
 }
 
 .row[data-selected='1'] td {
-  background: color-mix(in srgb, var(--brand-500) 12%, var(--bg-surface));
+  background: rgba(91, 184, 212, 0.16);
 }
 
 .chooser {
