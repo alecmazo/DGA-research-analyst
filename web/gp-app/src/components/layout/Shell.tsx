@@ -31,10 +31,6 @@ export function Shell({ user, build }: Props) {
           <Outlet />
         </div>
       </main>
-      <footer className={styles.footer} data-print="hide">
-        <span>DGA Capital · GP Terminal (React)</span>
-        {build && <span className={styles.build}>{build}</span>}
-      </footer>
       <div data-print="hide">
         <FabDock />
       </div>

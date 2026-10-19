@@ -174,22 +174,28 @@ def test_issuer_map_fills_klarman_and_seaport():
     assert g._norm_issuer("SEAPORT ENTMT GROUP INC") == "SEAPORT ENTERTAINMENT"
 
 
-def test_nav_has_lab_accounts_gurus():
+def test_nav_groups_research_book_more():
     top = (ROOT / "web/gp-app/src/components/layout/Topbar.tsx").read_text()
-    assert 'label="Gurus"' in top or "label: 'Gurus'" in top
-    assert 'label="Lab"' in top
-    assert 'label="Accounts"' in top
+    assert "label: 'Gurus'" in top
+    assert 'label="Research"' in top
+    assert 'label="Book"' in top
+    assert 'label="More"' in top
+    assert "On this Mac" in top
     assert "NavMenu" in top
     assert "createPortal" in top
-    work, rest = top.split("const LAB", 1)
-    lab, _accounts = rest.split("const ACCOUNTS", 1)
-    assert "label: 'Watchlists'" in work
-    assert "label: 'Builder'" not in work
-    assert "{ to: '/podcasts'" in work
-    assert "{ to: '/credit'" not in work
-    assert "{ to: '/credit'" in lab
-    assert "{ to: '/podcasts'" not in lab
-    assert "{ to: '/positions'" in top
+    research, rest = top.split("const BOOK", 1)
+    book, more = rest.split("const MORE", 1)
+    assert "label: 'Boards'" in research
+    assert "label: 'Watchlists'" not in research
+    assert "label: 'Builder'" not in research
+    assert "{ to: '/podcasts'" in research
+    assert "{ to: '/transcripts'" in research
+    assert "{ to: '/credit'" not in research
+    assert "label: 'Accounts'" in book
+    assert "{ to: '/positions'" in book
+    assert "{ to: '/credit'" in more
+    assert "label: 'Book map'" in more
+    assert "{ to: '/podcasts'" not in more
     app = (ROOT / "web/gp-app/src/App.tsx").read_text()
     assert 'path="gurus"' in app
     assert "GurusPage" in app

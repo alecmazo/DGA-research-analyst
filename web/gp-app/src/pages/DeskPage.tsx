@@ -29,7 +29,6 @@ import {
   notifyWatchlistSettled,
 } from '@/lib/deskBoot'
 import { publishQuotes } from '@/lib/quoteBook'
-import { saveSupportLog } from '@/lib/supportLog'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
 import { openReportWindow } from '@/lib/openWindows'
 import styles from './DeskPage.module.css'
@@ -247,7 +246,6 @@ export function DeskPage() {
   } | null>(null)
   const [wlSort, setWlSort] = useState<WlSort>('day')
   const [wlDir, setWlDir] = useState<SortDir>('desc')
-  const [logNote, setLogNote] = useState<string | null>(null)
 
   const loadWatchlist = useCallback(async () => {
     const ac = new AbortController()
@@ -376,55 +374,6 @@ export function DeskPage() {
       })
   }, [wl, wlSort, wlDir])
 
-  const captureWlLog = useCallback(async () => {
-    setLogNote('…')
-    const t0 = performance.now()
-    let fresh: WatchlistResponse | null = null
-    let error = ''
-    const ac = new AbortController()
-    const timer = window.setTimeout(() => ac.abort(), 12_000)
-    try {
-      fresh = await api<WatchlistResponse>('/api/watchlist?fresh=1', {
-        signal: ac.signal,
-      })
-    } catch (e) {
-      const aborted =
-        (e instanceof DOMException && e.name === 'AbortError') ||
-        (e instanceof Error && /abort/i.test(e.message))
-      error = aborted
-        ? 'client aborted at 12s'
-        : e instanceof Error
-          ? e.message
-          : 'fetch failed'
-    } finally {
-      window.clearTimeout(timer)
-    }
-    const src = fresh || wl
-    const tickers = src?.tickers || []
-    const quotes = src?.quotes || {}
-    const missing = tickers.filter((tk) => quotes[tk]?.price == null)
-    const noYtd = tickers.filter(
-      (tk) => quotes[tk]?.ytd == null && quotes[tk]?.ytd_pct == null,
-    )
-    const clientMs = Math.round(performance.now() - t0)
-    const text = [
-      `watchlist log ${new Date().toISOString()}`,
-      `client_ms ${clientMs}`,
-      `error ${error || 'none'}`,
-      `screen_error ${err || 'none'}`,
-      `shown_rows ${rows.length}`,
-      `server_ms ${src?.timing_ms ?? '—'}`,
-      `tickers ${tickers.length}`,
-      `quote_rows ${Object.keys(quotes).length}`,
-      `missing_price ${missing.length} ${missing.slice(0, 30).join(',')}`,
-      `missing_ytd ${noYtd.length}`,
-      `diag ${JSON.stringify(src?.diag || {})}`,
-    ].join('\n')
-    saveSupportLog(text)
-    setLogNote('ready')
-    window.setTimeout(() => setLogNote(null), 4000)
-  }, [wl, err, rows.length])
-
   const clickWlSort = (col: WlSort) => {
     if (wlSort === col) {
       setWlDir((d) => (d === 'desc' ? 'asc' : 'desc'))
@@ -506,14 +455,6 @@ export function DeskPage() {
             : loading
               ? '…'
               : 'Live'}
-          <button
-            type="button"
-            className={styles.logBtn}
-            title="Save a watchlist log, then file it with Support"
-            onClick={() => void captureWlLog()}
-          >
-            {logNote === '…' ? '…' : logNote === 'ready' ? 'Ready' : 'Log'}
-          </button>
         </span>
       ),
       children: (
@@ -697,7 +638,7 @@ export function DeskPage() {
     },
     {
       id: 'pulse' as const,
-      title: 'Daily Pulse',
+      title: 'Morning note',
       badge: brief?.provider || '—',
       action: (
         <span className={styles.meta}>
@@ -710,13 +651,13 @@ export function DeskPage() {
         </div>
       ) : (
         <div className={styles.emptyBlock}>
-          <p>No pulse yet. It runs on the Settings schedule.</p>
+          <p>No morning note yet. It runs on the Settings schedule.</p>
         </div>
       ),
     },
     {
       id: 'mpulse' as const,
-      title: 'Market Pulse',
+      title: 'Headlines',
       badge: 'Free',
       flush: true,
       action: <span className={styles.meta}>Newest headline</span>,
@@ -824,7 +765,7 @@ export function DeskPage() {
             <strong>{Object.keys(wl?.reports || {}).length}</strong>
           </li>
           <li>
-            <span>Pulse</span>
+            <span>Morning note</span>
             <strong>{brief?.markdown ? 'Ready' : 'Idle'}</strong>
           </li>
         </ul>
@@ -838,7 +779,7 @@ export function DeskPage() {
 
       <DeskBoard
         title="Desk"
-        meta={`${rows.length} watch · ${Object.keys(wl?.reports || {}).length} reports`}
+        meta="Watchlist, reports, and the morning note"
         onRefresh={() => void refreshDesk()}
         refreshBusy={refreshing}
         cards={cards}

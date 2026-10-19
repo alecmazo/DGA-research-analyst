@@ -325,6 +325,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Merger scan** | **`ui742-20261019-merger-scan-fix`** | A daily-index 403 no longer skips the rest of SEC. GlobeNewswire retries the subject feed with a full browser header. Screen rows without a stored price show the live print, and terms-needed is labeled. Support sits above the Merger Arb drawer. |
 | **Merger desk** | **`ui743-20261019-merger-desk`** | Screen rows pick up the scanner's stated cash or ratio, close date, and acquirer name. The table shows those figures. Add deal accepts a target with no acquirer. |
 | **Merger scan fetch** | **`ui744-20261019-scan-fetch`** | A scan no longer dies by writing a candidate id into the desk alias table. One missed status poll does not stay on screen as "Failed to fetch". Opening a deal skips the candidate table when the row already has terms. |
+| **Desk navigation** | **`ui745-20261019-desk-nav`** | Research, Book, and More replace the flat bar. Settings, theme, and log out sit in the avatar. A first visit and Daily layout open the watchlist, reports, Analyze, and Analyst. The morning note, headlines, movers, and strategist start collapsed. Load flow, repo flow, and desk health stay on the board, collapsed. The tape shows six prints, with the rest under More. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
 ### One-click handoff (preferred)
@@ -523,4 +524,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-19 · Agent: Cursor · Built: `ui744-20261019-scan-fetch` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui745-YYYYMMDD-slug`*
+*Last updated: 2026-10-19 · Agent: Cursor · Built: `ui745-20261019-desk-nav` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui746-YYYYMMDD-slug`*

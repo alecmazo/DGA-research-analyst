@@ -111,6 +111,7 @@ Human greenlit high-ROI package: **GP → mobile research → LP**, light termin
 |------|-----------|---------|
 | 2026-07-13 | Grok → Fable / all | Verified local worktree ≡ `origin/main` @ `6708074`. Restored accidental local deletions of tracked Sliw data files + `stock-financials/.gitkeep` (not committed as deletes). Added `.grok/` to `.gitignore`. Left design proposals in conversation only; **no portfolio UI code changes**. |
 | 2026-07-13 | Grok → Fable / all | **Implemented** high-ROI UX package (no API/fund math changes): GP Desk + light default + report reader; mobile Today + report hero/TOC; LP narrative strip. Claims released. Pull `main` before further web UI work. |
+| 2026-10-19 | Cursor → all | **ui745-20261019-desk-nav.** GP bar is Research / Book / More / On this Mac. Settings, theme, and log out are in the avatar. Daily layout is the desk default and a Desk-menu action; saved layouts are left in place until that action. Claims released. |
 
 ---
 

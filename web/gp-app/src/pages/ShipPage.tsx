@@ -239,8 +239,8 @@ export function ShipPage() {
       </div>
       <aside className={styles.aside}>
         <div>
-          <p className={styles.kicker}>Lab</p>
-          <h1>Portfolio City</h1>
+          <p className={styles.kicker}>Book</p>
+          <h1>Book map</h1>
         </div>
         <p className={styles.note}>
           Each building is one company. Each district is one sector. Height and footprint follow

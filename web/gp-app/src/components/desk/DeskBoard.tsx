@@ -45,23 +45,30 @@ const LEGACY_KEYS = [
   'dga.desk.layout.v1',
 ]
 
-/** Defaults only for first visit or brand-new cards the user never placed. */
+/**
+ * First visit, and the Desk menu's Daily layout.
+ * Open: watchlist, reports, analyst, analyze.
+ * Collapsed on the next row: morning note, headlines, movers, strategist.
+ * Parked as collapsed strips: wire, health, load flow, repo flow.
+ * A saved layout is never replaced by this map.
+ */
 const DEFAULT_LAYOUT: DeskLayoutMap = {
-  watchlist: { x: 0, y: 0, w: 340, h: 420 },
-  pulse: { x: 0, y: 436, w: 340, h: 240 },
-  mpulse: { x: 0, y: 692, w: 340, h: 400 },
-  reports: { x: 356, y: 0, w: 400, h: 420 },
-  analyst: { x: 356, y: 436, w: 400, h: 420 },
-  strategist: { x: 356, y: 872, w: 400, h: 380 },
-  wire: { x: 772, y: 0, w: 400, h: 380 },
-  analyze: { x: 772, y: 396, w: 400, h: 220 },
-  movers: { x: 772, y: 632, w: 400, h: 460 },
-  health: { x: 0, y: 1108, w: 340, h: 180 },
-  // Full width, first free row under Portfolio Strategist (health ends at 1288).
-  // Tall enough for the top-down chart, including Credit and Settings.
-  flow: { x: 0, y: 1304, w: 1172, h: 1300 },
-  // Full width, directly under Load flow (1304 + 1300 + 16).
-  repo: { x: 0, y: 2620, w: 1172, h: 520 },
+  watchlist: { x: 0, y: 0, w: 400, h: 440 },
+  reports: { x: 416, y: 0, w: 370, h: 440 },
+  analyst: { x: 802, y: 0, w: 370, h: 248 },
+  analyze: { x: 802, y: 264, w: 370, h: 176 },
+  pulse: { x: 0, y: 456, w: 281, h: 280, collapsed: true },
+  mpulse: { x: 297, y: 456, w: 281, h: 400, collapsed: true },
+  movers: { x: 594, y: 456, w: 281, h: 420, collapsed: true },
+  strategist: { x: 891, y: 456, w: 281, h: 380, collapsed: true },
+  wire: { x: 0, y: 516, w: 1172, h: 380, collapsed: true },
+  health: { x: 0, y: 576, w: 1172, h: 180, collapsed: true },
+  flow: { x: 0, y: 636, w: 1172, h: 1300, collapsed: true },
+  repo: { x: 0, y: 696, w: 1172, h: 520, collapsed: true },
+}
+
+function cloneLayout(map: DeskLayoutMap): DeskLayoutMap {
+  return JSON.parse(JSON.stringify(map)) as DeskLayoutMap
 }
 
 const ALL_IDS = Object.keys(DEFAULT_LAYOUT) as CardId[]
@@ -217,7 +224,7 @@ function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
   if (!saved) {
     markFlowAnchored()
     markRepoAnchored()
-    return { ...DEFAULT_LAYOUT }
+    return cloneLayout(DEFAULT_LAYOUT)
   }
 
   const out: DeskLayoutMap = { ...DEFAULT_LAYOUT }
@@ -450,14 +457,16 @@ export function DeskBoard({
     return max
   }, [layout])
 
-  const reset = () => {
+  const restoreDaily = () => {
     if (
       !window.confirm(
-        'Reset desk layout to defaults? Your current card positions will be replaced.',
+        'Restore the daily desk layout? Card positions you have dragged will be replaced.',
       )
     )
       return
-    persist({ ...DEFAULT_LAYOUT })
+    markFlowAnchored()
+    markRepoAnchored()
+    persist(cloneLayout(DEFAULT_LAYOUT))
   }
 
   const setAllCollapsed = (collapsed: boolean) => {
@@ -510,7 +519,7 @@ export function DeskBoard({
           {title != null && <strong className={styles.deskTitle}>{title}</strong>}
           {meta != null && <span className={styles.deskMeta}>{meta}</span>}
           <span className={styles.hintText}>
-            Drag to move · resize corner · click title to collapse
+            Drag to move · resize corner · click title to collapse · Daily layout is in the Desk menu
           </span>
         </div>
         <div className={styles.hintActions}>
@@ -526,7 +535,7 @@ export function DeskBoard({
             disabled={refreshBusy}
             aria-label="Desk actions"
             aria-busy={refreshBusy || undefined}
-            title="Refresh, collapse, expand, or reset layout"
+            title="Refresh, collapse, expand, or restore the daily layout"
             onChange={(e) => {
               const v = e.target.value
               e.currentTarget.value = ''
@@ -534,7 +543,7 @@ export function DeskBoard({
               if (v === 'refresh') onRefresh?.()
               else if (v === 'collapse') setAllCollapsed(true)
               else if (v === 'expand') setAllCollapsed(false)
-              else if (v === 'reset') reset()
+              else if (v === 'daily') restoreDaily()
             }}
           >
             <option value="" disabled>
@@ -543,7 +552,7 @@ export function DeskBoard({
             <option value="refresh">Refresh</option>
             <option value="collapse">Collapse all</option>
             <option value="expand">Expand all</option>
-            <option value="reset">Reset layout</option>
+            <option value="daily">Daily layout</option>
           </select>
           <TicketStatusDot />
         </div>

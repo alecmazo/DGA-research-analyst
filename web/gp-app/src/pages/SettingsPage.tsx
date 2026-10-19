@@ -40,7 +40,7 @@ export function SettingsPage() {
           <p className={page.kicker}>Admin</p>
           <h1 className={page.h1}>Settings</h1>
           <p className={page.sub}>
-            Continuity kit (short briefing + product log), models, connections, security, users, and system.
+            Models, connections, users, and the handoff kit.
           </p>
         </div>
       </header>

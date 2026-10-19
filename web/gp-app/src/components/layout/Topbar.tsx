@@ -9,28 +9,27 @@ import { StockPeek } from './StockPeek'
 import styles from './Topbar.module.css'
 
 // Paths are relative to BrowserRouter basename="/gp")
-const WORK: { to: string; label: string }[] = [
+const RESEARCH: { to: string; label: string }[] = [
   { to: '/', label: 'Desk' },
   { to: '/financials', label: 'Financials' },
-  { to: '/local', label: 'Local' },
-  { to: '/builder', label: 'Watchlists' },
+  { to: '/builder', label: 'Boards' },
   { to: '/gurus', label: 'Gurus' },
   { to: '/podcasts', label: 'Podcasts' },
-]
-
-const LAB: { to: string; label: string }[] = [
-  { to: '/credit', label: 'Credit' },
   { to: '/transcripts', label: 'Transcripts' },
-  { to: '/munger', label: 'Munger' },
-  { to: '/merger-arb', label: 'Merger Arb' },
-  { to: '/ship', label: 'City' },
 ]
 
-const ACCOUNTS: { to: string; label: string }[] = [
+const BOOK: { to: string; label: string }[] = [
   { to: '/fund', label: 'Accounts' },
   { to: '/positions', label: 'Positions' },
   { to: '/options', label: 'Options' },
   { to: '/memos', label: 'Memos' },
+]
+
+const MORE: { to: string; label: string }[] = [
+  { to: '/credit', label: 'Credit' },
+  { to: '/merger-arb', label: 'Merger arb' },
+  { to: '/munger', label: 'Munger' },
+  { to: '/ship', label: 'Book map' },
 ]
 
 /** Sliw Agent — Edyta corporate desk. Same allowlist as pre-React topbar
@@ -58,7 +57,10 @@ function NavMenu({
   const ref = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const active = items.some((it) => pathActive(loc.pathname, it.to))
+  const activeItem = items.find((it) => pathActive(loc.pathname, it.to))
+  const active = !!activeItem
+  const buttonLabel = activeItem?.label || label
+  const menuId = useRef(`nav-${label}`)
 
   const place = () => {
     const r = btnRef.current?.getBoundingClientRect()
@@ -75,15 +77,20 @@ function NavMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
     }
+    const onOther = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== menuId.current) setOpen(false)
+    }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
     window.addEventListener('resize', place)
     window.addEventListener('scroll', place, true)
+    window.addEventListener('dga-nav-menu', onOther)
     return () => {
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
+      window.removeEventListener('dga-nav-menu', onOther)
     }
   }, [])
 
@@ -95,13 +102,15 @@ function NavMenu({
         className={`${styles.link} ${styles.menuBtn} ${active ? styles.linkActive : ''}`}
         aria-expanded={open}
         aria-haspopup="menu"
+        title={label}
         onClick={(e) => {
           e.stopPropagation()
           place()
+          window.dispatchEvent(new CustomEvent('dga-nav-menu', { detail: menuId.current }))
           setOpen((o) => !o)
         }}
       >
-        {label} <span aria-hidden>{open ? '▴' : '▾'}</span>
+        {buttonLabel} <span aria-hidden>{open ? '▴' : '▾'}</span>
       </button>
       {open &&
         createPortal(
@@ -115,6 +124,7 @@ function NavMenu({
               <NavLink
                 key={it.to}
                 to={it.to}
+                end={it.to === '/'}
                 role="menuitem"
                 className={({ isActive }) =>
                   `${styles.menuItem} ${isActive ? styles.menuItemOn : ''}`
@@ -124,6 +134,125 @@ function NavMenu({
                 {it.label}
               </NavLink>
             ))}
+          </div>,
+          document.body,
+        )}
+    </div>
+  )
+}
+
+function UserMenu({
+  user,
+  build,
+  theme,
+  onToggleTheme,
+}: {
+  user: GpUser | null
+  build?: string
+  theme: string
+  onToggleTheme: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, right: 0 })
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const initial = (user?.name || user?.email || 'GP').slice(0, 1).toUpperCase()
+  const menuId = useRef('nav-account')
+
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    setPos({
+      top: Math.round(r.bottom + 4),
+      right: Math.max(8, Math.round(window.innerWidth - r.right)),
+    })
+  }
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    const onOther = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== menuId.current) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    window.addEventListener('dga-nav-menu', onOther)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('dga-nav-menu', onOther)
+    }
+  }, [])
+
+  return (
+    <div className={styles.menuWrap} ref={ref}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={styles.userBtn}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="Account menu"
+        title={[user?.email, build].filter(Boolean).join(' · ') || 'Account'}
+        onClick={(e) => {
+          e.stopPropagation()
+          place()
+          window.dispatchEvent(new CustomEvent('dga-nav-menu', { detail: menuId.current }))
+          setOpen((o) => !o)
+        }}
+      >
+        <span className={styles.avatar}>{initial}</span>
+        <span className={styles.userMeta}>
+          <span className={styles.userName}>{user?.name || 'GP'}</span>
+          <span className={styles.userRole}>{(user?.role || 'gp').toUpperCase()}</span>
+        </span>
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className={`${styles.menuPanel} ${styles.menuPanelRight}`}
+            role="menu"
+            style={{ top: pos.top, right: pos.right }}
+          >
+            <div className={styles.menuWho}>
+              <strong>{user?.name || 'GP'}</strong>
+              {user?.email ? <span>{user.email}</span> : null}
+            </div>
+            <NavLink
+              to="/settings"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => setOpen(false)}
+            >
+              Settings
+            </NavLink>
+            {canAccessSliw(user) && (
+              <a className={styles.menuItem} role="menuitem" href="/sliw/">
+                Sliw
+              </a>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItemBtn}
+              onClick={onToggleTheme}
+            >
+              {theme === 'light' ? 'Dark theme' : 'Light theme'}
+            </button>
+            <button type="button" role="menuitem" className={styles.menuItemBtn} onClick={logout}>
+              Log out
+            </button>
+            {build ? <div className={styles.menuBuild}>{build}</div> : null}
           </div>,
           document.body,
         )}
@@ -162,7 +291,6 @@ type Props = {
 
 export function Topbar({ user, build }: Props) {
   const { theme, toggle } = useTheme()
-  const initial = (user?.name || user?.email || 'GP').slice(0, 1).toUpperCase()
 
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<SearchHit[]>([])
@@ -356,61 +484,22 @@ export function Topbar({ user, build }: Props) {
         </div>
 
         <nav className={styles.nav} aria-label="Primary">
-          {WORK.map((l) => (
-            <NavLink
-              key={l.to}
-              to={l.to}
-              end={l.to === '/'}
-              className={({ isActive }) =>
-                `${styles.link} ${isActive ? styles.linkActive : ''}`
-              }
-            >
-              {l.label}
-            </NavLink>
-          ))}
-          <NavMenu label="Lab" items={LAB} />
-          <span className={styles.divider} role="separator" />
-          <NavMenu label="Accounts" items={ACCOUNTS} />
+          <NavMenu label="Research" items={RESEARCH} />
+          <NavMenu label="Book" items={BOOK} />
+          <NavMenu label="More" items={MORE} />
           <NavLink
-            to="/settings"
+            to="/local"
             className={({ isActive }) =>
               `${styles.link} ${isActive ? styles.linkActive : ''}`
             }
           >
-            Settings
+            On this Mac
           </NavLink>
-          {canAccessSliw(user) && (
-            <a
-              className={styles.link}
-              href="/sliw/"
-              title="Sliw Agent — Edyta corporate desk"
-            >
-              Sliw
-            </a>
-          )}
         </nav>
 
         <div className={styles.right}>
-          <button
-            type="button"
-            className={styles.iconBtn}
-            onClick={toggle}
-            title="Toggle theme"
-            aria-label="Toggle theme"
-          >
-            {theme === 'light' ? '☾' : '☀'}
-          </button>
-          <span className={styles.dot} title={build || 'API online'} />
-          <div className={styles.user} title={user?.email || ''}>
-            <span className={styles.avatar}>{initial}</span>
-            <span className={styles.userMeta}>
-              <span className={styles.userName}>{user?.name || 'GP'}</span>
-              <span className={styles.userRole}>{(user?.role || 'gp').toUpperCase()}</span>
-            </span>
-          </div>
-          <button type="button" className={styles.logout} onClick={logout}>
-            Log out
-          </button>
+          <span className={styles.dot} title="API online" />
+          <UserMenu user={user} build={build} theme={theme} onToggleTheme={toggle} />
         </div>
       </header>
 

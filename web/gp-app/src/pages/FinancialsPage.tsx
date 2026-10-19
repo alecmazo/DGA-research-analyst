@@ -74,17 +74,13 @@ export function FinancialsPage() {
           <p className={page.kicker}>Research · SEC store</p>
           <h1 className={page.h1}>Financials</h1>
           <p className={page.sub}>
-            Full PM desk: company dashboard (DGA Score &amp; Value, ranks, peers,
-            TTM), Value Line sheet, SEC store pull/settings, company history, and
-            cross-name screen. Data from{' '}
-            <strong>Postgres company_financials</strong> (EDGAR XBRL) + quotes.
-            Coverage:{' '}
+            Company dashboard, Value Line sheet, and SEC history.
             {coverage.length ? (
-              <strong>{coverage.length.toLocaleString()}</strong>
-            ) : (
-              '—'
-            )}{' '}
-            tickers.
+              <>
+                {' '}
+                <strong>{coverage.length.toLocaleString()}</strong> tickers on file.
+              </>
+            ) : null}
           </p>
         </div>
       </header>

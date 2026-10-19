@@ -229,7 +229,7 @@ export default function App() {
               <Route
                 path="local"
                 element={
-                  <LazyPage label="Local">
+                  <LazyPage label="Local model">
                     <LocalPage />
                   </LazyPage>
                 }
@@ -253,7 +253,7 @@ export default function App() {
               <Route
                 path="builder"
                 element={
-                  <LazyPage label="Watchlists">
+                  <LazyPage label="Boards">
                     <BuilderPage />
                   </LazyPage>
                 }
@@ -313,7 +313,7 @@ export default function App() {
               <Route
                 path="ship"
                 element={
-                  <LazyPage label="City">
+                  <LazyPage label="Book map">
                     <ShipPage />
                   </LazyPage>
                 }

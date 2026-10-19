@@ -312,7 +312,7 @@ export function LocalPage() {
       <header className={styles.head}>
         <div>
           <p className={page.kicker}>This Mac only</p>
-          <h1 className={page.h1}>Local</h1>
+          <h1 className={page.h1}>Local model</h1>
         </div>
         {online ? (
           <div className={styles.status} title={status?.message || ''}>
