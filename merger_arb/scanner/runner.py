@@ -8,26 +8,41 @@ from decimal import Decimal
 
 from merger_arb.scanner.http import PoliteClient, ResponseCache, SecBlocked
 from merger_arb.scanner.llm_extract import LlmSkipped, LlmUrlError, extract_llm_fields, resolve_llm_url
+from merger_arb.calc import deal_metrics
+from merger_arb.scanner.extract import close_from_phrase
 from merger_arb.scanner.merge import _apply_fields, merge_records
 from merger_arb.scanner.models import FieldValue, SourceRecord
-from merger_arb.scanner.pricing import _dec, compute_spread, offer_terms
 from merger_arb.scanner.resolve import TickerMap, names_match
 from merger_arb.scanner.scoring import score_candidate
 from merger_arb.scanner.sources.base import FetchContext
 from merger_arb.scanner.status_watch import detect_alerts
 
 
-def _money(value: Decimal | None) -> str:
-    if value is None:
+def _money(value) -> str:
+    if value is None or value == "":
         return ""
-    return format(value.quantize(Decimal("0.01")), "f")
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return ""
 
 
-def _pct(value: Decimal | None) -> str:
-    if value is None:
+def _pct(value) -> str:
+    if value is None or value == "":
         return ""
-    shown = (value * Decimal(100)).quantize(Decimal("0.01"))
-    return f"{shown}%"
+    try:
+        return f"{float(value) * 100:.2f}%"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _num(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(str(value).replace(",", "").replace("$", "").strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def _current_rows(fields: list[dict], name: str) -> list[dict]:
@@ -113,13 +128,13 @@ def _freeze(bucket: dict) -> dict:
     }
 
 
-def _price_candidate(candidate: dict, quotes: dict, as_of: date) -> None:
+def _price_candidate(candidate: dict, quotes: dict, as_of: date, extras: dict | None = None) -> None:
     fields = candidate.get("fields") or []
     cash = _one(fields, "cash_per_share")
     ratio = _one(fields, "exchange_ratio")
     close = _one(fields, "expected_close")
     cvr = _one(fields, "cvr")
-    cvr_value = _dec(cvr.get("value")) if cvr else None
+    dividends = _one(fields, "target_dividends") or _one(fields, "special_dividend")
     manual = _flag(fields, "collar") or _flag(fields, "election") or _flag(fields, "proration")
     target_px = quotes.get((candidate.get("target_ticker") or "").upper())
     acquirer_px = quotes.get((candidate.get("acquirer_ticker") or "").upper())
@@ -127,39 +142,63 @@ def _price_candidate(candidate: dict, quotes: dict, as_of: date) -> None:
         candidate["current_price"] = _money(target_px)
     if acquirer_px is not None:
         candidate["acquirer_price"] = _money(acquirer_px)
-    spread = compute_spread(
+    close_date = (close or {}).get("value") or candidate.get("expected_close") or ""
+    close_text = (close or {}).get("evidence") or ""
+    assumption = ""
+    if str(close_date)[:10].count("-") != 2:
+        iso, assumption, _phrase = close_from_phrase(close_text)
+        close_date = iso or close_date
+    elif close_text:
+        _iso, assumption, _phrase = close_from_phrase(close_text)
+    extra = extras or {}
+    metrics = deal_metrics(
         cash=None if cash is None else cash.get("value"),
         ratio=None if ratio is None else ratio.get("value"),
         target_price=target_px,
         acquirer_price=acquirer_px,
-        close_date=(close or {}).get("value") or candidate.get("expected_close") or "",
-        close_text=(close or {}).get("evidence") or "",
+        close_date=close_date,
         as_of=as_of,
-        cvr_max=cvr_value,
+        cvr_max=None if cvr is None else cvr.get("value"),
         collar=manual and _flag(fields, "collar"),
         election=_flag(fields, "election"),
         proration=_flag(fields, "proration"),
+        target_dividends=None if dividends is None else dividends.get("value"),
+        break_price=extra.get("break_price"),
+        tbill_pct=extra.get("tbill_pct"),
+        shares_outstanding=extra.get("shares_outstanding"),
     )
-    candidate["needs_manual_terms"] = bool(spread.needs_manual_terms or manual)
-    candidate["consideration_type"] = spread.consideration or candidate.get("consideration_type") or ""
-    candidate["offer_terms"] = offer_terms(
-        cash=None if cash is None else Decimal(str(cash.get("value"))),
-        ratio=None if ratio is None else Decimal(str(ratio.get("value"))),
-    )
+    if assumption:
+        metrics.annualized_assumption = assumption + (
+            ("; " + metrics.annualized_assumption) if metrics.annualized_assumption and assumption not in metrics.annualized_assumption else ""
+        )
+    candidate["needs_manual_terms"] = bool(metrics.needs_manual_terms or manual)
+    candidate["consideration_type"] = metrics.consideration or candidate.get("consideration_type") or ""
+    candidate["offer_terms"] = metrics.offer_terms
+    candidate["metrics"] = metrics.as_json()
+    candidate["offer_value_num"] = metrics.offer_value
+    candidate["gross_pct"] = metrics.gross_pct
+    candidate["ann_pct"] = metrics.annualized_pct
+    candidate["net_pct"] = metrics.net_pct
+    candidate["implied_p"] = metrics.implied_p
+    candidate["downside_pct"] = metrics.downside_pct
+    candidate["deal_value_usd"] = metrics.deal_value_usd
+    candidate["acquirer_price_sensitive"] = bool(metrics.acquirer_price_sensitive)
     if candidate["needs_manual_terms"]:
         candidate["offer_value"] = ""
         candidate["gross_spread"] = ""
         candidate["gross_spread_pct"] = ""
         candidate["annualized_pct"] = ""
     else:
-        candidate["offer_value"] = _money(spread.offer_value)
-        candidate["gross_spread"] = _money(spread.gross_spread)
-        candidate["gross_spread_pct"] = _pct(spread.gross_spread_pct)
-        candidate["annualized_pct"] = _pct(spread.annualized_pct)
-    candidate["annualized_assumption"] = spread.annualized_assumption or ""
-    candidate["spread_with_cvr_max"] = _money(spread.spread_with_cvr_max)
+        candidate["offer_value"] = _money(metrics.offer_value)
+        candidate["gross_spread"] = _money(metrics.gross_dollars)
+        candidate["gross_spread_pct"] = _pct(metrics.gross_pct)
+        candidate["annualized_pct"] = _pct(metrics.annualized_pct)
+    candidate["annualized_assumption"] = metrics.annualized_assumption or ""
+    candidate["spread_with_cvr_max"] = _money(metrics.spread_with_cvr_max)
     if close and close.get("value"):
         candidate["expected_close"] = str(close.get("value"))[:10]
+    elif close_date:
+        candidate["expected_close"] = str(close_date)[:10]
     vote = _one(fields, "vote_date")
     if vote and vote.get("value"):
         candidate["vote_date"] = str(vote.get("value"))[:10]
@@ -205,6 +244,9 @@ class ScanRunner:
         desk_deals_fn=None,
         desk_store=None,
         llm_complete=None,
+        tbill_fn=None,
+        shares_fn=None,
+        history_fn=None,
     ):
         self.store = store
         self.sources = list(sources)
@@ -215,6 +257,9 @@ class ScanRunner:
         self.desk_deals_fn = desk_deals_fn or (lambda: [])
         self.desk_store = desk_store
         self.llm_complete = llm_complete
+        self.tbill_fn = tbill_fn
+        self.shares_fn = shares_fn
+        self.history_fn = history_fn
         self._thread = None
 
     def _now(self) -> datetime:
@@ -340,12 +385,14 @@ class ScanRunner:
         ignored = set(getattr(self.store, "ignored", {}) or {})
         deals = list(self.desk_deals_fn() or [])
         quotes = self._quotes(buckets)
+        tbill = self._tbill()
         saved = 0
         for bucket in buckets:
             if bucket.get("deal_key") in ignored:
                 bucket["ignored"] = True
             candidate = _freeze(bucket)
-            _price_candidate(candidate, quotes, today)
+            extras = self._metric_extras(candidate, tbill)
+            _price_candidate(candidate, quotes, today, extras)
             score, breakdown = score_candidate(candidate)
             candidate["confidence"] = score
             candidate["confidence_breakdown"] = breakdown
@@ -355,7 +402,9 @@ class ScanRunner:
                 candidate["on_desk"] = True
             self.store.upsert_candidate(candidate)
             if self.desk_store is not None and hasattr(self.desk_store, "upsert_screen_deal") and not candidate.get("hidden"):
-                self.desk_store.upsert_screen_deal(candidate)
+                deal = self.desk_store.upsert_screen_deal(candidate)
+                if hasattr(self.desk_store, "upsert_spread_history"):
+                    self.desk_store.upsert_spread_history(deal["id"], today.isoformat(), candidate)
             saved += 1
 
         alert_rows = []
@@ -375,6 +424,45 @@ class ScanRunner:
         run["counts"] = {"new_records": new_records, "candidates": saved, "alerts": len(alert_rows)}
         self.store.save_run(run)
         return run
+
+    def _tbill(self) -> float | None:
+        fn = self.tbill_fn
+        if fn is None:
+            try:
+                from api.domains.lp_planning import _mm_yield_pct
+                fn = _mm_yield_pct
+            except Exception:
+                return None
+        try:
+            value = fn()
+            return None if value in (None, "") else float(value)
+        except Exception:
+            return None
+
+    def _metric_extras(self, candidate: dict, tbill: float | None) -> dict:
+        from merger_arb.calc import unaffected_from_history
+
+        extras = {"tbill_pct": tbill}
+        ticker = (candidate.get("target_ticker") or "").upper()
+        if ticker and self.shares_fn is not None:
+            try:
+                extras["shares_outstanding"] = self.shares_fn(ticker)
+            except Exception:
+                pass
+        elif ticker:
+            extras["shares_outstanding"] = _lookup_shares(ticker)
+        announce = candidate.get("announce_date") or ""
+        rows = []
+        if ticker and self.history_fn is not None:
+            try:
+                rows = self.history_fn(ticker) or []
+            except Exception:
+                rows = []
+        elif ticker:
+            rows = _lookup_history(ticker)
+        if rows and announce:
+            extras["break_price"] = unaffected_from_history(rows, announce)
+        return extras
 
     def _quotes(self, buckets: list[dict]) -> dict:
         tickers = []
@@ -426,6 +514,63 @@ class ScanRunner:
             except (LlmSkipped, LlmUrlError, Exception):
                 continue
             record.extra["llm_fields"] = [row.to_dict() for row in fields]
+
+
+def _lookup_shares(ticker: str):
+    import os
+    url = os.environ.get("DATABASE_URL") or ""
+    if not url or not ticker:
+        return None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COALESCE(shares_outstanding, diluted_shares)
+                      FROM company_financials
+                     WHERE upper(ticker) = %s
+                     ORDER BY period_end DESC
+                     LIMIT 1
+                    """,
+                    (ticker.upper(),),
+                )
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        if row and row[0] not in (None, ""):
+            return float(row[0])
+    except Exception:
+        return None
+    return None
+
+
+def _lookup_history(ticker: str) -> list[dict]:
+    import os
+    url = os.environ.get("DATABASE_URL") or ""
+    if not url or not ticker:
+        return []
+    try:
+        import psycopg2
+        conn = psycopg2.connect(url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT d::text, close
+                      FROM price_history
+                     WHERE upper(symbol) = %s
+                     ORDER BY d
+                    """,
+                    (ticker.upper(),),
+                )
+                rows = [{"date": row[0], "close": row[1]} for row in cur.fetchall()]
+        finally:
+            conn.close()
+        return rows
+    except Exception:
+        return []
 
 
 def default_client(config) -> PoliteClient:

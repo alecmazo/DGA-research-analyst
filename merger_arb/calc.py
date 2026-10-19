@@ -17,6 +17,9 @@ collar only the stock leg. Election uses proration as the cash fraction.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, asdict
+from datetime import date, datetime
+
 from merger_arb.schema import field_map, parse_time, sourced
 
 DERIVED_IDS = (
@@ -142,6 +145,212 @@ def implied_probability(
     if clamped != raw:
         warnings.append("implied probability was held between 0 and 1")
     return clamped, warnings
+
+
+def net_spread(
+    offer: float | None,
+    price: float | None,
+    target_dividends: float | None = 0.0,
+) -> tuple[float | None, float | None]:
+    """Gross plus target dividends only. No borrow cost and no acquirer short."""
+    if offer is None or price is None or price == 0:
+        return None, None
+    dollars = float(offer) + float(target_dividends or 0) - float(price)
+    return dollars, dollars / float(price)
+
+
+def _to_float(value) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(str(value).replace(",", "").replace("$", "").replace("%", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_date(value) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value)[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def consideration_of(*, cash, ratio) -> str:
+    if cash is not None and ratio is not None:
+        return "mixed"
+    if ratio is not None:
+        return "stock"
+    if cash is not None:
+        return "cash"
+    return ""
+
+
+def offer_terms_label(*, cash, ratio) -> str:
+    parts = []
+    if cash is not None:
+        parts.append(f"${cash} cash")
+    if ratio is not None:
+        parts.append(f"{ratio} shares")
+    return " + ".join(parts)
+
+
+def unaffected_from_history(rows: list[dict], announce_on: str) -> float | None:
+    cutoff = str(announce_on or "")[:10]
+    if not cutoff:
+        return None
+    prior = []
+    for row in rows or []:
+        day = str(row.get("date") or row.get("d") or "")[:10]
+        close = row.get("close") if row.get("close") not in (None, "") else row.get("price")
+        if day and day < cutoff and close not in (None, ""):
+            try:
+                prior.append((day, float(close)))
+            except (TypeError, ValueError):
+                continue
+    if not prior:
+        return None
+    return sorted(prior)[-1][1]
+
+
+def equity_value(offer: float | None, shares: float | None) -> float | None:
+    if offer is None or shares in (None, "", 0):
+        return None
+    return float(offer) * float(shares)
+
+
+@dataclass
+class DealMetrics:
+    offer_value: float | None = None
+    gross_dollars: float | None = None
+    gross_pct: float | None = None
+    net_dollars: float | None = None
+    net_pct: float | None = None
+    annualized_pct: float | None = None
+    annualized_simple: float | None = None
+    annualized_assumption: str = ""
+    needs_manual_terms: bool = False
+    consideration: str = ""
+    offer_terms: str = ""
+    spread_with_cvr_max: float | None = None
+    implied_p: float | None = None
+    downside_pct: float | None = None
+    days_to_close: int | None = None
+    tbill_pct: float | None = None
+    excess_ann_pct: float | None = None
+    deal_value_usd: float | None = None
+    acquirer_price_sensitive: bool = False
+    walkaway_triggered: bool = False
+
+    def as_json(self) -> dict:
+        return asdict(self)
+
+
+def deal_metrics(
+    *,
+    cash=None,
+    ratio=None,
+    target_price=None,
+    acquirer_price=None,
+    close_date=None,
+    as_of=None,
+    cvr_max=None,
+    collar: bool = False,
+    election: bool = False,
+    proration: bool = False,
+    collar_type: str = "none",
+    collar_low=None,
+    collar_high=None,
+    collar_value=None,
+    walkaway_low=None,
+    walkaway_high=None,
+    proration_cash=None,
+    target_dividends=None,
+    break_price=None,
+    tbill_pct=None,
+    shares_outstanding=None,
+    consideration: str = "",
+) -> DealMetrics:
+    """One spread engine for the scanner and the desk. Collar/election stay blank until confirmed."""
+    cash_n = _to_float(cash)
+    ratio_n = _to_float(ratio)
+    target = _to_float(target_price)
+    acquirer = _to_float(acquirer_price)
+    cvr = _to_float(cvr_max)
+    dividends = _to_float(target_dividends) or 0.0
+    kind = (consideration or "").strip().lower() or consideration_of(cash=cash_n, ratio=ratio_n)
+    manual = bool(collar or election or proration)
+    close = _as_date(close_date)
+    as_of_date = _as_date(as_of) or date.today()
+    assumption = close.isoformat() if close else ""
+    days = (close - as_of_date).days if close else None
+    if days is not None and days <= 0:
+        assumption = (assumption + "; " if assumption else "") + "past due; annualized not computed"
+        days = None
+
+    out = DealMetrics(
+        consideration=kind,
+        offer_terms=offer_terms_label(cash=cash_n, ratio=ratio_n),
+        needs_manual_terms=manual,
+        acquirer_price_sensitive=kind in {"stock", "mixed", "election"},
+        annualized_assumption=assumption,
+        days_to_close=days,
+        tbill_pct=_to_float(tbill_pct),
+    )
+    if manual:
+        return out
+    if kind not in {"cash", "stock", "mixed", "election"}:
+        out.needs_manual_terms = kind == ""
+        return out
+
+    offered = offer_value(
+        consideration=kind,
+        cash=cash_n,
+        ratio=ratio_n,
+        acquirer_price=acquirer,
+        collar_type=collar_type or "none",
+        collar_low=_to_float(collar_low),
+        collar_high=_to_float(collar_high),
+        collar_value=_to_float(collar_value),
+        walkaway_low=_to_float(walkaway_low),
+        walkaway_high=_to_float(walkaway_high),
+        proration_cash=_to_float(proration_cash),
+    )
+    out.offer_value = offered["value"]
+    out.walkaway_triggered = bool(offered["walkaway_triggered"])
+    if out.offer_value is None:
+        return out
+
+    gross_d, gross_p = gross_spread(out.offer_value, target)
+    net_d, net_p = net_spread(out.offer_value, target, dividends)
+    out.gross_dollars = gross_d
+    out.gross_pct = gross_p
+    out.net_dollars = net_d
+    out.net_pct = net_p
+    years = None if days is None else days / 365.0
+    compound, simple = annualized(net_p, years)
+    out.annualized_pct = compound
+    out.annualized_simple = simple
+    if cvr is not None and target not in (None, 0):
+        out.spread_with_cvr_max = (out.offer_value + cvr) - target
+    break_px = _to_float(break_price)
+    if break_px is not None and target is not None:
+        _down_d, down_p = downside_return(break_px, target)
+        out.downside_pct = down_p
+        prob, _warnings = implied_probability(target, out.offer_value, break_px)
+        out.implied_p = prob
+    if out.annualized_pct is not None and out.tbill_pct is not None:
+        out.excess_ann_pct = out.annualized_pct - (out.tbill_pct / 100.0)
+    out.deal_value_usd = equity_value(out.offer_value, _to_float(shares_outstanding))
+    return out
 
 
 def downside_return(break_price: float | None, price: float | None) -> tuple[float | None, float | None]:

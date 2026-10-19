@@ -2,11 +2,15 @@
 
 from merger_arb.calc import (
     annualized,
+    deal_metrics,
     downside_return,
+    equity_value,
     gross_spread,
     implied_probability,
+    net_spread,
     offer_value,
     recompute,
+    unaffected_from_history,
     upside_return,
 )
 from merger_arb.fixture import build_fixture
@@ -68,6 +72,38 @@ def test_election_uses_the_cash_fraction():
         consideration="election", cash=50, ratio=2, acquirer_price=20, proration_cash=0.25,
     )
     assert elected["value"] == 0.25 * 50 + 0.75 * 40
+
+
+def test_dombey_gross_net_and_implied_p():
+    metrics = deal_metrics(
+        cash=50,
+        target_price=47.50,
+        break_price=36,
+        target_dividends=0.50,
+        as_of="2026-10-01",
+    )
+    assert round(metrics.gross_pct * 100, 2) == 5.26
+    assert metrics.gross_dollars == 2.50
+    dollars, pct = net_spread(50, 47.50, 0.50)
+    assert dollars == 3.00
+    assert round(pct * 100, 2) == 6.32
+    assert round(metrics.net_pct * 100, 2) == 6.32
+    prob, warnings = implied_probability(47.50, 50, 36)
+    assert round(prob * 100, 1) == 82.1
+    assert warnings == []
+    assert round(metrics.implied_p * 100, 1) == 82.1
+    collar = deal_metrics(cash=50, target_price=47.50, collar=True)
+    election = deal_metrics(cash=50, ratio=0.5, target_price=47.50, election=True)
+    assert collar.needs_manual_terms and collar.offer_value is None
+    assert election.needs_manual_terms and election.offer_value is None
+    stock = deal_metrics(ratio=0.5, acquirer_price=20, target_price=8)
+    assert stock.acquirer_price_sensitive is True
+    prior = unaffected_from_history(
+        [{"date": "2026-05-29", "close": 36}, {"date": "2026-06-02", "close": 48}],
+        "2026-06-01",
+    )
+    assert prior == 36
+    assert equity_value(50, 10_000_000) == 500_000_000
 
 
 def test_spread_probability_and_annualized_dividends():

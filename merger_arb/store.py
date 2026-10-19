@@ -306,6 +306,15 @@ def _blank(value) -> bool:
     return value in (None, "", [], {}, ())
 
 
+def _num_or_none(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", "").replace("$", "").replace("%", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _merge_deal_row(existing: dict, incoming: dict) -> dict:
     out = dict(existing)
     for key, value in incoming.items():
@@ -433,6 +442,16 @@ class MemoryStore:
         if match is None:
             incoming["first_seen_at"] = candidate.get("first_seen_at") or now
             incoming["created_at"] = now
+        metrics = candidate.get("metrics") or {}
+        if metrics:
+            incoming["metrics_json"] = metrics
+            incoming["offer_value"] = metrics.get("offer_value")
+            incoming["target_price"] = _num_or_none(candidate.get("current_price")) or metrics.get("target_price")
+            incoming["gross_pct"] = metrics.get("gross_pct")
+            incoming["ann_pct"] = metrics.get("annualized_pct")
+            incoming["downside_pct"] = metrics.get("downside_pct")
+            incoming["implied_p"] = metrics.get("implied_p")
+            incoming["deal_value_usd"] = metrics.get("deal_value_usd")
         if old_key and new_key and old_key != new_key:
             self.put_alias(old_key, deal_id)
         deal = self.upsert_deal(incoming)
@@ -445,6 +464,26 @@ class MemoryStore:
         self.deals[deal["id"]] = deal
         candidate["screen_deal_id"] = deal["id"]
         return deal
+
+    def upsert_spread_history(self, deal_id: str, day: str, candidate: dict) -> dict:
+        metrics = candidate.get("metrics") or {}
+        row = {
+            "deal_id": deal_id,
+            "d": str(day)[:10],
+            "target_px": _num_or_none(candidate.get("current_price")),
+            "acquirer_px": _num_or_none(candidate.get("acquirer_price")),
+            "offer_value": metrics.get("offer_value"),
+            "gross_pct": metrics.get("gross_pct"),
+            "net_ann_pct": metrics.get("annualized_pct"),
+            "implied_p": metrics.get("implied_p"),
+            "score": candidate.get("score") or candidate.get("confidence"),
+        }
+        self.spread_history[(deal_id, row["d"])] = row
+        return row
+
+    def list_spread_history(self, deal_id: str) -> list[dict]:
+        rows = [row for (did, _day), row in self.spread_history.items() if did == deal_id]
+        return sorted(rows, key=lambda item: item.get("d") or "")
 
     def list_deals(self) -> list[dict]:
         return list(self.deals.values())
@@ -558,6 +597,14 @@ class PostgresStore:
                         announce_date = COALESCE(EXCLUDED.announce_date, merger_arb_deals.announce_date),
                         expected_close = COALESCE(EXCLUDED.expected_close, merger_arb_deals.expected_close),
                         terms_json = COALESCE(EXCLUDED.terms_json, merger_arb_deals.terms_json),
+                        metrics_json = COALESCE(EXCLUDED.metrics_json, merger_arb_deals.metrics_json),
+                        offer_value = COALESCE(EXCLUDED.offer_value, merger_arb_deals.offer_value),
+                        target_price = COALESCE(EXCLUDED.target_price, merger_arb_deals.target_price),
+                        gross_pct = COALESCE(EXCLUDED.gross_pct, merger_arb_deals.gross_pct),
+                        ann_pct = COALESCE(EXCLUDED.ann_pct, merger_arb_deals.ann_pct),
+                        downside_pct = COALESCE(EXCLUDED.downside_pct, merger_arb_deals.downside_pct),
+                        implied_p = COALESCE(EXCLUDED.implied_p, merger_arb_deals.implied_p),
+                        deal_value_usd = COALESCE(EXCLUDED.deal_value_usd, merger_arb_deals.deal_value_usd),
                         data_confidence = COALESCE(EXCLUDED.data_confidence, merger_arb_deals.data_confidence),
                         last_seen_at = COALESCE(EXCLUDED.last_seen_at, merger_arb_deals.last_seen_at),
                         updated_at = EXCLUDED.updated_at
@@ -709,12 +756,61 @@ class PostgresStore:
         }
         if match is None:
             incoming["first_seen_at"] = candidate.get("first_seen_at") or now
+        metrics = candidate.get("metrics") or {}
+        if metrics:
+            incoming["metrics_json"] = metrics
+            incoming["offer_value"] = metrics.get("offer_value")
+            incoming["target_price"] = _num_or_none(candidate.get("current_price"))
+            incoming["gross_pct"] = metrics.get("gross_pct")
+            incoming["ann_pct"] = metrics.get("annualized_pct")
+            incoming["downside_pct"] = metrics.get("downside_pct")
+            incoming["implied_p"] = metrics.get("implied_p")
+            incoming["deal_value_usd"] = metrics.get("deal_value_usd")
         if old_key and new_key and old_key != new_key:
             self.put_alias(old_key, deal_id)
         deal = self.upsert_deal(incoming)
         self.merge_deal_fields(deal["id"], candidate.get("fields") or [])
         candidate["screen_deal_id"] = deal["id"]
         return deal
+
+    def upsert_spread_history(self, deal_id: str, day: str, candidate: dict) -> dict:
+        metrics = candidate.get("metrics") or {}
+        row = {
+            "deal_id": deal_id,
+            "d": str(day)[:10],
+            "target_px": _num_or_none(candidate.get("current_price")),
+            "acquirer_px": _num_or_none(candidate.get("acquirer_price")),
+            "offer_value": metrics.get("offer_value"),
+            "gross_pct": metrics.get("gross_pct"),
+            "net_ann_pct": metrics.get("annualized_pct"),
+            "implied_p": metrics.get("implied_p"),
+            "score": candidate.get("score") or candidate.get("confidence"),
+        }
+        with self._connect() as conn:
+            ensure_tables(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO merger_arb_spread_history
+                        (deal_id, d, target_px, acquirer_px, offer_value, gross_pct, net_ann_pct, implied_p, score)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (deal_id, d) DO UPDATE SET
+                        target_px = EXCLUDED.target_px,
+                        acquirer_px = EXCLUDED.acquirer_px,
+                        offer_value = EXCLUDED.offer_value,
+                        gross_pct = EXCLUDED.gross_pct,
+                        net_ann_pct = EXCLUDED.net_ann_pct,
+                        implied_p = EXCLUDED.implied_p,
+                        score = EXCLUDED.score
+                    """,
+                    (
+                        row["deal_id"], row["d"], row["target_px"], row["acquirer_px"],
+                        row["offer_value"], row["gross_pct"], row["net_ann_pct"],
+                        row["implied_p"], row["score"],
+                    ),
+                )
+            conn.commit()
+        return row
 
     def list_deals(self) -> list[dict]:
         with self._connect() as conn, conn.cursor() as cur:

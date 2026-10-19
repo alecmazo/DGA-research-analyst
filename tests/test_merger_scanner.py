@@ -19,9 +19,10 @@ from merger_arb.scanner.config import ScannerConfig, _rps
 from merger_arb.scanner.extract import extract_terms
 from merger_arb.scanner.http import PoliteClient, ResponseCache
 from merger_arb.scanner.llm_extract import LlmUrlError, extract_llm_fields, resolve_llm_url
+from merger_arb.calc import deal_metrics
+from merger_arb.scanner.extract import close_from_phrase
 from merger_arb.scanner.merge import merge_records
 from merger_arb.scanner.models import FetchResult, SourceRecord
-from merger_arb.scanner.pricing import compute_spread
 from merger_arb.scanner.resolve import (
     TickerMap,
     document_url,
@@ -221,27 +222,29 @@ def test_merge_sources_and_competing_bids():
 
 def test_pricing_decimal_cases():
     as_of = date(2026, 10, 1)
-    cash = compute_spread(cash="50", target_price="40", close_date="2027-10-01", as_of=as_of)
-    assert cash.offer_value == Decimal("50")
-    assert cash.gross_spread == Decimal("10")
-    assert cash.gross_spread_pct == Decimal("0.25")
-    assert cash.annualized_pct == Decimal("0.25")
-    stock = compute_spread(ratio="0.5", acquirer_price="20", target_price="8", as_of=as_of)
-    assert stock.offer_value == Decimal("10")
-    mixed = compute_spread(cash="10", ratio="0.5", acquirer_price="20", target_price="16", as_of=as_of)
-    assert mixed.offer_value == Decimal("20") and mixed.consideration == "mixed"
-    cvr = compute_spread(cash="50", target_price="40", cvr_max="5", as_of=as_of)
-    assert cvr.gross_spread == Decimal("10") and cvr.spread_with_cvr_max == Decimal("15")
-    missing = compute_spread(ratio="0.5", target_price="8", as_of=as_of)
+    cash = deal_metrics(cash="50", target_price="40", close_date="2027-10-01", as_of=as_of)
+    assert cash.offer_value == 50
+    assert cash.gross_dollars == 10
+    assert cash.gross_pct == 0.25
+    assert cash.annualized_pct == 0.25
+    stock = deal_metrics(ratio="0.5", acquirer_price="20", target_price="8", as_of=as_of)
+    assert stock.offer_value == 10
+    mixed = deal_metrics(cash="10", ratio="0.5", acquirer_price="20", target_price="16", as_of=as_of)
+    assert mixed.offer_value == 20 and mixed.consideration == "mixed"
+    cvr = deal_metrics(cash="50", target_price="40", cvr_max="5", as_of=as_of)
+    assert cvr.gross_dollars == 10 and cvr.spread_with_cvr_max == 15
+    missing = deal_metrics(ratio="0.5", target_price="8", as_of=as_of)
     assert missing.offer_value is None
-    negative = compute_spread(cash="30", target_price="40", as_of=as_of)
-    assert negative.gross_spread == Decimal("-10")
-    past = compute_spread(cash="50", target_price="40", close_date="2020-01-01", as_of=as_of)
+    negative = deal_metrics(cash="30", target_price="40", as_of=as_of)
+    assert negative.gross_dollars == -10
+    past = deal_metrics(cash="50", target_price="40", close_date="2020-01-01", as_of=as_of)
     assert past.annualized_pct is None and "past due" in past.annualized_assumption
-    manual = compute_spread(cash="50", target_price="40", collar=True, as_of=as_of)
+    manual = deal_metrics(cash="50", target_price="40", collar=True, as_of=as_of)
     assert manual.needs_manual_terms and manual.offer_value is None
-    quarter = compute_spread(cash="50", target_price="40", close_text="expected to close in the first quarter of 2027", as_of=as_of)
-    assert quarter.annualized_assumption.startswith("Q1 2027 mapped to 2027-03-31")
+    iso, assumption, _phrase = close_from_phrase("expected to close in the first quarter of 2027")
+    quarter = deal_metrics(cash="50", target_price="40", close_date=iso, as_of=as_of)
+    assert assumption.startswith("Q1 2027 mapped to 2027-03-31")
+    assert quarter.days_to_close == (date(2027, 3, 31) - as_of).days
 
 
 def test_polite_client_limit_cache_and_block():
