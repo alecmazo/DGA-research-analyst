@@ -140,6 +140,8 @@ def public_deal(deal: dict) -> dict:
         "expected_close": str(deal.get("expected_close") or "")[:10],
         "outside_date": str(deal.get("outside_date") or "")[:10],
         "offer_value": _num(deal.get("offer_value") if deal.get("offer_value") is not None else metrics.get("offer_value")),
+        "stated_cash": _num((deal.get("terms_json") or {}).get("cash_per_share") if isinstance(deal.get("terms_json"), dict) else None),
+        "stated_ratio": _num((deal.get("terms_json") or {}).get("exchange_ratio") if isinstance(deal.get("terms_json"), dict) else None),
         "target_price": _num(deal.get("target_price") if deal.get("target_price") is not None else metrics.get("target_price")),
         "gross_pct": _num(deal.get("gross_pct") if deal.get("gross_pct") is not None else metrics.get("gross_pct")),
         "ann_pct": _num(deal.get("ann_pct") if deal.get("ann_pct") is not None else metrics.get("annualized_pct")),

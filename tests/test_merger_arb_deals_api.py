@@ -252,6 +252,51 @@ def test_detail_patch_and_score_config():
     assert desk.get_deal("cash-one")["score_json"]["weights"]["return"] == 30
 
 
+def test_scanner_terms_land_on_a_blank_desk_row():
+    from merger_arb.screen_facts import sync_deals
+
+    store = MemoryStore()
+    store.upsert_deal({
+        "id": "ampx",
+        "target_ticker": "AMPX",
+        "target_name": "AMPX",
+        "acquirer_name": "Legacy ZincFive",
+        "stage": "screen",
+        "target_price": 7.6,
+    })
+    sync_deals(store, store.list_deals(), [{
+        "target_ticker": "AMPX",
+        "target_name": "Amprius Technologies",
+        "acquirer_name": "Legacy ZincFive",
+        "current_price": "7.60",
+        "confidence": 75,
+        "fields": [
+            {"field_name": "cash_per_share", "value": 11.5, "is_current": True},
+            {"field_name": "expected_close", "value": "2026-12-31", "is_current": True},
+            {"field_name": "announce_date", "value": "2026-09-30", "is_current": True},
+        ],
+    }])
+    deal = store.get_deal("ampx")
+    assert deal["target_name"] == "Amprius Technologies"
+    assert deal["deal_type"] == "cash"
+    assert deal["expected_close"] == "2026-12-31"
+    assert float(deal["offer_value"]) == 11.5
+    assert deal["gross_pct"] is not None
+    client, _desk = _app(store)
+    row = next(item for item in client.get("/api/merger-arb/deals").json()["deals"] if item["id"] == "ampx")
+    assert row["stated_cash"] == 11.5
+    assert row["offer_value"] == 11.5
+    assert row["target_price"] == 7.6
+
+
+def test_add_deal_allows_a_target_without_an_acquirer():
+    client, desk = _app()
+    created = client.post("/api/merger-arb/deals", json={"target_ticker": "AMPX", "target_name": "Amprius"})
+    assert created.status_code == 200
+    assert created.json()["deal"]["id"] == "ampx"
+    assert desk.get_deal("ampx")["target_ticker"] == "AMPX"
+
+
 def test_a_blank_screen_row_shows_the_live_price():
     store = MemoryStore()
     store.upsert_deal({

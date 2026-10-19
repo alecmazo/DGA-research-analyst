@@ -21,6 +21,8 @@ type Deal = {
   deal_type?: string
   sector?: string
   offer_value?: number | null
+  stated_cash?: number | null
+  stated_ratio?: number | null
   target_price?: number | null
   gross_pct?: number | null
   ann_pct?: number | null
@@ -65,6 +67,13 @@ function money(value: number | null | undefined) {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 }
 
+function offerText(deal: Deal) {
+  if (deal.offer_value != null) return money(deal.offer_value)
+  if (deal.stated_cash != null) return money(deal.stated_cash)
+  if (deal.stated_ratio != null) return `${deal.stated_ratio}×`
+  return '—'
+}
+
 function compact(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return '—'
   const abs = Math.abs(value)
@@ -74,10 +83,11 @@ function compact(value: number | null | undefined) {
 }
 
 function closeLabel(deal: Deal) {
-  const day = (deal.expected_close || '').slice(5)
+  const day = (deal.expected_close || '').slice(0, 10)
   if (!day && deal.days_to_close == null) return '—'
   const days = deal.days_to_close
-  return `${day || '—'} · ${days == null ? '—' : `${days}d`}`
+  if (!day) return `${days}d`
+  return days == null ? day : `${day} · ${days}d`
 }
 
 function bandClass(band?: string) {
@@ -263,10 +273,10 @@ export function MergerArbPage() {
         </span>
       ),
     },
-    { id: 'offer', label: 'Offer', sort: 'offer', numeric: true, render: (deal) => (deal.needs_manual_terms ? '—' : money(deal.offer_value)) },
+    { id: 'offer', label: 'Offer', sort: 'offer', numeric: true, render: (deal) => offerText(deal) },
     { id: 'price', label: 'Price', sort: 'price', numeric: true, render: (deal) => money(deal.target_price) },
-    { id: 'gross', label: 'Gross', sort: 'gross', numeric: true, render: (deal) => (deal.needs_manual_terms ? '—' : pctShort(deal.gross_pct)) },
-    { id: 'ann', label: 'Ann.', sort: 'ann', numeric: true, render: (deal) => (deal.needs_manual_terms ? '—' : pctShort(deal.ann_pct)) },
+    { id: 'gross', label: 'Gross', sort: 'gross', numeric: true, render: (deal) => pctShort(deal.gross_pct) },
+    { id: 'ann', label: 'Ann.', sort: 'ann', numeric: true, render: (deal) => pctShort(deal.ann_pct) },
     {
       id: 'down',
       label: 'Down',

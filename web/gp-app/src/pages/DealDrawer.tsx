@@ -21,6 +21,8 @@ type Deal = {
   score?: number | null
   score_band?: string
   offer_value?: number | null
+  stated_cash?: number | null
+  stated_ratio?: number | null
   target_price?: number | null
   gross_pct?: number | null
   ann_pct?: number | null
@@ -112,7 +114,8 @@ function signed(value: number | null | undefined) {
 function analysisRows(view: AnalysisView | null, sectionId: string): AnalysisRow[] {
   const card = (view?.sections || []).find((item) => item.id === sectionId)
   if (!card) return []
-  return [...card.rows, ...card.blocks.flatMap((block) => block.rows)]
+  const blocks = card.blocks || []
+  return [...(card.rows || []), ...blocks.flatMap((block) => block.rows || [])]
 }
 
 function Sensitivity({ value }: { value: unknown }) {
@@ -240,7 +243,10 @@ export function DealDrawer({
     return `${x},${y}`
   }).join(' ')
   const sensitivity = analysisRows(analysis, 'spread').find((row) => row.id === 'spread.sensitivity')
-  const unverified = (analysis?.sections || []).flatMap((card) => [...card.rows, ...card.blocks.flatMap((block) => block.rows)]).filter((row) => row.unverified)
+  const unverified = (analysis?.sections || []).flatMap((card) => [
+    ...(card.rows || []),
+    ...(card.blocks || []).flatMap((block) => block.rows || []),
+  ]).filter((row) => row.unverified)
 
   return (
     <aside className={styles.side} aria-label="Deal terms">
@@ -290,7 +296,7 @@ export function DealDrawer({
       </div>
       <p className={styles.muted}>Deep dive runs only when you click it, on {provider === 'grok' ? 'Grok' : 'Claude'}. Refresh stays on the local model.</p>
       <div className={styles.strip}>
-        <div><span>Offer</span><strong>{money(deal?.offer_value)}</strong></div>
+        <div><span>Offer</span><strong>{deal?.offer_value != null ? money(deal.offer_value) : deal?.stated_cash != null ? money(deal.stated_cash) : deal?.stated_ratio != null ? `${deal.stated_ratio}×` : '—'}</strong></div>
         <div><span>Price</span><strong>{money(deal?.target_price)}</strong></div>
         <div><span>Gross</span><strong>{pct(deal?.gross_pct)}</strong></div>
         <div><span>Net ann.</span><strong>{pct(deal?.ann_pct)}</strong></div>

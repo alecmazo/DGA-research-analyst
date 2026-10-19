@@ -52,11 +52,25 @@ def _json_body(request: Request) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _ticker(value: str) -> str:
+def _ticker(value: str, *, required: bool = True) -> str:
     text = re.sub(r"[^A-Za-z0-9.\-]", "", (value or "").strip().upper())[:12]
     if len(text) < 1:
-        raise HTTPException(400, "Ticker is required")
+        if required:
+            raise HTTPException(400, "Ticker is required")
+        return ""
     return text
+
+
+def _sync_screen(store) -> None:
+    """Pull scanner terms onto desk rows that were saved as names only."""
+    try:
+        from merger_arb.screen_facts import load_candidates, sync_deals
+        deals = [row for row in store.list_deals() if row.get("id") != "fixture-acme"]
+        candidates = load_candidates(store)
+        if candidates:
+            sync_deals(store, deals, candidates)
+    except Exception:
+        return
 
 
 def get_store():
@@ -224,7 +238,9 @@ def create_router(claims_fn, *, store=None, quotes_fn=None) -> APIRouter:
     @router.get("/deals")
     def list_deals(request: Request):
         gp(request)
-        result = query_deals(desk().list_deals(), parse_query(request.query_params))
+        book = desk()
+        _sync_screen(book)
+        result = query_deals(book.list_deals(), parse_query(request.query_params))
         remembered = fill_missing_prices(result.get("deals") or [], quotes_fn)
         book = desk()
         if remembered and hasattr(book, "remember_prices"):
@@ -235,14 +251,16 @@ def create_router(claims_fn, *, store=None, quotes_fn=None) -> APIRouter:
     def get_deal(deal_id: str, request: Request):
         gp(request)
         deal_id = _deal_id(deal_id)
-        found = desk().get_deal(deal_id)
+        book = desk()
+        _sync_screen(book)
+        found = book.get_deal(deal_id)
         if found is None:
             raise HTTPException(404, "Deal not found")
         from merger_arb.query import public_deal
         shown = public_deal(found)
         remembered = fill_missing_prices([shown], quotes_fn)
-        if remembered and hasattr(desk(), "remember_prices"):
-            desk().remember_prices(remembered)
+        if remembered and hasattr(book, "remember_prices"):
+            book.remember_prices(remembered)
         history = []
         if hasattr(desk(), "history"):
             history = version_history(desk().history(deal_id))
@@ -314,8 +332,9 @@ def create_router(claims_fn, *, store=None, quotes_fn=None) -> APIRouter:
         gp(request)
         body = _json_body(request)
         target = _ticker(str(body.get("target_ticker") or ""))
-        acquirer = _ticker(str(body.get("acquirer_ticker") or ""))
-        deal_id = _deal_id(str(body.get("id") or f"{target.lower()}-{acquirer.lower()}"))
+        acquirer = _ticker(str(body.get("acquirer_ticker") or ""), required=False)
+        raw_id = str(body.get("id") or f"{target.lower()}-{acquirer.lower()}").strip("-")
+        deal_id = _deal_id(raw_id)
         deal = {
             "id": deal_id,
             "target_ticker": target,
