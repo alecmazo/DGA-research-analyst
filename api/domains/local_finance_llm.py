@@ -242,8 +242,8 @@ def local_model(name: str | None = None) -> str:
     """One source of truth for the active local chat model.
 
     ``name`` is an optional per-request override. It must be in
-    ``LOCAL_LLM_MODELS``. With no name, returns ``LOCAL_LLM_MODEL``
-    (default ``gpt-oss-20b-finance``).
+    ``LOCAL_LLM_MODELS``. A missing or unknown name returns
+    ``LOCAL_LLM_MODEL`` (default ``gpt-oss-20b-finance``).
     """
     allowed = local_model_list()
     wanted = (name or "").strip() or _env("LOCAL_LLM_MODEL", DEFAULT_LOCAL_MODEL)
@@ -252,13 +252,31 @@ def local_model(name: str | None = None) -> str:
     for m in allowed:
         if wanted == m or wanted.startswith(m + ":") or m.startswith(wanted + ":"):
             return m
-    if name is not None and str(name).strip():
-        raise ValueError(
-            f"local_model must be one of: {', '.join(allowed)}"
-        )
+    # A missing or unknown override uses the configured default.
     if DEFAULT_LOCAL_MODEL in allowed:
         return DEFAULT_LOCAL_MODEL
     return allowed[0]
+
+
+def ollama_reachable(timeout: float = 1.5) -> bool:
+    """True when this process can open Ollama's /api/tags. Short timeout."""
+    url = _host_root(_env("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")) + "/api/tags"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp.read(256)
+        return True
+    except Exception:
+        return False
+
+
+def llm_model_catalog(timeout: float = 1.5) -> dict:
+    """Allowlist, default, and whether Ollama answered a tags ping."""
+    return {
+        "models": local_model_list(),
+        "default": local_model(None),
+        "reachable": ollama_reachable(timeout),
+    }
 
 
 def local_fast_model() -> str:

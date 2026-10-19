@@ -5,6 +5,33 @@ import { trackLoad } from './loadFlow'
 export const OLLAMA_HOST = 'http://127.0.0.1:11434'
 export const OLLAMA_DESK = 'http://127.0.0.1:8766'
 export const LOCAL_MODEL = 'gpt-oss-20b-finance'
+const MODEL_KEY = 'dga.local.model'
+const MODEL_LIST_KEY = 'dga.local.models'
+
+export function rememberLocalModels(models: string[], choice: string) {
+  const allowed = models.map((m) => m.trim()).filter(Boolean)
+  const pick = allowed.includes(choice) ? choice : allowed[0] || LOCAL_MODEL
+  try {
+    localStorage.setItem(MODEL_LIST_KEY, JSON.stringify(allowed))
+    localStorage.setItem(MODEL_KEY, pick)
+  } catch {
+    /* ignore */
+  }
+  return pick
+}
+
+/** Allowlisted model from the header dropdown. Unknown stored values use the default. */
+export function selectedLocalModel(): string {
+  try {
+    const raw = (localStorage.getItem(MODEL_KEY) || '').trim()
+    const allowed = JSON.parse(localStorage.getItem(MODEL_LIST_KEY) || '[]') as unknown
+    const list = Array.isArray(allowed) ? allowed.map((m) => String(m)) : []
+    if (raw && list.includes(raw)) return raw
+  } catch {
+    /* ignore */
+  }
+  return LOCAL_MODEL
+}
 
 const OFFLINE = 'Local model offline – start Ollama'
 
@@ -55,6 +82,7 @@ export type LocalChat = {
 type ChatOpts = {
   system: string
   user: string
+  model?: string
   maxTokens?: number
   think?: string
   numCtx?: number
@@ -68,18 +96,29 @@ export async function ollamaStatus(): Promise<OllamaState> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = (await res.json()) as { models?: { name?: string }[] }
     const names = (data.models || []).map((m) => m.name || '')
+    const wanted = selectedLocalModel()
     const present = names.some(
-      (n) => n === LOCAL_MODEL || n.startsWith(`${LOCAL_MODEL}:`),
+      (n) => n === wanted || n.startsWith(`${wanted}:`) || wanted.startsWith(`${n}:`),
     )
     if (!present) {
-      done('fail', `Local model ${LOCAL_MODEL} is not installed in Ollama`)
-      return { ok: false, message: `Local model ${LOCAL_MODEL} is not installed in Ollama`, model: LOCAL_MODEL }
+      done('fail', `Local model ${wanted} is not installed in Ollama`)
+      return { ok: false, message: `Local model ${wanted} is not installed in Ollama`, model: wanted }
     }
     done('ok')
-    return { ok: true, message: 'ok', model: LOCAL_MODEL }
+    return { ok: true, message: 'ok', model: wanted }
   } catch {
     done('fail', OFFLINE)
-    return { ok: false, message: OFFLINE, model: LOCAL_MODEL }
+    return { ok: false, message: OFFLINE, model: selectedLocalModel() }
+  }
+}
+
+/** Browser-side ping. The API on Railway cannot see Ollama on this Mac. */
+export async function ollamaReachable(): Promise<boolean> {
+  try {
+    const res = await fetch(`${OLLAMA_HOST}/api/tags`, { signal: AbortSignal.timeout(1500) })
+    return res.ok
+  } catch {
+    return false
   }
 }
 
@@ -132,7 +171,7 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: LOCAL_MODEL,
+        model: opts.model || selectedLocalModel(),
         stream: true,
         think: opts.think || 'low',
         messages: [

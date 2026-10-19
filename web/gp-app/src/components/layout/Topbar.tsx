@@ -5,6 +5,7 @@ import type { GpUser } from '@/lib/auth'
 import { logout } from '@/lib/auth'
 import { useTheme } from '@/hooks/useTheme'
 import { api } from '@/lib/api'
+import { ollamaReachable, rememberLocalModels } from '@/lib/localOllama'
 import { StockPeek } from './StockPeek'
 import styles from './Topbar.module.css'
 
@@ -138,6 +139,68 @@ function NavMenu({
           document.body,
         )}
     </div>
+  )
+}
+
+function LocalModelSelect() {
+  const [models, setModels] = useState<string[]>([])
+  const [choice, setChoice] = useState('')
+  const [reachable, setReachable] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const [catalog, here] = await Promise.all([
+        api<{ models?: string[]; default?: string; reachable?: boolean }>(
+          '/api/llm/models',
+        ).catch(() => null),
+        ollamaReachable(),
+      ])
+      if (!alive) return
+      const list = (catalog?.models || []).map((m) => m.trim()).filter(Boolean)
+      const up = here || !!catalog?.reachable
+      if (!list.length || !up) {
+        setReachable(false)
+        return
+      }
+      let stored = catalog?.default || list[0]
+      try {
+        const prev = localStorage.getItem('dga.local.model') || ''
+        if (list.includes(prev)) stored = prev
+      } catch {
+        /* ignore */
+      }
+      stored = rememberLocalModels(list, stored)
+      setModels(list)
+      setChoice(stored)
+      setReachable(true)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (!reachable || !models.length) return null
+
+  return (
+    <label className={styles.modelWrap}>
+      <span className={styles.modelLbl}>Model</span>
+      <select
+        className={styles.modelSelect}
+        aria-label="Local model"
+        value={choice}
+        onChange={(e) => {
+          const next = rememberLocalModels(models, e.target.value)
+          setChoice(next)
+        }}
+      >
+        {models.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 
@@ -498,6 +561,7 @@ export function Topbar({ user, build }: Props) {
         </nav>
 
         <div className={styles.right}>
+          <LocalModelSelect />
           <span className={styles.dot} title="API online" />
           <UserMenu user={user} build={build} theme={theme} onToggleTheme={toggle} />
         </div>

@@ -13,6 +13,7 @@ from api.domains.local_finance_llm import (
     call_chunks_table,
     check_local_health,
     fit_local_context,
+    llm_model_catalog,
     local_fast_model,
     local_model,
     local_model_list,
@@ -142,9 +143,32 @@ class LocalModelHelpersTests(unittest.TestCase):
         self.assertIn("gpt-oss-20b-finance", local_model_list())
         self.assertEqual(local_model(), "gpt-oss-20b-finance")
         self.assertEqual(local_model("gemma4:12b"), "gemma4:12b")
-        with self.assertRaises(ValueError):
-            local_model("not-a-real-model")
+        self.assertEqual(local_model("gemma4:26b"), "gemma4:26b")
+        self.assertEqual(local_model("not-a-real-model"), "gpt-oss-20b-finance")
+        self.assertEqual(local_model(""), "gpt-oss-20b-finance")
+        self.assertEqual(local_model(None), "gpt-oss-20b-finance")
         self.assertEqual(local_fast_model(), "gemma4:12b")
+
+    def test_catalog_lists_allowlist_and_ping(self):
+        with patch("api.domains.local_finance_llm.urllib.request.urlopen", side_effect=OSError("down")):
+            offline = llm_model_catalog(timeout=0.2)
+        self.assertEqual(offline["default"], "gpt-oss-20b-finance")
+        self.assertIn("gemma4:26b", offline["models"])
+        self.assertIn("gemma4:12b", offline["models"])
+        self.assertFalse(offline["reachable"])
+
+        class _Resp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, _n=256):
+                return b"{}"
+
+        with patch("api.domains.local_finance_llm.urllib.request.urlopen", return_value=_Resp()):
+            online = llm_model_catalog(timeout=0.2)
+        self.assertTrue(online["reachable"])
+        self.assertEqual(online["models"][0], "gpt-oss-20b-finance")
 
     def test_call_chunks_table_keeps_live_index_separate(self):
         self.assertEqual(

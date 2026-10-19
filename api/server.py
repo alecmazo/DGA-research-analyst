@@ -7588,14 +7588,7 @@ def _run_analysis(job_id: str, ticker: str, generate_gamma: bool,
     resolved_local = None
     if provider == "local" and local_model:
         from api.domains.local_finance_llm import local_model as _resolve_local_model
-        try:
-            resolved_local = _resolve_local_model(local_model)
-        except ValueError as exc:
-            with _jobs_lock:
-                if _jobs.get(job_id):
-                    _jobs[job_id]["status"] = "failed"
-                    _jobs[job_id]["error"] = str(exc)[:300]
-            return False
+        resolved_local = _resolve_local_model(local_model)
 
     # Dispatch 'both' to the dedicated runner
     if provider == "both":
@@ -9010,7 +9003,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui745-20261019-desk-nav"
+WEB_BUILD_VERSION = "ui746-20261019-local-models"
 
 
 @app.get("/api/build")
@@ -9939,6 +9932,14 @@ def diagnostics(request: Request):
     }
 
 
+@app.get("/api/llm/models")
+def llm_models(request: Request):
+    """Selectable local models. Reachable is a short ping to Ollama /api/tags."""
+    _claims_or_401(request)
+    from api.domains.local_finance_llm import llm_model_catalog
+    return llm_model_catalog()
+
+
 @app.get("/api/llm/local/health")
 def local_llm_health(request: Request):
     """Ollama is up; reports each LOCAL_LLM_MODELS entry as installed or missing."""
@@ -9964,6 +9965,7 @@ class LocalPortfolioRequest(BaseModel):
 
 class LocalTickerRequest(BaseModel):
     ticker: str = ""
+    model: str = ""
 
 
 class LocalSaveRequest(BaseModel):
@@ -10052,7 +10054,7 @@ def local_research_prompt(body: LocalTickerRequest, request: Request):
         "system": result.get("system_prompt") or "",
         "user": result.get("user_msg") or "",
         "munger_system": result.get("munger_system") or "",
-        "model": _local_model(),
+        "model": _local_model(body.model or None),
     }
 
 
@@ -10548,10 +10550,7 @@ def start_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks,
         )
     if req_local_model:
         from api.domains.local_finance_llm import local_model as _resolve_local_model
-        try:
-            req_local_model = _resolve_local_model(req_local_model)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)[:300]) from exc
+        req_local_model = _resolve_local_model(req_local_model)
 
     # DEMO: no paid LLM call ever — synthesize a sample report instantly.
     if request is not None and _request_is_demo(request):
@@ -11701,7 +11700,8 @@ def download_xlsx(
     local_xlsx = (payload.get("provider") or provider) == "local"
     if local_xlsx:
         from api.domains.local_finance_llm import local_model as _local_model
-        model = str(payload.get("model") or _local_model())
+        raw_model = str(payload.get("model") or "").strip()
+        model = _local_model(raw_model or None)
         engine = f"local · {model}"
     else:
         engine = _print_engine_alias(payload.get("provider") or provider) or provider

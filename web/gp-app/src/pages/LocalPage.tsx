@@ -10,6 +10,7 @@ import {
   refusalDiagnosis,
   ollamaStatus,
   parseToolCall,
+  selectedLocalModel,
 } from '@/lib/localOllama'
 import { relativeTime } from '@/lib/format'
 import { renderMd } from '@/lib/md'
@@ -163,7 +164,7 @@ export function LocalPage() {
         detail?: string
       }>(
         '/api/local/research-prompt',
-        { method: 'POST', body: JSON.stringify({ ticker: tk }) },
+        { method: 'POST', body: JSON.stringify({ ticker: tk, model: selectedLocalModel() }) },
       )
       if (!prep.system || !prep.user || !prep.munger_system) {
         throw new Error(prep.detail || 'Could not build the prompt')
