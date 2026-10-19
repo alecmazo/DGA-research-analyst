@@ -1,11 +1,11 @@
-"""Collapse duplicate merger-arb rows. Dry-run is the default.
+"""Collapse duplicate scanner rows. Dry-run is the default.
 
-Local only. This script never reads DATABASE_URL and never connects to a
-remote database. A production dry-run and --apply are left for Alec.
+A database apply updates scanner_candidates only. It does not insert
+rows into merger_arb_deals. Passing a remote DSN is refused.
 
     python scripts/merger_arb_dedupe.py              # fixtures, dry-run
     python scripts/merger_arb_dedupe.py --apply      # fixtures, in memory
-    python scripts/merger_arb_dedupe.py --dsn postgresql://localhost/... 
+    python scripts/merger_arb_dedupe.py --dsn postgresql://localhost/...
 
 A second --apply on the same rows changes nothing.
 """
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from merger_arb.scanner.dedupe import collapse, fixture_rows  # noqa: E402
+from merger_arb.scanner.dedupe import collapse, fixture_rows, plan_collapse  # noqa: E402
 from merger_arb.store import MemoryStore  # noqa: E402
 
 
@@ -75,96 +75,113 @@ def _print_report(label: str, rows: list[dict], report: dict) -> None:
         print(f"  aliases: {len(report['aliases'])}")
 
 
+def _load_scanner_rows(cur) -> list[dict]:
+    cur.execute("SELECT id, deal_key, payload_json FROM scanner_candidates")
+    rows = []
+    for candidate_id, deal_key, payload in cur.fetchall():
+        row = json.loads(payload) if isinstance(payload, str) else dict(payload or {})
+        row["id"] = row.get("id") or candidate_id
+        row["deal_key"] = row.get("deal_key") or deal_key
+        rows.append(row)
+    return rows
+
+
+def _table_exists(cur, name: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1 FROM information_schema.tables
+         WHERE table_schema = 'public' AND table_name = %s
+        """,
+        (name,),
+    )
+    return cur.fetchone() is not None
+
+
+def apply_scanner_plan(conn, plan: dict) -> dict:
+    """Delete duplicate scanner rows and update the survivors.
+
+    merger_arb_deals is counted before and after and must stay the same.
+    Aliases are not written: that table only accepts a desk deal id.
+    """
+    drop_ids = [item for item in plan["drop_ids"] if item]
+    updates = plan["updates"]
+    keys = [row.get("deal_key") or "" for row in updates]
+    if len(keys) != len(set(keys)):
+        raise RuntimeError("collapsed deal keys are not unique")
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM merger_arb_deals")
+        deals_before = cur.fetchone()[0]
+        if drop_ids:
+            for table in (
+                "scanner_candidate_fields",
+                "scanner_candidate_sources",
+                "scanner_analysis_seeds",
+            ):
+                if _table_exists(cur, table):
+                    cur.execute(
+                        f"DELETE FROM {table} WHERE candidate_id = ANY(%s)",
+                        (drop_ids,),
+                    )
+            cur.execute("DELETE FROM scanner_candidates WHERE id = ANY(%s)", (drop_ids,))
+        for row in updates:
+            cur.execute(
+                """
+                UPDATE scanner_candidates
+                   SET deal_key = %s, payload_json = %s
+                 WHERE id = %s
+                """,
+                (row.get("deal_key") or "", json.dumps(row, default=str), row.get("id")),
+            )
+        cur.execute("SELECT COUNT(*) FROM merger_arb_deals")
+        deals_after = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM scanner_candidates")
+        scanner_after = cur.fetchone()[0]
+    if deals_before != deals_after:
+        conn.rollback()
+        raise RuntimeError("merger_arb_deals changed during a scanner collapse")
+    conn.commit()
+    return {
+        "deals_before": deals_before,
+        "deals_after": deals_after,
+        "scanner_after": scanner_after,
+        "dropped": len(drop_ids),
+    }
+
+
 def _apply_postgres(dsn: str, apply: bool) -> int:
     if not _local_dsn(dsn):
-        print("Refusing DSN: only localhost is allowed. Production is left for Alec.", file=sys.stderr)
+        print("Refusing DSN: only localhost is allowed.", file=sys.stderr)
         return 2
     import psycopg2
 
     conn = psycopg2.connect(dsn)
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, deal_key, payload_json
-                  FROM scanner_candidates
-                """
-            )
-            fetched = cur.fetchall()
-        rows = []
-        for candidate_id, deal_key, payload in fetched:
-            row = json.loads(payload) if isinstance(payload, str) else dict(payload or {})
-            row["id"] = row.get("id") or candidate_id
-            row["deal_key"] = row.get("deal_key") or deal_key
-            rows.append(row)
-        collapsed, report = collapse(rows)
-        _print_report("dry-run" if not apply else "apply", collapsed if apply else rows, report)
+            rows = _load_scanner_rows(cur)
+        plan = plan_collapse(rows)
+        report = plan["report"]
+        _print_report("dry-run" if not apply else "apply", rows, report)
         if not apply:
-            print("Dry-run only. Pass --apply to write this local database.")
+            print("Dry-run only. Pass --apply to update scanner_candidates. merger_arb_deals is not written.")
             return 0
-        by_id = {row.get("id"): row for row in collapsed}
-        drop = []
-        if not report["unchanged"]:
-            with conn.cursor() as cur:
-                for group in report["collapsed"]:
-                    keep_key = group["into"]
-                    keep = next((row for row in collapsed if row.get("deal_key") == keep_key), None)
-                    for member in group["members"]:
-                        if keep and member == keep.get("deal_key"):
-                            continue
-                        drop.append(member)
-                for row in collapsed:
-                    if row.get("id") not in {item.get("id") for item in rows}:
-                        continue
-                    cur.execute(
-                        """
-                        UPDATE scanner_candidates
-                           SET deal_key = %s, payload_json = %s
-                         WHERE id = %s
-                        """,
-                        (row.get("deal_key") or "", json.dumps(row), row.get("id")),
-                    )
-                for alias in report["aliases"]:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS merger_arb_deal_aliases (
-                            alias_key TEXT PRIMARY KEY,
-                            deal_id TEXT
-                        )
-                        """
-                    )
-                    cur.execute(
-                        """
-                        INSERT INTO merger_arb_deal_aliases (alias_key, deal_id)
-                        VALUES (%s, %s)
-                        ON CONFLICT (alias_key) DO UPDATE SET deal_id = EXCLUDED.deal_id
-                        """,
-                        (alias["alias_key"], alias["deal_key"]),
-                    )
-                for key in drop:
-                    cur.execute("DELETE FROM scanner_candidates WHERE deal_key = %s", (key,))
-            conn.commit()
-        from merger_arb.store import PostgresStore, reset_ensure_tables
-
-        reset_ensure_tables()
-
-        def connect():
-            return psycopg2.connect(dsn)
-
-        desk = PostgresStore(connect)
-        _write_deals(desk, collapsed, report["aliases"])
-        before_n = len(desk.list_deals())
-        _write_deals(desk, collapsed, report["aliases"])
-        after_n = len(desk.list_deals())
-        if before_n != after_n:
-            print("Second apply created new deal rows.", file=sys.stderr)
+        if report["unchanged"]:
+            print("Nothing to collapse.")
+            return 0
+        result = apply_scanner_plan(conn, plan)
+        with conn.cursor() as cur:
+            again_rows = _load_scanner_rows(cur)
+        _again, second = collapse(again_rows)
+        print(
+            f"second apply: {second['before']} -> {second['after']} "
+            f"(unchanged={second['unchanged']})"
+        )
+        print(
+            f"scanner_candidates: {result['scanner_after']}. "
+            f"merger_arb_deals stayed {result['deals_after']}."
+        )
+        if not second["unchanged"] or result["deals_before"] != result["deals_after"]:
+            print("Scanner collapse did not stick.", file=sys.stderr)
             return 1
-        again, second = collapse(list(by_id.values()))
-        print(f"second apply: {second['before']} -> {second['after']} (unchanged={second['unchanged']})")
-        if not second["unchanged"]:
-            print("Second apply was not a no-op.", file=sys.stderr)
-            return 1
-        print(f"Local merger_arb_deals: {after_n} rows at stage screen.")
         return 0
     finally:
         conn.close()

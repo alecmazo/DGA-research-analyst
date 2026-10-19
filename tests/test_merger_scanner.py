@@ -589,10 +589,12 @@ def test_api_scan_and_placeholder_skips_sec():
     denied = client.post("/api/merger-arb/scan", json={"mode": "incremental"})
     assert denied.status_code == 200
     run_id = denied.json()["run_id"]
+    import time
     for _ in range(50):
         body = client.get(f"/api/merger-arb/scan/{run_id}").json()["run"]
         if body["status"] != "running":
             break
+        time.sleep(0.05)
     else:
         raise AssertionError("scan did not finish")
     latest = client.get("/api/merger-arb/scan/latest").json()

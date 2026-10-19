@@ -268,6 +268,29 @@ def collapse(rows: list[dict]) -> tuple[list[dict], dict]:
     return kept, report
 
 
+def plan_collapse(rows: list[dict]) -> dict:
+    """Which scanner rows to keep and which duplicate ids to drop.
+
+    The kept payload is the collapsed row. Desk deals are not part of this plan.
+    """
+    collapsed, report = collapse(rows)
+    by_id = {row.get("id"): row for row in collapsed}
+    drop_ids: list[str] = []
+    updates: list[dict] = []
+    for group in group_rows(rows):
+        if len(group) < 2:
+            continue
+        keep_id = _canonical(group).get("id")
+        for row in group:
+            row_id = row.get("id")
+            if row_id and row_id != keep_id:
+                drop_ids.append(row_id)
+        winner = by_id.get(keep_id)
+        if winner is not None:
+            updates.append(winner)
+    return {"report": report, "drop_ids": drop_ids, "updates": updates}
+
+
 def fixture_rows() -> list[dict]:
     """Example duplicates. Not live deals."""
     return [

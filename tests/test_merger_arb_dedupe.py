@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from merger_arb.scanner.dedupe import collapse, find_match, fixture_rows
+from merger_arb.scanner.dedupe import collapse, find_match, fixture_rows, plan_collapse
 from merger_arb.scanner.merge import merge_candidate, merge_records, precedence
 from merger_arb.scanner.models import FetchResult, SourceRecord
 from merger_arb.scanner.resolve import TickerMap, deal_key, is_generic_acquirer
@@ -431,3 +431,23 @@ def test_scanner_writes_deals_at_stage_screen():
     assert cash
     visible = scanner.list_candidates()
     assert len(visible) == 1
+
+
+def test_scanner_plan_drops_duplicates_and_leaves_the_survivor():
+    rows = fixture_rows()
+    plan = plan_collapse(rows)
+    report = plan["report"]
+    assert report["before"] == len(rows)
+    assert report["after"] < report["before"]
+    assert report["unchanged"] is False
+    drop_ids = set(plan["drop_ids"])
+    update_ids = {row["id"] for row in plan["updates"]}
+    assert drop_ids.isdisjoint(update_ids)
+    assert len(rows) - len(drop_ids) == report["after"]
+    kept = [row for row in rows if row["id"] not in drop_ids]
+    for update in plan["updates"]:
+        for row in kept:
+            if row["id"] == update["id"]:
+                row.update(update)
+    _collapsed, second = collapse(kept)
+    assert second["unchanged"] is True
