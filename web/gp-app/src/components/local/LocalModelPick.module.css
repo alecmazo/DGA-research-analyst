@@ -1,0 +1,97 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lbl,
+.single span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.chipOn {
+  background: #5bb8d4;
+  border-color: #5bb8d4;
+  color: #0a1628;
+}
+
+.chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.single {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.compact select {
+  max-width: 132px;
+  height: 28px;
+  font-size: 11px;
+}
+
+.guideNow {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.guide {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.guide summary {
+  cursor: pointer;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.guide ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.guide li + li {
+  margin-top: 6px;
+}
+
+.single select {
+  height: 32px;
+  max-width: 220px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}

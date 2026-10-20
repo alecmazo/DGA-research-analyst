@@ -13,6 +13,7 @@ import {
 import { getCachedUser } from '@/lib/auth'
 import { readQuote } from '@/lib/quoteBook'
 import { fmtPct, fmtPx, pctClass, printEngineName, relativeTime, scrubPrintEngineNames } from '@/lib/format'
+import { shortModelLabel } from '@/lib/localOllama'
 import { renderMd, reportMarkdown } from '@/lib/md'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import styles from './ReportPage.module.css'
@@ -54,6 +55,7 @@ export function ReportPage() {
   const ticker = (params.get('ticker') || '').toUpperCase()
   const isolated = loc.pathname.replace(/\/$/, '').endsWith('/local-report')
   const provider = isolated ? 'local' : (params.get('provider') || 'grok').toLowerCase()
+  const localModelQuery = isolated ? (params.get('model') || '') : ''
 
   const [data, setData] = useState<ReportDetail | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
@@ -96,9 +98,12 @@ export function ReportPage() {
       try {
         const known = readQuote(ticker)
         if (known?.price != null) setQuote(known as Quote)
+        const modelBit = localModelQuery
+          ? `&model=${encodeURIComponent(localModelQuery)}`
+          : ''
         const [r, h] = await Promise.all([
           api<ReportDetail>(
-            `/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}&as_stored=1`,
+            `/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}&as_stored=1${modelBit}`,
           ),
           api<ReportHistory>(
             `/api/report/${encodeURIComponent(ticker)}/history?provider=${encodeURIComponent(provider)}`,
@@ -122,7 +127,7 @@ export function ReportPage() {
     return () => {
       alive = false
     }
-  }, [ticker, provider])
+  }, [ticker, provider, localModelQuery])
 
   const loadVersion = async (id: string | number) => {
     if (!ticker) return
@@ -400,6 +405,24 @@ export function ReportPage() {
           {data?.note && <span className={styles.note}>{data.note}</span>}
         </div>
         <div className={`${styles.actions} ${styles.noPrint}`}>
+          {isolated && (data?.local_models || []).length > 1 && (
+            <div className={styles.engineSwitch} role="tablist" aria-label="Local model">
+              {(data?.local_models || []).map((row) => (
+                <button
+                  key={row.model}
+                  type="button"
+                  role="tab"
+                  title={row.model}
+                  aria-selected={data?.model === row.model}
+                  className={`${styles.engineBtn} ${data?.model === row.model ? styles.engineOn : ''}`}
+                  disabled={loading}
+                  onClick={() => setParams({ ticker, model: row.model })}
+                >
+                  {shortModelLabel(row.model)}
+                </button>
+              ))}
+            </div>
+          )}
           {showEngineSwitch && (
             <div className={styles.engineSwitch} role="tablist" aria-label="Report engine">
               <button

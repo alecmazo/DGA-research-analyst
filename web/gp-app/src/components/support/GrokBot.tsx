@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { getCachedUser } from '@/lib/auth'
-import { ensureOllama, ollamaChat } from '@/lib/localOllama'
+import { ensureOllama, LOCAL_MODEL, LOCAL_PICK_KEYS, ollamaChat, shortModelLabel } from '@/lib/localOllama'
+import { LocalModelPick, useLocalModelChoice } from '@/components/local/LocalModelPick'
 import { renderMd } from '@/lib/md'
 import { openReportWindow } from '@/lib/openWindows'
 import styles from './GrokBot.module.css'
@@ -155,6 +156,8 @@ function saveChat(msgs: ChatMsg[]) {
 }
 
 export function GrokBot() {
+  const botModel = useLocalModelChoice(LOCAL_PICK_KEYS.bot)
+  const model = botModel.picked[0] || LOCAL_MODEL
   const loc = useLocation()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -260,6 +263,7 @@ export function GrokBot() {
           maxTokens: 800,
           think: 'low',
           numCtx: 8192,
+          model,
         })
       let chat
       try {
@@ -299,7 +303,7 @@ export function GrokBot() {
       <button
         type="button"
         className={`${styles.fab} ${open ? styles.fabOpen : ''}`}
-        title="Ask GPT-oss to do something on this page"
+        title={`Ask ${shortModelLabel(model)} to do something on this page`}
         aria-label="Open GPT-oss"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
@@ -315,8 +319,15 @@ export function GrokBot() {
           <div className={styles.head}>
             <div>
               <div className={styles.headTitle}>GPT-oss</div>
-              <span className={styles.headSub}>On this Mac · this page</span>
+              <span className={styles.headSub}>{shortModelLabel(model)} · this page</span>
             </div>
+            <LocalModelPick
+              compact
+              choices={botModel.choices}
+              picked={botModel.picked}
+              disabled={busy}
+              onToggle={botModel.toggle}
+            />
             <div className={styles.headBtns}>
               <button
                 type="button"

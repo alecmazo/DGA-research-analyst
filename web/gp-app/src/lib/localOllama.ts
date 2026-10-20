@@ -5,8 +5,70 @@ import { trackLoad } from './loadFlow'
 export const OLLAMA_HOST = 'http://127.0.0.1:11434'
 export const OLLAMA_DESK = 'http://127.0.0.1:8766'
 export const LOCAL_MODEL = 'gpt-oss-20b-finance'
+export const LOCAL_MODEL_CHOICES = ['gpt-oss-20b-finance', 'gemma4:26b', 'gemma4:12b']
 const MODEL_KEY = 'dga.local.model'
 const MODEL_LIST_KEY = 'dga.local.models'
+
+export const LOCAL_PICK_KEYS = {
+  research: 'dga.local.research.models',
+  ask: 'dga.local.ask.model',
+  portfolio: 'dga.local.portfolio.model',
+  transcript: 'dga.local.transcript.model',
+  bot: 'dga.local.bot.model',
+} as const
+
+/** Short name for a chip or a target tag. The full Ollama name stays in the tooltip. */
+export function shortModelLabel(model: string): string {
+  const raw = (model || '').trim()
+  const m = raw.toLowerCase()
+  if (m.includes('gpt-oss')) return 'GPT-oss'
+  const gemma = m.match(/gemma\d*:(\d+b)/)
+  if (gemma) return `Gemma ${gemma[1]}`
+  if (m.startsWith('gemma')) return 'Gemma'
+  return raw.length > 18 ? `${raw.slice(0, 16)}…` : raw
+}
+
+/** Two-to-four character mark for a stacked target, like G and C on the desk. */
+export function modelMark(model: string): string {
+  const m = (model || '').toLowerCase()
+  if (m.includes('gpt-oss')) return 'OSS'
+  if (m.includes('26b')) return '26B'
+  if (m.includes('12b')) return '12B'
+  const raw = (model || '').split(':')[0].replace(/[^a-z0-9]/gi, '')
+  return (raw.slice(0, 3) || 'LOC').toUpperCase()
+}
+
+export function modelPicks(key: string, allowed: string[], multiple: boolean): string[] {
+  const list = allowed.map((m) => m.trim()).filter(Boolean)
+  const fallback = list.includes(LOCAL_MODEL) ? LOCAL_MODEL : list[0]
+  if (!fallback) return []
+  const keep = (names: string[]) => {
+    const ok = names.filter((n) => list.includes(n))
+    if (!ok.length) return [fallback]
+    return multiple ? ok : [ok[0]]
+  }
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown
+      const names = Array.isArray(parsed) ? parsed.map((m) => String(m)) : [String(parsed)]
+      return keep(names)
+    }
+    const legacy = (localStorage.getItem(MODEL_KEY) || '').trim()
+    if (legacy) return keep([legacy])
+  } catch {
+    /* ignore */
+  }
+  return [fallback]
+}
+
+export function storeModelPicks(key: string, picks: string[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(picks))
+  } catch {
+    /* ignore */
+  }
+}
 
 export function rememberLocalModels(models: string[], choice: string) {
   const allowed = models.map((m) => m.trim()).filter(Boolean)
@@ -89,14 +151,18 @@ type ChatOpts = {
   onDelta?: (chunk: string) => void
 }
 
-export async function ollamaStatus(): Promise<OllamaState> {
+export async function ollamaStatus(model?: string): Promise<OllamaState> {
   const done = trackLoad('ollama://tags')
   try {
     const res = await fetch(`${OLLAMA_HOST}/api/tags`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = (await res.json()) as { models?: { name?: string }[] }
     const names = (data.models || []).map((m) => m.name || '')
-    const wanted = selectedLocalModel()
+    const wanted = (model || '').trim()
+    if (!wanted) {
+      done('ok')
+      return { ok: true, message: 'ok', model: '' }
+    }
     const present = names.some(
       (n) => n === wanted || n.startsWith(`${wanted}:`) || wanted.startsWith(`${n}:`),
     )

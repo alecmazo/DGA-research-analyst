@@ -5,13 +5,17 @@ import { openPortfolioReport, openReportWindow } from '@/lib/openWindows'
 import {
   ensureOllama,
   isModelRefusal,
+  LOCAL_MODEL,
+  LOCAL_PICK_KEYS,
   mungerSectionReady,
   ollamaChat,
   refusalDiagnosis,
   ollamaStatus,
   parseToolCall,
-  selectedLocalModel,
+  shortModelLabel,
 } from '@/lib/localOllama'
+import { LocalDcf } from '@/components/local/LocalDcf'
+import { LocalModelPick, useLocalModelChoice } from '@/components/local/LocalModelPick'
 import { relativeTime } from '@/lib/format'
 import { renderMd } from '@/lib/md'
 import { Button } from '@/components/ui/Button'
@@ -72,6 +76,9 @@ export function LocalPage() {
   const [launching, setLaunching] = useState(false)
   const [deskMsg, setDeskMsg] = useState<string | null>(null)
   const [libraryCount, setLibraryCount] = useState<string | null>(null)
+  const researchModels = useLocalModelChoice(LOCAL_PICK_KEYS.research, true)
+  const askModel = useLocalModelChoice(LOCAL_PICK_KEYS.ask)
+  const bookModel = useLocalModelChoice(LOCAL_PICK_KEYS.portfolio)
   const navigate = useNavigate()
 
   const loadStatus = useCallback(() => {
@@ -83,7 +90,7 @@ export function LocalPage() {
         ...meta,
         ok: ollama.ok,
         message: ollama.ok ? meta.message : ollama.message,
-        model: ollama.model || meta.model,
+        model: meta.model,
       })
     })
   }, [])
@@ -151,80 +158,97 @@ export function LocalPage() {
   const runResearch = async () => {
     const tk = ticker.trim().toUpperCase()
     if (!tk) return
+    const models = researchModels.picked.length ? researchModels.picked : [LOCAL_MODEL]
     setRunning(true)
     setRunErr(null)
     setDoneTicker(null)
-    setProgress('Gathering the filing and Yahoo news…')
+    let saved = 0
+    let lastSaved = models[0]
     try {
-      const prep = await api<{
-        ok?: boolean
-        system?: string
-        user?: string
-        munger_system?: string
-        detail?: string
-      }>(
-        '/api/local/research-prompt',
-        { method: 'POST', body: JSON.stringify({ ticker: tk, model: selectedLocalModel() }) },
-      )
-      if (!prep.system || !prep.user || !prep.munger_system) {
-        throw new Error(prep.detail || 'Could not build the prompt')
-      }
-      setProgress('Writing the note on this Mac…')
-      let chat = await ollamaChat({
-        system: prep.system,
-        user: prep.user,
-      })
-      if (isModelRefusal(chat.text)) {
-        setProgress('Writing the note again…')
-        chat = await ollamaChat({
+      for (const model of models) {
+        const name = shortModelLabel(model)
+        const health = await ollamaStatus(model)
+        if (!health.ok) throw new Error(health.message)
+        setProgress(`${name} · gathering the filing and Yahoo news…`)
+        const prep = await api<{
+          ok?: boolean
+          system?: string
+          user?: string
+          munger_system?: string
+          detail?: string
+        }>(
+          '/api/local/research-prompt',
+          { method: 'POST', body: JSON.stringify({ ticker: tk, model }) },
+        )
+        if (!prep.system || !prep.user || !prep.munger_system) {
+          throw new Error(prep.detail || 'Could not build the prompt')
+        }
+        setProgress(`${name} · writing the note on this Mac…`)
+        let chat = await ollamaChat({
           system: prep.system,
           user: prep.user,
+          model,
         })
-      }
-      if (!chat.text || isModelRefusal(chat.text)) {
-        throw new Error(
-          `The local model refused this run. The previous note was kept. ${refusalDiagnosis(chat)}`,
-        )
-      }
-      setProgress('Writing the Munger section…')
-      const mungerUser =
-        `The equity note is below. Write only Section 8.5 from it. Do not repeat the note.\n\n${chat.text}`
-      let munger = await ollamaChat({
-        system: prep.munger_system,
-        user: mungerUser,
-      })
-      if (!mungerSectionReady(munger.text)) {
-        setProgress('Writing the Munger section again…')
-        munger = await ollamaChat({
+        if (isModelRefusal(chat.text)) {
+          setProgress(`${name} · writing the note again…`)
+          chat = await ollamaChat({
+            system: prep.system,
+            user: prep.user,
+            model,
+          })
+        }
+        if (!chat.text || isModelRefusal(chat.text)) {
+          throw new Error(
+            `${name} refused this run. Earlier notes were kept. ${refusalDiagnosis(chat)}`,
+          )
+        }
+        setProgress(`${name} · writing the Munger section…`)
+        const mungerUser =
+          `The equity note is below. Write only Section 8.5 from it. Do not repeat the note.\n\n${chat.text}`
+        let munger = await ollamaChat({
           system: prep.munger_system,
           user: mungerUser,
+          model,
         })
+        if (!mungerSectionReady(munger.text)) {
+          setProgress(`${name} · writing the Munger section again…`)
+          munger = await ollamaChat({
+            system: prep.munger_system,
+            user: mungerUser,
+            model,
+          })
+        }
+        if (!mungerSectionReady(munger.text)) {
+          throw new Error(
+            `${name} wrote the note, but not the Munger section, so that model was not saved. ${refusalDiagnosis(munger)}`,
+          )
+        }
+        const full = `${chat.text.trim()}\n\n${munger.text.trim()}\n`
+        setProgress(`${name} · saving…`)
+        const latency = chat.latencyMs + munger.latencyMs
+        const speedSrc = munger.tokensPerSec ?? chat.tokensPerSec
+        await api('/api/local/save', {
+          method: 'POST',
+          body: JSON.stringify({
+            ticker: tk,
+            text: full,
+            model,
+            tokens_per_sec: speedSrc,
+            latency_ms: latency,
+          }),
+        })
+        saved += 1
+        lastSaved = model
+        setReportsKey((n) => n + 1)
+        const speed = speedSrc != null ? ` · ${speedSrc.toFixed(1)} tok/s` : ''
+        setProgress(`${name} saved · ${Math.round(latency / 1000)}s${speed} · cost: $0`)
       }
-      if (!mungerSectionReady(munger.text)) {
-        throw new Error(
-          `The note was written, but the Munger section was not, so the previous report was kept. ${refusalDiagnosis(munger)}`,
-        )
-      }
-      const full = `${chat.text.trim()}\n\n${munger.text.trim()}\n`
-      setProgress('Saving…')
-      const latency = chat.latencyMs + munger.latencyMs
-      const speedSrc = munger.tokensPerSec ?? chat.tokensPerSec
-      await api('/api/local/save', {
-        method: 'POST',
-        body: JSON.stringify({
-          ticker: tk,
-          text: full,
-          tokens_per_sec: speedSrc,
-          latency_ms: latency,
-        }),
-      })
-      const speed = speedSrc != null ? ` · ${speedSrc.toFixed(1)} tok/s` : ''
       setDoneTicker(tk)
-      setReportsKey((n) => n + 1)
-      setProgress(`Saved · ${Math.round(latency / 1000)}s${speed} · cost: $0`)
-      openReportWindow(tk, 'local')
+      openReportWindow(tk, 'local', lastSaved)
     } catch (e) {
-      setRunErr(e instanceof Error ? e.message : 'Could not start')
+      const msg = e instanceof Error ? e.message : 'Could not start'
+      setRunErr(saved ? `${msg} ${saved} model${saved === 1 ? '' : 's'} already saved.` : msg)
+      if (saved) openReportWindow(tk, 'local', lastSaved)
     } finally {
       setRunning(false)
     }
@@ -233,6 +257,7 @@ export function LocalPage() {
   const askQuestion = async () => {
     const q = question.trim()
     if (!q) return
+    const model = askModel.picked[0] || LOCAL_MODEL
     setAsking(true)
     setAsk(null)
     const system = status?.agent_system || 'You are the local finance analyst. Do not invent figures.'
@@ -241,7 +266,7 @@ export function LocalPage() {
     try {
       let answer = ''
       for (let i = 0; i < 4; i++) {
-        const chat = await ollamaChat({ system, user: transcript, maxTokens: 3500 })
+        const chat = await ollamaChat({ system, user: transcript, maxTokens: 3500, model })
         const call = parseToolCall(chat.text)
         if (!call) {
           answer = chat.text
@@ -259,6 +284,7 @@ export function LocalPage() {
           system,
           user: `${transcript}\n\nWrite the markdown answer now. Do not call a tool.`,
           maxTokens: 3500,
+          model,
         })
         answer = chat.text
       }
@@ -272,6 +298,7 @@ export function LocalPage() {
 
   const reviewBook = async () => {
     if (!book) return
+    const model = bookModel.picked[0] || LOCAL_MODEL
     setReviewing(true)
     setReviewErr(null)
     setReviewNote('Writing the recommendation…')
@@ -285,6 +312,7 @@ export function LocalPage() {
         system: prep.system || status?.portfolio_system || 'You are the local portfolio analyst.',
         user: prep.user,
         maxTokens: 4000,
+        model,
       })
       if (!chat.text || isModelRefusal(chat.text)) {
         throw new Error(
@@ -320,10 +348,7 @@ export function LocalPage() {
             <span className={`${styles.dot} ${styles.up}`} />
             <div>
               <strong>Ollama running</strong>
-              <span>
-                {status?.model || 'gpt-oss-20b-finance'}
-                {status?.branch ? ` · ${status.branch}` : ''}
-              </span>
+              <span>{status?.branch ? status.branch : 'Ready on this Mac'}</span>
             </div>
           </div>
         ) : (
@@ -370,7 +395,15 @@ export function LocalPage() {
 
       <section className={styles.card}>
         <h2>Research</h2>
-        <p>Same investment-case note as Analyze. It opens in a new window when it is saved.</p>
+        <p>Same investment-case note as Analyze. Pick one or more models. Each saved note keeps its own target.</p>
+        <LocalModelPick
+          label="Models"
+          multiple
+          choices={researchModels.choices}
+          picked={researchModels.picked}
+          disabled={running}
+          onToggle={researchModels.toggle}
+        />
         <div className={styles.row}>
           <input
             value={ticker}
@@ -394,6 +427,13 @@ export function LocalPage() {
       <section className={styles.card}>
         <h2>Ask</h2>
         <p>A local agent. It can read the financial store, Yahoo headlines, quotes, and portfolios.</p>
+        <LocalModelPick
+          guide
+          choices={askModel.choices}
+          picked={askModel.picked}
+          disabled={asking}
+          onToggle={askModel.toggle}
+        />
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
@@ -427,6 +467,15 @@ export function LocalPage() {
       </Panel>
       </div>
 
+      <section className={styles.card}>
+        <h2>DCF</h2>
+        <p>
+          Two-stage free cash flow to the firm. Load a ticker to fill the base year
+          from the financials store, then change any input. The value updates here.
+        </p>
+        <LocalDcf />
+      </section>
+
       <div className={styles.pair}>
         <section className={styles.card}>
           <h2>Portfolio</h2>
@@ -434,6 +483,12 @@ export function LocalPage() {
             Recommendations from the account’s holdings, the financial store, and Yahoo updates.
             A finished review opens in its own window.
           </p>
+          <LocalModelPick
+            choices={bookModel.choices}
+            picked={bookModel.picked}
+            disabled={reviewing}
+            onToggle={bookModel.toggle}
+          />
           <div className={styles.row}>
             <select
               value={book}

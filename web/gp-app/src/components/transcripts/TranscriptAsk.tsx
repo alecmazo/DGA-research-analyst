@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/api'
-import { ollamaChat, ollamaStatus, LOCAL_MODEL } from '@/lib/localOllama'
+import { ollamaChat, ollamaStatus, LOCAL_MODEL, LOCAL_PICK_KEYS, shortModelLabel } from '@/lib/localOllama'
+import { LocalModelPick, useLocalModelChoice } from '@/components/local/LocalModelPick'
 import { renderMd } from '@/lib/md'
 import { Button } from '@/components/ui/Button'
 import { Panel } from '@/components/ui/Panel'
@@ -31,8 +32,8 @@ type EngineId = 'local' | 'grok' | 'claude' | 'deepseek'
 const ENGINES: { id: EngineId; label: string; via: string }[] = [
   {
     id: 'local',
-    label: `Local · ${LOCAL_MODEL}`,
-    via: `This Mac · Ollama · ${LOCAL_MODEL} · not an API call`,
+    label: 'Local',
+    via: 'This Mac · Ollama · not an API call',
   },
   { id: 'grok', label: 'Grok · grok-4.7', via: 'xAI API · grok-4.7' },
   { id: 'claude', label: 'Claude', via: 'Anthropic API' },
@@ -92,6 +93,7 @@ async function stitchSaved(
   question: string,
   system: string,
   notes: string[],
+  model: string,
   onProgress: (text: string) => void,
 ): Promise<string> {
   const promptFor = (blocks: string[]) =>
@@ -102,6 +104,7 @@ async function stitchSaved(
       user: promptFor(blocks),
       maxTokens: 1600,
       numCtx: 8192,
+      model,
     })
     return (chat.text || '').trim()
   }
@@ -173,6 +176,8 @@ function rowsFrom(folders: LibraryFolder[] | undefined, kind: 'interview' | 'cal
 
 export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) {
   const [engine, setEngine] = useState<EngineId>('local')
+  const localChoice = useLocalModelChoice(LOCAL_PICK_KEYS.transcript)
+  const localName = localChoice.picked[0] || LOCAL_MODEL
   const [scope, setScope] = useState<Scope>('open')
   const [picks, setPicks] = useState<Record<string, OpenTranscript>>({})
   const [library, setLibrary] = useState<Library | null>(null)
@@ -253,7 +258,7 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
           ? 'the open transcript'
           : 'the library'
       if (engine === 'local') {
-        const health = await ollamaStatus()
+        const health = await ollamaStatus(localName)
         if (!health.ok) throw new Error(health.message)
         const pack = await api<PacketPack>(
           '/api/transcripts/ask-context',
@@ -272,6 +277,7 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
                 user: sectionUser(q, packet),
                 maxTokens: 900,
                 numCtx: 8192,
+                model: localName,
               })
               const note = (chat.text || '').trim()
               if (keepSectionNote(note)) saved.push(note)
@@ -282,7 +288,7 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
             }
           }
           const notes = saved.filter(keepSectionNote)
-          const via = `${chosen.via} · ${context} · ${packets.length} section${packets.length === 1 ? '' : 's'}`
+          const via = `${chosen.via} · ${shortModelLabel(localName)} · ${context} · ${packets.length} section${packets.length === 1 ? '' : 's'}`
           if (!notes.length) {
             setAnswer('Nothing in this transcript answers that.')
             setUsed(via)
@@ -291,13 +297,13 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
             setUsed(via)
           } else {
             setProgress(`Stitching ${notes.length} saved sections…`)
-            const stitched = await stitchSaved(q, pack.stitch_system || '', notes, setProgress)
+            const stitched = await stitchSaved(q, pack.stitch_system || '', notes, localName, setProgress)
             setAnswer(stitched || notes.map((note, i) => `Section ${i + 1}\n${note}`).join('\n\n'))
             setUsed(`${via} stitched`)
           }
         } else {
           if (!pack.system || !pack.user) throw new Error('Could not load transcript excerpts')
-          const chat = await ollamaChat({ system: pack.system, user: pack.user, maxTokens: 2500 })
+          const chat = await ollamaChat({ system: pack.system, user: pack.user, maxTokens: 2500, model: localName })
           if (!chat.text) throw new Error('The local model returned an empty answer')
           setAnswer(chat.text)
           setUsed(`${chosen.via} · ${context}`)
@@ -418,11 +424,19 @@ export function TranscriptAsk({ openDoc }: { openDoc?: OpenTranscript | null }) 
           >
             {ENGINES.map((row) => (
               <option key={row.id} value={row.id}>
-                {row.label}
+                {row.id === 'local' ? `Local · ${shortModelLabel(localName)}` : row.label}
               </option>
             ))}
           </select>
         </label>
+        {engine === 'local' && (
+          <LocalModelPick
+            choices={localChoice.choices}
+            picked={localChoice.picked}
+            disabled={busy}
+            onToggle={localChoice.toggle}
+          />
+        )}
       </div>
       <textarea
         value={question}

@@ -17,6 +17,8 @@ from api.domains.local_finance_llm import (
     local_fast_model,
     local_model,
     local_model_list,
+    ordered_local_runs,
+    store_local_run,
 )
 from api.domains.yahoo_finance_news import (
     EMPTY_NOTE,
@@ -183,6 +185,46 @@ class LocalModelHelpersTests(unittest.TestCase):
             call_chunks_table("qwen3-embedding:4b", provider="ollama"),
             "call_chunks__qwen3_embedding_4b",
         )
+
+    def test_second_local_model_keeps_the_first_note(self):
+        legacy = {
+            "model": "gpt-oss-20b-finance",
+            "md": "A" * 40,
+            "generated_at": "2026-10-19T12:00:00Z",
+            "rating": "Buy",
+            "price_target": 54.4,
+            "upside_pct": 12.0,
+            "report_date": "2026-10-19",
+        }
+        first = store_local_run(None, {}, {
+            "model": "gpt-oss-20b-finance",
+            "report_md": "A" * 40,
+            "generated_at": "2026-10-19T12:00:00Z",
+            "rating": "Buy",
+            "price_target": 54.4,
+            "upside_pct": 12.0,
+            "report_date": "2026-10-19",
+        })
+        both = store_local_run(first, legacy, {
+            "model": "gemma4:26b",
+            "report_md": "B" * 40,
+            "generated_at": "2026-10-20T12:00:00Z",
+            "rating": "Hold",
+            "price_target": 48.0,
+            "upside_pct": 4.0,
+            "report_date": "2026-10-20",
+        })
+        names = [row["model"] for row in ordered_local_runs(both)]
+        self.assertEqual(names, ["gemma4:26b", "gpt-oss-20b-finance"])
+        self.assertIn("AAAA", both["gpt-oss-20b-finance"]["report_md"])
+        self.assertEqual(both["gemma4:26b"]["price_target"], 48.0)
+        from_legacy = store_local_run(None, legacy, {
+            "model": "gemma4:26b",
+            "report_md": "B" * 40,
+            "generated_at": "2026-10-20T12:00:00Z",
+            "price_target": 48.0,
+        })
+        self.assertEqual(set(from_legacy), {"gpt-oss-20b-finance", "gemma4:26b"})
 
 
 if __name__ == "__main__":

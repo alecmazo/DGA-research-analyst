@@ -5,6 +5,7 @@ import { api, type Quote, type SavedReport } from '@/lib/api'
 import { readQuote, subscribeQuoteBook } from '@/lib/quoteBook'
 import { delayAfterWatchlist } from '@/lib/deskBoot'
 import { fmtPct, fmtPx, pctClass, relativeTime } from '@/lib/format'
+import { modelMark } from '@/lib/localOllama'
 import { openReportWindow, openValuationWindow } from '@/lib/openWindows'
 import styles from './deskWidgets.module.css'
 
@@ -110,8 +111,8 @@ export function SavedReports({
   const [sortKey, setSortKey] = useState<'recent' | 'upside'>('recent')
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
 
-  const openRep = (ticker: string) => {
-    openReportWindow(ticker, local ? 'local' : 'grok')
+  const openRep = (ticker: string, model?: string) => {
+    openReportWindow(ticker, local ? 'local' : 'grok', model)
   }
 
   const load = useCallback(async () => {
@@ -170,6 +171,11 @@ export function SavedReports({
           : rep.current_price != null
             ? Number(rep.current_price)
             : null
+      if (local) {
+        const view = (rep.local_views || [])[0]
+        const pt = view?.price_target ?? rep.price_target
+        return liveUpside(pt != null ? Number(pt) : null, price, view?.upside_pct ?? rep.upside_pct)
+      }
       const grokPt =
         rep.grok_price_target != null ? Number(rep.grok_price_target) : null
       return liveUpside(grokPt, price, rep.grok_upside_pct)
@@ -259,7 +265,7 @@ export function SavedReports({
                 <button
                   type="button"
                   className={`${styles.thSort} ${styles.thSortRight} ${sortKey === 'upside' ? styles.thSortOn : ''}`}
-                  title="Sort by Grok 12m upside vs live last — largest first"
+                  title={local ? 'Sort by the newest local target vs live last' : 'Sort by Grok 12m upside vs live last — largest first'}
                   onClick={() => clickSort('upside')}
                 >
                   TGT / Upside
@@ -333,7 +339,7 @@ export function SavedReports({
                 <tr
                   key={rep.ticker}
                   className={styles.repRow}
-                  onClick={() => openRep(rep.ticker)}
+                  onClick={() => openRep(rep.ticker, local ? (rep.local_views || [])[0]?.model : undefined)}
                 >
                     <td>
                       <div className={styles.repTkRow}>
@@ -434,7 +440,36 @@ export function SavedReports({
                       <div className={`tabular ${pctClass(pct)}`}>{fmtPct(pct)}</div>
                     </td>
                     <td className={styles.num}>
-                      {bothEngines ? (
+                      {local && (rep.local_views || []).length ? (
+                        <div className={styles.tgtStack}>
+                          {(rep.local_views || []).map((view) => {
+                            const pt = view.price_target != null ? Number(view.price_target) : null
+                            const up = liveUpside(pt, price, view.upside_pct)
+                            return (
+                              <button
+                                key={view.model}
+                                type="button"
+                                className={`${styles.tgtLine} ${styles.tgtBtn}`}
+                                title={`${view.model} 12m target vs live last`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openRep(rep.ticker, view.model)
+                                }}
+                              >
+                                <div className={styles.tgtPx}>
+                                  <span className={`${styles.tgtMark} ${styles.tgtLocal}`}>
+                                    {modelMark(view.model)}
+                                  </span>{' '}
+                                  {fmtTgt(pt)}
+                                </div>
+                                <div className={`tabular ${styles.tgtUp} ${pctClass(up)}`}>
+                                  {fmtPct(up)}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : bothEngines ? (
                         <div className={styles.tgtStack}>
                           <div className={styles.tgtLine} title="Grok 12m PT vs live last">
                             <div className={styles.tgtPx}>

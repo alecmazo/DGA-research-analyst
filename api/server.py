@@ -9003,7 +9003,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui746-20261019-local-models"
+WEB_BUILD_VERSION = "ui749-20261020-local-dcf"
 
 
 @app.get("/api/build")
@@ -9971,6 +9971,7 @@ class LocalTickerRequest(BaseModel):
 class LocalSaveRequest(BaseModel):
     ticker: str = ""
     text: str = ""
+    model: str = ""
     tokens_per_sec: float | None = None
     latency_ms: int | None = None
 
@@ -10106,6 +10107,7 @@ def local_save_report(body: LocalSaveRequest, request: Request):
     except Exception:
         summary = {}
     from api.domains.local_finance_llm import local_model as _local_model
+    saved_model = _local_model(body.model or None)
     try:
         from word_report import render_report
         render_report(
@@ -10115,7 +10117,7 @@ def local_save_report(body: LocalSaveRequest, request: Request):
             output_path=str(docx_path),
             price=(summary or {}).get("current_price"),
             rating_hint=str((summary or {}).get("rating") or ""),
-            engine_label=f"local · {_local_model()}",
+            engine_label=f"local · {saved_model}",
             scrub_engine_names=False,
         )
     except Exception as exc:
@@ -10132,7 +10134,7 @@ def local_save_report(body: LocalSaveRequest, request: Request):
         "cost_usd": 0,
         "tokens_per_sec": body.tokens_per_sec,
         "latency_ms": body.latency_ms,
-        "model": _local_model(),
+        "model": saved_model,
     }
     persisted, chars = _persist_analysis_text(
         ticker=ticker, provider="local", result=result,
@@ -10385,6 +10387,71 @@ def _local_row_prices(stored_pt, stored_up, md: str) -> dict:
         }
 
 
+def _local_saved_views(row: dict) -> list[dict]:
+    """One target per local model. Older single-column notes count as one."""
+    from api.domains.local_finance_llm import (
+        coerce_local_runs,
+        ordered_local_runs,
+        seed_legacy_run,
+    )
+    runs = seed_legacy_run(
+        coerce_local_runs(row.get("local_runs")),
+        model=row.get("local_model"),
+        md=row.get("report_md_local") or "",
+        generated_at=row.get("local_generated_at"),
+        rating=row.get("local_rating"),
+        price_target=row.get("local_price_target"),
+        upside_pct=row.get("local_upside_pct"),
+        report_date=row.get("local_report_date"),
+    )
+    views: list[dict] = []
+    for view in ordered_local_runs(runs):
+        md = view.get("report_md") or ""
+        prices = _local_row_prices(view.get("price_target"), view.get("upside_pct"), md)
+        views.append({
+            "model": view.get("model"),
+            "generated_at": view.get("generated_at"),
+            "report_date": view.get("report_date"),
+            "rating": view.get("rating") or prices.get("rating"),
+            "price_target": prices["price_target"],
+            "upside_pct": prices["upside_pct"],
+            "current_price": prices.get("current_price"),
+            "pct_change": prices.get("pct_change"),
+            "report_md": md,
+        })
+    return views
+
+
+def _local_list_row(row: dict) -> dict:
+    views = _local_saved_views(row)
+    public = [{k: v for k, v in view.items() if k != "report_md"} for view in views]
+    newest = public[0] if public else {}
+    generated = newest.get("generated_at") or row.get("local_generated_at")
+    if hasattr(generated, "isoformat"):
+        generated = generated.isoformat()
+    return {
+        "ticker": row.get("ticker"),
+        "generated_at": generated,
+        "report_date": newest.get("report_date") or row.get("local_report_date"),
+        "rating": newest.get("rating"),
+        "price_target": newest.get("price_target"),
+        "upside_pct": newest.get("upside_pct"),
+        "current_price": newest.get("current_price"),
+        "pct_change": newest.get("pct_change"),
+        "providers": ["local"],
+        "local_views": public,
+        "last_attempt_status": row.get("last_attempt_status"),
+        "last_attempt_at": row.get("last_attempt_at").isoformat()
+            if hasattr(row.get("last_attempt_at"), "isoformat")
+            else row.get("last_attempt_at"),
+        "last_attempt_error": row.get("last_attempt_error"),
+        "version_count": row.get("version_count") or 1,
+        "delta_from_prior": row.get("delta_from_prior"),
+        "stock_style": row.get("stock_style"),
+        "stock_style_note": row.get("stock_style_note"),
+    }
+
+
 @app.get("/api/local/reports")
 def local_reports_list(request: Request):
     """Saved local reports for the Local page card."""
@@ -10397,44 +10464,20 @@ def local_reports_list(request: Request):
                 cur.execute("""
                     SELECT ticker, local_generated_at, local_rating,
                            local_price_target, local_upside_pct, local_report_date,
-                           report_md_local,
+                           report_md_local, local_model, local_runs,
                            last_attempt_status, last_attempt_at, last_attempt_error,
                            COALESCE(version_count, 1) AS version_count,
                            delta_from_prior, stock_style, stock_style_note
                       FROM analyst_reports
-                     WHERE report_md_local IS NOT NULL
-                       AND length(report_md_local) > 20
+                     WHERE (
+                            (report_md_local IS NOT NULL AND length(report_md_local) > 20)
+                            OR (local_runs IS NOT NULL AND local_runs <> '{}'::jsonb)
+                           )
                        AND archived IS NOT TRUE
                      ORDER BY local_generated_at DESC NULLS LAST
                 """)
                 for r in cur.fetchall() or []:
-                    prices = _local_row_prices(
-                        r.get("local_price_target"),
-                        r.get("local_upside_pct"),
-                        r.get("report_md_local") or "",
-                    )
-                    rows.append({
-                        "ticker": r.get("ticker"),
-                        "generated_at": r.get("local_generated_at").isoformat()
-                            if hasattr(r.get("local_generated_at"), "isoformat")
-                            else r.get("local_generated_at"),
-                        "report_date": r.get("local_report_date"),
-                        "rating": r.get("local_rating") or prices.get("rating"),
-                        "price_target": prices["price_target"],
-                        "upside_pct": prices["upside_pct"],
-                        "current_price": prices["current_price"],
-                        "pct_change": prices["pct_change"],
-                        "providers": ["local"],
-                        "last_attempt_status": r.get("last_attempt_status"),
-                        "last_attempt_at": r.get("last_attempt_at").isoformat()
-                            if hasattr(r.get("last_attempt_at"), "isoformat")
-                            else r.get("last_attempt_at"),
-                        "last_attempt_error": r.get("last_attempt_error"),
-                        "version_count": r.get("version_count") or 1,
-                        "delta_from_prior": r.get("delta_from_prior"),
-                        "stock_style": r.get("stock_style"),
-                        "stock_style_note": r.get("stock_style_note"),
-                    })
+                    rows.append(_local_list_row(r))
         except Exception as exc:
             print(f"[local] report list failed: {exc!s:.180}", flush=True)
     if not rows:
@@ -10447,15 +10490,23 @@ def local_reports_list(request: Request):
                 except Exception:
                     text = ""
                 prices = _local_row_prices(None, None, text)
+                stamp = datetime.utcfromtimestamp(path.stat().st_mtime).isoformat()
                 rows.append({
                     "ticker": tk,
-                    "generated_at": datetime.utcfromtimestamp(path.stat().st_mtime).isoformat(),
+                    "generated_at": stamp,
                     "rating": prices.get("rating"),
                     "price_target": prices["price_target"],
                     "upside_pct": prices["upside_pct"],
                     "current_price": prices["current_price"],
                     "pct_change": prices["pct_change"],
                     "providers": ["local"],
+                    "local_views": [{
+                        "model": "gpt-oss-20b-finance",
+                        "generated_at": stamp,
+                        "rating": prices.get("rating"),
+                        "price_target": prices["price_target"],
+                        "upside_pct": prices["upside_pct"],
+                    }],
                     "version_count": 1,
                 })
     return rows
@@ -10488,7 +10539,9 @@ def local_reports_delete(ticker: str, request: Request):
                            local_price_target = NULL,
                            local_upside_pct = NULL,
                            local_report_date = NULL,
-                           local_gamma_url = NULL
+                           local_gamma_url = NULL,
+                           local_model = NULL,
+                           local_runs = NULL
                      WHERE ticker = %s
                 """, (tk,))
                 conn.commit()
@@ -10743,7 +10796,7 @@ def list_jobs():
 
 
 @app.get("/api/report/{ticker}")
-def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, request: Request = None):
+def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, model: str = "", request: Request = None):
     if request is not None and _request_is_demo(request):
         md = _demo_report_lookup(ticker)
         if md is None:
@@ -10925,7 +10978,7 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                            report_md_claude, claude_generated_at,
                            report_md_kimi, kimi_generated_at,
                            report_md_deepseek, deepseek_generated_at,
-                           report_md_local, local_generated_at, local_gamma_url, local_model,
+                           report_md_local, local_generated_at, local_gamma_url, local_model, local_runs,
                            rating, price_target, upside_pct,
                            claude_rating, claude_price_target, claude_upside_pct,
                            kimi_rating, kimi_price_target, kimi_upside_pct,
@@ -11000,41 +11053,46 @@ def get_report(ticker: str, provider: str = "grok", as_stored: bool = False, req
                                        if row.get("deepseek_upside_pct") is not None
                                        else _f(row.get("upside_pct")),
                     })
-                if provider == "local" and (row.get("report_md_local") or "").strip():
+                if provider == "local":
                     from api.domains.local_finance_llm import is_model_refusal, local_model as _local_model
-                    local_md = row["report_md_local"]
+                    views = _local_saved_views(row)
+                    wanted = (model or "").strip()
+                    resolved = _local_model(wanted) if wanted else ""
+                    pick = None
+                    if wanted:
+                        pick = next(
+                            (v for v in views if v.get("model") in (wanted, resolved)),
+                            None,
+                        )
+                    if pick is None and views:
+                        pick = views[0]
+                    local_md = (pick or {}).get("report_md") or row.get("report_md_local") or ""
                     if is_model_refusal(local_md):
                         local_md = ""
                     if local_md:
+                        catalog = [
+                            {"model": v.get("model"), "generated_at": v.get("generated_at")}
+                            for v in views if (v.get("report_md") or "").strip()
+                        ]
                         held_payload = {
                         "ticker": ticker,
                         "provider": "local",
                         "version_count": _vc,
                         "delta_from_prior": _parse_delta_blob(_delta_raw, "local"),
-                        "report_md": row["report_md_local"],
-                        "generated_at": _iso(row.get("local_generated_at")),
+                        "report_md": local_md,
+                        "generated_at": (pick or {}).get("generated_at") or _iso(row.get("local_generated_at")),
                         "has_docx": (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Report_local.docx").exists(),
                         "has_pptx": (analyst.STOCKS_FOLDER / f"{ticker}_DGA_Presentation_local.pptx").exists(),
                         "gamma_url": row.get("local_gamma_url"),
                         "gamma_generated_at": None,
-                        "model": row.get("local_model") or _local_model(),
-                        "rating": row.get("local_rating"),
-                        "price_target": _f(row.get("local_price_target")),
-                        "upside_pct": _f(row.get("local_upside_pct")),
+                        "model": (pick or {}).get("model") or row.get("local_model") or _local_model(),
+                        "local_models": catalog,
+                        "rating": (pick or {}).get("rating") or row.get("local_rating"),
+                        "price_target": (pick or {}).get("price_target"),
+                        "upside_pct": (pick or {}).get("upside_pct"),
+                        "current_price": (pick or {}).get("current_price"),
+                        "pct_change": (pick or {}).get("pct_change"),
                         }
-                        _lq = _local_row_prices(
-                            row.get("local_price_target"),
-                            row.get("local_upside_pct"),
-                            local_md,
-                        )
-                        if held_payload.get("price_target") is None:
-                            held_payload["price_target"] = _lq.get("price_target")
-                        if held_payload.get("upside_pct") is None or row.get("local_price_target") is None:
-                            held_payload["upside_pct"] = _lq.get("upside_pct")
-                        held_payload["current_price"] = _lq.get("current_price")
-                        held_payload["pct_change"] = _lq.get("pct_change")
-                        if not held_payload.get("rating"):
-                            held_payload["rating"] = _lq.get("rating")
                         held_local = held_payload
                         try:
                             return _present_md(local_md, row=row, payload=held_payload)
@@ -17207,6 +17265,21 @@ def _archive_prior_report_version(cur, ticker: str, provider: str, new_summary: 
         vcount = int(row[6] or 1) if len(row) > 6 else 1
 
     if provider == "local":
+        new_model = str((new_summary or {}).get("model") or "").strip()
+        if new_model:
+            cur.execute(
+                "SELECT local_model FROM analyst_reports WHERE ticker=%s",
+                (ticker,),
+            )
+            got = cur.fetchone()
+            prev_model = ""
+            if got:
+                prev_model = str(
+                    (got.get("local_model") if isinstance(got, dict) else got[0]) or ""
+                ).strip()
+            # A different local model is a second view, not a revision of this one.
+            if prev_model and prev_model != new_model:
+                return None
         cur.execute(
             "SELECT COUNT(*) FROM analyst_report_versions WHERE ticker=%s AND provider=%s",
             (ticker, "local"),
@@ -17579,16 +17652,56 @@ def _db_upsert_report(
                         _stamp_report_delta(cur, ticker, provider, delta_from_prior)
 
                 elif provider == "local":
-                    from api.domains.local_finance_llm import local_model as _resolve_local_model
+                    from api.domains.local_finance_llm import (
+                        local_model as _resolve_local_model,
+                        store_local_run,
+                    )
                     local_model = str(summary.get("model") or _resolve_local_model())[:80]
+                    cur.execute(
+                        """
+                        SELECT local_runs, local_model, report_md_local, local_generated_at,
+                               local_rating, local_price_target, local_upside_pct, local_report_date
+                          FROM analyst_reports WHERE ticker=%s
+                        """,
+                        (ticker,),
+                    )
+                    prev = cur.fetchone()
+                    def _prev(idx, key):
+                        if not prev:
+                            return None
+                        if isinstance(prev, dict):
+                            return prev.get(key)
+                        return prev[idx]
+                    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    merged_runs = store_local_run(
+                        _prev(0, "local_runs"),
+                        {
+                            "model": _prev(1, "local_model"),
+                            "md": _prev(2, "report_md_local"),
+                            "generated_at": _prev(3, "local_generated_at"),
+                            "rating": _prev(4, "local_rating"),
+                            "price_target": _prev(5, "local_price_target"),
+                            "upside_pct": _prev(6, "local_upside_pct"),
+                            "report_date": _prev(7, "local_report_date"),
+                        },
+                        {
+                            "model": local_model,
+                            "report_md": md_text,
+                            "generated_at": now_iso,
+                            "rating": summary.get("rating"),
+                            "price_target": summary.get("price_target"),
+                            "upside_pct": summary.get("upside_pct"),
+                            "report_date": report_date,
+                        },
+                    )
                     cur.execute("""
                         INSERT INTO analyst_reports
                             (ticker, generated_at, report_md, has_docx, has_pptx,
                              report_md_local, local_generated_at, local_report_date,
                              local_rating, local_price_target, local_upside_pct,
-                             local_model)
+                             local_model, local_runs)
                         VALUES (%s, NOW(), '', FALSE, FALSE,
-                                %s, NOW(), %s, %s, %s, %s, %s)
+                                %s, NOW(), %s, %s, %s, %s, %s, %s::jsonb)
                         ON CONFLICT (ticker) DO UPDATE SET
                             report_md_local    = EXCLUDED.report_md_local,
                             local_generated_at = CASE WHEN %s THEN NOW()
@@ -17597,11 +17710,13 @@ def _db_upsert_report(
                             local_rating       = EXCLUDED.local_rating,
                             local_price_target = EXCLUDED.local_price_target,
                             local_upside_pct   = EXCLUDED.local_upside_pct,
-                            local_model        = EXCLUDED.local_model
+                            local_model        = EXCLUDED.local_model,
+                            local_runs         = EXCLUDED.local_runs
                     """, (
                         ticker, md_text, report_date,
                         summary.get("rating"), summary.get("price_target"),
                         summary.get("upside_pct"), local_model,
+                        json.dumps(merged_runs),
                         _touch,
                     ))
                     if delta_from_prior is not None:
@@ -21493,6 +21608,7 @@ def _ensure_analyst_reports_table(conn) -> None:
         ("local_report_date",     "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_report_date TEXT"),
         ("local_gamma_url",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_gamma_url TEXT"),
         ("local_model",           "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_model TEXT"),
+        ("local_runs",            "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS local_runs JSONB"),
         # Desk style pill (VALUE / GROWTH / GARP / RICH / CORE)
         ("stock_style",       "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style VARCHAR(16)"),
         ("stock_style_note",  "ALTER TABLE analyst_reports ADD COLUMN IF NOT EXISTS stock_style_note TEXT"),

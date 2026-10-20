@@ -630,6 +630,14 @@ export type SavedReport = {
   dcf_user_multiple?: number | null
   dcf_user_value?: number | null
   dcf_user_fcf?: number | null
+  /** Local page only. One target per model that has written this ticker. */
+  local_views?: {
+    model: string
+    price_target?: number | null
+    upside_pct?: number | null
+    generated_at?: string | null
+    rating?: string | null
+  }[]
 }
 
 export type ValuationApproach = {
@@ -721,4 +729,6 @@ export type ReportDetail = {
   providers?: string[]
   /** Local window only. Exact model that wrote the note. */
   model?: string
+  /** Other local models saved for this ticker. */
+  local_models?: { model: string; generated_at?: string | null }[]
 }

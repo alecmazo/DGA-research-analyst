@@ -258,6 +258,103 @@ def local_model(name: str | None = None) -> str:
     return allowed[0]
 
 
+def _as_float(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_iso(value) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
+
+
+def coerce_local_runs(raw) -> dict:
+    """Model name → saved note. Drops empty or non-object entries."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for key, val in raw.items():
+        if not isinstance(val, dict):
+            continue
+        name = str(val.get("model") or key or "").strip()
+        md = str(val.get("report_md") or "")
+        if not name or len(md.strip()) < 20:
+            continue
+        out[name] = dict(val)
+        out[name]["model"] = name
+    return out
+
+
+def seed_legacy_run(
+    runs: dict,
+    *,
+    model: str | None = None,
+    md: str | None = None,
+    generated_at=None,
+    rating=None,
+    price_target=None,
+    upside_pct=None,
+    report_date=None,
+) -> dict:
+    """Keep a note that was saved before per-model storage existed."""
+    seeded = dict(runs or {})
+    text = (md or "").strip()
+    if len(text) < 20:
+        return seeded
+    name = (model or "").strip() or DEFAULT_LOCAL_MODEL
+    if name in seeded:
+        return seeded
+    seeded[name] = {
+        "model": name,
+        "report_md": text,
+        "generated_at": _as_iso(generated_at),
+        "rating": rating,
+        "price_target": _as_float(price_target),
+        "upside_pct": _as_float(upside_pct),
+        "report_date": report_date,
+    }
+    return seeded
+
+
+def store_local_run(existing, legacy: dict, new: dict) -> dict:
+    """Add one model's note without dropping the others."""
+    runs = seed_legacy_run(coerce_local_runs(existing), **(legacy or {}))
+    name = str((new or {}).get("model") or "").strip()
+    md = str((new or {}).get("report_md") or "")
+    if not name or len(md.strip()) < 20:
+        return runs
+    runs[name] = {
+        "model": name,
+        "report_md": md,
+        "generated_at": _as_iso((new or {}).get("generated_at")),
+        "rating": (new or {}).get("rating"),
+        "price_target": _as_float((new or {}).get("price_target")),
+        "upside_pct": _as_float((new or {}).get("upside_pct")),
+        "report_date": (new or {}).get("report_date"),
+    }
+    return runs
+
+
+def ordered_local_runs(runs: dict) -> list[dict]:
+    """Newest note first."""
+    rows = [dict(val) for val in (runs or {}).values() if isinstance(val, dict)]
+    rows.sort(key=lambda row: str(row.get("generated_at") or ""), reverse=True)
+    return rows
+
+
 def ollama_reachable(timeout: float = 1.5) -> bool:
     """True when this process can open Ollama's /api/tags. Short timeout."""
     url = _host_root(_env("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")) + "/api/tags"
