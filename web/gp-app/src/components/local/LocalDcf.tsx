@@ -49,7 +49,7 @@ function Field({
   disabled?: boolean
 }) {
   return (
-    <label className={styles.field}>
+    <label className={styles.field} title={hint}>
       <span>{label}</span>
       <input
         value={value}
@@ -58,8 +58,8 @@ function Field({
         autoComplete="off"
         disabled={disabled}
         aria-label={label}
+        title={hint}
       />
-      {hint ? <span className={styles.hint}>{hint}</span> : null}
     </label>
   )
 }
@@ -282,7 +282,7 @@ export function LocalDcf() {
                 value={draft.years}
                 onChange={(v) => commit({ years: v })}
               />
-              <label className={styles.field}>
+              <label className={`${styles.field} ${styles.wide}`}>
                 <span>Terminal</span>
                 <select
                   value={terminal}

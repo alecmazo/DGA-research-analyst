@@ -1,0 +1,17 @@
+---
+description: Commit, push, and deploy web changes unless Alec says not to
+alwaysApply: true
+---
+
+# Ship by default
+
+When Alec asks for a change in this repo, finish by shipping it. Do not wait for a separate "push it".
+
+1. Bump `WEB_BUILD_VERSION`, `BUILD_VERSION`, the tests that pin that string, and a `CONTINUITY.md` row when the GP UI or API build id changes.
+2. If `web/gp-app` changed, run `npm run build --prefix web/gp-app` and commit `web/gp-app/dist`. Railway does not run Node.
+3. Commit and push `main`. That deploys Railway service `web` in project `upbeat-ambition`.
+4. Poll `https://portfolio.dgacapital.com/api/build` until it matches. If the push does not start a web deployment, redeploy service `web` from the commit already on `main`.
+5. Do not deploy Postgres unless Alec asks. A push does not deploy `sliw` unless the commit touches `apps/sliw-agent/**`, `railway.toml`, `nixpacks.toml`, `Procfile`, or `requirements.txt`.
+6. Skip the push only when Alec says not to push, not to deploy, or to keep the change local.
+
+Do not force-push `main`. Do not commit `.env` or the untracked `scripts/llm_ab` index and result files.

@@ -11,7 +11,8 @@ This is the path. Do not invent a second one.
 2. When desk pages change, `npm run build --prefix web/gp-app` and commit `web/gp-app/dist`. Railway does not run Node.
 3. Commit everything the next model needs, including `ticket_*.jpg`, `mobile/logo-options/`, and `stocks/AAPL_user_msg.txt`. Do not commit `.env` or generated `stocks/*` reports.
 4. Push `main` on `https://github.com/alecmazo/DGA-research-analyst`. That push deploys Railway service **web** (`6aac66bc-eea5-45a1-b808-ff4275886491`) in project `upbeat-ambition`. The service is set to Nixpacks, a `/health` check, and the memory-capped start command in `railway.toml`.
-5. Poll `https://portfolio.dgacapital.com/api/build` until it matches `BUILD_VERSION`. A push does not deploy `sliw` unless the commit touches `apps/sliw-agent/**`, `railway.toml`, `nixpacks.toml`, `Procfile`, or `requirements.txt`. Never deploy Postgres unless Alec asks.
+5. Poll `https://portfolio.dgacapital.com/api/build` until it matches `BUILD_VERSION`. A push does not deploy `sliw` unless the commit touches `apps/sliw-agent/**`, `railway.toml`, `nixpacks.toml`, `Procfile`, or `requirements.txt`. Never deploy Postgres unless Alec asks. If the push does not start a web deployment, redeploy service `web` from the commit already on `main`.
+6. After a change Alec asked for, commit and push unless he said not to push, not to deploy, or to keep it local. Do not wait for a separate "push it".
 6. Credit (`/gp/credit`) and the GPT-oss desk button are already part of this tree. The button calls `gpt-oss-20b-finance` on this Mac and does not call xAI.
 
 ---
@@ -113,6 +114,7 @@ Human greenlit high-ROI package: **GP → mobile research → LP**, light termin
 | 2026-07-13 | Grok → Fable / all | **Implemented** high-ROI UX package (no API/fund math changes): GP Desk + light default + report reader; mobile Today + report hero/TOC; LP narrative strip. Claims released. Pull `main` before further web UI work. |
 | 2026-10-19 | Cursor → all | **ui745-20261019-desk-nav.** GP bar is Research / Book / More / On this Mac. Settings, theme, and log out are in the avatar. Daily layout is the desk default and a Desk-menu action; saved layouts are left in place until that action. Claims released. |
 | 2026-10-20 | Cursor → all | **ui747-20261020-local-model-picks.** Local model choice left the header. Research, transcripts, and the desk bot each remember their own model. A second local model on the same ticker keeps its own target. Claims released. |
+| 2026-10-20 | Cursor → all | **ui750-20261020-dcf-fields.** DCF inputs on On this Mac are short boxes beside their labels. Ship by default: commit and push unless Alec says not to. Claims released. |
 
 ---
 

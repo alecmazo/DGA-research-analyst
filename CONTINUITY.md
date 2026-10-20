@@ -330,6 +330,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Local model picks** | **`ui747-20261020-local-model-picks`** | The header model menu is gone. Research on On this Mac can run one or more local models, and each saved note keeps its own target. Transcript questions and the GPT-oss button pick their own model. |
 | **Ask model guide** | **`ui748-20261020-ask-model-guide`** | The Ask card on On this Mac shows what the selected local model is for, and a short guide for narrative, DCF, reasoning, and a portfolio review. |
 | **Local DCF** | **`ui749-20261020-local-dcf`** | On this Mac, a two-stage FCFF calculator loads a ticker's base year from company_financials and the quote, then reprices as the inputs change. |
+| **DCF fields** | **`ui750-20261020-dcf-fields`** | The On this Mac DCF inputs are short boxes beside their labels. The note for a field shows on hover. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
 ### One-click handoff (preferred)
@@ -528,4 +529,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-20 · Agent: Cursor · Built: `ui749-20261020-local-dcf` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui750-YYYYMMDD-slug`*
+*Last updated: 2026-10-20 · Agent: Cursor · Built: `ui750-20261020-dcf-fields` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui751-YYYYMMDD-slug`*

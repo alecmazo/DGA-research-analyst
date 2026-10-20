@@ -1,7 +1,7 @@
 .form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .tickerRow {
@@ -12,8 +12,16 @@
 }
 
 .tickerRow .field {
-  width: 140px;
+  display: flex;
+  flex-direction: column;
+  width: 88px;
   flex: 0 0 auto;
+  grid-template-columns: none;
+}
+
+.tickerRow .field input {
+  width: 100%;
+  text-align: left;
 }
 
 .ticker input {
@@ -43,15 +51,15 @@
 
 .body {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.85fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1.7fr) minmax(220px, 0.7fr);
+  gap: 12px;
   align-items: start;
 }
 
 .groups {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px 18px;
+  gap: 10px 14px;
 }
 
 .group h3 {
@@ -64,42 +72,58 @@
 }
 
 .group h3.later {
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .fields {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 2px 12px;
 }
 
 .field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.2;
   color: var(--text-tertiary);
 }
 
 .field input,
 .field select {
   font: inherit;
-  font-size: 14px;
+  font-size: 12px;
+  line-height: 1.2;
   color: var(--text-primary, inherit);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 4px;
+  padding: 2px 6px;
   background: var(--bg-canvas, transparent);
-  width: 100%;
+  width: 92px;
+  justify-self: end;
+  text-align: right;
+  min-height: 0;
+}
+
+.wide {
+  grid-template-columns: minmax(0, 1fr) 148px;
+}
+
+.wide select {
+  width: 148px;
+  text-align: left;
 }
 
 .outs {
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: 8px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .hero {
@@ -117,7 +141,7 @@
 }
 
 .hero strong {
-  font-size: 28px;
+  font-size: 20px;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
@@ -125,8 +149,8 @@
 .line {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  font-size: 14px;
+  gap: 8px;
+  font-size: 12px;
 }
 
 .line span {
@@ -191,3 +215,4 @@
     grid-template-columns: 1fr;
   }
 }
+
