@@ -1996,6 +1996,14 @@ def auth_v2_login(req: AuthV2LoginRequest, request: Request):
                 status_code=503,
                 detail="Demo workspace is starting up — try again in a moment.",
             )
+        try:
+            from api.domains.family_offices import login_block
+            blocked = login_block(_fund_conn, email)
+        except Exception:
+            blocked = None
+        if blocked:
+            _audit("login", email, ip, False, "trial_paused")
+            raise HTTPException(status_code=403, detail=blocked)
 
     # ── Second factor (opt-in TOTP). Password is verified; gate the token on MFA. ──
     mfa = _mfa_get(result.get("lp_id"))
@@ -9003,7 +9011,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui751-20261021-flows"
+WEB_BUILD_VERSION = "ui752-20261021-offices"
 
 
 @app.get("/api/build")
@@ -44810,6 +44818,22 @@ def _mount_credit() -> None:
 
 
 _mount_credit()
+
+
+def _mount_family_offices() -> None:
+    try:
+        from api.domains.family_offices import create_router
+        app.include_router(create_router(
+            _claims_or_401,
+            _fund_conn,
+            create_user=auth_v2_mod.create_user,
+            delete_user=auth_v2_mod.delete_user,
+        ))
+    except Exception as exc:
+        print(f"[family-offices] mount failed: {exc!r}", flush=True)
+
+
+_mount_family_offices()
 
 
 def _mount_portfolio_ship() -> None:

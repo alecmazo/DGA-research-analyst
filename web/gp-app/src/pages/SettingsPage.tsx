@@ -1,4 +1,6 @@
 import { useEffect, useState, type MouseEvent } from 'react'
+import { Link } from 'react-router-dom'
+import { getCachedUser } from '@/lib/auth'
 import page from './page.module.css'
 import styles from './SettingsPage.module.css'
 import { FlowsSection } from './settings/FlowsSection'
@@ -69,6 +71,9 @@ export function SettingsPage() {
       </header>
 
       <nav className={styles.jump} role="navigation" aria-label="Settings sections">
+        {!getCachedUser()?.demo_mode && (
+          <Link to="/settings/offices">Offices</Link>
+        )}
         <a
           href="#set-flows"
           aria-current={panel === 'flows' ? 'page' : undefined}

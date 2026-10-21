@@ -45,6 +45,7 @@ const PodcastsPage = lazyExport(() => import('@/pages/PodcastsPage'), 'PodcastsP
 const TranscriptsPage = lazyExport(() => import('@/pages/TranscriptsPage'), 'TranscriptsPage')
 const MemosPage = lazyExport(() => import('@/pages/MemosPage'), 'MemosPage')
 const SettingsPage = lazyExport(() => import('@/pages/SettingsPage'), 'SettingsPage')
+const OfficesPage = lazyExport(() => import('@/pages/OfficesPage'), 'OfficesPage')
 const ReportPage = lazyExport(() => import('@/pages/ReportPage'), 'ReportPage')
 const LocalPortfolioPage = lazyExport(
   () => import('@/pages/LocalPortfolioPage'),
@@ -339,6 +340,14 @@ export default function App() {
                 element={
                   <LazyPage label="Memos">
                     <MemosPage />
+                  </LazyPage>
+                }
+              />
+              <Route
+                path="settings/offices"
+                element={
+                  <LazyPage label="Family offices">
+                    <OfficesPage />
                   </LazyPage>
                 }
               />

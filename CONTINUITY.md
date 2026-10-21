@@ -332,6 +332,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Local DCF** | **`ui749-20261020-local-dcf`** | On this Mac, a two-stage FCFF calculator loads a ticker's base year from company_financials and the quote, then reprices as the inputs change. |
 | **DCF fields** | **`ui750-20261020-dcf-fields`** | The On this Mac DCF inputs are short boxes beside their labels. The note for a field shows on hover. |
 | **Flows tab** | **`ui751-20261021-flows`** | Settings has a Flows tab. It holds the production path, the fix order, and the load and repo charts that left the desk. |
+| **Family offices** | **`ui752-20261021-offices`** | Settings → Offices opens a trial on the sample workspace. A trial does not see DGA books. Pause blocks that login. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
 ### One-click handoff (preferred)
@@ -530,4 +531,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-21 · Agent: Cursor · Built: `ui751-20261021-flows` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui752-YYYYMMDD-slug`*
+*Last updated: 2026-10-21 · Agent: Cursor · Built: `ui752-20261021-offices` · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui753-YYYYMMDD-slug`*
