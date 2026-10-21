@@ -30,7 +30,8 @@
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-.jump a:hover {
+.jump a:hover,
+.jump a[aria-current='page'] {
   color: var(--brand-700);
   border-color: rgba(91, 184, 212, 0.35);
   background: var(--brand-50);

@@ -1,6 +1,7 @@
-import type { MouseEvent } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import page from './page.module.css'
 import styles from './SettingsPage.module.css'
+import { FlowsSection } from './settings/FlowsSection'
 import { HandoffSection } from './settings/HandoffSection'
 import { SupportSection } from './settings/SupportSection'
 import { ModelsSection } from './settings/ModelsSection'
@@ -21,18 +22,40 @@ const JUMP = [
   { id: 'set-system', label: 'System' },
 ] as const
 
-function jumpTo(e: MouseEvent<HTMLAnchorElement>, id: string) {
-  e.preventDefault()
-  const el = document.getElementById(id)
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  try {
-    history.replaceState(null, '', `#${id}`)
-  } catch {
-    /* ignore */
-  }
-}
-
 export function SettingsPage() {
+  const [panel, setPanel] = useState<'office' | 'flows'>(() =>
+    typeof window !== 'undefined' && window.location.hash === '#set-flows' ? 'flows' : 'office',
+  )
+  const [pending, setPending] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (panel !== 'office' || !pending) return
+    document.getElementById(pending)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setPending(null)
+  }, [panel, pending])
+
+  const openFlows = (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    setPanel('flows')
+    setPending(null)
+    try {
+      history.replaceState(null, '', '#set-flows')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const jumpTo = (e: MouseEvent<HTMLAnchorElement>, id: string) => {
+    e.preventDefault()
+    setPanel('office')
+    setPending(id)
+    try {
+      history.replaceState(null, '', `#${id}`)
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div className={`${page.page} ${styles.shell}`}>
       <header className={page.hero}>
@@ -40,12 +63,19 @@ export function SettingsPage() {
           <p className={page.kicker}>Admin</p>
           <h1 className={page.h1}>Settings</h1>
           <p className={page.sub}>
-            Models, connections, users, and the handoff kit.
+            Models, connections, users, and the production flow.
           </p>
         </div>
       </header>
 
       <nav className={styles.jump} role="navigation" aria-label="Settings sections">
+        <a
+          href="#set-flows"
+          aria-current={panel === 'flows' ? 'page' : undefined}
+          onClick={openFlows}
+        >
+          Flows
+        </a>
         {JUMP.map((j) => (
           <a key={j.id} href={`#${j.id}`} onClick={(e) => jumpTo(e, j.id)}>
             {j.label}
@@ -53,6 +83,9 @@ export function SettingsPage() {
         ))}
       </nav>
 
+      {panel === 'flows' ? <FlowsSection /> : null}
+      {panel === 'office' ? (
+      <>
       <h3 className={styles.groupHead} id="set-handoff">
         Agent continuity · handoff
       </h3>
@@ -108,6 +141,8 @@ export function SettingsPage() {
       <div className={styles.grid}>
         <SystemSection />
       </div>
+      </>
+      ) : null}
     </div>
   )
 }

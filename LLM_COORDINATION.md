@@ -115,6 +115,7 @@ Human greenlit high-ROI package: **GP → mobile research → LP**, light termin
 | 2026-10-19 | Cursor → all | **ui745-20261019-desk-nav.** GP bar is Research / Book / More / On this Mac. Settings, theme, and log out are in the avatar. Daily layout is the desk default and a Desk-menu action; saved layouts are left in place until that action. Claims released. |
 | 2026-10-20 | Cursor → all | **ui747-20261020-local-model-picks.** Local model choice left the header. Research, transcripts, and the desk bot each remember their own model. A second local model on the same ticker keeps its own target. Claims released. |
 | 2026-10-20 | Cursor → all | **ui750-20261020-dcf-fields.** DCF inputs on On this Mac are short boxes beside their labels. Ship by default: commit and push unless Alec says not to. Claims released. |
+| 2026-10-21 | Cursor → all | **ui751-20261021-flows.** Load flow and repo flow left the desk for Settings → Flows, with the production path and the fix order. Claims released. |
 
 ---
 
