@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from datetime import datetime
 from unittest.mock import patch
@@ -10,8 +11,11 @@ from zoneinfo import ZoneInfo
 
 from api.domains.local_finance_llm import (
     OFFLINE_MESSAGE,
+    PRODUCTION_LOOPBACK_MESSAGE,
+    LocalLlmError,
     call_chunks_table,
     check_local_health,
+    complete_local,
     fit_local_context,
     llm_model_catalog,
     local_fast_model,
@@ -171,6 +175,38 @@ class LocalModelHelpersTests(unittest.TestCase):
             online = llm_model_catalog(timeout=0.2)
         self.assertTrue(online["reachable"])
         self.assertEqual(online["models"][0], "gpt-oss-20b-finance")
+
+    def test_railway_does_not_dial_loopback_ollama(self):
+        blocked = {
+            "RAILWAY_ENVIRONMENT": "production",
+            "LOCAL_LLM_BASE_URL": "http://127.0.0.1:11434/v1",
+            "LOCAL_LLM_ALLOW_LOOPBACK": "",
+        }
+        with patch.dict(os.environ, blocked, clear=False):
+            with patch("api.domains.local_finance_llm.urllib.request.urlopen") as opened:
+                catalog = llm_model_catalog(timeout=0.2)
+                health = check_local_health()
+                with self.assertRaises(LocalLlmError) as raised:
+                    complete_local("system", "user")
+            opened.assert_not_called()
+        self.assertFalse(catalog["reachable"])
+        self.assertIn("gpt-oss-20b-finance", catalog["models"])
+        self.assertEqual(health["message"], PRODUCTION_LOOPBACK_MESSAGE)
+        self.assertIn("127.0.0.1:11434", str(raised.exception))
+
+        remote = {
+            "RAILWAY_ENVIRONMENT": "production",
+            "LOCAL_LLM_BASE_URL": "http://llm.internal:11434/v1",
+            "LOCAL_LLM_ALLOW_LOOPBACK": "",
+        }
+        with patch.dict(os.environ, remote, clear=False):
+            with patch(
+                "api.domains.local_finance_llm.urllib.request.urlopen",
+                side_effect=OSError("down"),
+            ) as opened:
+                catalog = llm_model_catalog(timeout=0.2)
+            self.assertGreaterEqual(opened.call_count, 1)
+            self.assertFalse(catalog["reachable"])
 
     def test_call_chunks_table_keeps_live_index_separate(self):
         self.assertEqual(

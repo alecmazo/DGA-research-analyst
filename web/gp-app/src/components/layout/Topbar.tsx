@@ -5,6 +5,7 @@ import type { GpUser } from '@/lib/auth'
 import { logout } from '@/lib/auth'
 import { useTheme } from '@/hooks/useTheme'
 import { api } from '@/lib/api'
+import { thisMacHasLocalModel } from '@/lib/localOllama'
 import { StockPeek } from './StockPeek'
 import styles from './Topbar.module.css'
 
@@ -298,11 +299,22 @@ export function Topbar({ user, build }: Props) {
   const [searching, setSearching] = useState(false)
   const [peekTk, setPeekTk] = useState<string | null>(null)
   const [activeIdx, setActiveIdx] = useState(0)
+  const [onThisMac, setOnThisMac] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<number | null>(null)
   const seqRef = useRef(0)
+
+  useEffect(() => {
+    let alive = true
+    void thisMacHasLocalModel().then((ok) => {
+      if (alive) setOnThisMac(ok)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const openPeek = useCallback((ticker: string) => {
     const tk = normalizeTicker(ticker)
@@ -487,14 +499,16 @@ export function Topbar({ user, build }: Props) {
           <NavMenu label="Research" items={RESEARCH} />
           <NavMenu label="Book" items={BOOK} />
           <NavMenu label="More" items={MORE} />
-          <NavLink
-            to="/local"
-            className={({ isActive }) =>
-              `${styles.link} ${isActive ? styles.linkActive : ''}`
-            }
-          >
-            On this Mac
-          </NavLink>
+          {onThisMac && (
+            <NavLink
+              to="/local"
+              className={({ isActive }) =>
+                `${styles.link} ${isActive ? styles.linkActive : ''}`
+              }
+            >
+              On this Mac
+            </NavLink>
+          )}
         </nav>
 
         <div className={styles.right}>

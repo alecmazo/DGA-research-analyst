@@ -176,11 +176,38 @@ import starlette.responses as _sr
 _sr.JSONResponse.render = _nan_safe_render  # type: ignore[method-assign]
 
 # ── yfinance (optional — for live price fetching) ─────────────────────────────
-try:
-    import yfinance as yf
-    _YFINANCE_OK = True
-except ImportError:
-    _YFINANCE_OK = False
+# Imported on first use. A top-level import pulled Yahoo into process start
+# and kept /health waiting on it (SUP_20261022_281244dc).
+class _LazyYFinance:
+    _mod = None
+    _missing = False
+
+    def load(self):
+        if self._missing:
+            return None
+        if self._mod is None:
+            try:
+                import yfinance as mod
+                self._mod = mod
+            except ImportError:
+                self._missing = True
+                return None
+        return self._mod
+
+    def __getattr__(self, name):
+        mod = self.load()
+        if mod is None:
+            raise AttributeError(name)
+        return getattr(mod, name)
+
+
+class _YFinanceReady:
+    def __bool__(self) -> bool:
+        return yf.load() is not None
+
+
+yf = _LazyYFinance()
+_YFINANCE_OK = _YFinanceReady()
 
 # ── openpyxl (optional — for XLSX cap-table uploads) ─────────────────────────
 try:
@@ -1324,7 +1351,23 @@ from pydantic import BaseModel
 # Make the project root importable when running from the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import DGA_analyst as analyst
+
+class _LazyAnalyst:
+    """DGA_analyst imports pandas and EDGAR. Load it on first use, not at bind."""
+
+    _mod = None
+
+    def load(self):
+        if self._mod is None:
+            import DGA_analyst as mod
+            self._mod = mod
+        return self._mod
+
+    def __getattr__(self, name):
+        return getattr(self.load(), name)
+
+
+analyst = _LazyAnalyst()
 
 # Swagger / OpenAPI map every admin route. Off in production; set ENABLE_API_DOCS=1
 # only on a throwaway box if you need to browse the schema.
@@ -1822,11 +1865,48 @@ def _analyze_lock_for(ticker: str) -> threading.Lock:
 # Persistent job-index — survives server restarts on Railway.
 # Maps { job_id: { "ticker": str, "type": "analysis"|"portfolio" } }
 # Stored next to the stocks folder so it lives on the same volume.
+# The folder is the same path DGA_analyst uses. Resolving it must not import
+# that module, or pandas and EDGAR load before /health can answer.
 # ---------------------------------------------------------------------------
-_JOB_INDEX_PATH      = analyst.STOCKS_FOLDER / "_job_index.json"
+def _stocks_folder() -> Path:
+    folder = Path(__file__).resolve().parent.parent / "stocks"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return folder
+
+
+class _DeferredPath:
+    def __init__(self, name: str, env_key: str = ""):
+        self._name = name
+        self._env_key = env_key
+        self._path: Path | None = None
+
+    def path(self) -> Path:
+        if self._path is None:
+            if self._env_key:
+                override = (os.environ.get(self._env_key) or "").strip()
+                if override:
+                    self._path = Path(override)
+                    return self._path
+            self._path = _stocks_folder() / self._name
+        return self._path
+
+    def exists(self) -> bool:
+        return self.path().exists()
+
+    def read_text(self, *args, **kwargs) -> str:
+        return self.path().read_text(*args, **kwargs)
+
+    def write_text(self, *args, **kwargs) -> int:
+        return self.path().write_text(*args, **kwargs)
+
+
+_JOB_INDEX_PATH = _DeferredPath("_job_index.json")
 # Lean snapshot of the last completed rebalance — persisted to Dropbox so
 # both the web client and the mobile app read the same ground truth.
-_LAST_JOB_PATH       = analyst.STOCKS_FOLDER / "_portfolio_last_job.json"
+_LAST_JOB_PATH = _DeferredPath("_portfolio_last_job.json")
 
 def _load_job_index() -> dict:
     try:
@@ -4051,10 +4131,7 @@ def gurufocus_snapshot(ticker: str):
 # PERSISTENCE: stored in the `watchlists` Postgres table so the data
 # survives Railway redeploys. The legacy JSON file is read once on first
 # DB-write and migrated in, then never touched again.
-_WATCHLISTS_FILE = Path(os.environ.get(
-    "DGA_WATCHLISTS_PATH",
-    str(analyst.STOCKS_FOLDER / "_dga_watchlists.json"),
-))
+_WATCHLISTS_FILE = _DeferredPath("_dga_watchlists.json", env_key="DGA_WATCHLISTS_PATH")
 _watchlists_lock = threading.Lock()
 _WATCHLIST_LEGACY_MIGRATED = False
 
@@ -9011,7 +9088,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui757-20261021-open-tickets"
+WEB_BUILD_VERSION = "ui758-20261022-flows-boot"
 
 
 @app.get("/api/build")
@@ -29921,8 +29998,11 @@ _podcast_jobs_lock = threading.Lock()
 # emits {"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}} for
 # opus-5 / opus-4.x, so the loop is 400-free on current Opus.
 # ═══════════════════════════════════════════════════════════════════════
-_AGENTIC_MODEL = os.environ.get("AGENTIC_MODEL", "").strip() or getattr(
-    analyst, "CLAUDE_MODEL", "claude-opus-5")
+_AGENTIC_MODEL = (
+    os.environ.get("AGENTIC_MODEL", "").strip()
+    or os.environ.get("CLAUDE_MODEL", "").strip()
+    or "claude-opus-5"
+)
 _AGENTIC_MAX_STEPS = 12          # hard cap on tool-call rounds (cost guard)
 # Portfolio Strategist reviews a whole book — needs more tool rounds than Q&A.
 # Grok/Kimi/DeepSeek often burn 1 step per name; 12 was too low (ticket d754f5b2).

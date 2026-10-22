@@ -11,11 +11,14 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 OFFLINE_MESSAGE = "Local model offline – start Ollama"
+PRODUCTION_LOOPBACK_MESSAGE = "Production does not call Ollama at 127.0.0.1:11434."
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 NUM_CTX = 32768
 OUTPUT_RESERVE_TOKENS = 12000
 
@@ -355,9 +358,32 @@ def ordered_local_runs(runs: dict) -> list[dict]:
     return rows
 
 
+def production_blocks_loopback(base_url: str) -> bool:
+    """True when this process must not open a socket to loopback Ollama.
+
+    Railway cannot reach the model on the GP's Mac. A non-loopback
+    LOCAL_LLM_BASE_URL is a real host and is still called.
+    LOCAL_LLM_ALLOW_LOOPBACK=1 is the explicit override.
+    """
+    allow = (os.environ.get("LOCAL_LLM_ALLOW_LOOPBACK") or "").strip().lower()
+    if allow in ("1", "true", "yes", "on"):
+        return False
+    on_railway = bool(
+        (os.environ.get("RAILWAY_ENVIRONMENT") or "").strip()
+        or (os.environ.get("RAILWAY_PROJECT_ID") or "").strip()
+    )
+    if not on_railway:
+        return False
+    host = (urllib.parse.urlparse(base_url or "").hostname or "").lower()
+    return host in _LOOPBACK_HOSTS
+
+
 def ollama_reachable(timeout: float = 1.5) -> bool:
     """True when this process can open Ollama's /api/tags. Short timeout."""
-    url = _host_root(_env("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")) + "/api/tags"
+    base = _env("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")
+    if production_blocks_loopback(base):
+        return False
+    url = _host_root(base) + "/api/tags"
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -418,6 +444,13 @@ def check_local_health(timeout: float = 5.0) -> dict:
         return {
             "ok": False,
             "message": "Local finance model is disabled (LOCAL_LLM_ENABLED=false)",
+            "model": cfg["model"],
+            "models": cfg["models"],
+        }
+    if production_blocks_loopback(cfg["base_url"]):
+        return {
+            "ok": False,
+            "message": PRODUCTION_LOOPBACK_MESSAGE,
             "model": cfg["model"],
             "models": cfg["models"],
         }
@@ -532,6 +565,8 @@ def _embed_texts_openai(texts: list[str], *, model: str) -> list[list[float]]:
 
 def _embed_texts_ollama(texts: list[str], *, model: str, base_url: str) -> list[list[float]]:
     """Ollama /api/embed (preferred) with /v1/embeddings fallback."""
+    if production_blocks_loopback(base_url):
+        raise LocalLlmError(PRODUCTION_LOOPBACK_MESSAGE)
     root = _host_root(base_url)
     out: list[list[float]] = []
     for text in texts:
@@ -583,6 +618,8 @@ def _ollama_embed_one(root: str, model: str, text: str) -> list[float]:
 def unload_local_model(model: str | None = None, timeout: float = 30.0) -> None:
     """Ask Ollama to unload a model (keep_alive=0) so the next one can load."""
     cfg = local_settings()
+    if production_blocks_loopback(cfg["base_url"]):
+        return
     wanted = local_model(model) if model else cfg["model"]
     payload = {
         "model": wanted,
@@ -729,6 +766,8 @@ def complete_local(system_prompt: str, user_content: str, *, on_delta=None,
                    keep_alive: str | int | None = "30m") -> str:
     """Stream one completion from the configured local model. Raises LocalLlmError."""
     cfg = local_settings(model=model)
+    if production_blocks_loopback(cfg["base_url"]):
+        raise LocalLlmError(PRODUCTION_LOOPBACK_MESSAGE)
     if max_tokens:
         cfg["max_tokens"] = max(256, min(int(max_tokens), 20000))
     if not cfg["enabled"]:

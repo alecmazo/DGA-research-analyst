@@ -188,6 +188,21 @@ export async function ollamaReachable(): Promise<boolean> {
   }
 }
 
+/** This browser is the Mac that runs Ollama or the desk helper.
+
+A sold office has neither, so it does not get the local-model page.
+The helper counts even when Ollama itself is stopped, so this Mac can
+still open the page and start it.
+*/
+export async function thisMacHasLocalModel(): Promise<boolean> {
+  const ollama = ollamaReachable()
+  const helper = fetch(`${OLLAMA_DESK}/health`, { signal: AbortSignal.timeout(800) })
+    .then((res) => res.ok)
+    .catch(() => false)
+  const [up, desk] = await Promise.all([ollama, helper])
+  return up || desk
+}
+
 /** Ask the on-Mac helper to start Ollama, or restart it when the process is stuck. */
 export async function ensureOllama(): Promise<{ ok: boolean; message: string; action?: string }> {
   const done = trackLoad('ollama://ensure')

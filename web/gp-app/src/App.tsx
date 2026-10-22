@@ -11,6 +11,7 @@ import { Shell } from '@/components/layout/Shell'
 import { DeskPage } from '@/pages/DeskPage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
+import { thisMacHasLocalModel } from '@/lib/localOllama'
 import {
   clearSession,
   getCachedUser,
@@ -64,6 +65,39 @@ const GurusPage = lazyExport(() => import('@/pages/GurusPage'), 'GurusPage')
 const MergerArbPage = lazyExport(() => import('@/pages/MergerArbPage'), 'MergerArbPage')
 const CreditPage = lazyExport(() => import('@/pages/CreditPage'), 'CreditPage')
 const ShipPage = lazyExport(() => import('@/pages/ShipPage'), 'ShipPage')
+
+function LocalMacPage() {
+  const [onMac, setOnMac] = useState<boolean | null>(null)
+  useEffect(() => {
+    let alive = true
+    void thisMacHasLocalModel().then((ok) => {
+      if (alive) setOnMac(ok)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+  if (onMac !== true) {
+    return (
+      <div className={styles.boot}>
+        <div className={styles.bootCard}>
+          <div className={styles.mark}>DGA</div>
+          <h1>On this Mac</h1>
+          <p>
+            {onMac === null
+              ? 'Checking this Mac…'
+              : 'The local model stays on the Mac that runs Ollama. This browser cannot reach it.'}
+          </p>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <LazyPage label="Local model">
+      <LocalPage />
+    </LazyPage>
+  )
+}
 
 function LazyPage({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -227,14 +261,7 @@ export default function App() {
                   </LazyPage>
                 }
               />
-              <Route
-                path="local"
-                element={
-                  <LazyPage label="Local model">
-                    <LocalPage />
-                  </LazyPage>
-                }
-              />
+              <Route path="local" element={<LocalMacPage />} />
               <Route
                 path="financials"
                 element={

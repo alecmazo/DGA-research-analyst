@@ -34,8 +34,8 @@ const FIXES = [
   'Give Railway a Node build so hashed files stop living in git. Until then, every UI change commits dist.',
   'One database is one office. There is no firm id. A second family office gets its own database, not a row in this one. Positions and notes would otherwise be visible across offices.',
   'Move the name, logo, and model engines into settings. The same build should run for DGA and for the next office. DGA stays the first office on the new build.',
-  'Stop importing pandas, Yahoo, and EDGAR at process start. The health check allows 300 seconds because boot is heavy. Read paths should answer before those libraries load.',
-  'Leave Ollama on this Mac. Production must not call 127.0.0.1:11434, and a sold office does not get the local-model page.',
+  'Pandas, Yahoo, and EDGAR load on first use, not at process start. A read path can answer before those libraries load. The health check still allows 300 seconds.',
+  'Ollama stays on this Mac. Production does not call 127.0.0.1:11434. On this Mac shows only when this browser can reach Ollama or the local helper.',
 ]
 
 export function FlowsSection() {
