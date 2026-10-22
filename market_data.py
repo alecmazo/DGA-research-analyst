@@ -1679,6 +1679,7 @@ def earnings_card(symbol: str, horizon_days: int = 5,
     # (SUP_20261015_a64c30f6 TSM BMO). Leftover floor is 0.2s, not 0.7s.
     press_release_url = None
     filing_url = None
+    release_rev_est = None
     street_range: dict = {}
     if not event_still_future and status in ("reported", "pending_update"):
         try:
@@ -1699,6 +1700,8 @@ def earnings_card(symbol: str, horizon_days: int = 5,
                 k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
                 press_release_url = k8.get("press_release_url") or None
                 filing_url = k8.get("filing_url") or None
+                if k8.get("revenue_estimate") is not None:
+                    release_rev_est = k8.get("revenue_estimate")
                 used_sec = False
                 if rev_actual is None and k8.get("revenue_actual") is not None:
                     if _revenue_plausible_vs_estimate(k8["revenue_actual"], None):
@@ -1774,13 +1777,16 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         print(f"[market_data] quarterly actuals {sym}: {e!s:.100}", flush=True)
 
     # Same-day headlines when Nasdaq/Yahoo stmt/SEC still lag (free, no LLM).
+    headline_pack: dict = {}
     if (not event_still_future and status in ("reported", "pending_update")
             and (eps_actual_final is None or rev_actual is None)
             and _left() > 0.4):
         try:
             hl = _actuals_from_yahoo_headlines(
                 sym, eps_est=eps_est, rev_est=street_range.get("revenue_avg"),
+                revenue_actual=rev_actual,
             ) or {}
+            headline_pack = hl
             used_hl = False
             if eps_actual_final is None and hl.get("eps_actual") is not None:
                 eps_actual_final = hl["eps_actual"]
@@ -1806,6 +1812,68 @@ def earnings_card(symbol: str, horizon_days: int = 5,
             print(f"[market_data] ir_links card {sym}: {e!s:.100}", flush=True)
 
     rev_estimate = street_range.get("revenue_avg")
+    # Once the print is out, Yahoo's calendar Revenue Average is often the
+    # NEXT quarter (or blank). Don't invent a surprise from that, and don't
+    # stop at the first empty source (SUP_20261021_42c070cd).
+    if status in ("reported", "pending_update"):
+        ev_date = (
+            (result or {}).get("date_reported")
+            or (upcoming or {}).get("date")
+            or ""
+        )
+        if rev_estimate not in (None, 0) and not _calendar_revenue_is_this_event(
+                street_range, str(ev_date)):
+            print(
+                f"[market_data] skip rolled calendar rev {sym}: "
+                f"est={rev_estimate} next={street_range.get('next_earnings_date')}",
+                flush=True,
+            )
+            rev_estimate = None
+
+    def _take_rev_est(val, tag: str) -> None:
+        nonlocal rev_estimate, result_source
+        if rev_estimate not in (None, 0) or val in (None, 0):
+            return
+        if not _revenue_plausible_vs_estimate(rev_actual, val):
+            print(
+                f"[market_data] skip {tag} rev est {sym}: "
+                f"actual={rev_actual} est={val}",
+                flush=True,
+            )
+            return
+        rev_estimate = float(val)
+        result_source = (
+            (result_source or "") + "+" + tag if result_source else tag
+        )
+
+    if rev_estimate in (None, 0):
+        _take_rev_est(release_rev_est, "rel_est")
+    if rev_estimate in (None, 0) and not event_still_future:
+        if not headline_pack:
+            try:
+                headline_pack = _actuals_from_yahoo_headlines(
+                    sym, eps_est=eps_est, rev_est=None,
+                    revenue_actual=rev_actual,
+                ) or {}
+            except Exception as e:
+                print(f"[market_data] headline est {sym}: {e!s:.100}", flush=True)
+                headline_pack = {}
+        _take_rev_est(headline_pack.get("revenue_estimate"), "hl_est")
+    if rev_estimate in (None, 0) and not event_still_future:
+        try:
+            fq_est = (
+                (upcoming or {}).get("fiscal_quarter")
+                or (result or {}).get("fiscal_quarter")
+                or (actuals or {}).get("period_label")
+                or ""
+            )
+            _take_rev_est(
+                revenue_consensus_from_trend(yahoo_earnings_trend_rows(sym), fq_est),
+                "yf_trend",
+            )
+        except Exception as e:
+            print(f"[market_data] trend est {sym}: {e!s:.100}", flush=True)
+
     rev_surprise_pct = None
     rev_beat = None
     if (rev_actual is not None and rev_estimate not in (None, 0)
@@ -2240,6 +2308,247 @@ def _extract_revenue_from_earnings_text(text: str) -> dict:
     return {}
 
 
+def _extract_revenue_consensus_from_text(text: str) -> dict:
+    """Street revenue estimate stated next to a reported print.
+
+    The card's Yahoo calendar often drops Revenue Average once the quarter
+    is out (SUP_20261021_42c070cd — AT&T showed $32.30B actual and dashes
+    for consensus and rev surprise). The release and the headline still
+    say the number: 'revenues of $32.3 billion, compared with the consensus
+    estimate of $32.1 billion.'
+
+    Returns {revenue_estimate, snippet} or {}.
+    """
+    import re as _re
+    t = _plain_earnings_text(text)
+    if not t:
+        return {}
+    money = r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|b|m)\b"
+    cue = (
+        r"(?:consensus|estimates?|expectations?|forecast|"
+        r"analysts?'?|street)"
+    )
+    patterns = [
+        cue + r"[^.]{0,70}?" + money,
+        money + r"[^.]{0,24}?" + cue,
+        r"vs\.?\s+" + money + r"\s*(?:expected|estimated|estimate|est\.?|consensus|forecast)",
+        r"ahead of (?:the\s+)?" + money,
+        r"compared (?:with|to) (?:the\s+)?(?:consensus|analysts?'? )?[^.]{0,40}?" + money,
+    ]
+    hits: list[tuple[int, float, str]] = []
+    for pat in patterns:
+        for m in _re.finditer(pat, t, _re.I):
+            # Last two groups are the amount; earlier groups belong to the cue.
+            groups = [g for g in m.groups() if g]
+            if len(groups) < 2:
+                continue
+            num, unit = groups[-2], groups[-1]
+            val = _parse_money_phrase_to_float(num, unit)
+            if val is None or val < 1_000_000:
+                continue
+            num_at = t.rfind(str(num), m.start(), m.end() + 1)
+            if num_at < 0:
+                num_at = m.start()
+            before_num = t[max(0, num_at - 56): num_at].lower()
+            after_num = t[num_at: num_at + 48].lower()
+            sc = 0
+            if _re.search(
+                r"(?:consensus|estimates?|expected|forecast|analyst|ahead of|\bvs\.?\b)",
+                before_num,
+            ):
+                sc += 12
+            if _re.search(
+                r"(?:billion|million|bn|mm|\bb\b|\bm\b)\s+"
+                r"(?:expected|estimated|consensus|forecast)",
+                after_num,
+            ):
+                sc += 12
+            # Only the clause that holds this figure. The next sentence often
+            # says "a year ago" and must not knock out the consensus number.
+            clause = before_num + " " + after_num.split(".")[0]
+            if _re.search(r"(?:year ago|year-ago|prior year|last year|year earlier)", clause):
+                sc -= 10
+            ctx = t[max(0, num_at - 80): num_at + 60]
+            hits.append((sc, float(val), ctx[:220]))
+    if not hits:
+        return {}
+    hits.sort(key=lambda item: (item[0], -abs(item[1])), reverse=True)
+    sc, val, snip = hits[0]
+    if sc < 4:
+        return {}
+    return {"revenue_estimate": val, "snippet": snip}
+
+
+def revenue_estimate_from_beat_phrase(text: str, actual) -> float | None:
+    """'revenue beat estimates by $230 million' plus the print → street estimate.
+
+    Wire headlines often give the surprise in dollars and not the consensus
+    level (SUP_20261021_42c070cd). EPS 'beat by $0.03' has no billion/million
+    unit, so it does not match.
+    """
+    import re as _re
+    try:
+        act = float(actual)
+    except (TypeError, ValueError):
+        return None
+    if not act or act <= 0:
+        return None
+    t = _plain_earnings_text(text)
+    if not t:
+        return None
+    money = r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(billion|million|bn|mm|b|m)\b"
+    # Dot is allowed: "$30.85 billion" sits between "revenue" and "beat".
+    m = _re.search(
+        r"(?:revenue|revenues|sales).{0,90}?"
+        r"(beat|beats|beating|topped|topping|ahead|missed|misses|missing|shy)"
+        r".{0,40}?\bby\s+" + money,
+        t,
+        _re.I,
+    )
+    if not m:
+        return None
+    verb = m.group(1).lower()
+    delta = _parse_money_phrase_to_float(m.group(2), m.group(3))
+    if delta is None or delta <= 0 or delta > act * 0.5:
+        return None
+    miss = verb.startswith("miss") or verb == "shy"
+    est = act + delta if miss else act - delta
+    if est <= 0:
+        return None
+    return float(est)
+
+
+def revenue_consensus_from_trend(rows: list | None, fiscal_quarter: str) -> float | None:
+    """Yahoo earningsTrend revenue avg for the quarter that just printed.
+
+    ``0q`` rolls forward after the release. A Dec/2026 row must not fill a
+    Sep/2026 card. ``endDate`` is ISO ``YYYY-MM-DD`` or a unix timestamp.
+    """
+    import re as _re
+    from datetime import datetime, timezone
+    raw = (fiscal_quarter or "").strip().lower()
+    want = raw.replace("/", " ")
+    months = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    }
+    mon = next((months[k] for k in months if k in want), None)
+    years = _re.findall(r"20\d{2}", want)
+    year = int(years[-1]) if years else None
+    # Nasdaq and the card also say "2026-09-30", "9/30/2026", or "Q3 2026".
+    # A month-name-only match left AT&T's consensus blank (SUP_20261021_42c070cd).
+    if mon is None:
+        iso = _re.search(r"(20\d{2})-(\d{2})", want)
+        if iso:
+            year = int(iso.group(1))
+            mon = int(iso.group(2))
+    if mon is None:
+        us = _re.search(r"\b(\d{1,2})/\d{1,2}/(20\d{2})\b", raw)
+        if us and 1 <= int(us.group(1)) <= 12:
+            mon = int(us.group(1))
+            year = int(us.group(2))
+    if mon is None and year is not None:
+        q = _re.search(r"\bq([1-4])\b|\b([1-4])q\b", want)
+        if q:
+            mon = int(q.group(1) or q.group(2)) * 3
+    if mon is None or year is None or not 1 <= int(mon) <= 12:
+        return None
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        end = row.get("endDate") if row.get("endDate") is not None else row.get("end_date")
+        # quoteSummary often wraps the date: {"raw": 1759190400, "fmt": "2026-09-30"}.
+        if isinstance(end, dict):
+            fmt = str(end.get("fmt") or "")
+            raw = end.get("raw")
+            if _re.search(r"20\d{2}-\d{2}", fmt):
+                end = fmt
+            elif isinstance(raw, (int, float)):
+                end = raw
+            else:
+                end = fmt
+        ey = em = None
+        if isinstance(end, (int, float)) and end > 1_000_000_000:
+            try:
+                dt = datetime.fromtimestamp(float(end), tz=timezone.utc)
+                ey, em = dt.year, dt.month
+            except Exception:
+                ey = em = None
+        else:
+            s = str(end or "")
+            m = _re.search(r"(20\d{2})-(\d{2})", s)
+            if m:
+                ey, em = int(m.group(1)), int(m.group(2))
+        if ey != year or em != mon:
+            continue
+        est = row.get("revenueEstimate") or row.get("revenue_estimate") or {}
+        avg = est.get("avg") if isinstance(est, dict) else None
+        if isinstance(avg, dict):
+            avg = avg.get("raw", avg.get("fmt"))
+        try:
+            if avg is None:
+                continue
+            n = float(avg)
+        except (TypeError, ValueError):
+            continue
+        if n != n or n <= 0:
+            continue
+        return n
+    return None
+
+
+def _calendar_revenue_is_this_event(street: dict | None, event_date: str) -> bool:
+    """False when Yahoo's calendar revenue belongs to the next quarter.
+
+    After a print, Earnings Date jumps ~90 days and Revenue Average is that
+    future quarter. Using it as this card's consensus paints a fake surprise.
+    """
+    from datetime import date
+    nxt = str((street or {}).get("next_earnings_date") or "")[:10]
+    ev = str(event_date or "")[:10]
+    if not nxt or not ev or len(nxt) < 10 or len(ev) < 10:
+        return True
+    try:
+        gap = (date.fromisoformat(nxt) - date.fromisoformat(ev)).days
+    except Exception:
+        return True
+    return abs(gap) <= 14
+
+
+def yahoo_earnings_trend_rows(symbol: str) -> list:
+    """earningsTrend rows from Yahoo quoteSummary. Fail-open. No LLM."""
+    import time as _time
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return []
+    hit = _EARNINGS_DETAIL_CACHE.get(("yf_trend", sym))
+    if hit and _time.time() - hit[0] < 1800:
+        return hit[1]
+    rows: list = []
+    try:
+        import requests
+        r = requests.get(
+            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/"
+            f"{sym}?modules=earningsTrend",
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; DGA-Capital/1.0)",
+                "Accept": "application/json",
+            },
+            timeout=1.6,
+        )
+        if r.status_code == 200:
+            result = ((r.json() or {}).get("quoteSummary") or {}).get("result") or []
+            if result:
+                rows = ((result[0].get("earningsTrend") or {}).get("trend")) or []
+                if not isinstance(rows, list):
+                    rows = []
+    except Exception as e:
+        print(f"[market_data] yahoo trend {sym}: {e!s:.100}", flush=True)
+        rows = []
+    _EARNINGS_DETAIL_CACHE[("yf_trend", sym)] = (_time.time(), rows)
+    return rows
+
+
 def _score_earnings_eps_hit(val: float, snip: str) -> tuple[int, float]:
     """Rank ADR / USD EPS over local-currency prints (TSM NT$29.43 vs US$4.60)."""
     s = (snip or "").lower()
@@ -2321,7 +2630,7 @@ def _extract_eps_from_earnings_text(text: str) -> dict:
 
 
 def _actuals_from_yahoo_headlines(
-    symbol: str, *, eps_est=None, rev_est=None,
+    symbol: str, *, eps_est=None, rev_est=None, revenue_actual=None,
 ) -> dict:
     """Last-resort same-day actuals from free Yahoo headlines (no LLM)."""
     out: dict = {}
@@ -2333,21 +2642,32 @@ def _actuals_from_yahoo_headlines(
         title = (h.get("title") or "") if isinstance(h, dict) else ""
         if not title:
             continue
+        summary = (h.get("summary") or "") if isinstance(h, dict) else ""
+        blob = title if not summary else f"{title}. {summary}"
         if out.get("eps_actual") is None:
-            ep = _extract_eps_from_earnings_text(title)
+            ep = _extract_eps_from_earnings_text(blob)
             v = ep.get("eps_actual")
             if v is not None and _revenue_plausible_vs_estimate(v, eps_est):
                 out["eps_actual"] = v
                 out["eps_snippet"] = ep.get("snippet")
                 out["eps_title"] = title[:180]
         if out.get("revenue_actual") is None:
-            rv = _extract_revenue_from_earnings_text(title)
+            rv = _extract_revenue_from_earnings_text(blob)
             v = rv.get("revenue_actual")
             if v is not None and _revenue_plausible_vs_estimate(v, rev_est):
                 out["revenue_actual"] = v
                 out["rev_snippet"] = rv.get("snippet")
                 out["rev_title"] = title[:180]
-        if out.get("eps_actual") is not None and out.get("revenue_actual") is not None:
+        if out.get("revenue_estimate") is None:
+            ce = _extract_revenue_consensus_from_text(blob)
+            ev = ce.get("revenue_estimate")
+            if ev is None and revenue_actual not in (None, 0):
+                ev = revenue_estimate_from_beat_phrase(blob, revenue_actual)
+            if ev is not None:
+                out["revenue_estimate"] = ev
+                out["rev_est_title"] = title[:180]
+        if out.get("eps_actual") is not None and out.get("revenue_actual") is not None \
+                and out.get("revenue_estimate") is not None:
             break
     if out:
         out["source"] = "yahoo_headline"
@@ -2577,6 +2897,11 @@ def sec_8k_earnings_release_actuals(
                     continue
                 parsed = _extract_revenue_from_earnings_text(pr.text)
                 parsed_eps = _extract_eps_from_earnings_text(pr.text)
+                cons = _extract_revenue_consensus_from_text(pr.text)
+                if cons.get("revenue_estimate") is not None and out.get("revenue_estimate") is None:
+                    actual_now = out.get("revenue_actual") or parsed.get("revenue_actual")
+                    if _revenue_plausible_vs_estimate(actual_now, cons["revenue_estimate"]):
+                        out["revenue_estimate"] = cons["revenue_estimate"]
                 if parsed.get("revenue_actual") or parsed_eps.get("eps_actual"):
                     if parsed.get("revenue_actual") is not None:
                         out["revenue_actual"] = parsed["revenue_actual"]
@@ -3037,7 +3362,10 @@ def yahoo_earnings_headlines(symbol: str, limit: int = 4) -> list[dict]:
             if not isinstance(c, dict):
                 c = item if isinstance(item, dict) else {}
             title = (c.get("title") or item.get("title") or "").strip()
-            if not title or not keys.search(title):
+            summary = str(
+                c.get("summary") or c.get("description") or item.get("summary") or ""
+            ).strip()
+            if not title or not keys.search(title + " " + summary):
                 continue
             pub = ""
             try:
@@ -3058,7 +3386,12 @@ def yahoo_earnings_headlines(symbol: str, limit: int = 4) -> list[dict]:
                 )
             except Exception:
                 url = item.get("link") or ""
-            out.append({"title": title[:180], "publisher": str(pub)[:60], "url": url})
+            out.append({
+                "title": title[:180],
+                "summary": summary[:500],
+                "publisher": str(pub)[:60],
+                "url": url,
+            })
             if len(out) >= limit:
                 break
     except Exception as e:

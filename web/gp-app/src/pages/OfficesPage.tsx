@@ -6,18 +6,27 @@ import { Button } from '@/components/ui/Button'
 import page from './page.module.css'
 import styles from './OfficesPage.module.css'
 
-type Trial = {
+type Office = {
   id: string
   name: string
   contact_name: string
   email: string
   status: string
+  slug?: string | null
+  db_name?: string | null
   created_at?: string | null
 }
 
 type Payload = {
-  live?: { name: string; status: string; books: string }
-  trials?: Trial[]
+  live?: { name: string; status: string; db_name: string; service: string }
+  offices?: Office[]
+}
+
+function slugify(name: string): string {
+  let raw = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  raw = raw.replace(/_+/g, '_')
+  if (raw && !/^[a-z]/.test(raw)) raw = `office_${raw}`
+  return raw.slice(0, 31).replace(/_+$/g, '')
 }
 
 function when(iso?: string | null): string {
@@ -27,16 +36,43 @@ function when(iso?: string | null): string {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+function statusWord(status: string): string {
+  if (status === 'ready') return 'Database marked ready'
+  if (status === 'held') return 'On hold'
+  return 'Database not created'
+}
+
+function Setup({ dbName, email }: { dbName: string; email: string }) {
+  const steps = [
+    'This page stores the office name in DGA’s database only. It does not copy books, notes, or users.',
+    `Create an empty Postgres database named ${dbName}. Do not add a schema or a tenant column to the DGA database.`,
+    `Create a second web service from this same repo, branch main. Set its DATABASE_URL to ${dbName}. Leave DGA’s DATABASE_URL on the current service.`,
+    'Start that service once. The app creates its own tables on the empty database. Books and notes start empty.',
+    `On that service only, create the GP login for ${email || 'the contact email'}. That login does not exist on portfolio.dgacapital.com.`,
+    'Give the service its own hostname. Logo and office name are settings in that database.',
+    'Come back here and mark the office ready when that service answers. This site never opens their database.',
+  ]
+  return (
+    <ol className={styles.steps}>
+      {steps.map((line) => (
+        <li key={line}>{line}</li>
+      ))}
+    </ol>
+  )
+}
+
 export function OfficesPage() {
   const demo = !!getCachedUser()?.demo_mode
   const [data, setData] = useState<Payload | null>(null)
   const [err, setErr] = useState('')
   const [name, setName] = useState('')
+  const [slug, setSlug] = useState('')
+  const [slugTouched, setSlugTouched] = useState(false)
   const [contact, setContact] = useState('')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [selected, setSelected] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (demo) return
@@ -52,36 +88,42 @@ export function OfficesPage() {
     void load()
   }, [load])
 
-  const openTrial = async () => {
+  const offices = data?.offices || []
+  const focus = offices.find((o) => o.id === selected) || offices[0] || null
+  const previewDb = slug ? `dga_${slug}` : 'dga_<name>'
+
+  const addOffice = async () => {
     setBusy(true)
     setNotice('')
     setErr('')
     try {
-      const res = await api<{ office: Trial }>('/api/offices', {
+      const res = await api<{ office: Office }>('/api/offices', {
         method: 'POST',
         body: JSON.stringify({
           name,
           contact_name: contact,
           email,
-          password,
+          slug,
         }),
       })
       setName('')
       setContact('')
       setEmail('')
-      setPassword('')
+      setSlug('')
+      setSlugTouched(false)
+      setSelected(res.office.id)
       setNotice(
-        `${res.office.name} can sign in at portfolio.dgacapital.com with ${res.office.email}. They see the sample workspace, not DGA books.`,
+        `${res.office.name} is on the list. Its database name is ${res.office.db_name}. Nothing was created in Postgres yet.`,
       )
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not open the trial')
+      setErr(e instanceof Error ? e.message : 'Could not add the office')
     } finally {
       setBusy(false)
     }
   }
 
-  const setStatus = async (office: Trial, status: 'trial' | 'paused') => {
+  const setStatus = async (office: Office, status: 'planned' | 'held' | 'ready') => {
     setErr('')
     try {
       await api(`/api/offices/${encodeURIComponent(office.id)}/status`, {
@@ -90,7 +132,7 @@ export function OfficesPage() {
       })
       await load()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not update the trial')
+      setErr(e instanceof Error ? e.message : 'Could not update the office')
     }
   }
 
@@ -106,8 +148,8 @@ export function OfficesPage() {
         </Link>
       </header>
       <p className={styles.lead}>
-        Open a trial for an office that wants to use the desk. A trial signs into the sample workspace.
-        It does not see DGA books, notes, or accounts. Trials share that sample desk until an office has its own database.
+        Add an office here. Each office gets its own Postgres database and its own web service from this repo.
+        This deployment stays DGA. Adding an office does not create the database and does not make a login on this site.
       </p>
 
       {demo && <p className={styles.warn}>This page is for the live office only.</p>}
@@ -117,7 +159,7 @@ export function OfficesPage() {
           <section className={styles.live}>
             <div>
               <strong>{data?.live?.name || 'DGA Capital'}</strong>
-              <span>{data?.live?.books || 'This database'}</span>
+              <span>Service {data?.live?.service || 'web'} · {data?.live?.db_name || 'this database'}</span>
             </div>
             <em>Live</em>
           </section>
@@ -126,21 +168,30 @@ export function OfficesPage() {
             className={styles.form}
             onSubmit={(e) => {
               e.preventDefault()
-              void openTrial()
+              void addOffice()
             }}
           >
-            <h2>Open a trial</h2>
+            <h2>Add an office</h2>
             <div className={styles.fields}>
               <label>
                 Office
-                <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required />
+                <input
+                  value={name}
+                  onChange={(e) => {
+                    const next = e.target.value
+                    setName(next)
+                    if (!slugTouched) setSlug(slugify(next))
+                  }}
+                  autoComplete="off"
+                  required
+                />
               </label>
               <label>
                 Contact
                 <input value={contact} onChange={(e) => setContact(e.target.value)} autoComplete="off" />
               </label>
               <label>
-                Login email
+                Contact email
                 <input
                   type="email"
                   value={email}
@@ -150,19 +201,22 @@ export function OfficesPage() {
                 />
               </label>
               <label>
-                Password
+                Database
                 <input
-                  type="text"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="new-password"
-                  required
-                  minLength={8}
+                  value={slug}
+                  onChange={(e) => {
+                    setSlugTouched(true)
+                    setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))
+                  }}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label="Database slug"
                 />
               </label>
             </div>
+            <p className={styles.dbHint}>Database name {previewDb}. The service that uses it is created later, not from this form.</p>
             <Button variant="primary" type="submit" disabled={busy}>
-              {busy ? 'Opening…' : 'Open trial'}
+              {busy ? 'Adding…' : 'Add office'}
             </Button>
           </form>
 
@@ -170,39 +224,55 @@ export function OfficesPage() {
           {err && <p className={styles.warn}>{err}</p>}
 
           <section className={styles.list}>
-            <h2>Trials</h2>
-            {(data?.trials || []).length === 0 ? (
-              <p className={styles.empty}>No trials yet.</p>
+            <h2>Offices</h2>
+            {offices.length === 0 ? (
+              <p className={styles.empty}>No other offices yet.</p>
             ) : (
               <table>
                 <thead>
                   <tr>
                     <th>Office</th>
                     <th>Contact</th>
-                    <th>Login</th>
-                    <th>Opened</th>
+                    <th>Database</th>
+                    <th>Added</th>
                     <th>Status</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {(data?.trials || []).map((office) => (
-                    <tr key={office.id}>
+                  {offices.map((office) => (
+                    <tr
+                      key={office.id}
+                      className={focus?.id === office.id ? styles.picked : undefined}
+                      onClick={() => setSelected(office.id)}
+                    >
                       <td>{office.name}</td>
-                      <td>{office.contact_name || '—'}</td>
-                      <td>{office.email}</td>
-                      <td>{when(office.created_at)}</td>
-                      <td className={office.status === 'paused' ? styles.paused : styles.trial}>
-                        {office.status === 'paused' ? 'Paused' : 'Trial'}
-                      </td>
                       <td>
-                        {office.status === 'paused' ? (
-                          <button type="button" onClick={() => void setStatus(office, 'trial')}>
+                        {office.contact_name || '—'}
+                        <span className={styles.sub}>{office.email}</span>
+                      </td>
+                      <td>{office.db_name || '—'}</td>
+                      <td>{when(office.created_at)}</td>
+                      <td className={office.status === 'ready' ? styles.trial : styles.paused}>
+                        {statusWord(office.status)}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        {office.status === 'held' ? (
+                          <button type="button" onClick={() => void setStatus(office, 'planned')}>
                             Resume
                           </button>
                         ) : (
-                          <button type="button" onClick={() => void setStatus(office, 'paused')}>
-                            Pause
+                          <button type="button" onClick={() => void setStatus(office, 'held')}>
+                            Hold
+                          </button>
+                        )}
+                        {office.status === 'ready' ? (
+                          <button type="button" onClick={() => void setStatus(office, 'planned')}>
+                            Not ready
+                          </button>
+                        ) : (
+                          <button type="button" onClick={() => void setStatus(office, 'ready')}>
+                            Mark ready
                           </button>
                         )}
                       </td>
@@ -211,6 +281,17 @@ export function OfficesPage() {
                 </tbody>
               </table>
             )}
+          </section>
+
+          <section className={styles.form}>
+            <h2>
+              Separate database
+              {focus ? ` · ${focus.name}` : ''}
+            </h2>
+            <p className={styles.dbHint}>
+              One office, one database, one web service, same repo. DGA does not share this database.
+            </p>
+            <Setup dbName={focus?.db_name || previewDb} email={focus?.email || email} />
           </section>
         </>
       )}

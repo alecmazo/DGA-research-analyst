@@ -280,6 +280,7 @@ def test_pending_skips_yf_surprise_and_always_hits_sec(monkeypatch):
     monkeypatch.setattr(md, "company_ir_links", lambda _s: {})
     monkeypatch.setattr(md, "_earnings_report_window_passed", lambda *_a, **_k: True)
     monkeypatch.setattr(md, "_actuals_from_yahoo_headlines", lambda *_a, **_k: {})
+    monkeypatch.setattr(md, "yahoo_earnings_trend_rows", lambda _s: [])
     out = md.earnings_card("TSM", horizon_days=5, include_past_days=1)
     assert out.get("status") == "reported"
     assert out.get("result", {}).get("eps_actual") == 4.60
@@ -287,3 +288,133 @@ def test_pending_skips_yf_surprise_and_always_hits_sec(monkeypatch):
     fn = src.split("def earnings_card")[1].split("\ndef _fiscal_quarter_labels_match")[0]
     assert 'status == "pending_update" or _left() > 0.2' in fn
     assert "status != \"pending_update\"" in fn
+
+
+ATT_RELEASE = (
+    "AT&T reported third-quarter revenues of $32.3 billion, compared with "
+    "the consensus estimate of $32.1 billion. A year ago, revenues were "
+    "$30.0 billion."
+)
+
+
+def test_release_consensus_is_not_the_print_or_year_ago():
+    out = md._extract_revenue_consensus_from_text(ATT_RELEASE)
+    assert out.get("revenue_estimate") == 32.1e9
+
+
+def test_vs_estimate_phrase_is_consensus():
+    out = md._extract_revenue_consensus_from_text(
+        "Revenue of $30.85 billion vs. $30.62 billion estimate."
+    )
+    assert out.get("revenue_estimate") == 30.62e9
+
+
+def test_beat_by_phrase_rebuilds_the_consensus():
+    est = md.revenue_estimate_from_beat_phrase(
+        "Third-quarter revenue of $30.85 billion beat estimates by $230 million.",
+        30.85e9,
+    )
+    assert est == 30.85e9 - 230e6
+    assert md.revenue_estimate_from_beat_phrase(
+        "EPS beat by $0.03.", 30.85e9,
+    ) is None
+
+
+def test_year_ago_alone_is_not_consensus():
+    out = md._extract_revenue_consensus_from_text(
+        "Revenues were $32.3 billion, up from $30.0 billion a year ago."
+    )
+    assert out == {}
+
+
+def test_trend_uses_the_printed_quarter_not_the_next_one():
+    rows = [
+        {
+            "period": "0q",
+            "endDate": "2026-12-31",
+            "revenueEstimate": {"avg": {"raw": 33.4e9}},
+        },
+        {
+            "period": "-1q",
+            "endDate": "2026-09-30",
+            "revenueEstimate": {"avg": {"raw": 32.1e9}},
+        },
+    ]
+    assert md.revenue_consensus_from_trend(rows, "Sep/2026") == 32.1e9
+    assert md.revenue_consensus_from_trend(rows, "Dec 2026") == 33.4e9
+    assert md.revenue_consensus_from_trend(rows, "2026-09-30") == 32.1e9
+    assert md.revenue_consensus_from_trend(rows, "9/30/2026") == 32.1e9
+    assert md.revenue_consensus_from_trend(rows, "Q3 2026") == 32.1e9
+    wrapped = [{
+        "period": "-1q",
+        "endDate": {"raw": 1759190400, "fmt": "2026-09-30"},
+        "revenueEstimate": {"avg": {"raw": 32.1e9}},
+    }]
+    assert md.revenue_consensus_from_trend(wrapped, "Sep/2026") == 32.1e9
+
+
+def test_rolled_calendar_is_not_this_print():
+    assert md._calendar_revenue_is_this_event(
+        {"next_earnings_date": "2027-01-21", "revenue_avg": 33e9},
+        "2026-10-21",
+    ) is False
+    assert md._calendar_revenue_is_this_event(
+        {"next_earnings_date": "2026-10-21", "revenue_avg": 32.1e9},
+        "2026-10-21",
+    ) is True
+
+
+def test_card_fills_consensus_when_calendar_is_empty(monkeypatch):
+    md._EARNINGS_CARD_CACHE.clear()
+    monkeypatch.setattr(md, "earnings_upcoming", lambda *_a, **_k: {
+        "T": {
+            "date": "2026-10-21",
+            "days_until": 0,
+            "time": "time-pre-market",
+            "fiscal_quarter": "Sep/2026",
+            "eps_forecast": "0.61",
+            "name": "AT&T",
+        }
+    })
+    monkeypatch.setattr(md, "nasdaq_earnings_surprise", lambda _s: {
+        "history": [{
+            "date_reported": "2026-10-21",
+            "eps_actual": 0.65,
+            "eps_estimate": 0.61,
+            "surprise_pct": 6.6,
+            "beat": "beat",
+            "source": "nasdaq",
+        }],
+        "latest": {
+            "date_reported": "2026-10-21",
+            "eps_actual": 0.65,
+            "eps_estimate": 0.61,
+            "surprise_pct": 6.6,
+            "beat": "beat",
+            "source": "nasdaq",
+        },
+        "source": "nasdaq",
+    })
+    monkeypatch.setattr(md, "yfinance_earnings_surprise", lambda _s: {
+        "history": [], "latest": None, "source": "yfinance",
+    })
+    monkeypatch.setattr(md, "yfinance_earnings_calendar_context", lambda _s: {})
+    monkeypatch.setattr(md, "yfinance_quarterly_actuals", lambda *_a, **_k: {})
+    monkeypatch.setattr(md, "sec_8k_earnings_release_actuals", lambda *_a, **_k: {
+        "revenue_actual": 32.3e9,
+        "revenue_estimate": 32.1e9,
+        "source": "sec_8k_ex99",
+        "filed": "2026-10-21",
+    })
+    monkeypatch.setattr(md, "company_ir_links", lambda _s: {})
+    monkeypatch.setattr(md, "_earnings_report_window_passed", lambda *_a, **_k: True)
+    monkeypatch.setattr(md, "_actuals_from_yahoo_headlines", lambda *_a, **_k: {})
+    monkeypatch.setattr(md, "yahoo_earnings_trend_rows", lambda _s: (_ for _ in ()).throw(
+        AssertionError("trend should not run once the release has the estimate")
+    ))
+    out = md.earnings_card("T", horizon_days=5, include_past_days=1)
+    res = out.get("result") or {}
+    assert res.get("revenue_actual") == 32.3e9
+    assert res.get("revenue_estimate") == 32.1e9
+    assert res.get("revenue_surprise_pct") is not None
+    assert abs(res["revenue_surprise_pct"] - round((32.3 - 32.1) / 32.1 * 100, 2)) < 0.01

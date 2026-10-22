@@ -201,23 +201,29 @@ export type YtdCache = {
 
 export type RebalanceRow = {
   ticker?: string
-  rating?: string
-  upside_pct?: number | null
-  price_target?: number | null
-  target_provider?: string | null
-  price?: number | null
+  action?: string
   current_pct?: number
   suggested_pct?: number
-  shares_delta?: number | null
-  score?: number
+  why?: string
+  downside?: string
+  binary?: boolean
+  thesis_on_file?: boolean
+}
+
+export type RebalanceReview = {
+  id: string
+  fund_id?: string | null
+  fund_name?: string
+  tickers?: string
+  generated_at?: string
 }
 
 export type RebalanceResult = {
   ok?: boolean
+  source?: string
+  review_id?: string | null
   rows?: RebalanceRow[]
+  reviews?: RebalanceReview[]
   run_at?: string
-  current_ev?: number
-  suggested_ev?: number
-  equity_count?: number
   detail?: string
 }

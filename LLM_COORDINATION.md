@@ -13,7 +13,9 @@ This is the path. Do not invent a second one.
 4. Push `main` on `https://github.com/alecmazo/DGA-research-analyst`. That push deploys Railway service **web** (`6aac66bc-eea5-45a1-b808-ff4275886491`) in project `upbeat-ambition`. The service is set to Nixpacks, a `/health` check, and the memory-capped start command in `railway.toml`.
 5. Poll `https://portfolio.dgacapital.com/api/build` until it matches `BUILD_VERSION`. A push does not deploy `sliw` unless the commit touches `apps/sliw-agent/**`, `railway.toml`, `nixpacks.toml`, `Procfile`, or `requirements.txt`. Never deploy Postgres unless Alec asks. If the push does not start a web deployment, redeploy service `web` from the commit already on `main`.
 6. After a change Alec asked for, commit and push unless he said not to push, not to deploy, or to keep it local. Do not wait for a separate "push it".
-6. Credit (`/gp/credit`) and the GPT-oss desk button are already part of this tree. The button calls `gpt-oss-20b-finance` on this Mac and does not call xAI.
+7. Credit (`/gp/credit`) and the GPT-oss desk button are already part of this tree. The button calls `gpt-oss-20b-finance` on this Mac and does not call xAI.
+
+**Hosting (2026-10-22):** The Railway workspace is Pro, upgraded from Hobby. Pro still bills for CPU and RAM. One office per database, on the existing Postgres. The web service stays one uvicorn process with the malloc trim in `railway.toml`.
 
 ---
 

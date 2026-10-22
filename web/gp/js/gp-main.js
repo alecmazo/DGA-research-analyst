@@ -14870,9 +14870,9 @@
         '<div class="panel-head" style="display:flex;align-items:center;gap:8px;">' +
           '<span class="panel-title">Rebalance Suggestions</span>' +
           '<span id="acd-rebalance-status" style="font-size:10px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;"></span>' +
-          '<button id="acd-rebalance-btn" class="tab-btn sm" style="font-size:10px;">📊 Run</button>' +
+          '<button id="acd-rebalance-btn" class="tab-btn sm" style="font-size:10px;">Run</button>' +
         '</div>' +
-        '<div style="padding:10px 12px;font-size:11px;color:var(--text-secondary,#58616f);">Run to compute suggested weights from research ratings &amp; upside — results appear here beside the positions.</div>' +
+        '<div style="padding:10px 12px;font-size:11px;color:var(--text-secondary,#58616f);">Run opens a full investment-committee review of this book. Suggested weights follow each saved thesis, with a smaller size where the outcome is binary or the thesis is not on file.</div>' +
       '</section>';
     document.getElementById('acd-rebalance-btn')
       ?.addEventListener('click', () => runAcctRebalance(fundId));
@@ -14881,21 +14881,34 @@
   async function runAcctRebalance(fundId) {
     const btn = document.getElementById('acd-rebalance-btn');
     const status = document.getElementById('acd-rebalance-status');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Running…'; }
-    if (status) status.textContent = '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Running'; }
+    if (status) status.textContent = 'Starting the committee review…';
     try {
-      const r = await window.dgaFetch('/api/v2/gp/fund/' + encodeURIComponent(fundId) + '/rebalance', {method:'POST'});
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const r = await window.dgaFetch('/api/v2/gp/fund/' + encodeURIComponent(fundId) + '/rebalance', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
       const data = await r.json();
-      if (!data.ok) throw new Error(data.detail || 'Rebalance failed');
-      renderRebalanceResult(data, fundId);
-      // Re-query: renderRebalanceResult replaced the panel (and the status el).
-      const st2 = document.getElementById('acd-rebalance-status');
-      if (st2) { st2.style.color='var(--green)'; st2.textContent='✓ ' + new Date(data.run_at).toLocaleString('en-US', _PT); }
-    } catch(e) {
-      if (status) { status.style.color='var(--red)'; status.textContent='❌ ' + e.message; }
+      if (!r.ok || !data.ok || data.source !== 'committee' || !data.job_id) {
+        throw new Error(data.detail || data.error || 'Committee review did not start on this server.');
+      }
+      if (data.status !== 'done') {
+        const t0 = Date.now();
+        let done = false;
+        while (Date.now() - t0 < 24 * 60 * 1000) {
+          await new Promise(res => setTimeout(res, 1400));
+          const jr = await window.dgaFetch('/api/research/agentic/' + encodeURIComponent(data.job_id));
+          const job = await jr.json();
+          if (status) status.textContent = job.label || 'Committee review running…';
+          if (job.status === 'done') { done = true; break; }
+          if (job.status === 'error') throw new Error(job.label || job.error || 'Committee review failed');
+        }
+        if (!done) throw new Error('Committee review is still running. The report stays on this card when it finishes.');
+      }
+      await loadSavedRebalance(fundId);
+      if (data.job_id) window.open('/gp/research?kind=strategist&id=' + encodeURIComponent(data.job_id), 'dga-research-strategist-' + data.job_id);
+    } catch (e) {
+      if (status) { status.style.color = 'var(--red)'; status.textContent = e.message; }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '📊 Run'; }
+      const btn2 = document.getElementById('acd-rebalance-btn');
+      if (btn2) { btn2.disabled = false; btn2.textContent = 'Run'; }
     }
   }
 
@@ -14904,41 +14917,33 @@
       const r = await window.dgaFetch('/api/v2/gp/fund/' + encodeURIComponent(fundId) + '/rebalance');
       if (!r.ok) return;
       const data = await r.json();
-      if (data.ok && data.rows) renderRebalanceResult(data, fundId);
-    } catch(_) {}
+      if (data && data.source === 'committee') renderRebalanceResult(data, fundId);
+    } catch (_) {}
   }
 
   function renderRebalanceResult(data, fundId) {
-    if (!data || !data.rows) return;
-    // (ui356) The positions table no longer carries Suggested %/New QTY cells —
-    // this panel, side by side with it, is the single home for rebalance data.
+    if (!data || data.source !== 'committee') return;
     const elResult = document.getElementById('acd-rebalance-result');
     if (!elResult) return;
-
-    const runDate = data.run_at ? new Date(data.run_at).toLocaleString('en-US', _PT) : '—';
-    const evImprove = (data.suggested_ev || 0) - (data.current_ev || 0);
-
-    const rowsHtml = (data.rows || []).slice().sort(function(a,b){ return (b.suggested_pct||0)-(a.suggested_pct||0); }).map(function(row) {
-      const diff = (row.suggested_pct||0) - (row.current_pct||0);
-      const diffCol = diff > 0.5 ? 'var(--green)' : diff < -0.5 ? 'var(--red)' : 'var(--mid)';
-      const ratingColors = {'Buy':'var(--green)','Strong Buy':'var(--green)','Hold':'var(--mid)','Sell':'var(--red)','Strong Sell':'var(--red)'};
-      const ratingCol = ratingColors[row.rating] || 'var(--mid)';
-      const upside = row.upside_pct;
-      const sd = row.shares_delta;
-      let sharesStr = '—', sharesCol = 'var(--dim)';
-      if (sd != null && Math.abs(sd) >= 0.01) {
-        sharesStr = (sd > 0 ? '+' : '') + sd.toFixed(2);
-        sharesCol = sd > 0 ? 'var(--green)' : 'var(--red)';
-      }
+    const runDate = data.run_at ? new Date(data.run_at).toLocaleString('en-US', _PT) : '';
+    const rowsHtml = (data.rows || []).map(function(row) {
+      const action = row.action === 'add' ? 'Add' : row.action === 'trim' ? 'Trim' : 'Hold';
       return '<tr>' +
-        '<td style="font-weight:800;color:var(--blue);" title="Score ' + (row.score||0).toFixed(2) + '">' + row.ticker + '</td>' +
-        '<td style="color:' + ratingCol + ';">' + (row.rating||'—') + '</td>' +
-        '<td class="num" style="color:' + ((upside||0)>=0?'var(--green)':'var(--red)') + ';">' + (upside!=null?(upside>=0?'+':'')+upside.toFixed(1)+'%':'—') + '</td>' +
-        '<td class="num" style="color:var(--mid);">' + (row.current_pct||0).toFixed(1) + '% <span style="color:var(--blue);opacity:.55;">→</span> <span style="color:' + diffCol + ';font-weight:700;">' + (row.suggested_pct||0).toFixed(1) + '%</span></td>' +
-        '<td class="num" style="font-weight:700;color:' + sharesCol + ';" title="Δ shares to trade">' + sharesStr + '</td>' +
+        '<td style="font-weight:800;color:var(--blue);">' + (row.ticker || '') + '</td>' +
+        '<td>' + action + '</td>' +
+        '<td class="num">' + (row.current_pct || 0).toFixed(1) + '% → <strong>' + (row.suggested_pct || 0).toFixed(1) + '%</strong></td>' +
+        '<td style="font-size:11px;white-space:normal;max-width:240px;">' + (row.why || '—') + '</td>' +
+        '<td style="font-size:11px;white-space:normal;max-width:220px;">' + (row.downside || '—') + '</td>' +
         '</tr>';
     }).join('');
-
+    const reviews = data.reviews || [];
+    const reviewsHtml = reviews.map(function(rv) {
+      const when = rv.generated_at ? String(rv.generated_at).slice(0, 16).replace('T', ' ') : '';
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;">' +
+        '<span style="font-size:11px;">' + (rv.fund_name || 'Portfolio') + (when ? ' · ' + when : '') + '</span>' +
+        '<button type="button" class="tab-btn sm js-open-review" data-id="' + rv.id + '" style="font-size:10px;">Open</button>' +
+        '</div>';
+    }).join('');
     const emailBtnId = 'reb-email-btn-' + fundId;
     const emailMsgId = 'reb-email-msg-' + fundId;
     elResult.innerHTML =
@@ -14947,83 +14952,70 @@
           '<summary class="panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;justify-content:space-between;">' +
             '<span style="display:flex;align-items:center;gap:8px;">' +
               '<span class="panel-title">Rebalance Suggestions</span>' +
-              '<span class="panel-badge">' + (data.equity_count || data.rows.length) + ' equities</span>' +
-              '<span style="font-size:10px;color:var(--mid);">Run: ' + runDate + '</span>' +
+              '<span class="panel-badge">' + ((data.rows || []).length) + '</span>' +
+              (runDate ? '<span style="font-size:10px;color:var(--mid);">' + runDate + '</span>' : '') +
             '</span>' +
             '<span style="display:flex;align-items:center;gap:6px;flex-shrink:0;" onclick="event.stopPropagation()">' +
-              '<span id="acd-rebalance-status" style="font-size:10px;min-width:0;overflow:hidden;text-overflow:ellipsis;"></span>' +
-              '<button id="acd-rebalance-btn" class="tab-btn sm" style="font-size:9px;padding:0 10px;white-space:nowrap;">📊 Run</button>' +
-              '<span id="' + emailMsgId + '" style="font-size:10px;min-width:0;"></span>' +
-              '<button id="' + emailBtnId + '" class="tab-btn sm" style="font-size:9px;padding:0 10px;white-space:nowrap;">📨 Email</button>' +
+              '<span id="acd-rebalance-status" style="font-size:10px;"></span>' +
+              '<button id="acd-rebalance-btn" class="tab-btn sm" style="font-size:9px;padding:0 10px;">Run</button>' +
+              '<span id="' + emailMsgId + '" style="font-size:10px;"></span>' +
+              '<button id="' + emailBtnId + '" class="tab-btn sm" style="font-size:9px;padding:0 10px;">Email</button>' +
             '</span>' +
           '</summary>' +
           '<div style="padding:8px 12px 6px;">' +
-          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--mid);">' +
-            '<span style="font-size:8.5px;font-weight:800;letter-spacing:.7px;color:var(--dim);">EXPECTED VALUE</span>' +
-            '<span style="font-variant-numeric:tabular-nums;font-weight:700;">' + (data.current_ev||0).toFixed(1) + '%</span>' +
-            '<span style="color:var(--blue);opacity:.6;">→</span>' +
-            '<span style="font-variant-numeric:tabular-nums;font-weight:800;' + (evImprove>=0?'color:var(--green)':'color:var(--red)') + ';">' + (data.suggested_ev||0).toFixed(1) + '%</span>' +
-            '<span style="background:rgba(34,197,94,0.12);color:' + (evImprove>=0?'var(--green)':'var(--red)') + ';padding:1px 8px;border-radius:5px;font-size:10px;font-weight:700;">' + (evImprove>=0?'+':'') + evImprove.toFixed(1) + '%</span>' +
-            '<span style="font-size:9px;color:var(--dim);">wtd avg upside</span>' +
+            (rowsHtml
+              ? '<div style="max-height:460px;overflow-y:auto;"><table class="acd-compact-table"><thead><tr>' +
+                  '<th>Ticker</th><th>Action</th><th class="num">Weight</th><th>Why</th><th>Downside</th>' +
+                '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>'
+              : '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0 8px;">Run opens a full investment-committee review of this book. Suggested weights follow each saved thesis.</div>') +
+            '<div style="margin-top:10px;border-top:1px solid var(--border-subtle);padding-top:8px;">' +
+              '<div style="font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);margin-bottom:4px;">Committee reports (' + reviews.length + ')</div>' +
+              (reviewsHtml || '<div style="font-size:11px;color:var(--text-secondary);">The full committee report for this book is saved here after a run.</div>') +
+            '</div>' +
           '</div>' +
-          '<div style="max-height:460px;overflow-y:auto;">' +
-          '<table class="acd-compact-table">' +
-            '<thead><tr>' +
-              '<th>Ticker</th>' +
-              '<th>Rating</th>' +
-              '<th class="num">Upside</th>' +
-              '<th class="num">Cur → Sug</th>' +
-              '<th class="num">Δ Sh</th>' +
-            '</tr></thead>' +
-            '<tbody>' + rowsHtml + '</tbody>' +
-          '</table>' +
-          '</div>' +
-        '</div>' +
         '</details>' +
       '</section>';
-
-    // Wire the Run + email buttons (both live in the panel header now)
     document.getElementById('acd-rebalance-btn')
       ?.addEventListener('click', () => runAcctRebalance(fundId));
+    elResult.querySelectorAll('.js-open-review').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const id = btn.getAttribute('data-id');
+        if (id) window.open('/gp/research?kind=strategist&id=' + encodeURIComponent(id), 'dga-research-strategist-' + id);
+      });
+    });
     const emailBtn = document.getElementById(emailBtnId);
     const emailMsg = document.getElementById(emailMsgId);
     if (emailBtn) {
       emailBtn.addEventListener('click', async () => {
-        // Prompt for recipient — default to GP's own email
         const defaultTo = (window.DGA_USER && window.DGA_USER.email) || '';
-        const to = prompt('Send rebalance report to:', defaultTo);
+        const to = prompt('Send the committee sizing to:', defaultTo);
         if (!to || !to.includes('@')) return;
         emailBtn.disabled = true;
-        emailBtn.textContent = '⏳ Sending…';
+        emailBtn.textContent = 'Sending';
         if (emailMsg) emailMsg.textContent = '';
         try {
           const r = await window.dgaFetch(
             '/api/v2/gp/fund/' + encodeURIComponent(fundId) + '/rebalance/email',
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ to }),
-            }
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) }
           );
           const d = await r.json();
           if (d.ok) {
-            if (emailMsg) { emailMsg.style.color='var(--green)'; emailMsg.textContent = '✓ Sent to ' + to; }
-          } else {
-            if (emailMsg) { emailMsg.style.color='var(--red)'; emailMsg.textContent = '✗ ' + (d.error || r.status); }
+            if (emailMsg) { emailMsg.style.color = 'var(--green)'; emailMsg.textContent = 'Sent to ' + to; }
+          } else if (emailMsg) {
+            emailMsg.style.color = 'var(--red)';
+            emailMsg.textContent = d.detail || d.error || 'Email failed';
           }
         } catch (e) {
-          if (emailMsg) { emailMsg.style.color='var(--red)'; emailMsg.textContent = '✗ ' + e.message; }
+          if (emailMsg) { emailMsg.style.color = 'var(--red)'; emailMsg.textContent = e.message; }
         } finally {
           emailBtn.disabled = false;
-          emailBtn.textContent = '📨 Email Report';
+          emailBtn.textContent = 'Email';
         }
       });
     }
-
   }
 
-  // Compute and display the positions-based (investment) return + alpha.
-  // Called after positions load (to get current MV) or after bench changes.
+
   function _updatePositionsReturnTile() {
     const el = document.getElementById('acd-pos-ret-val');
     if (!el || !_acctChartData) return;

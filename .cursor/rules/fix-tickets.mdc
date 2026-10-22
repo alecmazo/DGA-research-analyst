@@ -1,0 +1,20 @@
+---
+description: When Alec says fix tickets, start from the GP support button, not GitHub issues
+alwaysApply: true
+---
+
+# Fix tickets means the support button
+
+When Alec says "fix tickets," the work is the trouble tickets filed from the GP terminal support button. Do not start with GitHub issues.
+
+Look here, in this order:
+
+1. `GET /api/support/agent-inbox` and `GET /api/support/tickets` (GP auth or `x-support-agent-token`). Table: `support_tickets`.
+2. Each ticket's `description` plus its screenshot: `GET /api/support/tickets/{id}/screenshot`.
+3. Settings → Support tickets, which reads the same table.
+
+The button posts `description` and a page snapshot (`screenshot_b64`) to `POST /api/support/tickets`. Code is `api/domains/support_tickets.py`. The button UI is `web/gp-app/src/components/support/SupportFab.tsx`.
+
+Read the description and look at the snapshot before editing. Fix his open reports. If a previous session already started that fix, continue it. Do not revert unrelated dirty files.
+
+Do not push or deploy unless he asks. Mark a ticket fixed only after the change is in the tree he asked to ship.

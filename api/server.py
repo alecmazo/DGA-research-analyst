@@ -9011,7 +9011,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui752-20261021-offices"
+WEB_BUILD_VERSION = "ui757-20261021-open-tickets"
 
 
 @app.get("/api/build")
@@ -23673,286 +23673,187 @@ def email_test_send(request: Request):
     return result
 
 
+def _suggestion_rows(raw) -> list:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    return raw if isinstance(raw, list) else []
+
+
+def _strategist_reviews_for_fund(fund_id: str) -> list[dict]:
+    """Saved committee reviews for this fund or managed account, newest first."""
+    fid = str(fund_id or "").strip()
+    if not fid:
+        return []
+    _ensure_strategist_reviews_table()
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, fund_id, fund_name, tickers, model, generated_at, suggestions
+                  FROM strategist_reviews
+                 WHERE fund_id = %s
+                 ORDER BY generated_at DESC
+                 LIMIT 20
+            """, (fid,))
+            rows = cur.fetchall() or []
+    except Exception as e:
+        print(f"⚠️ [committee reviews] {e!s:.150}", flush=True)
+        return []
+    out = []
+    for r in rows:
+        generated = r.get("generated_at")
+        out.append({
+            "id": r.get("id"),
+            "fund_id": r.get("fund_id"),
+            "fund_name": r.get("fund_name"),
+            "tickers": r.get("tickers"),
+            "model": r.get("model"),
+            "generated_at": generated.isoformat() if generated else None,
+            "suggestions": _suggestion_rows(r.get("suggestions")),
+        })
+    return out
+
+
+def _committee_rebalance_payload(fund_id: str) -> dict:
+    """Suggestion table + report list for one book. Rows are committee sizing."""
+    from api.domains.committee_sizing import reviews_for_book
+    reviews = _strategist_reviews_for_fund(fund_id)
+    latest = reviews[0] if reviews else None
+    rows = (latest or {}).get("suggestions") or []
+    return {
+        "ok": True,
+        "source": "committee",
+        "fund_id": fund_id,
+        "review_id": (latest or {}).get("id"),
+        "run_at": (latest or {}).get("generated_at"),
+        "rows": rows,
+        "reviews": reviews_for_book(reviews, fund_id),
+    }
+
+
+def _demo_committee_rebalance(fund_id: str, claims: dict) -> dict:
+    """Canned committee review for a demo book. Same sizing rules, no paid model."""
+    from api.domains.committee_sizing import committee_dossier, rows_from_committee
+    positions = _load_fund_positions(str(fund_id))
+    if len(positions) < 3:
+        return JSONResponse(
+            {"ok": False, "error": "Need at least 3 positions."},
+            status_code=400,
+        )
+    fund_name = _fund_name_lookup(str(fund_id)) or "Portfolio"
+    tickers = [p["ticker"] for p in positions]
+    theses = _saved_theses(tickers)
+    proposals = []
+    for p in positions:
+        tk = p["ticker"]
+        thesis = (theses.get(tk) or "").strip()
+        proposals.append({
+            "ticker": tk,
+            "current_pct": p.get("weight_pct"),
+            "target_pct": p.get("weight_pct"),
+            "action": "hold",
+            "why": thesis[:280] if thesis else "",
+            "downside": "",
+            "binary": False,
+            "thesis_on_file": bool(thesis),
+            "industry": "",
+            "market_cap": None,
+        })
+    answer = committee_dossier(fund_name, proposals)
+    rows = rows_from_committee(positions, answer=answer, theses=theses)
+    import uuid as _uuid
+    job_id = "STRAT_" + _uuid.uuid4().hex[:12]
+    verification = {"verdict": "unchecked", "flags": []}
+    job = {
+        "stage": "done",
+        "status": "done",
+        "label": "Committee review ready",
+        "started_at": time.time(),
+        "updated_at": time.time(),
+        "question": f"Investment committee review — {fund_name}",
+        "display_question": f"Investment committee review — {fund_name}",
+        "steps": 1,
+        "tool_calls": [],
+        "cost_usd": 0.0,
+        "mode": "strategist",
+        "positions": positions,
+        "tickers": tickers,
+        "fund_name": fund_name,
+        "fund_id": str(fund_id),
+        "theses": theses,
+        "generated_by": (claims or {}).get("email") or "demo",
+        "result": {
+            "answer": answer,
+            "suggestions": rows,
+            "cost_usd": 0.0,
+            "model": "demo",
+            "verification": verification,
+        },
+    }
+    _agentic_jobs[job_id] = job
+    _persist_strategist_review(
+        job_id, job, answer, verification, 0.0, "demo", suggestions=rows)
+    return {
+        "ok": True,
+        "source": "committee",
+        "status": "done",
+        "job_id": job_id,
+        "review_id": job_id,
+        "tickers": tickers,
+        "positions": positions,
+        "fund_name": fund_name,
+        "rows": rows,
+        "model": "demo",
+        "provider": "demo",
+    }
+
+
 @app.get("/api/v2/gp/fund/{fund_id}/rebalance")
 def get_account_rebalance(fund_id: str, request: Request):
-    """Return the persisted rebalance result for a managed account."""
+    """Committee sizing and saved reviews for this fund or managed account."""
     _require_fund_token(request)
-    result = _kv_get(f"rebalance.account.{fund_id}")
-    if result is None:
-        return {"ok": False, "detail": "No rebalance yet"}
-    return result
+    return _committee_rebalance_payload(fund_id)
 
 
 @app.post("/api/v2/gp/fund/{fund_id}/rebalance")
-def run_account_rebalance(fund_id: str, request: Request):
-    """Run a fresh portfolio rebalance for a managed account and persist results."""
+def run_account_rebalance(fund_id: str, request: Request,
+                          background_tasks: BackgroundTasks):
+    """Run the desk investment-committee review for this book.
+
+    Suggestion rows are derived from that review. The valuation-only
+    rebalance no longer fills this card.
+    """
     claims = getattr(request.state, "auth_claims", None)
     if not claims or claims.get("role") not in ("gp", "admin"):
-        _require_fund_token(request)  # fall back to legacy fund token
-
-    if not _PSYCOPG2_OK:
-        raise HTTPException(status_code=503, detail="Database not available")
-
-    conn = _fund_conn()
+        _require_fund_token(request)
+        claims = claims or {"role": "gp", "email": "fund-token"}
+    if _request_is_demo(request):
+        return _demo_committee_rebalance(fund_id, claims)
+    extra = {}
     try:
-        with conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            # 1. Resolve fund id
-            fid = _resolve_fund_id(cur, fund_id)
-
-            # 2. Load open positions from tax_lots
-            cur.execute("""
-                SELECT s.symbol,
-                       SUM(tl.quantity) AS qty,
-                       SUM(tl.quantity * tl.cost_basis_per_unit) AS cost
-                  FROM tax_lots tl
-                  JOIN securities s ON s.id = tl.security_id
-                 WHERE tl.fund_id = %s AND tl.closed_at IS NULL
-                 GROUP BY s.symbol
-            """, (fid,))
-            lot_rows = cur.fetchall()
-
-            if not lot_rows:
-                raise HTTPException(status_code=422, detail="No open positions found for this fund")
-
-            # 3. Fetch live prices
-            all_syms = [r["symbol"] for r in lot_rows if r["symbol"]]
-            prices = _fetch_prices(all_syms)
-
-            # Compute total MV (all positions including cash)
-            total_mv_all = 0.0
-            pos_map = {}  # symbol -> {qty, cost, price, mv}
-            for r in lot_rows:
-                sym = r["symbol"]
-                qty = float(r["qty"] or 0)
-                cost = float(r["cost"] or 0)
-                price = prices.get(sym)
-                mv = qty * price if price else cost
-                total_mv_all += mv
-                pos_map[sym] = {"qty": qty, "cost": cost, "price": price, "mv": mv}
-
-            # 4. Filter to equity tickers only
-            equity_syms = [s for s in all_syms if not _is_cash_ticker(s)]
-
-            total_equity_mv = sum(pos_map[s]["mv"] for s in equity_syms if s in pos_map)
-            if total_equity_mv <= 0:
-                total_equity_mv = max(sum(pos_map[s]["cost"] for s in equity_syms if s in pos_map), 1.0)
-
-            # 5. Saved Reports (Postgres) — Grok 12m PT is the rebalancer
-            #    target. Other engines only if Grok has no PT. Upside is always
-            #    PT vs *live* last, never the frozen % in the report.
-            db_signals: dict[str, dict] = {}
-            try:
-                cur.execute("""
-                    SELECT ticker,
-                           rating, price_target, generated_at,
-                           claude_rating, claude_price_target, claude_generated_at,
-                           kimi_rating, kimi_price_target, kimi_generated_at,
-                           deepseek_rating, deepseek_price_target, deepseek_generated_at
-                      FROM analyst_reports
-                     WHERE ticker = ANY(%s)
-                """, (equity_syms,))
-                for row in (cur.fetchall() or []):
-                    tk = (row.get("ticker") or "").strip().upper()
-                    if not tk:
-                        continue
-                    cands = []
-                    for prov, ts_k, rat_k, pt_k in (
-                        ("grok", "generated_at", "rating", "price_target"),
-                        ("claude", "claude_generated_at", "claude_rating", "claude_price_target"),
-                        ("kimi", "kimi_generated_at", "kimi_rating", "kimi_price_target"),
-                        ("deepseek", "deepseek_generated_at", "deepseek_rating", "deepseek_price_target"),
-                    ):
-                        pt = row.get(pt_k)
-                        ts = row.get(ts_k)
-                        if pt is None and not row.get(rat_k) and not ts:
-                            continue
-                        try:
-                            pt_f = float(pt) if pt is not None else None
-                        except (TypeError, ValueError):
-                            pt_f = None
-                        if ts is not None and getattr(ts, "tzinfo", None) is not None:
-                            try:
-                                ts = ts.replace(tzinfo=None)
-                            except Exception:
-                                pass
-                        cands.append((ts or datetime(1970, 1, 1), 1 if pt_f else 0, prov,
-                                      row.get(rat_k) or "Hold", pt_f))
-                    # Grok PT first (Accounts rebalancer). Else newest engine
-                    # that actually has a 12m target; else newest rating.
-                    grok_pt = next((c for c in cands if c[2] == "grok" and c[1] == 1), None)
-                    if grok_pt:
-                        pick = grok_pt
-                    else:
-                        with_pt = [c for c in cands if c[1] == 1]
-                        pick = max(with_pt or cands, key=lambda c: c[0]) if (with_pt or cands) else None
-                    if pick:
-                        db_signals[tk] = {
-                            "provider": pick[2],
-                            "rating": pick[3] or "Hold",
-                            "price_target": pick[4],
-                        }
-            except Exception as _e:
-                print(f"[rebalance] analyst_reports lookup failed: {_e!s:.160}", flush=True)
-
-            reports_folder = analyst.STOCKS_FOLDER
-            ticker_results = []
-            for sym in equity_syms:
-                live = pos_map.get(sym, {}).get("price")
-                sig = db_signals.get(sym) or {}
-                rating = sig.get("rating")
-                pt = sig.get("price_target")
-                provider = sig.get("provider")
-                if pt is None and rating is None:
-                    md_path = reports_folder / f"{sym}_DGA_Report.md"
-                    if md_path.exists():
-                        try:
-                            raw_summary = _extract_summary_cached(md_path)
-                            if raw_summary:
-                                rating = raw_summary.get("rating") or "Hold"
-                                pt = raw_summary.get("price_target")
-                                provider = "disk"
-                        except Exception:
-                            pass
-                summary_dict = {
-                    "rating": rating or "Hold",
-                    "price_target": pt,
-                    # Do not pass frozen upside_pct — compute vs live last.
-                }
-                ticker_results.append({
-                    "ticker": sym,
-                    "ok": True,
-                    "market_price": live,
-                    "summary": summary_dict,
-                    "sector": "Unknown",
-                    "industry": "Unknown",
-                    "target_provider": provider,
-                })
-
-            if not ticker_results:
-                raise HTTPException(status_code=422, detail="No equity positions found to rebalance")
-
-            # 6. Compute rebalance (uses "current" strategy = keep all positions)
-            try:
-                rebalance = analyst.compute_rebalance(ticker_results, strategy="current")
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"compute_rebalance failed: {exc}")
-
-            weights = rebalance.get("weights", {})  # {ticker: fraction 0-1}
-            reb_rows = rebalance.get("rows", [])
-
-            # Build a lookup from compute_rebalance rows
-            reb_lookup = {r["ticker"]: r for r in reb_rows}
-
-            # 7. Build result rows
-            result_rows = []
-            current_ev = 0.0
-            suggested_ev = 0.0
-
-            for sym in equity_syms:
-                pm = pos_map.get(sym, {})
-                cur_pct = (pm.get("mv", 0) / total_equity_mv * 100) if total_equity_mv > 0 else 0
-                sug_frac = weights.get(sym, 0)
-                sug_pct = sug_frac * 100
-
-                reb = reb_lookup.get(sym, {})
-                src = ticker_results[equity_syms.index(sym)]
-                src_sum = src.get("summary") or {}
-                rating = reb.get("rating") or src_sum.get("rating") or "Hold"
-                pt = reb.get("price_target")
-                if pt is None:
-                    pt = src_sum.get("price_target")
-                live_px = src.get("market_price") or pm.get("price")
-                upside_pct = reb.get("upside_pct")
-                if upside_pct is None and isinstance(pt, (int, float)) and live_px:
-                    try:
-                        upside_pct = (float(pt) - float(live_px)) / float(live_px) * 100.0
-                    except (TypeError, ValueError, ZeroDivisionError):
-                        upside_pct = 0
-                if upside_pct is None:
-                    upside_pct = 0
-                score = float(reb.get("score") or 0)
-                sec = reb.get("sector") or src.get("sector") or "Unknown"
-                tprov = src.get("target_provider") or ""
-
-                current_ev  += (cur_pct / 100) * float(upside_pct)
-                suggested_ev += sug_frac * float(upside_pct)
-
-                # Action determination
-                diff = sug_pct - cur_pct
-                if diff > 1.5:
-                    action = "BUY MORE"
-                elif diff < -1.5:
-                    action = "TRIM"
-                else:
-                    action = "HOLD"
-
-                # Shares calculation
-                _price = pm.get("price") or 0
-                if not _price and pm.get("qty", 0) > 0:
-                    _price = pm.get("cost", 0) / pm["qty"]  # fallback to avg cost
-                _current_qty  = pm.get("qty", 0)
-                _current_mv   = pm.get("mv", 0)
-                _suggested_mv = sug_frac * total_equity_mv
-                _delta_mv     = _suggested_mv - _current_mv
-                _shares_delta = round(_delta_mv / _price, 2) if _price > 0 else None
-                _new_qty      = round(_current_qty + _shares_delta, 2) if _shares_delta is not None else None
-
-                result_rows.append({
-                    "ticker":        sym,
-                    "name":          sym,  # no name in tax_lots directly
-                    "current_pct":   round(cur_pct, 2),
-                    "suggested_pct": round(sug_pct, 2),
-                    "rating":        rating,
-                    "upside_pct":    round(float(upside_pct), 2),
-                    "price_target":  round(float(pt), 2) if isinstance(pt, (int, float)) else None,
-                    "target_provider": tprov,
-                    "score":         round(score, 4),
-                    "sector":        sec,
-                    "action":        action,
-                    "current_qty":   round(_current_qty, 4),
-                    "price":         round(_price, 4) if _price else None,
-                    "shares_delta":  _shares_delta,
-                    "new_qty":       _new_qty,
-                })
-
-            # EV = weighted-average upside across equity positions
-            # current_ev  = Σ (cur_pct/100 × upside_pct)  — e.g. 15.3% allocation × 18.5% upside
-            # suggested_ev = Σ (sug_frac × upside_pct)     — already a fraction (0–1)
-            result = {
-                "ok":               True,
-                "fund_id":          fund_id,
-                "run_at":           datetime.utcnow().isoformat() + "Z",
-                "strategy":         "current",
-                "total_equity_mv":  round(total_equity_mv, 2),
-                "rows":             result_rows,
-                "current_ev":       round(current_ev, 2),
-                "suggested_ev":     round(suggested_ev, 2),
-                "positions_count":  len(lot_rows),
-                "equity_count":     len(equity_syms),
-            }
-
-            # 8. Persist and flush cache
-            _kv_put(f"rebalance.account.{fund_id}", result)
-            _invalidate_user_cache()
-
-            return result
-    finally:
-        conn.close()
+        extra = _request_json_sync(request) or {}
+    except Exception:
+        extra = {}
+    payload = {"fund_id": fund_id}
+    prov = (extra.get("llm_provider") or extra.get("provider") or "")
+    if prov:
+        payload["llm_provider"] = prov
+    return _queue_portfolio_strategist(payload, claims, background_tasks)
 
 
 @app.post("/api/v2/gp/fund/{fund_id}/rebalance/email")
 def email_account_rebalance(fund_id: str, request: Request):
-    """Email the rebalance summary for a managed account to a specified address."""
+    """Email the committee sizing for a book."""
     claims = getattr(request.state, "auth_claims", None)
     if not claims or claims.get("role") not in ("gp", "admin"):
         _require_fund_token(request)
 
-    # Load persisted rebalance
-    data = _kv_get(f"rebalance.account.{fund_id}")
-    if not data or not data.get("ok"):
-        raise HTTPException(status_code=404, detail="No rebalance found — run one first")
+    data = _committee_rebalance_payload(fund_id)
+    if not data.get("review_id") or not data.get("rows"):
+        raise HTTPException(status_code=404, detail="No committee review yet — run one first")
 
-    # Determine recipient — prefer explicitly provided address from request body
     to_addr = ""
     try:
         body_raw = _request_body_sync(request)
@@ -23961,98 +23862,44 @@ def email_account_rebalance(fund_id: str, request: Request):
             to_addr = (body_json.get("to") or "").strip()
     except Exception:
         pass
-    # Fall back to GP's auth email
     if not to_addr and claims:
         to_addr = claims.get("email", "")
     if not _valid_email_addr(to_addr):
         raise HTTPException(status_code=422, detail="Provide a valid recipient email address")
 
-    run_date = data.get("run_at", "")[:10] if data.get("run_at") else "—"
-    evImprove = (data.get("suggested_ev") or 0) - (data.get("current_ev") or 0)
-    evSign = "+" if evImprove >= 0 else ""
-    sug_ev_color = "#22c55e" if evImprove >= 0 else "#ef4444"
-
+    run_date = (data.get("run_at") or "")[:10] or "—"
     rows_html = ""
-    for row in sorted(data.get("rows", []), key=lambda r: -(r.get("suggested_pct") or 0)):
-        diff = (row.get("suggested_pct") or 0) - (row.get("current_pct") or 0)
-        diff_str = f"+{diff:.1f}%" if diff > 0.1 else (f"{diff:.1f}%" if diff < -0.1 else "—")
-        diff_color = "#22c55e" if diff > 0.5 else ("#ef4444" if diff < -0.5 else "#8899aa")
-        upside = row.get("upside_pct") or 0
-        upside_sign = "+" if upside >= 0 else ""
-        sd = row.get("shares_delta")
-        if sd is not None and abs(sd) >= 0.01:
-            shares_str = f"+{sd:.2f}" if sd > 0 else f"{sd:.2f}"
-            shares_color = "#22c55e" if sd > 0 else "#ef4444"
-        else:
-            shares_str = "—"
-            shares_color = "#6688aa"
+    for row in data.get("rows") or []:
         rows_html += (
-            f"<tr style='border-bottom:1px solid #2a3a4a;'>"
+            "<tr style='border-bottom:1px solid #2a3a4a;'>"
             f"<td style='padding:6px 10px;font-weight:bold;color:#5bb8d4;'>{row.get('ticker','')}</td>"
-            f"<td style='padding:6px 10px;text-align:right;'>{row.get('rating','—')}</td>"
-            f"<td style='padding:6px 10px;text-align:right;'>{upside_sign}{upside:.1f}%</td>"
-            f"<td style='padding:6px 10px;text-align:right;'>{(row.get('current_pct') or 0):.1f}%</td>"
-            f"<td style='padding:6px 10px;text-align:right;'>{(row.get('suggested_pct') or 0):.1f}%</td>"
-            f"<td style='padding:6px 10px;text-align:right;color:{diff_color};'>{diff_str}</td>"
-            f"<td style='padding:6px 10px;text-align:right;'>{row.get('action','—')}</td>"
-            f"<td style='padding:6px 10px;text-align:right;font-weight:bold;color:{shares_color};'>{shares_str}</td>"
-            f"</tr>"
+            f"<td style='padding:6px 10px;'>{row.get('action','hold')}</td>"
+            f"<td style='padding:6px 10px;text-align:right;'>{(row.get('current_pct') or 0):.1f}% → {(row.get('suggested_pct') or 0):.1f}%</td>"
+            f"<td style='padding:6px 10px;'>{row.get('why','')}</td>"
+            f"<td style='padding:6px 10px;'>{row.get('downside','')}</td>"
+            "</tr>"
         )
-
     html_body = f"""
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a1628;color:#c0d0e0;margin:0;padding:24px;">
-  <div style="max-width:700px;margin:0 auto;">
-    <h1 style="color:#5bb8d4;font-size:20px;margin-bottom:4px;">Portfolio Rebalance Summary</h1>
-    <p style="color:#6688aa;font-size:13px;margin-top:0;">Fund {fund_id} &mdash; Run {run_date}</p>
-
-    <div style="display:flex;gap:24px;margin:20px 0;flex-wrap:wrap;">
-      <div style="text-align:center;background:#112233;padding:16px 24px;border-radius:8px;">
-        <div style="font-size:11px;color:#6688aa;font-weight:bold;margin-bottom:6px;">CURRENT EV</div>
-        <div style="font-size:28px;font-weight:bold;color:#8899aa;">{(data.get('current_ev') or 0):.1f}%</div>
-        <div style="font-size:11px;color:#445566;">wtd avg upside</div>
-      </div>
-      <div style="display:flex;align-items:center;font-size:28px;color:#5bb8d4;">→</div>
-      <div style="text-align:center;background:#112233;padding:16px 24px;border-radius:8px;">
-        <div style="font-size:11px;color:#6688aa;font-weight:bold;margin-bottom:6px;">SUGGESTED EV</div>
-        <div style="font-size:28px;font-weight:bold;color:{sug_ev_color};">{(data.get('suggested_ev') or 0):.1f}%</div>
-        <div style="font-size:11px;color:#445566;">wtd avg upside</div>
-      </div>
-      <div style="display:flex;align-items:center;">
-        <span style="background:rgba(34,197,94,0.15);color:#22c55e;padding:8px 16px;border-radius:6px;font-size:14px;font-weight:bold;">
-          {evSign}{evImprove:.1f}% EV improvement
-        </span>
-      </div>
-    </div>
-
-    <table style="width:100%;border-collapse:collapse;background:#112233;border-radius:8px;overflow:hidden;">
-      <thead>
-        <tr style="background:#1a3050;">
-          <th style="padding:8px 10px;text-align:left;color:#8899aa;font-size:11px;">TICKER</th>
-          <th style="padding:8px 10px;text-align:right;color:#8899aa;font-size:11px;">RATING</th>
-          <th style="padding:8px 10px;text-align:right;color:#8899aa;font-size:11px;">UPSIDE</th>
-          <th style="padding:8px 10px;text-align:right;color:#8899aa;font-size:11px;">CURRENT %</th>
-          <th style="padding:8px 10px;text-align:right;color:#8899aa;font-size:11px;">SUGGESTED %</th>
-          <th style="padding:8px 10px;text-align:right;color:#8899aa;font-size:11px;">CHANGE</th>
-          <th style="padding:8px 10px;text-align:right;color:#8899aa;font-size:11px;">ACTION</th>
-          <th style="padding:8px 10px;text-align:right;color:#8899aa;font-size:11px;">SHARES</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows_html}
-      </tbody>
+  <div style="max-width:760px;margin:0 auto;">
+    <h1 style="color:#5bb8d4;font-size:20px;margin-bottom:4px;">Committee sizing</h1>
+    <p style="color:#6688aa;font-size:13px;margin-top:0;">Fund {fund_id} — review {data.get('review_id')} — {run_date}</p>
+    <table style="width:100%;border-collapse:collapse;background:#112233;">
+      <thead><tr style="background:#1a3050;">
+        <th style="padding:8px 10px;text-align:left;color:#8899aa;font-size:11px;">TICKER</th>
+        <th style="padding:8px 10px;text-align:left;color:#8899aa;font-size:11px;">ACTION</th>
+        <th style="padding:8px 10px;text-align:right;color:#8899aa;font-size:11px;">WEIGHT</th>
+        <th style="padding:8px 10px;text-align:left;color:#8899aa;font-size:11px;">WHY</th>
+        <th style="padding:8px 10px;text-align:left;color:#8899aa;font-size:11px;">DOWNSIDE</th>
+      </tr></thead>
+      <tbody>{rows_html}</tbody>
     </table>
-
-    <p style="font-size:11px;color:#445566;margin-top:20px;">
-      Generated by DGA Capital GP Portal &mdash; {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC
-    </p>
   </div>
 </body>
 </html>"""
-
-    subject = f"[DGA] Portfolio Rebalance — Fund {fund_id} — {run_date}"
+    subject = f"[DGA] Committee sizing — {fund_id} — {run_date}"
     result = _send_simple_email(to_addr, subject, html_body)
     if not result.get("ok"):
         raise HTTPException(status_code=500, detail=result.get("error", "Email failed"))
@@ -30080,6 +29927,26 @@ _AGENTIC_MAX_STEPS = 12          # hard cap on tool-call rounds (cost guard)
 # Portfolio Strategist reviews a whole book — needs more tool rounds than Q&A.
 # Grok/Kimi/DeepSeek often burn 1 step per name; 12 was too low (ticket d754f5b2).
 _STRATEGIST_MAX_STEPS = 24
+
+
+def _agentic_limits(mode: str, provider: str) -> tuple[int, float]:
+    """(max tool rounds, wall-clock seconds) for one agentic job.
+
+    Quarterly letters must finish inside the memos page poll. A 10-minute
+    wall plus one read_saved_report per exit left EM-DEF on
+    'timed out — try again' while the job was still running
+    (SUP_20261021_40e7622c).
+    """
+    m = (mode or "agentic").strip().lower()
+    p = (provider or "").strip().lower()
+    if m == "quarterly_letter":
+        return 4, 240.0
+    if m == "strategist":
+        steps = _AGENTIC_MAX_STEPS if p == "claude" else _STRATEGIST_MAX_STEPS
+        return steps, 720.0
+    return _AGENTIC_MAX_STEPS, 600.0
+
+
 _agentic_jobs: dict[str, dict] = {}
 
 
@@ -30976,6 +30843,7 @@ def _ensure_strategist_reviews_table() -> None:
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS strategist_reviews_gen_idx ON strategist_reviews(generated_at DESC)")
             cur.execute("ALTER TABLE strategist_reviews ADD COLUMN IF NOT EXISTS positions JSONB")
+            cur.execute("ALTER TABLE strategist_reviews ADD COLUMN IF NOT EXISTS suggestions JSONB")
             conn.commit()
     except Exception as e:
         print(f"❌ _ensure_strategist_reviews_table: {e!s:.200}", flush=True)
@@ -31006,18 +30874,27 @@ def _roundup_position_rows(raw) -> list[dict]:
 
 
 def _persist_strategist_review(job_id: str, job: dict, answer: str,
-                                verification: dict, cost_usd: float, model: str) -> None:
+                                verification: dict, cost_usd: float, model: str,
+                                suggestions: list | None = None) -> None:
     """Insert one completed strategist review. Best-effort, never raises."""
     _ensure_strategist_reviews_table()
     try:
+        if suggestions is None:
+            from api.domains.committee_sizing import rows_from_committee
+            suggestions = rows_from_committee(
+                job.get("positions") or [],
+                answer=answer,
+                theses=job.get("theses") or {},
+            )
         tickers = ", ".join(job.get("tickers") or [])[:600]
         compact = _roundup_position_rows(job.get("positions"))
         with _fund_conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO strategist_reviews
                     (id, fund_id, fund_name, tickers, question, answer,
-                     verification, cost_usd, model, generated_by, positions)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     verification, cost_usd, model, generated_by, positions,
+                     suggestions)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (id) DO NOTHING
             """, (job_id, job.get("fund_id"), job.get("fund_name"), tickers,
                   (job.get("display_question")
@@ -31029,7 +30906,8 @@ def _persist_strategist_review(job_id: str, job: dict, answer: str,
                    )[:400], answer or "",
                   json.dumps(verification or {}), cost_usd, model,
                   job.get("generated_by") or "gp",
-                  json.dumps(compact) if compact else None))
+                  json.dumps(compact) if compact else None,
+                  json.dumps(suggestions or [])))
             conn.commit()
         print(f"🧭 [strategist] persisted review {job_id} ({tickers[:60]})", flush=True)
     except Exception as e:
@@ -31247,6 +31125,21 @@ def _agentic_non_claude_system_addon(mode: str, max_steps: int, model: str) -> s
     forced wrap-up instead of a competitive Grok 4.6 conclusion.
     """
     eng = "Grok 4.7" if "grok" in (model or "").lower() else "this engine"
+    if mode == "quarterly_letter":
+        # The research addon tells Grok to call read_saved_report per name.
+        # That is the EM-DEF timeout (SUP_20261021_40e7622c). The letter
+        # prompt already contains the trade record and thesis snippets.
+        return (
+            f"\n\nENGINE: {eng}. This is one account's quarterly letter, not a "
+            "research report and not an investment-committee dossier.\n"
+            "• The trade record and saved thesis snippets are already in the prompt. "
+            "Do NOT call read_saved_report.\n"
+            "• At most one tool call, and only if a number you must cite is missing. "
+            "Then stop and write.\n"
+            "• Write the three sections in order: ### What we did here, "
+            "### How it's positioned, ### Why it's built this way.\n"
+            "• No sleeve JSON. No timeout apology. Never invent a trade or a number."
+        )
     if mode == "strategist":
         return (
             f"\n\nENGINE: {eng} with the IDENTICAL tool set and evidence rules as Claude. "
@@ -31256,7 +31149,7 @@ def _agentic_non_claude_system_addon(mode: str, max_steps: int, model: str) -> s
             "• Do not re-read every report if 4–6 key names already ground the story.\n"
             "• When evidence is enough, STOP tools and write the FULL 6-section IC dossier "
             f"in one reply — a decisive {eng} investment-committee conclusion with cited numbers, "
-            "not a stub or 'timed out' note.\n"
+            "not a stub or 'timed out' note. Close with the ```sizing JSON array.\n"
             "• Never invent prices/multiples/returns — only tool evidence."
         )
     return (
@@ -31283,12 +31176,23 @@ def _agentic_final_write_prompt(mode: str, model: str, *, reason: str = "budget"
         "step_limit": "You hit the step limit.",
         "wall": "Wall-clock is nearly up; finish from evidence already gathered.",
     }.get(reason, "Finish now.")
+    if mode == "quarterly_letter":
+        return (
+            f"{why} The trade record and saved thesis snippets are already in the "
+            "prompt. Write this account's letter section now, in markdown, with "
+            "these headers in order: ### What we did here, ### How it's positioned, "
+            "### Why it's built this way. Address every exit and trim by name with "
+            "its realized P&L and the reason we sold. No more tools. No sleeve JSON. "
+            "Do not mention timeouts, budgets, or incomplete work."
+        )
     if mode == "strategist":
         return (
             f"{why} Using ONLY tool results already above, write the COMPLETE "
             f"investment-committee dossier as {eng}: all required sections, specific "
-            "numbers from tools, decisive recommendations. No more tools. "
-            "Do not mention timeouts, budgets, or incomplete work."
+            "numbers from tools, decisive recommendations. End with the ```sizing "
+            "JSON array (target weight, why from the saved thesis, downside / ruin "
+            "constraint, 4% cap on a binary name, 2% cap when the thesis is missing). "
+            "No more tools. Do not mention timeouts, budgets, or incomplete work."
         )
     return (
         f"{why} Using ONLY tool results already above, write a COMPLETE final research "
@@ -31326,12 +31230,8 @@ def _run_agentic_analysis(job_id: str, question: str,
     provider, model = _agent_route_and_model(mode, provider_override=_ov or None)
     # Claude batches tools; 24 rounds was for Grok 1-name-per-step and is
     # wasteful on Opus ($5/$25). Cap Claude strategist at the Analyst budget.
-    if mode == "strategist":
-        max_steps = (
-            _AGENTIC_MAX_STEPS if provider == "claude" else _STRATEGIST_MAX_STEPS
-        )
-    else:
-        max_steps = _AGENTIC_MAX_STEPS
+    # Quarterly letters use a short budget so the memos page still gets a draft.
+    max_steps, wall_s = _agentic_limits(mode, provider)
     _set(stage="queued", status="running", label=f"Starting {provider}…",
          started_at=time.time(), steps=0, tool_calls=[], cost_usd=0.0,
          provider=provider, model=model, max_steps=max_steps)
@@ -31352,29 +31252,45 @@ def _run_agentic_analysis(job_id: str, question: str,
                     f"(No written answer after {len(tool_log)} tool call(s). "
                     "Re-run or try Claude for this question.)"
                 )
-            _set(stage="verifying",
-                 label=("🔍 Verifying claims…"
-                        + (" (final write-up pass)" if forced else "")),
-                 steps=steps_done, tool_calls=tool_log[:],
-                 cost_usd=round(total_cost, 4))
-            verification = _agentic_verify_any(
-                provider, client_for_verify, model, question, final, tool_log)
+            # A letter is grounded in the prompt's trade record. The research
+            # fact-check is another full model call and flags those numbers as
+            # "unsupported" because they did not come from tools. Skip it so
+            # the memos page receives the draft (SUP_20261021_40e7622c).
+            if mode == "quarterly_letter":
+                verification = {
+                    "ok": True, "verdict": "skipped", "flags": [],
+                    "note": "Letter uses the prompt trade record, not a tool log.",
+                }
+            else:
+                _set(stage="verifying",
+                     label=("🔍 Verifying claims…"
+                            + (" (final write-up pass)" if forced else "")),
+                     steps=steps_done, tool_calls=tool_log[:],
+                     cost_usd=round(total_cost, 4))
+                verification = _agentic_verify_any(
+                    provider, client_for_verify, model, question, final, tool_log)
             done_label = (
                 "✓ Analysis complete (final write-up after tool budget)"
                 if forced else "✓ Analysis complete"
             )
-            _set(stage="done", status="done", label=done_label,
-                 steps=steps_done, tool_calls=tool_log[:],
-                 cost_usd=round(total_cost, 4),
-                 result={"answer": final, "tool_calls": tool_log[:],
-                         "cost_usd": round(total_cost, 4), "model": model,
-                         "provider": provider, "verification": verification,
-                         "forced_finalize": bool(forced)})
+            jr = _agentic_jobs.get(job_id) or {}
+            suggestions: list = []
+            if jr.get("mode") == "strategist":
+                try:
+                    from api.domains.committee_sizing import rows_from_committee
+                    suggestions = rows_from_committee(
+                        jr.get("positions") or [],
+                        answer=final,
+                        theses=jr.get("theses") or {},
+                    )
+                except Exception as _se:
+                    print(f"⚠️ [committee sizing] {_se!s:.150}", flush=True)
+                    suggestions = []
             try:
-                jr = _agentic_jobs.get(job_id) or {}
                 if jr.get("mode") == "strategist":
-                    _persist_strategist_review(job_id, jr, final, verification,
-                                               round(total_cost, 4), model)
+                    _persist_strategist_review(
+                        job_id, jr, final, verification,
+                        round(total_cost, 4), model, suggestions=suggestions)
                 else:
                     _persist_analyst_review(
                         job_id, jr.get("source") or "analyst",
@@ -31382,15 +31298,30 @@ def _run_agentic_analysis(job_id: str, question: str,
                         tool_log[:], round(total_cost, 4), model)
             except Exception as _pe:
                 print(f"⚠️ [review persist] {_pe!s:.150}", flush=True)
+            _set(stage="done", status="done", label=done_label,
+                 steps=steps_done, tool_calls=tool_log[:],
+                 cost_usd=round(total_cost, 4),
+                 result={"answer": final, "tool_calls": tool_log[:],
+                         "cost_usd": round(total_cost, 4), "model": model,
+                         "provider": provider, "verification": verification,
+                         "suggestions": suggestions,
+                         "forced_finalize": bool(forced)})
 
         # ── Claude (Anthropic Messages + tool_use) ─────────────────────
         if provider == "claude":
             client = _anthropic.Anthropic(api_key=analyst.get_claude_api_key(), timeout=120.0)
             think = _agentic_thinking_kwargs(model)
             messages = [{"role": "user", "content": question}]
+            _loop_t0 = time.time()
 
             for step in range(max_steps):
+                _elapsed = time.time() - _loop_t0
                 last_round = step >= max_steps - 1
+                # One tool round, then the section. More rounds run past the
+                # memos page poll (SUP_20261021_40e7622c).
+                if mode == "quarterly_letter" and (
+                        step >= 1 or _elapsed >= (wall_s * 0.90)):
+                    last_round = True
                 _set(stage="thinking",
                      label=f"{provider} · reasoning (step {step+1}/{max_steps})…",
                      steps=step, tool_calls=tool_log[:], cost_usd=round(total_cost, 4),
@@ -31399,8 +31330,17 @@ def _run_agentic_analysis(job_id: str, question: str,
                     model=model, max_tokens=8000,
                     system=system, messages=messages, **think,
                 )
-                # Final round: no tools — force written answer
-                if last_round and tool_log:
+                # Final round: no tools — force written answer.
+                # Quarterly letters write from the prompt even with an empty
+                # tool log; other modes still wait until a tool has run.
+                if last_round and mode == "quarterly_letter":
+                    reason = "wall" if _elapsed >= (wall_s * 0.90) else "budget"
+                    create_kw["messages"] = messages + [{
+                        "role": "user",
+                        "content": _agentic_final_write_prompt(
+                            mode, model or "", reason=reason),
+                    }]
+                elif last_round and tool_log:
                     create_kw["messages"] = messages + [{
                         "role": "user",
                         "content": (
@@ -31455,8 +31395,9 @@ def _run_agentic_analysis(job_id: str, question: str,
             {"role": "user", "content": question},
         ]
         # Generous wall so Grok can complete competitively; force only near end.
-        # Strategist: 12 min · Analyst: 10 min. Soft force at 90% elapsed.
-        _wall_s = 720.0 if mode == "strategist" else 600.0
+        # Strategist: 12 min · Analyst: 10 min · quarterly letter: 4 min.
+        # Soft force at 90% elapsed, still inside the memos page poll.
+        _wall_s = wall_s
         _loop_t0 = time.time()
         _oai_temp = 1.0 if provider in ("kimi", "volume") else 0.3
         _max_out = 12000 if provider == "grok" else 8000
@@ -31474,13 +31415,18 @@ def _run_agentic_analysis(job_id: str, question: str,
         for step in range(max_steps):
             _elapsed = time.time() - _loop_t0
             last_round = step >= max_steps - 1
-            # Only force late — give Grok room to gather evidence like Claude
-            if (not last_round) and tool_log and _elapsed >= (_wall_s * 0.90):
+            # A letter may take one tool round, then it must write. Two more
+            # 180s Grok calls run past the 8-minute memos poll
+            # (SUP_20261021_40e7622c). Research jobs still wait for evidence.
+            if mode == "quarterly_letter" and (
+                    step >= 1 or _elapsed >= (_wall_s * 0.90)):
+                last_round = True
+            elif (not last_round) and tool_log and _elapsed >= (_wall_s * 0.90):
                 last_round = True
             _set(stage="thinking",
                  label=(
                      f"{provider} · final write-up ({model})…"
-                     if last_round and tool_log
+                     if last_round and (tool_log or mode == "quarterly_letter")
                      else f"{provider} · reasoning (step {step+1}/{max_steps})…"
                  ),
                  steps=step, tool_calls=tool_log[:], cost_usd=round(total_cost, 4),
@@ -31495,7 +31441,7 @@ def _run_agentic_analysis(job_id: str, question: str,
                 if hasattr(analyst, "get_grok_report_effort"):
                     _effort = analyst.get_grok_report_effort()
                 create_kw["extra_body"] = {"reasoning_effort": _effort}
-            if last_round and tool_log:
+            if last_round and (mode == "quarterly_letter" or tool_log):
                 create_kw["messages"] = messages + [{
                     "role": "user",
                     "content": _agentic_final_write_prompt(
@@ -31514,7 +31460,7 @@ def _run_agentic_analysis(job_id: str, question: str,
                     create_kw.pop("tool_choice", None)
                     create_kw.pop("tools", None)
                     resp = oai.chat.completions.create(**create_kw)
-                elif tool_log and (
+                elif (tool_log or mode == "quarterly_letter") and (
                     "timeout" in str(_oe).lower()
                     or "timed out" in str(_oe).lower()
                     or "DeadlineExceeded" in str(_oe)
@@ -32172,11 +32118,45 @@ def _combine_fund_positions(fund_ids: list[str]) -> list[dict]:
     return _positions_from_valued([{"ticker": tk, "mv": mv} for tk, mv in agg.items()])
 
 
+def _saved_theses(tickers: list[str]) -> dict[str, str]:
+    """Saved thesis excerpt per ticker. An empty string means none is on file."""
+    out = {str(t).upper(): "" for t in tickers if t}
+    if not out or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return out
+    rows = []
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute("""
+                SELECT ticker, report_md, report_md_claude
+                  FROM analyst_reports WHERE ticker = ANY(%s)
+            """, (list(out),))
+            rows = cur.fetchall() or []
+    except Exception as e:
+        print(f"⚠️ [strategist theses] {e!s:.150}", flush=True)
+        return out
+    for r in rows:
+        tk = (r.get("ticker") or "").upper()
+        if tk not in out:
+            continue
+        snippet = ""
+        try:
+            snippet = analyst.extract_thesis_snippet(r.get("report_md") or "", 480)
+            if not snippet:
+                snippet = analyst.extract_thesis_snippet(r.get("report_md_claude") or "", 480)
+        except Exception:
+            snippet = ""
+        out[tk] = (snippet or "").strip()
+    return out
+
+
 def _build_strategist_context(positions: list[dict], fund_name: str | None,
-                              fund_ids: list | None = None) -> str:
+                              fund_ids: list | None = None,
+                              theses: dict | None = None) -> str:
     """Enrich positions with per-name Grok *and* Claude PT/upside (saved reports)
-    and produce a grounded context block for the strategist prompt."""
+    and the saved thesis excerpt. A missing thesis is labeled, not invented."""
     tickers = [p["ticker"] for p in positions if p.get("ticker")]
+    if theses is None:
+        theses = _saved_theses(tickers)
     reports = {}
     if _PSYCOPG2_OK and os.environ.get("DATABASE_URL") and tickers:
         try:
@@ -32249,11 +32229,20 @@ def _build_strategist_context(positions: list[dict], fund_name: str | None,
         if up_c is not None:
             ev_c.append(w / 100.0 * float(up_c))
         last_bit = f" last=${last:.2f}" if last is not None else ""
+        thesis = (theses.get(tk) or "").strip()
+        if thesis:
+            thesis_bit = f"thesis: {thesis}"
+        else:
+            thesis_bit = (
+                "thesis: NO THESIS ON FILE — say so in the dossier and size "
+                "this name conservatively. Do not invent a thesis."
+            )
         lines.append(
             f"  {tk:<7} {w:5.1f}%{last_bit}  "
             f"grok={rat_g} PT={_fmt_pt(pt_g)} up={_fmt_up(up_g)}  "
             f"claude={rat_c} PT={_fmt_pt(pt_c)} up={_fmt_up(up_c)}  "
-            f"{'[has saved report]' if has_report else '[NO report]'}"
+            f"{'[has saved report]' if has_report else '[NO report]'}\n"
+            f"    {thesis_bit}"
         )
     ctx = [
         f"PORTFOLIO ({fund_name or 'uploaded book'}) — {len(positions)} positions:",
@@ -32273,8 +32262,9 @@ def _build_strategist_context(positions: list[dict], fund_name: str | None,
         "\nNote: each name lists Grok AND Claude 12m PT/upside separately when "
         "both reports exist. Use BOTH numbers — do not collapse to one engine. "
         "Upside is PT vs live last when a quote is on file; otherwise the stored "
-        "report-day %. Names marked [NO report] have no thesis on file — flag "
-        "that as a gap."
+        "report-day %. Mechanical EV is the baseline you reason against. It does "
+        "not set the target weight. Names marked NO THESIS ON FILE have no "
+        "thesis on file — say so and size them inside the 2% cap."
     )
     snap_bits = []
     for fid in (fund_ids or []):
@@ -32326,28 +32316,41 @@ _STRATEGIST_SYSTEM = (
     "Advisory only — the GP decides.\n"
     "5. WIPEOUT SCENARIOS — 2-3 specific drawdown paths + rough probability.\n"
     "6. BOTTOM LINE — the single highest-conviction move this week.\n\n"
+    "SIZING (binding): build the book from each name's saved thesis. A high "
+    "price-target upside is context for expected value, and it is not a "
+    "position size.\n"
+    "- A binary outcome with risk of ruin, including a small or mid-cap "
+    "biotech (market cap under $15 billion), is capped at 4% of the book.\n"
+    "- When a name has no saved thesis, say so in the dossier and in that "
+    "row. Leave the thesis blank rather than inventing one. Cap that name "
+    "at 2% and keep the weight at or below its current weight.\n"
+    "Close the dossier with a fenced block tagged sizing. The body is a JSON "
+    "array, one object per position you review:\n"
+    '{"ticker","current_pct","target_pct","action":"add"|"trim"|"hold",'
+    '"why","downside","binary":true|false,"thesis_on_file":true|false,'
+    '"industry","market_cap"}\n'
+    "target_pct is the weight after those caps. why cites the saved thesis. "
+    "downside states the drawdown or ruin constraint. market_cap is dollars "
+    "when a tool provided it, otherwise null.\n\n"
     "Be specific and decisive. Internal analysis, not investment advice."
 )
 
 
-@app.post("/api/research/portfolio-strategist")
-def research_portfolio_strategist(req: Request, background_tasks: BackgroundTasks):
-    """Kick off an agentic whole-portfolio analysis. Body one of:
+def _queue_portfolio_strategist(body: dict | None, claims: dict,
+                                 background_tasks: BackgroundTasks):
+    """Start the desk investment-committee review for one book.
+
+    Same job the Portfolio Strategist card runs: live positions, saved thesis
+    per name, strategist_reviews row keyed by fund_id. Body one of:
       {fund_id: "..."}                      → one fund's live book, OR
       {fund_ids: ["...","..."]}             → SEVERAL accounts COMBINED into one
                                               book (e.g. ANAT-IRA + ANAT-DEF), OR
       {positions: [{ticker, weight_pct}]}   → an uploaded/explicit book
     The agent is scoped to EXACTLY this book (no list_portfolios /
     get_portfolio_holdings), so it never wanders onto the whole firm.
-    Returns {ok, job_id, tickers, positions, fund_name}."""
-    claims = _claims_or_401(req)
-    if claims.get("role") not in ("gp", "admin"):
-        raise HTTPException(403, "GP only")
-    try:
-        body = _request_json_sync(req)
-    except Exception:
-        body = {}
-    fund_id  = (body or {}).get("fund_id") or None
+    Returns {ok, source, status, job_id, tickers, positions, fund_name}."""
+    body = body or {}
+    fund_id  = body.get("fund_id") or None
     fund_ids = [str(f) for f in ((body or {}).get("fund_ids") or []) if f]
     if not fund_ids and fund_id:
         fund_ids = [str(fund_id)]
@@ -32385,18 +32388,23 @@ def research_portfolio_strategist(req: Request, background_tasks: BackgroundTask
     positions = positions[:40]
     tickers = [p["ticker"] for p in positions]
 
-    context = _build_strategist_context(positions, fund_name, fund_ids=fund_ids)
+    theses = _saved_theses(tickers)
+    context = _build_strategist_context(
+        positions, fund_name, fund_ids=fund_ids, theses=theses)
     question = (
         f"Run a full investment-committee review of this book and propose grounded, "
-        f"advisory adjustments to optimize expected value while controlling risk.\n\n"
+        f"advisory adjustments that keep the upside the theses support while "
+        f"limiting ruin from binary names.\n\n"
         f"{context}\n\n"
         f"IMPORTANT SCOPE: the position list above is the COMPLETE and ONLY book to "
         f"review — analyze exactly these names as a single portfolio"
         f"{' (it combines multiple accounts)' if (fund_name or '').endswith('(combined)') else ''}. "
         f"Do NOT look up, list, or fold in any other account or holding.\n\n"
-        f"Work through every section of your dossier. Use the tools to ground every "
-        f"number — pull each name's saved report, compute the EV math, and surface "
-        f"cross-portfolio risks the weights alone don't show."
+        f"Each name includes its saved thesis when one is on file. Where the "
+        f"thesis line says NO THESIS ON FILE, say so and size that name inside "
+        f"the 2% cap. Do not invent a thesis from the price target.\n\n"
+        f"Work through every section of your dossier, then close with the "
+        f"sizing fence. Use the tools to ground every number."
     )
     # Strategist tool set: drop the firm-wide enumeration tools so the agent can't
     # pull other accounts — it must reason from the book provided above.
@@ -32423,6 +32431,7 @@ def research_portfolio_strategist(req: Request, background_tasks: BackgroundTask
                               "mode": "strategist", "positions": positions,
                               "tickers": tickers, "fund_name": fund_name,
                               "fund_id": fund_id,
+                              "theses": theses,
                               "llm_provider": _lp or None,
                               "generated_by": claims.get("email") or claims.get("lp_id") or "gp"}
     background_tasks.add_task(_run_agentic_analysis, job_id, question, _STRATEGIST_SYSTEM, _strat_tools)
@@ -32432,9 +32441,23 @@ def research_portfolio_strategist(req: Request, background_tasks: BackgroundTask
         _prov, _mdl = "claude", _AGENTIC_MODEL
     print(f"🧭 [strategist] queued {job_id}  {len(tickers)} positions  fund={fund_name} "
           f"provider={_prov} model={_mdl}", flush=True)
-    return {"ok": True, "job_id": job_id, "tickers": tickers,
+    return {"ok": True, "source": "committee", "status": "running",
+            "job_id": job_id, "review_id": job_id, "tickers": tickers,
             "positions": positions, "fund_name": fund_name,
             "model": _mdl, "provider": _prov}
+
+
+@app.post("/api/research/portfolio-strategist")
+def research_portfolio_strategist(req: Request, background_tasks: BackgroundTasks):
+    """Desk Portfolio Strategist. Same queue the fund rebalance Run button uses."""
+    claims = _claims_or_401(req)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    try:
+        body = _request_json_sync(req)
+    except Exception:
+        body = {}
+    return _queue_portfolio_strategist(body, claims, background_tasks)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -32521,10 +32544,10 @@ _QUARTERLY_LETTER_SYSTEM = (
     "informal — like a smart note to partners, NOT a stiff compliance document. "
     "Short paragraphs. No hype, no filler.\n\n"
     "GROUND EVERY NUMBER with the tools (get_ytd_attribution for returns, compute for "
-    "math, read_saved_report for each name's thesis, get_recent_news/web_search for "
-    "catalysts). The trade list in the prompt is the ground truth of what we did this "
-    "year — explain the WHY behind the notable buys and sells using each name's saved "
-    "thesis and how it fits the book. Never invent a trade or a number.\n\n"
+    "math). Do NOT call read_saved_report — the trade list in the prompt is the ground "
+    "truth of what we did this year. Explain the WHY behind the notable buys and sells "
+    "using each name's saved thesis and how it fits the book. Never invent a trade or "
+    "a number.\n\n"
     "Write the letter in markdown with EXACTLY these section headers, in order "
     "(do NOT add a personal note — the GP inserts that separately):\n"
     "## The quarter in brief\n"
@@ -32578,12 +32601,13 @@ def research_quarterly_letter(req: Request, background_tasks: BackgroundTasks):
         f"Write DGA Capital's {year} quarter-end letter for this book.\n\n"
         f"{pos_ctx}\n\n{act_ctx}\n\n"
         f"SCOPE: the holdings above are the complete book ({book_label}). Use "
-        f"get_ytd_attribution for the real YTD return, read_saved_report for each "
-        f"name's thesis to explain the buys/sells, and compute for any math. Follow "
-        f"the section structure in your instructions exactly."
+        f"get_ytd_attribution for the real YTD return and compute for any math. "
+        f"The trade record is already in the prompt — do not call read_saved_report. "
+        f"Follow the section structure in your instructions exactly."
     )
     _strat_tools = [t for t in _AGENTIC_TOOLS
-                    if t.get("name") not in ("list_portfolios", "get_portfolio_holdings")]
+                    if t.get("name") not in (
+                        "list_portfolios", "get_portfolio_holdings", "read_saved_report")]
     import uuid as _uuid
     job_id = "QLETTER_" + _uuid.uuid4().hex[:12]
     _agentic_jobs[job_id] = {"stage": "queued", "status": "running",
@@ -32620,13 +32644,16 @@ _QLETTER_FUND_SYSTEM = (
     "includes positions we fully EXITED that are no longer in current holdings. Do NOT "
     "rely on get_ytd_attribution alone for trades — that reflects current holdings and will "
     "MISS exited names. Trust the prompt's trade list for what we sold.\n\n"
-    "MANDATORY COVERAGE: under '### What we did here', you MUST address EVERY fully-exited "
-    "position and EVERY trim by name, each with its realized YTD P&L and a SPECIFIC reason "
+    "MANDATORY COVERAGE: under '### What we did here', address every fully-exited "
+    "position and every trim by name, each with its realized YTD P&L and a specific reason "
     "we sold (thesis played out, valuation full, better use of capital, broken thesis, risk "
-    "management, etc.). Pull each sold name's saved thesis via read_saved_report to ground "
-    "the reason; if no report exists, reason from the numbers and say so briefly. Then cover "
-    "the notable buys/adds the same way. Do not skip exits — they are the most important part.\n\n"
-    "Use read_saved_report for theses and compute for any math. Never invent a trade or number.\n\n"
+    "management). The prompt already includes SAVED THESIS SNIPPETS for those names. "
+    "Use them. Do NOT call read_saved_report once per name — that loop runs past the "
+    "page timeout and the section never arrives. If a snippet is missing, say so in "
+    "one clause and reason from the numbers. Then cover the notable buys the same way. "
+    "Do not skip exits.\n\n"
+    "At most one tool call, and only if a number you must cite is missing. Then write. "
+    "Never invent a trade or a number.\n\n"
     "Write markdown with these headers, in order:\n"
     "### What we did here\n"
     "### How it's positioned\n"
@@ -32637,11 +32664,64 @@ _QLETTER_FUND_SYSTEM = (
 )
 
 
+def _qletter_activity_tickers(text: str) -> list[str]:
+    """Tickers from the YTD trade block (left-aligned symbol, then spaces)."""
+    import re as _re
+    out: list[str] = []
+    for m in _re.finditer(r"(?m)^\s+([A-Z][A-Z0-9.]{0,5})\s{2,}", text or ""):
+        tk = m.group(1)
+        if tk not in out:
+            out.append(tk)
+    return out
+
+
+def _qletter_thesis_block(tickers: list[str]) -> str:
+    """Short saved-report lines so the letter does not tool-call every exit."""
+    names: list[str] = []
+    for t in tickers or []:
+        tk = str(t or "").upper().strip()
+        if not tk or tk in names:
+            continue
+        names.append(tk)
+        if len(names) >= 8:
+            break
+    if not names or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return ""
+    try:
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute(
+                """SELECT ticker, rating, price_target, report_md, report_md_claude
+                     FROM analyst_reports
+                    WHERE ticker = ANY(%s)""",
+                (names,),
+            )
+            rows = cur.fetchall() or []
+    except Exception:
+        return ""
+    by = {str(r.get("ticker") or "").upper(): r for r in rows}
+    lines = [
+        "SAVED THESIS SNIPPETS (already loaded — do not call read_saved_report for these):"
+    ]
+    for tk in names:
+        r = by.get(tk)
+        if not r:
+            continue
+        snip = (r.get("report_md") or r.get("report_md_claude") or "").strip()
+        snip = " ".join(snip.split())
+        if len(snip) > 280:
+            snip = snip[:280].rstrip() + "…"
+        pt = r.get("price_target")
+        pt_s = f", PT {pt}" if pt not in (None, "") else ""
+        lines.append(f"- {tk}: rating {r.get('rating') or '—'}{pt_s}. {snip}")
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 def _qletter_kick(job_prefix: str, label: str, question: str, system: str,
                   background_tasks, claims, meta: dict) -> str:
     """Queue a quarterly-letter agentic job (shared by intro + fund-section)."""
     _strat_tools = [t for t in _AGENTIC_TOOLS
-                    if t.get("name") not in ("list_portfolios", "get_portfolio_holdings")]
+                    if t.get("name") not in (
+                        "list_portfolios", "get_portfolio_holdings", "read_saved_report")]
     import uuid as _uuid
     job_id = f"{job_prefix}_" + _uuid.uuid4().hex[:12]
     _agentic_jobs[job_id] = {"stage": "queued", "status": "running", "label": label,
@@ -32700,14 +32780,15 @@ def research_quarterly_letter_fund_section(req: Request, background_tasks: Backg
         return JSONResponse({"ok": False, "error": f"No live positions for {fund_name}."}, status_code=400)
     pos_ctx = _build_strategist_context(positions[:60], fund_name)
     act_ctx = _quarterly_activity_context([fund_id], year)
+    thesis_ctx = _qletter_thesis_block(_qletter_activity_tickers(act_ctx))
     question = (
         f"Write the {year} quarter-end letter section for '{fund_name}'.\n\n"
-        f"{pos_ctx}\n\n{act_ctx}\n\nSCOPE: these holdings are the COMPLETE book for this "
+        f"{pos_ctx}\n\n{act_ctx}\n\n{thesis_ctx}\n\nSCOPE: these holdings are the COMPLETE book for this "
         f"section — analyze only '{fund_name}'. The 'YTD TRADES & ATTRIBUTION' block above is "
-        f"the authoritative record of every buy, trim, and EXIT — you MUST address each "
-        f"exited and trimmed name by name with its realized P&L and the reason we sold "
-        f"(read_saved_report for the thesis). Use compute for math. Follow your section "
-        f"structure exactly."
+        f"the authoritative record of every buy, trim, and EXIT — address each "
+        f"exited and trimmed name with its realized P&L and the reason we sold, using "
+        f"the SAVED THESIS SNIPPETS already in this prompt. Do not call read_saved_report "
+        f"per name. Follow your section structure exactly."
     )
     job_id = _qletter_kick("QLFUND", f"Queued · {fund_name}", question,
                            _QLETTER_FUND_SYSTEM, background_tasks, claims,
@@ -44823,12 +44904,7 @@ _mount_credit()
 def _mount_family_offices() -> None:
     try:
         from api.domains.family_offices import create_router
-        app.include_router(create_router(
-            _claims_or_401,
-            _fund_conn,
-            create_user=auth_v2_mod.create_user,
-            delete_user=auth_v2_mod.delete_user,
-        ))
+        app.include_router(create_router(_claims_or_401, _fund_conn))
     except Exception as exc:
         print(f"[family-offices] mount failed: {exc!r}", flush=True)
 

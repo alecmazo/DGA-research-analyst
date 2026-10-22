@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Empty'
 import { Panel } from '@/components/ui/Panel'
-import { api, apiBlob } from '@/lib/api'
+import { ApiError, api, apiBlob } from '@/lib/api'
 import page from './page.module.css'
 import styles from './MemosPage.module.css'
 
@@ -142,20 +142,32 @@ function emailMsg(em: {
   )
 }
 
-/** Poll agentic research job until done / error / timeout. */
+/** Poll agentic research job until done / error / timeout.
+
+Quarterly-letter jobs are forced to a draft by ~4 minutes. This window is
+8 minutes so the page still receives that draft (SUP_20261021_40e7622c
+gave up at 6 minutes while the job was running). A missing job fails fast
+instead of spinning until the same timeout message.
+*/
 async function pollAgentic(
   jobId: string,
   onTick?: (label: string, cost: number) => void,
-  maxTries = 120,
+  maxTries = 160,
 ): Promise<string> {
   let tries = 0
+  let missing = 0
   while (tries < maxTries) {
     await new Promise((r) => setTimeout(r, 3000))
     tries++
     let j: AgenticJob
     try {
       j = await api<AgenticJob>(`/api/research/agentic/${encodeURIComponent(jobId)}`)
-    } catch {
+      missing = 0
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        missing += 1
+        if (missing >= 4) throw new Error('generation dropped — try again')
+      }
       continue
     }
     onTick?.(j.label || 'working…', j.cost_usd || 0)
@@ -214,6 +226,7 @@ export function MemosPage() {
   const [qlFundsLoading, setQlFundsLoading] = useState(true)
   const [qlBusy, setQlBusy] = useState<string | null>(null) // which action is busy
   const [qlPreviewOpen, setQlPreviewOpen] = useState(false)
+  const [qlPane, setQlPane] = useState('note')
   const [pageErr, setPageErr] = useState<string | null>(null)
 
   const fundsById = useMemo(() => {
@@ -506,6 +519,7 @@ export function MemosPage() {
   async function qlGenIntro() {
     if (qlIntro.trim() && !window.confirm('Replace the shared intro with a fresh draft?')) return
     setQlBusy('intro')
+    setQlPane('intro')
     setQlStatus('Intro: starting…')
     try {
       const r = await api<{ ok?: boolean; job_id?: string; error?: string; detail?: string }>(
@@ -534,6 +548,7 @@ export function MemosPage() {
     if (!opts?.force && cur.trim() && !window.confirm(`Replace the ${name} section with a fresh draft?`))
       return
     setQlBusy(`fund:${fid}`)
+    setQlPane(fid)
     try {
       const r = await api<{ ok?: boolean; job_id?: string; error?: string; detail?: string }>(
         '/api/research/quarterly-letter/fund-section',
@@ -701,6 +716,7 @@ export function MemosPage() {
   }
 
   const publishedSet = useMemo(() => new Set(qlPublished), [qlPublished])
+  const qlSelected = qlFunds.find((f) => f.fund_id === qlPane) || null
 
   const emailFundName = emailTarget?.fundId
     ? fundLabel(fundsById.get(emailTarget.fundId) || { id: emailTarget.fundId })
@@ -787,97 +803,151 @@ export function MemosPage() {
         }
       >
         <div className={styles.composerBody}>
-          <div className={styles.status}>{qlStatus}</div>
+          <div className={qlStatus.startsWith('❌') ? styles.statusBad : styles.status}>
+            {qlStatus}
+          </div>
           {qlFreshWarn && <div className={styles.freshWarn}>{qlFreshWarn}</div>}
 
-          <label className={styles.fieldLabel}>
-            ① Note from you — manual, shared, never AI-written
-          </label>
-          <textarea
-            className={styles.textarea}
-            rows={3}
-            placeholder="A few words to your partners / LPs…"
-            value={qlNote}
-            onChange={(e) => setQlNote(e.target.value)}
-          />
-
-          <div className={styles.fieldLabelRow}>
-            <label className={styles.fieldLabel} style={{ marginBottom: 0 }}>
-              ② Shared intro — firm-wide, every LP sees this
-            </label>
-            <Button
-              size="sm"
-              disabled={!!qlBusy}
-              onClick={() => void qlGenIntro()}
-            >
-              {qlBusy === 'intro' ? '✨ Generating…' : '✨ Generate intro'}
-            </Button>
-          </div>
-          <textarea
-            className={styles.textarea}
-            rows={8}
-            placeholder="Generate the firm-wide market/strategy opening, then edit…"
-            value={qlIntro}
-            onChange={(e) => setQlIntro(e.target.value)}
-          />
-
-          <label className={styles.fieldLabel}>
-            ③ Per-fund sections — each LP sees only the funds they hold
-          </label>
-          {qlFundsLoading ? (
-            <div className={styles.muted}>Loading funds…</div>
-          ) : !qlFunds.length ? (
-            <div className={styles.muted}>No funds with live positions yet.</div>
-          ) : (
-            qlFunds.map((f) => {
-              const name = qlFundLabel(f)
-              const tag =
-                f.fund_type === 'lp_fund'
-                  ? 'LP fund (shared by all its LPs)'
-                  : 'managed account'
-              const busyThis = qlBusy === `fund:${f.fund_id}` || qlBusy === `pub:${f.fund_id}`
-              return (
-                <div key={f.fund_id} className={styles.fundCard}>
-                  <div className={styles.fundHead}>
-                    <span className={styles.fundName}>{name}</span>
-                    <span className={styles.fundMeta}>
-                      {tag}
-                      {!f.has_attribution && (
-                        <span className={styles.fundWarn}> · no YTD CSV on file</span>
-                      )}
-                    </span>
-                    {publishedSet.has(f.fund_id) && (
-                      <span className={styles.pubTag}>✓ published</span>
-                    )}
-                    <span className={styles.fundHeadSpacer} />
-                    <Button
-                      size="sm"
-                      disabled={!!qlBusy}
-                      onClick={() => void qlGenFund(f.fund_id, name)}
+          <div className={styles.letterDesk}>
+            <nav className={styles.rail} aria-label="Letter sections">
+              <button
+                type="button"
+                className={qlPane === 'note' ? styles.railOn : styles.railBtn}
+                onClick={() => setQlPane('note')}
+              >
+                <span className={styles.railName}>Note from you</span>
+                <span className={styles.railMeta}>{qlNote.trim() ? 'Draft' : 'Empty'}</span>
+              </button>
+              <button
+                type="button"
+                className={qlPane === 'intro' ? styles.railOn : styles.railBtn}
+                onClick={() => setQlPane('intro')}
+              >
+                <span className={styles.railName}>Shared intro</span>
+                <span className={styles.railMeta}>{qlIntro.trim() ? 'Draft' : 'Empty'}</span>
+              </button>
+              <div className={styles.railLabel}>Accounts</div>
+              {qlFundsLoading ? (
+                <div className={styles.muted}>Loading funds…</div>
+              ) : !qlFunds.length ? (
+                <div className={styles.muted}>No funds with live positions yet.</div>
+              ) : (
+                qlFunds.map((f) => {
+                  const name = qlFundLabel(f)
+                  const filled = (qlSections[f.fund_id] || '').trim()
+                  const state = publishedSet.has(f.fund_id)
+                    ? 'Published'
+                    : filled
+                      ? 'Draft'
+                      : 'Empty'
+                  return (
+                    <button
+                      key={f.fund_id}
+                      type="button"
+                      className={qlPane === f.fund_id ? styles.railOn : styles.railBtn}
+                      onClick={() => setQlPane(f.fund_id)}
                     >
-                      {busyThis && qlBusy === `fund:${f.fund_id}` ? '✨ …' : '✨ Generate'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      disabled={!!qlBusy}
-                      onClick={() => void qlPublishFund(f.fund_id, name)}
-                    >
-                      {qlBusy === `pub:${f.fund_id}` ? '📢 …' : '📢 Publish to LP'}
+                      <span className={styles.railName}>{name}</span>
+                      <span className={styles.railMeta}>
+                        {state}
+                        {!f.has_attribution ? ' · no YTD' : ''}
+                      </span>
+                    </button>
+                  )
+                })
+              )}
+            </nav>
+
+            <div className={styles.editor}>
+              {qlPane === 'note' && (
+                <>
+                  <div className={styles.editorHead}>
+                    <div>
+                      <div className={styles.editorTitle}>Note from you</div>
+                      <div className={styles.editorSub}>
+                        Manual. Shared with every LP. Never written by the model.
+                      </div>
+                    </div>
+                  </div>
+                  <textarea
+                    className={`${styles.textarea} ${styles.editorTa}`}
+                    rows={14}
+                    placeholder="A few words to your partners / LPs…"
+                    value={qlNote}
+                    onChange={(e) => setQlNote(e.target.value)}
+                  />
+                </>
+              )}
+              {qlPane === 'intro' && (
+                <>
+                  <div className={styles.editorHead}>
+                    <div>
+                      <div className={styles.editorTitle}>Shared intro</div>
+                      <div className={styles.editorSub}>
+                        Firm-wide. Every LP sees this. No account holdings.
+                      </div>
+                    </div>
+                    <Button size="sm" disabled={!!qlBusy} onClick={() => void qlGenIntro()}>
+                      {qlBusy === 'intro' ? 'Generating…' : 'Generate intro'}
                     </Button>
                   </div>
                   <textarea
-                    className={`${styles.textarea} ${styles.fundTa}`}
-                    rows={6}
-                    placeholder="Generate this fund’s section, then edit…"
-                    value={qlSections[f.fund_id] || ''}
+                    className={`${styles.textarea} ${styles.editorTa}`}
+                    rows={16}
+                    placeholder="Generate the firm-wide opening, then edit…"
+                    value={qlIntro}
+                    onChange={(e) => setQlIntro(e.target.value)}
+                  />
+                </>
+              )}
+              {qlSelected && (
+                <>
+                  <div className={styles.editorHead}>
+                    <div>
+                      <div className={styles.editorTitle}>{qlFundLabel(qlSelected)}</div>
+                      <div className={styles.editorSub}>
+                        {qlSelected.fund_type === 'lp_fund'
+                          ? 'LP fund — shared by all of its LPs'
+                          : 'Managed account — only that holder sees this'}
+                        {!qlSelected.has_attribution ? ' · no YTD CSV on file' : ''}
+                        {publishedSet.has(qlSelected.fund_id) ? ' · published' : ''}
+                      </div>
+                    </div>
+                    <div className={styles.editorActions}>
+                      <Button
+                        size="sm"
+                        disabled={!!qlBusy}
+                        onClick={() => void qlGenFund(qlSelected.fund_id, qlFundLabel(qlSelected))}
+                      >
+                        {qlBusy === `fund:${qlSelected.fund_id}` ? 'Generating…' : 'Generate'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={!!qlBusy}
+                        onClick={() =>
+                          void qlPublishFund(qlSelected.fund_id, qlFundLabel(qlSelected))
+                        }
+                      >
+                        {qlBusy === `pub:${qlSelected.fund_id}` ? 'Publishing…' : 'Publish to LP'}
+                      </Button>
+                    </div>
+                  </div>
+                  <textarea
+                    className={`${styles.textarea} ${styles.editorTa}`}
+                    rows={16}
+                    placeholder="Generate this account’s section, then edit…"
+                    value={qlSections[qlSelected.fund_id] || ''}
                     onChange={(e) =>
-                      setQlSections((prev) => ({ ...prev, [f.fund_id]: e.target.value }))
+                      setQlSections((prev) => ({
+                        ...prev,
+                        [qlSelected.fund_id]: e.target.value,
+                      }))
                     }
                   />
-                </div>
-              )
-            })
-          )}
+                </>
+              )}
+            </div>
+          </div>
 
           <div className={styles.draftsHead}>Saved drafts</div>
           {!qlSaved.length ? (

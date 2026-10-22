@@ -6,6 +6,7 @@ import { api, downloadAuth } from '@/lib/api'
 import { fmtPct, fmtUsd, pctClass } from '@/lib/format'
 import { AccountChrome, type BookOption } from './AccountChrome'
 import { FundPositionsTable } from './FundPositionsTable'
+import { RebalanceCard } from './RebalanceCard'
 import { AllTimePerfChart, MonthlyBarChart } from './perfCharts'
 import type {
   BalanceHistory,
@@ -13,7 +14,6 @@ import type {
   FundDetail,
   FundPosition,
   MonthlyChartPoint,
-  RebalanceResult,
   YtdCache,
   YtdResult,
 } from './types'
@@ -156,12 +156,10 @@ export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: P
   const [positions, setPositions] = useState<FundPosition[]>([])
   const [ytd, setYtd] = useState<YtdResult | null>(null)
   const [cachedYtd, setCachedYtd] = useState<number | null>(null)
-  const [reb, setReb] = useState<RebalanceResult | null>(null)
   const [bench, setBench] = useState('SPY')
   const [benchYtd, setBenchYtd] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
-  const [rebBusy, setRebBusy] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [balFile, setBalFile] = useState<File | null>(null)
   const [posFile, setPosFile] = useState<File | null>(null)
@@ -187,16 +185,13 @@ export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: P
     setErr(null)
     setLoading(true)
     try {
-      const [pos, cache, rebData, hist] = await Promise.all([
+      const [pos, cache, hist] = await Promise.all([
         api<FundPosition[]>(`/api/fund/positions?fund_id=${encodeURIComponent(fundId)}`).catch(
           () => [],
         ),
         api<YtdCache>(
           `/api/fund/account/${encodeURIComponent(fundId)}/ytd-cache`,
         ).catch(() => ({}) as YtdCache),
-        api<RebalanceResult>(
-          `/api/v2/gp/fund/${encodeURIComponent(fundId)}/rebalance`,
-        ).catch(() => null),
         api<BalanceHistory>(
           `/api/fund/${encodeURIComponent(fundId)}/balance-history`,
         ).catch(() => null),
@@ -205,8 +200,6 @@ export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: P
       const parsed = parseYtd(cache)
       setYtd(parsed)
       setCachedYtd(cache.ytd_pct ?? null)
-      if (rebData?.ok && rebData.rows) setReb(rebData)
-      else setReb(null)
 
       const spyPts = parsed?.spy_monthly?.points || []
       const spyPct = spyPts.length ? spyPts[spyPts.length - 1].ytd_pct ?? null : null
@@ -403,22 +396,6 @@ export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: P
       }
     } catch {
       /* keep seeded */
-    }
-  }
-
-  const runRebalance = async () => {
-    setRebBusy(true)
-    try {
-      const data = await api<RebalanceResult>(
-        `/api/v2/gp/fund/${encodeURIComponent(fundId)}/rebalance`,
-        { method: 'POST' },
-      )
-      if (!data.ok) throw new Error(data.detail || 'Rebalance failed')
-      setReb(data)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Rebalance failed')
-    } finally {
-      setRebBusy(false)
     }
   }
 
@@ -867,91 +844,10 @@ export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: P
 
           <div className={`${styles.sideBySide} ${styles.equalCards}`}>
             <FundPositionsTable rows={positions} />
-            <Panel
-              title="Rebalance Suggestions"
-              collapsible
-              badge={reb?.rows?.length || undefined}
-              action={
-                <button
-                  type="button"
-                  className={styles.runRebalance}
-                  disabled={rebBusy}
-                  onClick={() => void runRebalance()}
-                >
-                  <span className={styles.runGlyph} aria-hidden />
-                  {rebBusy ? 'Running' : 'Run'}
-                </button>
-              }
-              flush
-            >
-              {!reb?.rows?.length ? (
-                <div className={styles.pad}>
-                  <p className={styles.hint}>
-                    Run to compute suggested weights from Saved Report 12-month
-                    price targets vs live last.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className={styles.rebEv}>
-                    Expected value{' '}
-                    <strong>{(reb.current_ev || 0).toFixed(1)}%</strong>
-                    {' → '}
-                    <strong className={pctClass((reb.suggested_ev || 0) - (reb.current_ev || 0))}>
-                      {(reb.suggested_ev || 0).toFixed(1)}%
-                    </strong>
-                    {reb.run_at && (
-                      <span className={styles.hint}> · {new Date(reb.run_at).toLocaleString()}</span>
-                    )}
-                  </div>
-                  <div className={styles.tableWrap}>
-                    <table className={styles.table}>
-                      <thead>
-                        <tr>
-                          <th>Ticker</th>
-                          <th>Rating</th>
-                          <th className="tabular">Upside</th>
-                          <th className="tabular">Cur → Sug</th>
-                          <th className="tabular">Δ Sh</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...reb.rows]
-                          .sort((a, b) => (b.suggested_pct || 0) - (a.suggested_pct || 0))
-                          .map((row) => {
-                            const sd = row.shares_delta
-                            return (
-                              <tr key={row.ticker}>
-                                <td className={styles.tk}>{row.ticker}</td>
-                                <td>{row.rating || '—'}</td>
-                                <td
-                                  className={`tabular ${pctClass(row.upside_pct)}`}
-                                  title={
-                                    row.price_target != null
-                                      ? `${(row.target_provider || 'report').toUpperCase()} PT $${Number(row.price_target).toFixed(0)} vs last ${row.price != null ? '$' + Number(row.price).toFixed(2) : '—'}`
-                                      : 'No saved-report price target'
-                                  }
-                                >
-                                  {fmtPct(row.upside_pct, 1)}
-                                </td>
-                                <td className={`tabular ${styles.nowrap}`}>
-                                  {(row.current_pct || 0).toFixed(1)}% →{' '}
-                                  <strong>{(row.suggested_pct || 0).toFixed(1)}%</strong>
-                                </td>
-                                <td className={`tabular ${pctClass(sd)}`}>
-                                  {sd != null && Math.abs(sd) >= 0.01
-                                    ? `${sd > 0 ? '+' : ''}${sd.toFixed(2)}`
-                                    : '—'}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-            </Panel>
+            <RebalanceCard
+              fundId={fundId}
+              fundName={detail.short_name || detail.fund_name}
+            />
           </div>
 
           <div className={styles.sideBySide}>

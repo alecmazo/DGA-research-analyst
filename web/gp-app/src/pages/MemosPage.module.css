@@ -39,6 +39,135 @@
   line-height: 1.5;
 }
 
+.statusBad {
+  font-size: 12px;
+  color: #b91c1c;
+  margin-bottom: 14px;
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.letterDesk {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 560px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.railLabel {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 10px 0 2px;
+}
+
+.railBtn,
+.railOn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.railBtn:hover {
+  background: var(--bg-sunken, #f8fafc);
+}
+
+.railOn {
+  background: var(--bg-surface);
+  border-color: var(--border-default);
+  box-shadow: 0 1px 2px rgba(10, 22, 40, 0.04);
+}
+
+.railName {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.railMeta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.editor {
+  min-width: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  padding: 14px 14px 6px;
+}
+
+.editorHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.editorTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.editorSub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.editorActions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.editorTa {
+  min-height: 280px;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 860px) {
+  .letterDesk {
+    grid-template-columns: 1fr;
+  }
+  .rail {
+    max-height: 220px;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .railBtn,
+  .railOn {
+    width: auto;
+    min-width: 140px;
+  }
+  .railLabel {
+    width: 100%;
+  }
+}
+
 .freshWarn {
   margin-bottom: 14px;
   background: var(--warn-50, #fffbeb);

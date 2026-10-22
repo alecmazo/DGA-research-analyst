@@ -5,6 +5,7 @@ import { api, downloadAuth } from '@/lib/api'
 import { fmtUsd, pctClass } from '@/lib/format'
 import { AccountChrome, type BookOption } from './AccountChrome'
 import { FundPositionsTable } from './FundPositionsTable'
+import { RebalanceCard } from './RebalanceCard'
 import type { FundDetail, FundPosition, Waterfall } from './types'
 import styles from './fund.module.css'
 
@@ -212,7 +213,13 @@ export function LpDetail({ fundId, detail, onBack, books, onSelectBook }: Props)
             )}
           </Panel>
 
-          <FundPositionsTable rows={positions} />
+          <div className={`${styles.sideBySide} ${styles.equalCards}`}>
+            <FundPositionsTable rows={positions} />
+            <RebalanceCard
+              fundId={fundId}
+              fundName={detail.short_name || detail.fund_name}
+            />
+          </div>
 
           <Panel
             title="GP Waterfall & Carry"

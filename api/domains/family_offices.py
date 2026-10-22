@@ -1,7 +1,8 @@
-"""Trial family offices.
+"""Family-office registry.
 
-A trial login is a demo-mode GP. It sees the sample workspace, not DGA books.
-Several trials share that sample desk. A private database is a later step.
+This table lives in DGA's database and holds names only. An office's books
+go in a separate Postgres database. This module does not create that database
+and does not create a login on this site.
 """
 from __future__ import annotations
 
@@ -14,34 +15,49 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_SLUG = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
+_RESERVED = {"dga", "postgres", "template0", "template1", "demo", "railway"}
 _READY = False
+_STATUSES = ("planned", "held", "ready")
 
 
 class OfficeCreate(BaseModel):
     name: str
     contact_name: str = ""
     email: str
-    password: str
+    slug: str = ""
 
 
 class OfficeStatus(BaseModel):
     status: str
 
 
-def validate_office(name: str, email: str, password: str) -> tuple[str, str, str]:
-    """Return cleaned name, email, and password, or raise ValueError."""
+def slug_from_name(name: str) -> str:
+    raw = re.sub(r"[^a-z0-9]+", "_", (name or "").lower()).strip("_")
+    raw = re.sub(r"_+", "_", raw)
+    if not raw or not raw[0].isalpha():
+        raw = "office_" + raw
+    return raw[:31].strip("_")
+
+
+def database_name(slug: str) -> str:
+    return "dga_" + slug
+
+
+def validate_office(name: str, email: str, slug: str = "") -> tuple[str, str, str, str]:
+    """Return name, email, slug, and database name, or raise ValueError."""
     name = " ".join((name or "").split())
     email = (email or "").strip().lower()
-    password = password or ""
+    slug = (slug or slug_from_name(name)).strip().lower().replace("-", "_")
     if len(name) < 2 or len(name) > 80:
         raise ValueError("Office name must be 2 to 80 characters.")
     if not _EMAIL.match(email):
         raise ValueError("Enter a real email address.")
     if email == "demo@dgacapital.com":
         raise ValueError("That email is the shared preview login.")
-    if len(password) < 8:
-        raise ValueError("Password must be at least 8 characters.")
-    return name, email, password
+    if not _SLUG.match(slug) or slug in _RESERVED:
+        raise ValueError("Database name must start with a letter and use only letters, numbers, and underscores.")
+    return name, email, slug, database_name(slug)
 
 
 def _ensure(conn) -> None:
@@ -56,16 +72,27 @@ def _ensure(conn) -> None:
                 name TEXT NOT NULL,
                 contact_name TEXT NOT NULL DEFAULT '',
                 email TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'trial',
+                status TEXT NOT NULL DEFAULT 'planned',
                 login_lp_id TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                slug TEXT,
+                db_name TEXT
             )
             """
         )
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS slug TEXT")
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS db_name TEXT")
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS family_offices_email_uq
                 ON family_offices (lower(email))
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS family_offices_slug_uq
+                ON family_offices (slug)
+                WHERE slug IS NOT NULL
             """
         )
     conn.commit()
@@ -81,14 +108,25 @@ def _row(rec) -> dict:
         "name": rec[1],
         "contact_name": rec[2],
         "email": rec[3],
-        "status": rec[4],
-        "login_lp_id": rec[5],
+        "status": rec[4] or "planned",
         "created_at": created,
+        "slug": rec[7],
+        "db_name": rec[8],
     }
 
 
+_LIST_SQL = """
+SELECT id, name, contact_name, email, status, login_lp_id, created_at, slug, db_name
+  FROM family_offices
+"""
+
+
 def login_block(conn_fn: Callable, email: str) -> Optional[str]:
-    """Paused trials cannot sign in. A database miss does not block anyone else."""
+    """Block only a login this site actually created, and only when that office is held.
+
+    A new office has no login here, so a held row does not affect anyone else
+    who happens to share the contact email.
+    """
     email = (email or "").strip().lower()
     if not email:
         return None
@@ -97,18 +135,18 @@ def login_block(conn_fn: Callable, email: str) -> Optional[str]:
             _ensure(conn)
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT status FROM family_offices WHERE lower(email) = %s",
+                    "SELECT status, login_lp_id FROM family_offices WHERE lower(email) = %s",
                     (email,),
                 )
                 row = cur.fetchone()
     except Exception:
         return None
-    if row and row[0] == "paused":
+    if row and row[1] and row[0] in ("paused", "held"):
         return "This trial is paused. Ask DGA to open it again."
     return None
 
 
-def create_router(claims_fn, conn_fn, *, create_user, delete_user) -> APIRouter:
+def create_router(claims_fn, conn_fn) -> APIRouter:
     router = APIRouter(prefix="/api/offices", tags=["family-offices"])
 
     def _live(request: Request) -> dict:
@@ -116,7 +154,7 @@ def create_router(claims_fn, conn_fn, *, create_user, delete_user) -> APIRouter:
         if claims.get("role") not in ("gp", "admin"):
             raise HTTPException(403, "GP access required")
         if claims.get("demo_mode"):
-            raise HTTPException(403, "The live office manages trials.")
+            raise HTTPException(403, "The live office manages other offices.")
         return claims
 
     @router.get("")
@@ -125,44 +163,26 @@ def create_router(claims_fn, conn_fn, *, create_user, delete_user) -> APIRouter:
         with conn_fn() as conn:
             _ensure(conn)
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, name, contact_name, email, status, login_lp_id, created_at
-                      FROM family_offices
-                     ORDER BY created_at DESC
-                    """
-                )
+                cur.execute(_LIST_SQL + " ORDER BY created_at DESC")
                 rows = cur.fetchall()
         return {
             "live": {
                 "name": "DGA Capital",
                 "status": "live",
-                "books": "This database",
+                "db_name": "this database",
+                "service": "web",
             },
-            "trials": [_row(r) for r in rows],
+            "offices": [_row(r) for r in rows],
         }
 
     @router.post("")
-    def open_trial(request: Request, body: OfficeCreate):
+    def add_office(request: Request, body: OfficeCreate):
         _live(request)
         try:
-            name, email, password = validate_office(body.name, body.email, body.password)
+            name, email, slug, db_name = validate_office(body.name, body.email, body.slug)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         contact = " ".join((body.contact_name or "").split())[:80]
-        try:
-            lp_id = create_user(
-                email=email,
-                name=contact or name,
-                password=password,
-                role="gp",
-                fund_memberships={},
-                managed_account_ids=[],
-                must_change_password=False,
-                demo_mode=True,
-            )
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
         office_id = "office_" + secrets.token_hex(6)
         try:
             with conn_fn() as conn:
@@ -171,18 +191,14 @@ def create_router(claims_fn, conn_fn, *, create_user, delete_user) -> APIRouter:
                     cur.execute(
                         """
                         INSERT INTO family_offices
-                            (id, name, contact_name, email, status, login_lp_id)
-                        VALUES (%s, %s, %s, %s, 'trial', %s)
+                            (id, name, contact_name, email, status, slug, db_name)
+                        VALUES (%s, %s, %s, %s, 'planned', %s, %s)
                         """,
-                        (office_id, name, contact, email, lp_id),
+                        (office_id, name, contact, email, slug, db_name),
                     )
                 conn.commit()
         except Exception:
-            try:
-                delete_user(lp_id)
-            except Exception:
-                pass
-            raise HTTPException(400, "Could not open that trial. The email may already be in use.")
+            raise HTTPException(400, "Could not add that office. The email or database name is already used.")
         return {
             "ok": True,
             "office": {
@@ -190,8 +206,9 @@ def create_router(claims_fn, conn_fn, *, create_user, delete_user) -> APIRouter:
                 "name": name,
                 "contact_name": contact,
                 "email": email,
-                "status": "trial",
-                "login_lp_id": lp_id,
+                "status": "planned",
+                "slug": slug,
+                "db_name": db_name,
             },
         }
 
@@ -199,8 +216,8 @@ def create_router(claims_fn, conn_fn, *, create_user, delete_user) -> APIRouter:
     def set_status(office_id: str, request: Request, body: OfficeStatus):
         _live(request)
         status = (body.status or "").strip().lower()
-        if status not in ("trial", "paused"):
-            raise HTTPException(400, "Status must be trial or paused.")
+        if status not in _STATUSES:
+            raise HTTPException(400, "Status must be planned, held, or ready.")
         with conn_fn() as conn:
             _ensure(conn)
             with conn.cursor() as cur:
