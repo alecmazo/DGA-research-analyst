@@ -177,11 +177,9 @@ def test_issuer_map_fills_klarman_and_seaport():
 def test_nav_groups_research_book_more():
     top = (ROOT / "web/gp-app/src/components/layout/Topbar.tsx").read_text()
     assert "label: 'Gurus'" in top
-    assert 'label="Research"' in top
-    assert 'label="Book"' in top
-    assert 'label="More"' in top
+    assert "TOP_LINKS" in top
+    assert "NavMenu" not in top
     assert "On this Mac" in top
-    assert "NavMenu" in top
     assert "createPortal" in top
     research, rest = top.split("const BOOK", 1)
     book, more = rest.split("const MORE", 1)
@@ -205,7 +203,8 @@ def test_nav_groups_research_book_more():
     body = (ROOT / "api/domains/gurus.py").read_text()
     css = (ROOT / "web/gp-app/src/components/layout/Topbar.module.css").read_text()
     assert "position: fixed" in css
-    assert "overflow-x: auto" not in css.split(".nav {", 1)[1].split("}", 1)[0]
+    nav_css = css.split(".nav {", 1)[1].split("}", 1)[0]
+    assert "overflow-x: auto" in nav_css
     assert "api.gurufocus.com" not in body
     assert "data.sec.gov" in body
     assert "0001336528" in body

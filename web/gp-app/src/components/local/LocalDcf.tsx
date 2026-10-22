@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import {
   type DcfDraft,
@@ -96,8 +96,8 @@ function sourceText(seed: DcfSeed): string {
     .join(' ')
 }
 
-export function LocalDcf() {
-  const [ticker, setTicker] = useState('AAPL')
+export function LocalDcf({ linkedTicker }: { linkedTicker?: string } = {}) {
+  const [ticker, setTicker] = useState(linkedTicker || 'AAPL')
   const [loading, setLoading] = useState(false)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [seed, setSeed] = useState<DcfSeed | null>(null)
@@ -115,8 +115,8 @@ export function LocalDcf() {
     setDraft((prev) => linkDraft({ ...prev, ...patch }, pins.current, bookEquity.current))
   }
 
-  const load = async () => {
-    const tk = ticker.trim().toUpperCase()
+  const load = useCallback(async (raw: string) => {
+    const tk = raw.trim().toUpperCase()
     if (!tk) return
     setTicker(tk)
     setLoading(true)
@@ -157,7 +157,13 @@ export function LocalDcf() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    const tk = (linkedTicker || '').trim().toUpperCase()
+    if (!tk) return
+    void load(tk)
+  }, [linkedTicker, load])
 
   const inputs = useMemo(() => inputsFromDraft(draft, terminal), [draft, terminal])
   const result = useMemo(() => valueDcf(inputs), [inputs])
@@ -189,7 +195,7 @@ export function LocalDcf() {
       className={styles.form}
       onSubmit={(e) => {
         e.preventDefault()
-        void load()
+        void load(ticker)
       }}
     >
       <div className={styles.ticker}>

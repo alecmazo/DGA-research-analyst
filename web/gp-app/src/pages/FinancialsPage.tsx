@@ -8,6 +8,7 @@ import { CompanyDashboard } from './financials/CompanyDashboard'
 import { ValueLineSheet } from './financials/ValueLineSheet'
 import { FinancialsStore } from './financials/FinancialsStore'
 import { HistoryScreen } from './financials/HistoryScreen'
+import { LocalDcf } from '@/components/local/LocalDcf'
 
 export function FinancialsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -74,7 +75,7 @@ export function FinancialsPage() {
           <p className={page.kicker}>Research · SEC store</p>
           <h1 className={page.h1}>Financials</h1>
           <p className={page.sub}>
-            Company dashboard, Value Line sheet, and SEC history.
+            Company dashboard, DCF calculator, Value Line sheet, and SEC history.
             {coverage.length ? (
               <>
                 {' '}
@@ -94,6 +95,11 @@ export function FinancialsPage() {
         onViewed={onViewed}
         reloadKey={reloadKey}
       />
+
+      <section className={styles.dcfBlock} aria-label="DCF calculator">
+        <h2 className={styles.dcfTitle}>DCF calculator</h2>
+        <LocalDcf linkedTicker={ticker} />
+      </section>
 
       <ValueLineSheet
         ticker={ticker}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import type { GpUser } from '@/lib/auth'
 import { logout } from '@/lib/auth'
 import { useTheme } from '@/hooks/useTheme'
@@ -40,107 +40,7 @@ const SLIW_ALLOWED = new Set([
   'edytasliw@gmail.com',
 ])
 
-function pathActive(pathname: string, to: string) {
-  if (to === '/') return pathname === '/'
-  return pathname === to || pathname.startsWith(`${to}/`)
-}
-
-function NavMenu({
-  label,
-  items,
-}: {
-  label: string
-  items: { to: string; label: string }[]
-}) {
-  const loc = useLocation()
-  const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState({ top: 0, left: 0 })
-  const ref = useRef<HTMLDivElement>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const activeItem = items.find((it) => pathActive(loc.pathname, it.to))
-  const active = !!activeItem
-  const buttonLabel = activeItem?.label || label
-  const menuId = useRef(`nav-${label}`)
-
-  const place = () => {
-    const r = btnRef.current?.getBoundingClientRect()
-    if (!r) return
-    setPos({ top: Math.round(r.bottom + 4), left: Math.round(r.left) })
-  }
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    const onOther = (e: Event) => {
-      if ((e as CustomEvent<string>).detail !== menuId.current) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    document.addEventListener('keydown', onKey)
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    window.addEventListener('dga-nav-menu', onOther)
-    return () => {
-      document.removeEventListener('mousedown', onDoc)
-      document.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
-      window.removeEventListener('dga-nav-menu', onOther)
-    }
-  }, [])
-
-  return (
-    <div className={styles.menuWrap} ref={ref}>
-      <button
-        ref={btnRef}
-        type="button"
-        className={`${styles.link} ${styles.menuBtn} ${active ? styles.linkActive : ''}`}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        title={label}
-        onClick={(e) => {
-          e.stopPropagation()
-          place()
-          window.dispatchEvent(new CustomEvent('dga-nav-menu', { detail: menuId.current }))
-          setOpen((o) => !o)
-        }}
-      >
-        {buttonLabel} <span aria-hidden>{open ? '▴' : '▾'}</span>
-      </button>
-      {open &&
-        createPortal(
-          <div
-            ref={panelRef}
-            className={styles.menuPanel}
-            role="menu"
-            style={{ top: pos.top, left: pos.left }}
-          >
-            {items.map((it) => (
-              <NavLink
-                key={it.to}
-                to={it.to}
-                end={it.to === '/'}
-                role="menuitem"
-                className={({ isActive }) =>
-                  `${styles.menuItem} ${isActive ? styles.menuItemOn : ''}`
-                }
-                onClick={() => setOpen(false)}
-              >
-                {it.label}
-              </NavLink>
-            ))}
-          </div>,
-          document.body,
-        )}
-    </div>
-  )
-}
+const TOP_LINKS = [...RESEARCH, ...BOOK, ...MORE]
 
 function UserMenu({
   user,
@@ -496,9 +396,18 @@ export function Topbar({ user, build }: Props) {
         </div>
 
         <nav className={styles.nav} aria-label="Primary">
-          <NavMenu label="Research" items={RESEARCH} />
-          <NavMenu label="Book" items={BOOK} />
-          <NavMenu label="More" items={MORE} />
+          {TOP_LINKS.map((it) => (
+            <NavLink
+              key={it.to}
+              to={it.to}
+              end={it.to === '/'}
+              className={({ isActive }) =>
+                `${styles.link} ${isActive ? styles.linkActive : ''}`
+              }
+            >
+              {it.label}
+            </NavLink>
+          ))}
           {onThisMac && (
             <NavLink
               to="/local"
