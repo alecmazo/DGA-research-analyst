@@ -9088,7 +9088,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui758-20261022-flows-boot"
+WEB_BUILD_VERSION = "ui759-20261022-flows-done"
 
 
 @app.get("/api/build")

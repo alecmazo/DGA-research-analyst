@@ -28,14 +28,36 @@ const SHIP = [
   { title: 'Confirm', body: 'GET /api/build matches WEB_BUILD_VERSION. Postgres is not redeployed.' },
 ]
 
-const FIXES = [
-  'Split api/server.py. It is about 46,000 lines and 361 routes. New work goes in a domain module, the way credit and the local model already do.',
-  'Keep the first paint small. The desk shell is about 400 kB, and the city scene is a separate 585 kB chunk. Do not pull the city, gurus, or podcasts into the desk load.',
-  'Give Railway a Node build so hashed files stop living in git. Until then, every UI change commits dist.',
-  'One database is one office. There is no firm id. A second family office gets its own database, not a row in this one. Positions and notes would otherwise be visible across offices.',
-  'Move the name, logo, and model engines into settings. The same build should run for DGA and for the next office. DGA stays the first office on the new build.',
-  'Pandas, Yahoo, and EDGAR load on first use, not at process start. A read path can answer before those libraries load. The health check still allows 300 seconds.',
-  'Ollama stays on this Mac. Production does not call 127.0.0.1:11434. On this Mac shows only when this browser can reach Ollama or the local helper.',
+const FIXES: { done?: boolean; body: string }[] = [
+  {
+    body: 'Split the rest of api/server.py. It is about 46,000 lines and 361 routes. New work goes in a domain module, the way credit and the local model already do.',
+  },
+  {
+    done: true,
+    body: 'The desk shell is its own chunk. The city scene, gurus, and podcasts load in their own chunks.',
+  },
+  {
+    body: 'Give Railway a Node build so the deploy builds the hashed files. Until then, every UI change commits dist.',
+  },
+  {
+    done: true,
+    body: 'A second office is a name in family_offices plus its own database.',
+  },
+  {
+    done: true,
+    body: 'Model engines are in Settings.',
+  },
+  {
+    body: 'Move the office name and logo into settings. The same build runs for DGA and the next office. DGA stays the first office on that build.',
+  },
+  {
+    done: true,
+    body: 'Pandas, Yahoo, and EDGAR load on first use. A read path can answer before those libraries load. The health check still allows 300 seconds.',
+  },
+  {
+    done: true,
+    body: 'Ollama stays on this Mac at 127.0.0.1:11434. The production server leaves that socket on this Mac. The local-model page and the on-Mac assistant appear when this browser can reach Ollama or the local helper.',
+  },
 ]
 
 export function FlowsSection() {
@@ -60,7 +82,7 @@ export function FlowsSection() {
           ))}
         </ol>
         <p className={styles.note}>
-          Local models never join that path. The browser on this Mac talks to Ollama at 127.0.0.1:11434. Railway cannot reach it.
+          Local models stay on this Mac. The browser talks to Ollama at 127.0.0.1:11434.
         </p>
 
         <h3>A ship</h3>
@@ -84,21 +106,24 @@ export function FlowsSection() {
           <div className={styles.step}>
             <strong>Today</strong>
             <span>
-              One deploy, one Postgres database, DGA written into the pages. A second login on this database sees these books and notes.
+              One deploy serves DGA from this database. A second office is a name in family_offices plus its own database. DGA's name and logo are written into the pages. A second login on this database sees these books and notes.
             </span>
           </div>
           <div className={styles.step}>
             <strong>Later</strong>
             <span>
-              The same repository. Each office has its own database. Logo, name, and engines are settings. DGA is the office that takes the new build first. No fork per customer.
+              The same repository. The office name and logo move into settings. DGA takes that build first. One codebase serves every office.
             </span>
           </div>
         </div>
 
         <h3>Fix in this order</h3>
         <ol className={styles.fixes}>
-          {FIXES.map((line) => (
-            <li key={line}>{line}</li>
+          {FIXES.map((step) => (
+            <li key={step.body} className={step.done ? styles.done : undefined}>
+              {step.done ? <span className={styles.doneMark}>✓ Done</span> : null}
+              {step.body}
+            </li>
           ))}
         </ol>
       </section>

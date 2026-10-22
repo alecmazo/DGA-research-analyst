@@ -97,6 +97,29 @@
   color: var(--text-secondary);
 }
 
+.done {
+  color: var(--text-primary);
+}
+
+.doneMark {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--success-50);
+  color: var(--success-700);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+[data-theme='dark'] .doneMark {
+  background: rgba(22, 163, 74, 0.18);
+  color: #86efac;
+}
+
 .well {
   height: 640px;
   margin-top: 10px;
