@@ -956,7 +956,8 @@ def support_ticket_update(ticket_id: str, request: Request):
 def support_open_count(request: Request):
     """GP desk light: count of unsolved tickets, including LP-filed ones.
 
-    Demo GP only sees the demo lane. No ticket bodies — cheap to poll.
+    Demo GP only sees the demo lane. Auto Analyze logs stay in Settings
+    and do not light the desk (SUP_20261022_ff0db72b). No ticket bodies.
     """
     claims = _support_gp_only(request)
     _ensure_support_tickets_table()
@@ -967,6 +968,8 @@ def support_open_count(request: Request):
                 SELECT created_by_email, context_json
                   FROM support_tickets
                  WHERE status IN ({_OPEN_STATUS_SQL})
+                   AND COALESCE(context_json->>'auto_analyze', '') <> '1'
+                   AND id NOT LIKE 'AUTO_ANALYZE_%%'
             """)
             n = sum(
                 1

@@ -343,6 +343,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Earnings consensus** | **`ui760-20261022-earn-consensus`** | SUP_20261021_42c070cd. A reported card still fetches the 8-K when revenue actual is missing. Consensus comes from the printed quarter on the public earnings table, not Yahoo's rolled 0q. AT&T Q3 2026 is $32.30B vs $31.69B, beat. |
 | **DCF on Financials** | **`ui761-20261022-dcf-nav`** | The two-stage DCF calculator is on Financials and follows the open ticker. Desk, Book, and Lab links are on the top line. |
 | **Book menu** | **`ui762-20261022-book-menu`** | Accounts, Positions, Memos, and Book map sit under a Book menu. The other pages stay on the top line. Options stays on the top line. |
+| **Desk ticket dot** | **`ui763-20261022-desk-dot`** | SUP_20261022_ff0db72b. The desk light ignores auto Analyze logs. A human ticket still turns it red. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
@@ -542,4 +543,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-22 · Agent: Grok Build · Built: `ui762-20261022-book-menu` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui763-YYYYMMDD-slug`*
+*Last updated: 2026-10-22 · Agent: Grok Build · Built: `ui763-20261022-desk-dot` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui764-YYYYMMDD-slug`*

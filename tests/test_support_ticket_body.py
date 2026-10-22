@@ -49,4 +49,7 @@ def test_open_count_route_and_statuses():
     )
     assert "open" in st._OPEN_STATUS_SQL
     assert "fixed" not in st._OPEN_STATUS_SQL
-    assert "_support_row_is_demo" in src.split("def support_open_count")[1][:1200]
+    body = src.split("def support_open_count")[1][:1600]
+    assert "_support_row_is_demo" in body
+    assert "auto_analyze" in body
+    assert "AUTO_ANALYZE_" in body
