@@ -344,6 +344,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **DCF on Financials** | **`ui761-20261022-dcf-nav`** | The two-stage DCF calculator is on Financials and follows the open ticker. Desk, Book, and Lab links are on the top line. |
 | **Book menu** | **`ui762-20261022-book-menu`** | Accounts, Positions, Memos, and Book map sit under a Book menu. The other pages stay on the top line. Options stays on the top line. |
 | **Desk ticket dot** | **`ui763-20261022-desk-dot`** | SUP_20261022_ff0db72b. The desk light ignores auto Analyze logs. A human ticket still turns it red. |
+| **Local Ask layout** | **`ui764-20261022-local-ask`** | SUP_20261022_f7b630e4. An Ask answer sits under the Ask card as a question bar and a note. Podcast Intel, Research, and saved local-report rows are tighter. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
@@ -543,4 +544,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-22 · Agent: Grok Build · Built: `ui763-20261022-desk-dot` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui764-YYYYMMDD-slug`*
+*Last updated: 2026-10-22 · Agent: Grok Build · Built: `ui764-20261022-local-ask` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui765-YYYYMMDD-slug`*

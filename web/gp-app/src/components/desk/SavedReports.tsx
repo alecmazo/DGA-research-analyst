@@ -506,7 +506,13 @@ export function SavedReports({
     </>
   )
 
-  if (embed) return <div className={styles.reportsEmbed}>{table}</div>
+  if (embed) {
+    return (
+      <div className={`${styles.reportsEmbed} ${local ? styles.reportsLocal : ''}`}>
+        {table}
+      </div>
+    )
+  }
   return (
     <Panel
       title="Saved Reports"

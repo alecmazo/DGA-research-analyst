@@ -120,6 +120,50 @@
   gap: 10px;
 }
 
+.tight {
+  padding: 10px 12px;
+  gap: 6px;
+}
+
+.tight h2 {
+  font-size: 15px;
+}
+
+.note {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.noteQ {
+  padding: 10px 14px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+.noteBody {
+  padding: 12px 14px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 78ch;
+}
+
+.noteBody :global(p) {
+  margin: 0 0 8px;
+}
+
+.noteBody :global(h1),
+.noteBody :global(h2),
+.noteBody :global(h3) {
+  margin: 12px 0 6px;
+  font-size: 15px;
+}
+
 .card h2 {
   margin: 0;
   font-size: 18px;

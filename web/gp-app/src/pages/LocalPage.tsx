@@ -65,6 +65,7 @@ export function LocalPage() {
   const [question, setQuestion] = useState('')
   const [asking, setAsking] = useState(false)
   const [ask, setAsk] = useState<Answer | null>(null)
+  const [asked, setAsked] = useState('')
   const [books, setBooks] = useState<Portfolio[]>([])
   const [book, setBook] = useState('')
   const [reviewing, setReviewing] = useState(false)
@@ -260,6 +261,7 @@ export function LocalPage() {
     const model = askModel.picked[0] || LOCAL_MODEL
     setAsking(true)
     setAsk(null)
+    setAsked(q)
     const system = status?.agent_system || 'You are the local finance analyst. Do not invent figures.'
     let transcript = q
     const steps: { tool?: string; ticker?: string }[] = []
@@ -378,24 +380,18 @@ export function LocalPage() {
 
       <div className={styles.grid}>
       <div className={styles.stack}>
-      <section className={styles.card}>
-        <h2>Podcast Intel</h2>
-        <p>
-          Interviews and earnings calls already in the research library, in one
-          folder tree. Shows are labeled by channel. Calls are labeled by ticker,
-          quarter, and source.
-        </p>
-        {libraryCount && <p className={styles.meta}>{libraryCount}</p>}
+      <section className={`${styles.card} ${styles.tight}`}>
         <div className={styles.row}>
-          <Button variant="primary" onClick={() => navigate('/transcripts')}>
-            Open transcript library
+          <h2>Podcast Intel</h2>
+          {libraryCount && <span className={styles.meta}>{libraryCount}</span>}
+          <Button size="sm" variant="primary" onClick={() => navigate('/transcripts')}>
+            Library
           </Button>
         </div>
       </section>
 
-      <section className={styles.card}>
+      <section className={`${styles.card} ${styles.tight}`}>
         <h2>Research</h2>
-        <p>Same investment-case note as Analyze. Pick one or more models. Each saved note keeps its own target.</p>
         <LocalModelPick
           label="Models"
           multiple
@@ -411,7 +407,7 @@ export function LocalPage() {
             aria-label="Ticker"
             disabled={running}
           />
-          <Button variant="primary" disabled={running || !online} onClick={() => void runResearch()}>
+          <Button size="sm" variant="primary" disabled={running || !online} onClick={() => void runResearch()}>
             {running ? 'Running…' : 'Run local analysis'}
           </Button>
         </div>
@@ -424,11 +420,10 @@ export function LocalPage() {
         )}
       </section>
 
-      <section className={styles.card}>
+      <section className={`${styles.card} ${styles.tight}`}>
         <h2>Ask</h2>
-        <p>A local agent. It can read the financial store, Yahoo headlines, quotes, and portfolios.</p>
         <LocalModelPick
-          guide
+          compact
           choices={askModel.choices}
           picked={askModel.picked}
           disabled={asking}
@@ -437,25 +432,34 @@ export function LocalPage() {
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          rows={4}
+          rows={2}
           placeholder="What changed recently at AAPL, and do the stored financials support it?"
           disabled={asking}
         />
         <div className={styles.row}>
-          <Button variant="primary" disabled={asking || !online || !question.trim()} onClick={() => void askQuestion()}>
+          <Button size="sm" variant="primary" disabled={asking || !online || !question.trim()} onClick={() => void askQuestion()}>
             {asking ? 'Thinking…' : 'Ask'}
           </Button>
         </div>
-        {ask?.error && <p className={styles.warn}>{ask.error}</p>}
-        {ask?.steps && ask.steps.length > 0 && (
-          <p className={styles.meta}>
-            Looked up {ask.steps.map((s) => s.tool).filter(Boolean).join(', ')}
-          </p>
-        )}
-        {ask?.answer && (
-          <div className={styles.answer} dangerouslySetInnerHTML={{ __html: renderMd(ask.answer) }} />
-        )}
       </section>
+      {(asking || ask) && (
+        <section className={styles.note} aria-live="polite">
+          {asked && <div className={styles.noteQ}>{asked}</div>}
+          {asking && <p className={styles.meta}>Thinking…</p>}
+          {ask?.error && <p className={styles.warn}>{ask.error}</p>}
+          {ask?.steps && ask.steps.length > 0 && (
+            <p className={styles.meta}>
+              Looked up {ask.steps.map((s) => s.tool).filter(Boolean).join(', ')}
+            </p>
+          )}
+          {ask?.answer && (
+            <article
+              className={styles.noteBody}
+              dangerouslySetInnerHTML={{ __html: renderMd(ask.answer) }}
+            />
+          )}
+        </section>
+      )}
       </div>
       <Panel title="Saved Local Reports" badge="local" flush className={styles.saved}>
         <SavedReports

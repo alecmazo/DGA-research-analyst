@@ -505,6 +505,35 @@
   max-height: none;
 }
 
+.reportsLocal .repTable th,
+.reportsLocal .repTable td {
+  padding: 3px 8px;
+}
+
+.reportsLocal .repTkRow,
+.reportsLocal .repPills,
+.reportsLocal .repDate {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0;
+  vertical-align: middle;
+}
+
+.reportsLocal .repPills,
+.reportsLocal .repDate {
+  margin-left: 6px;
+}
+
+.reportsLocal .tgtStack {
+  gap: 1px;
+}
+
+.reportsLocal .tgtLine {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
 .repTable {
   width: 100%;
   border-collapse: collapse;
