@@ -340,6 +340,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Open tickets** | **`ui757-20261021-open-tickets`** | EM-DEF letter jobs drop `read_saved_report` and write after one tool round, inside the memos poll. Earnings cards accept a quarter written as a date or Q3, and fill consensus from “vs estimate” or “beat by $X” when the calendar has rolled. |
 | **Flows boot** | **`ui758-20261022-flows-boot`** | SUP_20261022_281244dc. Pandas, Yahoo, and EDGAR load on first use, so process start does not import them. Production does not call Ollama at 127.0.0.1:11434. On this Mac shows only when this browser can reach it. |
 | **Flows done marks** | **`ui759-20261022-flows-done`** | Settings → Flows marks finished steps in the fix list: desk chunk, family-office database, lazy pandas/Yahoo/EDGAR, on-Mac Ollama, and model engines. Server split, Railway Node, and office name/logo remain. |
+| **Earnings consensus** | **`ui760-20261022-earn-consensus`** | SUP_20261021_42c070cd. A reported card still fetches the 8-K when revenue actual is missing. Consensus comes from the printed quarter on the public earnings table, not Yahoo's rolled 0q. AT&T Q3 2026 is $32.30B vs $31.69B, beat. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
@@ -539,4 +540,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-22 · Agent: Cursor · Built: `ui759-20261022-flows-done` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui760-YYYYMMDD-slug`*
+*Last updated: 2026-10-22 · Agent: Grok Build · Built: `ui760-20261022-earn-consensus` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui761-YYYYMMDD-slug`*

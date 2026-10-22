@@ -1695,8 +1695,10 @@ def earnings_card(symbol: str, horizon_days: int = 5,
             except Exception:
                 pass
             # Pending same-day prints always hit EDGAR even if Nasdaq already
-            # blew the 3.2s budget. Reported cards still respect leftover.
-            if status == "pending_update" or _left() > 0.2:
+            # blew the 3.2s budget. A reported card with no revenue actual
+            # does too — that is the public print (SUP_20261021_42c070cd).
+            need_release = rev_actual is None and status == "reported"
+            if status == "pending_update" or _left() > 0.2 or need_release:
                 k8 = sec_8k_earnings_release_actuals(sym, report_date=str(rd)[:10] or None)
                 press_release_url = k8.get("press_release_url") or None
                 filing_url = k8.get("filing_url") or None
@@ -1873,6 +1875,25 @@ def earnings_card(symbol: str, horizon_days: int = 5,
             )
         except Exception as e:
             print(f"[market_data] trend est {sym}: {e!s:.100}", flush=True)
+    if rev_estimate in (None, 0) and not event_still_future:
+        try:
+            ev_date = (
+                (result or {}).get("date_reported")
+                or (upcoming or {}).get("date")
+                or ""
+            )
+            printed = marketbeat_printed_quarter(sym, str(ev_date)[:10])
+            _take_rev_est(printed.get("revenue_estimate"), "mktbeat")
+            if rev_actual is None and printed.get("revenue_actual") not in (None, 0):
+                if _revenue_plausible_vs_estimate(
+                    printed.get("revenue_actual"), printed.get("revenue_estimate"),
+                ):
+                    rev_actual = float(printed["revenue_actual"])
+                    result_source = (
+                        (result_source or "") + "+mktbeat" if result_source else "mktbeat"
+                    )
+        except Exception as e:
+            print(f"[market_data] marketbeat est {sym}: {e!s:.100}", flush=True)
 
     rev_surprise_pct = None
     rev_beat = None
@@ -2513,6 +2534,108 @@ def _calendar_revenue_is_this_event(street: dict | None, event_date: str) -> boo
     except Exception:
         return True
     return abs(gap) <= 14
+
+
+def _marketbeat_money(num: str, unit: str) -> float | None:
+    try:
+        n = float(num)
+    except (TypeError, ValueError):
+        return None
+    scale = {"B": 1e9, "M": 1e6}.get((unit or "").upper(), 1.0)
+    if n <= 0:
+        return None
+    return n * scale
+
+
+def parse_marketbeat_earnings_rows(html: str) -> list[dict]:
+    """Printed quarters from a MarketBeat earnings page.
+
+    Each row is date, quarter, revenue estimate, revenue actual.
+    The page lists the newest quarter first.
+    """
+    import re as _re
+    from datetime import datetime
+    text = _re.sub(r"<[^>]+>", " ", html or "")
+    text = _re.sub(r"&nbsp;|&#160;", " ", text)
+    text = _re.sub(r"\s+", " ", text)
+    pat = _re.compile(
+        r"(\d{1,2}/\d{1,2}/20\d{2})\s+Q([1-4])\s+(20\d{2})\s+"
+        r"\$[\d.]+\s+\$[\d.]+\s+(?:\+?\$[\d.]+|-)\s+\$[\d.]+\s+"
+        r"\$([\d.]+)\s*([BM])\s+\$([\d.]+)\s*([BM])",
+        _re.I,
+    )
+    rows: list[dict] = []
+    for match in pat.finditer(text):
+        try:
+            day = datetime.strptime(match.group(1), "%m/%d/%Y").date().isoformat()
+        except ValueError:
+            continue
+        est = _marketbeat_money(match.group(4), match.group(5))
+        act = _marketbeat_money(match.group(6), match.group(7))
+        if est is None and act is None:
+            continue
+        rows.append({
+            "date": day,
+            "quarter": f"Q{match.group(2)} {match.group(3)}",
+            "revenue_estimate": est,
+            "revenue_actual": act,
+        })
+    return rows
+
+
+def marketbeat_printed_quarter(symbol: str, report_date: str = "") -> dict:
+    """Revenue estimate for the quarter that just printed.
+
+    Yahoo's 0q row rolls to the next quarter after the release, so it is
+    not this print's consensus (AT&T Q3 2026: actual $32.32B, Street $31.69B,
+    while 0q was already the December quarter).
+    """
+    import time as _time
+    sym = (symbol or "").strip().upper()
+    if not sym or not sym.replace(".", "").replace("-", "").isalnum():
+        return {}
+    raw_day = str(report_date or "")[:10]
+    want = raw_day
+    if raw_day and raw_day[4:5] != "-":
+        from datetime import datetime
+        for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+            try:
+                want = datetime.strptime(raw_day, fmt).date().isoformat()
+                break
+            except ValueError:
+                continue
+    hit = _EARNINGS_DETAIL_CACHE.get(("mktbeat", sym, want))
+    if hit and _time.time() - hit[0] < 1800:
+        return hit[1]
+    found: dict = {}
+    try:
+        import requests
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html",
+        }
+        for exch in ("NYSE", "NASDAQ", "AMEX"):
+            url = f"https://www.marketbeat.com/stocks/{exch}/{sym}/earnings/"
+            try:
+                resp = requests.get(url, headers=headers, timeout=4)
+            except Exception:
+                continue
+            if resp.status_code != 200 or "Revenue Estimate" not in resp.text:
+                continue
+            rows = parse_marketbeat_earnings_rows(resp.text)
+            if not rows:
+                continue
+            match = next((row for row in rows if want and row.get("date") == want), None)
+            found = dict(match or rows[0])
+            break
+    except Exception as e:
+        print(f"[market_data] marketbeat {sym}: {e!s:.100}", flush=True)
+        found = {}
+    _EARNINGS_DETAIL_CACHE[("mktbeat", sym, want)] = (_time.time(), found)
+    return found
 
 
 def yahoo_earnings_trend_rows(symbol: str) -> list:

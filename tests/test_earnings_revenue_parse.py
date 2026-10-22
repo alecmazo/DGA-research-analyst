@@ -418,3 +418,79 @@ def test_card_fills_consensus_when_calendar_is_empty(monkeypatch):
     assert res.get("revenue_estimate") == 32.1e9
     assert res.get("revenue_surprise_pct") is not None
     assert abs(res["revenue_surprise_pct"] - round((32.3 - 32.1) / 32.1 * 100, 2)) < 0.01
+
+
+ATT_TABLE = """
+Date Quarter Consensus Estimate Reported EPS Beat/Miss GAAP EPS Revenue Estimate Actual Revenue
+10/21/2026 Q3 2026 $0.6020 $0.65 +$0.0480 $0.12 $31.69B $32.32B
+7/22/2026 Q2 2026 $0.59 $0.65 +$0.06 $0.66 $31.80B $31.56B
+"""
+
+
+def test_marketbeat_table_is_the_printed_quarter():
+    rows = md.parse_marketbeat_earnings_rows(ATT_TABLE)
+    assert rows[0]["date"] == "2026-10-21"
+    assert rows[0]["revenue_estimate"] == 31.69e9
+    assert rows[0]["revenue_actual"] == 32.32e9
+    assert rows[1]["quarter"] == "Q2 2026"
+
+
+def test_card_uses_marketbeat_when_the_release_has_no_estimate(monkeypatch):
+    md._EARNINGS_CARD_CACHE.clear()
+    md._EARNINGS_DETAIL_CACHE.clear()
+    monkeypatch.setattr(md, "earnings_upcoming", lambda *_a, **_k: {
+        "T": {
+            "date": "2026-10-21",
+            "days_until": -1,
+            "time": "time-pre-market",
+            "fiscal_quarter": "Sep/2026",
+            "eps_forecast": "0.61",
+            "name": "AT&T",
+        }
+    })
+    monkeypatch.setattr(md, "nasdaq_earnings_surprise", lambda _s: {
+        "history": [{
+            "date_reported": "10/21/2026",
+            "fiscal_quarter": "Sep/2026",
+            "eps_actual": 0.65,
+            "eps_estimate": 0.61,
+            "surprise_pct": 6.6,
+            "beat": "beat",
+            "source": "nasdaq",
+        }],
+        "latest": {
+            "date_reported": "10/21/2026",
+            "fiscal_quarter": "Sep/2026",
+            "eps_actual": 0.65,
+            "eps_estimate": 0.61,
+            "surprise_pct": 6.6,
+            "beat": "beat",
+            "source": "nasdaq",
+        },
+        "source": "nasdaq",
+    })
+    monkeypatch.setattr(md, "yfinance_earnings_surprise", lambda _s: {
+        "history": [], "latest": None, "source": "yfinance",
+    })
+    monkeypatch.setattr(md, "yfinance_earnings_calendar_context", lambda _s: {})
+    monkeypatch.setattr(md, "yfinance_quarterly_actuals", lambda *_a, **_k: {})
+    monkeypatch.setattr(md, "sec_8k_earnings_release_actuals", lambda *_a, **_k: {
+        "revenue_actual": 32.32e9,
+        "eps_actual": 0.65,
+        "filed": "2026-10-21",
+    })
+    monkeypatch.setattr(md, "company_ir_links", lambda _s: {})
+    monkeypatch.setattr(md, "_earnings_report_window_passed", lambda *_a, **_k: True)
+    monkeypatch.setattr(md, "_actuals_from_yahoo_headlines", lambda *_a, **_k: {})
+    monkeypatch.setattr(md, "yahoo_earnings_trend_rows", lambda _s: [])
+    monkeypatch.setattr(md, "marketbeat_printed_quarter", lambda *_a, **_k: {
+        "date": "2026-10-21",
+        "revenue_estimate": 31.69e9,
+        "revenue_actual": 32.32e9,
+    })
+    out = md.earnings_card("T", horizon_days=21, include_past_days=14)
+    res = out.get("result") or {}
+    assert res.get("revenue_actual") == 32.32e9
+    assert res.get("revenue_estimate") == 31.69e9
+    assert res.get("revenue_beat") == "beat"
+    assert res.get("revenue_surprise_pct") is not None
