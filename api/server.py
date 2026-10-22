@@ -9088,7 +9088,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui761-20261022-dcf-nav"
+WEB_BUILD_VERSION = "ui762-20261022-book-menu"
 
 
 @app.get("/api/build")

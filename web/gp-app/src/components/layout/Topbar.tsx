@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import type { GpUser } from '@/lib/auth'
 import { logout } from '@/lib/auth'
 import { useTheme } from '@/hooks/useTheme'
@@ -22,15 +22,15 @@ const RESEARCH: { to: string; label: string }[] = [
 const BOOK: { to: string; label: string }[] = [
   { to: '/fund', label: 'Accounts' },
   { to: '/positions', label: 'Positions' },
-  { to: '/options', label: 'Options' },
   { to: '/memos', label: 'Memos' },
+  { to: '/ship', label: 'Book map' },
 ]
 
 const MORE: { to: string; label: string }[] = [
+  { to: '/options', label: 'Options' },
   { to: '/credit', label: 'Credit' },
   { to: '/merger-arb', label: 'Merger arb' },
   { to: '/munger', label: 'Munger' },
-  { to: '/ship', label: 'Book map' },
 ]
 
 /** Sliw Agent — Edyta corporate desk. Same allowlist as pre-React topbar
@@ -40,7 +40,98 @@ const SLIW_ALLOWED = new Set([
   'edytasliw@gmail.com',
 ])
 
-const TOP_LINKS = [...RESEARCH, ...BOOK, ...MORE]
+const TOP_LINKS = [...RESEARCH, ...MORE]
+
+function pathActive(pathname: string, to: string) {
+  if (to === '/') return pathname === '/'
+  return pathname === to || pathname.startsWith(`${to}/`)
+}
+
+function NavMenu({
+  label,
+  items,
+}: {
+  label: string
+  items: { to: string; label: string }[]
+}) {
+  const loc = useLocation()
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const active = items.some((it) => pathActive(loc.pathname, it.to))
+  const menuId = useRef(`nav-${label}`)
+
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    setPos({ top: Math.round(r.bottom + 4), left: Math.round(r.left) })
+  }
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', place)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', place)
+    }
+  }, [])
+
+  return (
+    <div className={styles.menuWrap} ref={ref}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`${styles.link} ${styles.menuBtn} ${active ? styles.linkActive : ''}`}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={label}
+        onClick={(e) => {
+          e.stopPropagation()
+          place()
+          setOpen((o) => !o)
+        }}
+      >
+        {label} <span aria-hidden>{open ? '▴' : '▾'}</span>
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className={styles.menuPanel}
+            role="menu"
+            style={{ top: pos.top, left: pos.left }}
+          >
+            {items.map((it) => (
+              <NavLink
+                key={it.to}
+                to={it.to}
+                role="menuitem"
+                className={({ isActive }) =>
+                  `${styles.menuItem} ${isActive ? styles.menuItemOn : ''}`
+                }
+                onClick={() => setOpen(false)}
+              >
+                {it.label}
+              </NavLink>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </div>
+  )
+}
 
 function UserMenu({
   user,
@@ -396,11 +487,23 @@ export function Topbar({ user, build }: Props) {
         </div>
 
         <nav className={styles.nav} aria-label="Primary">
-          {TOP_LINKS.map((it) => (
+          {RESEARCH.map((it) => (
             <NavLink
               key={it.to}
               to={it.to}
               end={it.to === '/'}
+              className={({ isActive }) =>
+                `${styles.link} ${isActive ? styles.linkActive : ''}`
+              }
+            >
+              {it.label}
+            </NavLink>
+          ))}
+          <NavMenu label="Book" items={BOOK} />
+          {TOP_LINKS.slice(RESEARCH.length).map((it) => (
+            <NavLink
+              key={it.to}
+              to={it.to}
               className={({ isActive }) =>
                 `${styles.link} ${isActive ? styles.linkActive : ''}`
               }

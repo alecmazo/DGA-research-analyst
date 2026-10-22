@@ -178,7 +178,8 @@ def test_nav_groups_research_book_more():
     top = (ROOT / "web/gp-app/src/components/layout/Topbar.tsx").read_text()
     assert "label: 'Gurus'" in top
     assert "TOP_LINKS" in top
-    assert "NavMenu" not in top
+    assert 'label="Book"' in top
+    assert "NavMenu" in top
     assert "On this Mac" in top
     assert "createPortal" in top
     research, rest = top.split("const BOOK", 1)
@@ -191,8 +192,11 @@ def test_nav_groups_research_book_more():
     assert "{ to: '/credit'" not in research
     assert "label: 'Accounts'" in book
     assert "{ to: '/positions'" in book
+    assert "label: 'Book map'" in book
+    assert "{ to: '/memos'" in book
+    assert "{ to: '/options'" in more
     assert "{ to: '/credit'" in more
-    assert "label: 'Book map'" in more
+    assert "label: 'Book map'" not in more
     assert "{ to: '/podcasts'" not in more
     app = (ROOT / "web/gp-app/src/App.tsx").read_text()
     assert 'path="gurus"' in app
