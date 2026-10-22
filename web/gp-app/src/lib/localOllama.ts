@@ -149,6 +149,7 @@ type ChatOpts = {
   think?: string
   numCtx?: number
   onDelta?: (chunk: string) => void
+  onProgress?: (state: { textChars: number; thinkingChars: number }) => void
 }
 
 export async function ollamaStatus(model?: string): Promise<OllamaState> {
@@ -270,7 +271,12 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
     throw new Error(OFFLINE)
   }
   if (!res.ok || !res.body) {
-    throw new Error(res.status === 403 ? 'Ollama blocked this site. Restart Ollama.' : OFFLINE)
+    const detail = await res.text().catch(() => '')
+    if (res.status === 403) throw new Error('Ollama blocked this site. Restart Ollama.')
+    if (res.status === 404) {
+      throw new Error(`Ollama does not have ${opts.model || 'that model'}.`)
+    }
+    throw new Error(detail.trim().slice(0, 180) || OFFLINE)
   }
   const reader = res.body.getReader()
   const dec = new TextDecoder()
@@ -308,6 +314,9 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
       if (piece) {
         text += piece
         opts.onDelta?.(piece)
+      }
+      if (piece || thought) {
+        opts.onProgress?.({ textChars: text.length, thinkingChars: thinking.length })
       }
       if (ev.done) {
         doneReason = ev.done_reason || doneReason

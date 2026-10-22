@@ -66,6 +66,8 @@ export function LocalPage() {
   const [asking, setAsking] = useState(false)
   const [ask, setAsk] = useState<Answer | null>(null)
   const [asked, setAsked] = useState('')
+  const [draft, setDraft] = useState('')
+  const [askStatus, setAskStatus] = useState('')
   const [books, setBooks] = useState<Portfolio[]>([])
   const [book, setBook] = useState('')
   const [reviewing, setReviewing] = useState(false)
@@ -262,18 +264,37 @@ export function LocalPage() {
     setAsking(true)
     setAsk(null)
     setAsked(q)
+    setDraft('')
+    setAskStatus(`Loading ${shortModelLabel(model)}. The first words can take a minute.`)
     const system = status?.agent_system || 'You are the local finance analyst. Do not invent figures.'
     let transcript = q
     const steps: { tool?: string; ticker?: string }[] = []
+    const stream = {
+      onDelta: (chunk: string) => setDraft((prev) => prev + chunk),
+      onProgress: (state: { textChars: number; thinkingChars: number }) => {
+        if (state.textChars) {
+          setAskStatus(`Writing… ${state.textChars.toLocaleString()} characters`)
+          return
+        }
+        if (state.thinkingChars) {
+          setAskStatus(`Reasoning… ${state.thinkingChars.toLocaleString()} characters`)
+        }
+      },
+    }
     try {
       let answer = ''
+      let lastThink = ''
       for (let i = 0; i < 4; i++) {
-        const chat = await ollamaChat({ system, user: transcript, maxTokens: 3500, model })
+        setDraft('')
+        const chat = await ollamaChat({ system, user: transcript, maxTokens: 3500, model, ...stream })
+        lastThink = chat.thinking || lastThink
         const call = parseToolCall(chat.text)
         if (!call) {
           answer = chat.text
           break
         }
+        setDraft('')
+        setAskStatus(`Looking up ${call.tool}${call.ticker ? ` ${call.ticker}` : ''}…`)
         const tool = await api<{ result?: string }>('/api/local/tool', {
           method: 'POST',
           body: JSON.stringify(call),
@@ -282,16 +303,29 @@ export function LocalPage() {
         transcript += `\n\nTOOL ${call.tool} RESULT:\n${tool.result || ''}\n\nUse this. Ask for another tool as JSON, or write the markdown answer.`
       }
       if (!answer) {
+        setDraft('')
+        setAskStatus('Writing the answer…')
         const chat = await ollamaChat({
           system,
           user: `${transcript}\n\nWrite the markdown answer now. Do not call a tool.`,
           maxTokens: 3500,
           model,
+          ...stream,
         })
         answer = chat.text
+        lastThink = chat.thinking || lastThink
       }
+      if (!answer.trim() && lastThink.trim()) {
+        answer = lastThink
+      }
+      if (!answer.trim()) {
+        throw new Error(`${shortModelLabel(model)} returned no answer. Ollama is up. Ask again.`)
+      }
+      setDraft('')
+      setAskStatus('')
       setAsk({ ok: true, answer, steps })
     } catch (e) {
+      setAskStatus('')
       setAsk({ ok: false, error: e instanceof Error ? e.message : 'Ask failed', steps })
     } finally {
       setAsking(false)
@@ -442,20 +476,20 @@ export function LocalPage() {
           </Button>
         </div>
       </section>
-      {(asking || ask) && (
+      {(asking || ask || draft) && (
         <section className={styles.note} aria-live="polite">
           {asked && <div className={styles.noteQ}>{asked}</div>}
-          {asking && <p className={styles.meta}>Thinking…</p>}
+          {askStatus && <p className={styles.meta}>{askStatus}</p>}
           {ask?.error && <p className={styles.warn}>{ask.error}</p>}
           {ask?.steps && ask.steps.length > 0 && (
             <p className={styles.meta}>
               Looked up {ask.steps.map((s) => s.tool).filter(Boolean).join(', ')}
             </p>
           )}
-          {ask?.answer && (
+          {(draft || ask?.answer) && (
             <article
               className={styles.noteBody}
-              dangerouslySetInnerHTML={{ __html: renderMd(ask.answer) }}
+              dangerouslySetInnerHTML={{ __html: renderMd(draft || ask?.answer || '') }}
             />
           )}
         </section>
