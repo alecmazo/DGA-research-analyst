@@ -67,7 +67,7 @@
 
 .fields {
   display: grid;
-  grid-template-columns: 1.2fr 1fr 1.3fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -180,6 +180,46 @@
   margin: 0 0 10px;
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+.erase {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.erase label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+}
+
+.erase input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-canvas, transparent);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.erase button {
+  height: 32px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9b2c2c;
+  border: 1px solid #e7c4c4;
+  background: transparent;
+  border-radius: 999px;
+  padding: 0 12px;
+  cursor: pointer;
 }
 
 .steps {

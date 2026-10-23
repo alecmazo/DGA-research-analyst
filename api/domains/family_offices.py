@@ -6,6 +6,7 @@ and does not create a login on this site.
 """
 from __future__ import annotations
 
+import json
 import re
 import secrets
 from datetime import datetime, timezone
@@ -26,10 +27,15 @@ class OfficeCreate(BaseModel):
     contact_name: str = ""
     email: str
     slug: str = ""
+    password: str = ""
 
 
 class OfficeStatus(BaseModel):
     status: str
+
+
+class OfficeErase(BaseModel):
+    confirm: str = ""
 
 
 def slug_from_name(name: str) -> str:
@@ -44,7 +50,14 @@ def database_name(slug: str) -> str:
     return "dga_" + slug
 
 
-def office_setup(name: str, db_name: str, email: str, status: str) -> dict:
+def office_setup(
+    name: str,
+    db_name: str,
+    email: str,
+    status: str,
+    hostname: str = "",
+    error: str = "",
+) -> dict:
     """What to do next on this DGA site after an office row exists.
 
     ``ready`` means the empty database was marked created. The test login
@@ -55,7 +68,17 @@ def office_setup(name: str, db_name: str, email: str, status: str) -> dict:
     email = (email or "").strip() or "the contact email"
     status = status if status in _STATUSES else "planned"
     ready = status == "ready"
-    if status == "held":
+    hostname = (hostname or "").strip()
+    error = (error or "").strip()
+    if status == "error" and error:
+        note = error
+    elif hostname and ready:
+        note = (
+            f"Sign in at https://{hostname} as {email}. "
+            f"That address opens {db_name}. "
+            "portfolio.dgacapital.com stays DGA Capital."
+        )
+    elif status == "held":
         note = f"{name} is on hold. Its database name stays {db_name}."
     elif ready:
         note = (
@@ -117,13 +140,21 @@ def office_setup(name: str, db_name: str, email: str, status: str) -> dict:
             ),
         },
     ]
+    if hostname and ready:
+        for step in steps:
+            step["done"] = True
+            step["text"] = step["text"]
+        steps[2]["text"] = f"The web service for {hostname} uses {db_name}."
+        steps[3]["text"] = "That service has started. Books and notes start empty."
+        steps[4]["text"] = f"The GP login for {email} is on {hostname}."
+        steps[5]["text"] = f"The hostname is {hostname}."
     marked = False
     for step in steps:
         step["current"] = False
         if not marked and not step["done"]:
             step["current"] = True
             marked = True
-    return {"note": note, "steps": steps}
+    return {"note": note, "steps": steps, "hostname": hostname}
 
 
 def validate_office(name: str, email: str, slug: str = "") -> tuple[str, str, str, str]:
@@ -164,6 +195,13 @@ def _ensure(conn) -> None:
         )
         cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS slug TEXT")
         cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS db_name TEXT")
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS hostname TEXT")
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS provision_error TEXT")
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS web_service_id TEXT")
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS db_service_id TEXT")
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS domain_id TEXT")
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS dns_record_ids TEXT")
+        cur.execute("ALTER TABLE family_offices ADD COLUMN IF NOT EXISTS dns_records TEXT")
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS family_offices_email_uq
@@ -185,21 +223,39 @@ def _row(rec) -> dict:
     created = rec[6]
     if isinstance(created, datetime):
         created = created.astimezone(timezone.utc).isoformat()
+    hostname = rec[9] or ""
+    error = rec[10] or ""
+    status = rec[4] or "planned"
     return {
         "id": rec[0],
         "name": rec[1],
         "contact_name": rec[2],
         "email": rec[3],
-        "status": rec[4] or "planned",
+        "status": status,
         "created_at": created,
         "slug": rec[7],
         "db_name": rec[8],
-        "setup": office_setup(rec[1], rec[8] or "", rec[3], rec[4] or "planned"),
+        "hostname": hostname,
+        "provision_error": error,
+        "dns_records": _dns(rec[15] if len(rec) > 15 else ""),
+        "setup": office_setup(rec[1], rec[8] or "", rec[3], status, hostname, error),
     }
 
 
+def _dns(raw) -> list:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
 _LIST_SQL = """
-SELECT id, name, contact_name, email, status, login_lp_id, created_at, slug, db_name
+SELECT id, name, contact_name, email, status, login_lp_id, created_at, slug, db_name,
+       hostname, provision_error, web_service_id, db_service_id, domain_id, dns_record_ids,
+       dns_records
   FROM family_offices
 """
 
@@ -229,6 +285,17 @@ def login_block(conn_fn: Callable, email: str) -> Optional[str]:
     return None
 
 
+def _load_one(conn_fn, office_id: str) -> dict:
+    with conn_fn() as conn:
+        _ensure(conn)
+        with conn.cursor() as cur:
+            cur.execute(_LIST_SQL + " WHERE id = %s", (office_id,))
+            rec = cur.fetchone()
+    if not rec:
+        raise HTTPException(404, "Office not found")
+    return _row(rec)
+
+
 def create_router(claims_fn, conn_fn) -> APIRouter:
     router = APIRouter(prefix="/api/offices", tags=["family-offices"])
 
@@ -248,6 +315,8 @@ def create_router(claims_fn, conn_fn) -> APIRouter:
             with conn.cursor() as cur:
                 cur.execute(_LIST_SQL + " ORDER BY created_at DESC")
                 rows = cur.fetchall()
+        from api.domains.office_provision import BASE_DOMAIN
+
         return {
             "live": {
                 "name": "DGA Capital",
@@ -255,18 +324,32 @@ def create_router(claims_fn, conn_fn) -> APIRouter:
                 "db_name": "this database",
                 "service": "web",
             },
+            "base_domain": BASE_DOMAIN,
             "offices": [_row(r) for r in rows],
         }
 
     @router.post("")
     def add_office(request: Request, body: OfficeCreate):
         _live(request)
+        from api.domains.office_provision import (
+            OfficeProvisionError,
+            configured,
+            create_office_instance,
+            hostname_for,
+        )
+
+        if not configured():
+            raise HTTPException(503, "This service has no Railway token, so it cannot create an office.")
         try:
             name, email, slug, db_name = validate_office(body.name, body.email, body.slug)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        password = body.password or ""
+        if len(password) < 6:
+            raise HTTPException(400, "Password must be at least 6 characters.")
         contact = " ".join((body.contact_name or "").split())[:80]
         office_id = "office_" + secrets.token_hex(6)
+        hostname = hostname_for(slug)
         try:
             with conn_fn() as conn:
                 _ensure(conn)
@@ -274,25 +357,68 @@ def create_router(claims_fn, conn_fn) -> APIRouter:
                     cur.execute(
                         """
                         INSERT INTO family_offices
-                            (id, name, contact_name, email, status, slug, db_name)
-                        VALUES (%s, %s, %s, %s, 'planned', %s, %s)
+                            (id, name, contact_name, email, status, slug, db_name, hostname)
+                        VALUES (%s, %s, %s, %s, 'provisioning', %s, %s, %s)
                         """,
-                        (office_id, name, contact, email, slug, db_name),
+                        (office_id, name, contact, email, slug, db_name, hostname),
                     )
                 conn.commit()
         except Exception:
             raise HTTPException(400, "Could not add that office. The email or database name is already used.")
-        office = {
-            "id": office_id,
-            "name": name,
-            "contact_name": contact,
-            "email": email,
-            "status": "planned",
-            "slug": slug,
-            "db_name": db_name,
-            "setup": office_setup(name, db_name, email, "planned"),
-        }
-        return {"ok": True, "office": office}
+        status = "ready"
+        error = ""
+        dns_records: list = []
+        try:
+            created = create_office_instance(slug, email, contact or name, password)
+            dns_records = created.get("dns_records") or []
+            if created.get("login_error"):
+                status = "error"
+                error = "The office service is up. The first login was not created yet. " + created["login_error"]
+            if not created.get("dns_published") and dns_records:
+                error = (error + " " if error else "") + "Publish the DNS records shown on this page."
+                if status == "ready":
+                    status = "error"
+            with conn_fn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE family_offices
+                           SET status = %s,
+                               hostname = %s,
+                               provision_error = %s,
+                               web_service_id = %s,
+                               db_service_id = %s,
+                               domain_id = %s,
+                               dns_record_ids = %s,
+                               dns_records = %s
+                         WHERE id = %s
+                        """,
+                        (
+                            status,
+                            created.get("hostname") or hostname,
+                            error,
+                            created.get("web_service_id"),
+                            created.get("db_service_id"),
+                            created.get("domain_id"),
+                            json.dumps(created.get("dns_record_ids") or []),
+                            json.dumps(dns_records),
+                            office_id,
+                        ),
+                    )
+                conn.commit()
+        except (OfficeProvisionError, Exception) as exc:
+            status = "error"
+            error = str(exc)[:300]
+            with conn_fn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE family_offices SET status = 'error', provision_error = %s WHERE id = %s",
+                        (error, office_id),
+                    )
+                conn.commit()
+        office = _load_one(conn_fn, office_id)
+        office["dns_records"] = dns_records
+        return {"ok": status == "ready", "office": office}
 
     @router.post("/{office_id}/status")
     def set_status(office_id: str, request: Request, body: OfficeStatus):
@@ -315,5 +441,35 @@ def create_router(claims_fn, conn_fn) -> APIRouter:
             raise HTTPException(404, "Office not found")
         office = _row(rec)
         return {"ok": True, "id": office_id, "status": status, "office": office}
+
+    @router.post("/{office_id}/erase")
+    def erase_office(office_id: str, request: Request, body: OfficeErase):
+        _live(request)
+        from api.domains.office_provision import OfficeProvisionError, erase_office_instance
+
+        with conn_fn() as conn:
+            _ensure(conn)
+            with conn.cursor() as cur:
+                cur.execute(_LIST_SQL + " WHERE id = %s", (office_id,))
+                rec = cur.fetchone()
+        if not rec:
+            raise HTTPException(404, "Office not found")
+        if (body.confirm or "").strip() != (rec[1] or "").strip():
+            raise HTTPException(400, "Type the office name to erase it.")
+        dns_ids = []
+        if rec[14]:
+            try:
+                dns_ids = json.loads(rec[14])
+            except json.JSONDecodeError:
+                dns_ids = []
+        try:
+            erase_office_instance(rec[11] or "", rec[12] or "", rec[13] or "", dns_ids)
+        except OfficeProvisionError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        with conn_fn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM family_offices WHERE id = %s", (office_id,))
+            conn.commit()
+        return {"ok": True, "id": office_id}
 
     return router

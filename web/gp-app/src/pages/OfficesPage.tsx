@@ -21,11 +21,17 @@ type Office = {
   slug?: string | null
   db_name?: string | null
   created_at?: string | null
+  hostname?: string | null
+  provision_error?: string | null
+  dns_records?: DnsRecord[]
   setup?: { note: string; steps: SetupStep[] }
 }
 
+type DnsRecord = { type?: string; name?: string; content?: string }
+
 type Payload = {
   live?: { name: string; status: string; db_name: string; service: string }
+  base_domain?: string
   offices?: Office[]
 }
 
@@ -44,9 +50,11 @@ function when(iso?: string | null): string {
 }
 
 function statusWord(status: string): string {
-  if (status === 'ready') return 'Database marked ready'
+  if (status === 'ready') return 'Address ready'
+  if (status === 'error') return 'Setup needs attention'
+  if (status === 'provisioning') return 'Creating'
   if (status === 'held') return 'On hold'
-  return 'Database not created'
+  return 'Not created'
 }
 
 function localSetup(office: Office): { note: string; steps: SetupStep[] } {
@@ -92,33 +100,17 @@ function localSetup(office: Office): { note: string; steps: SetupStep[] } {
   return { note, steps }
 }
 
-function draftSteps(dbName: string, email: string): SetupStep[] {
+function draftSteps(host: string, email: string): SetupStep[] {
   const who = email.trim() || 'the contact email'
   return [
     {
       done: false,
       current: true,
-      text: "Add the office on this form. This page stores the name in DGA's database only.",
+      text: `Add office creates ${host}, an empty database, and a web service from this repo.`,
     },
     {
       done: false,
-      text: `Create an empty Postgres database named ${dbName}. Do not add a schema or a tenant column to the DGA database. Mark this row ready when that database exists.`,
-    },
-    {
-      done: false,
-      text: `Create a second web service from this same repo, branch main. Set its DATABASE_URL to ${dbName}. Leave DGA's DATABASE_URL on the current service.`,
-    },
-    {
-      done: false,
-      text: 'Start that service once. The app creates its own tables on the empty database. Books and notes start empty.',
-    },
-    {
-      done: false,
-      text: `On that service, create the GP login for ${who} and sign in to test the empty books.`,
-    },
-    {
-      done: false,
-      text: 'Give the service its own hostname. Logo and office name are settings in that database.',
+      text: `The first password becomes the GP login for ${who} on that address.`,
     },
   ]
 }
@@ -149,8 +141,10 @@ export function OfficesPage() {
   const [slugTouched, setSlugTouched] = useState(false)
   const [contact, setContact] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
+  const [eraseName, setEraseName] = useState('')
 
   const load = useCallback(async () => {
     if (demo) return
@@ -168,7 +162,8 @@ export function OfficesPage() {
 
   const offices = data?.offices || []
   const focus = offices.find((o) => o.id === selected) || offices[0] || null
-  const previewDb = slug ? `dga_${slug}` : 'dga_<name>'
+  const base = data?.base_domain || 'privateofficedesk.com'
+  const previewHost = slug ? `${slug.replace(/_/g, '-')}.${base}` : `<office>.${base}`
   const setup = focus?.setup?.note ? focus.setup : focus ? localSetup(focus) : null
 
   const addOffice = async () => {
@@ -182,11 +177,13 @@ export function OfficesPage() {
           contact_name: contact,
           email,
           slug,
+          password,
         }),
       })
       setName('')
       setContact('')
       setEmail('')
+      setPassword('')
       setSlug('')
       setSlugTouched(false)
       setSelected(res.office.id)
@@ -211,6 +208,21 @@ export function OfficesPage() {
     }
   }
 
+  const eraseOffice = async (office: Office) => {
+    setErr('')
+    try {
+      await api(`/api/offices/${encodeURIComponent(office.id)}/erase`, {
+        method: 'POST',
+        body: JSON.stringify({ confirm: eraseName }),
+      })
+      setEraseName('')
+      setSelected(null)
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not erase the office')
+    }
+  }
+
   return (
     <div className={`${page.page} ${styles.page}`}>
       <header className={page.hero}>
@@ -223,8 +235,8 @@ export function OfficesPage() {
         </Link>
       </header>
       <p className={styles.lead}>
-        Add an office here. Each office gets its own Postgres database and its own web service from this repo.
-        This deployment stays DGA. Adding an office does not create the database and does not make a login on this site.
+        Add an office here. This creates its database, its web service, and its address on {base}.
+        The first password is the login on that address. This site stays DGA Capital.
       </p>
 
       {demo && <p className={styles.warn}>This page is for the live office only.</p>}
@@ -276,7 +288,7 @@ export function OfficesPage() {
                 />
               </label>
               <label>
-                Database
+                Address
                 <input
                   value={slug}
                   onChange={(e) => {
@@ -285,13 +297,24 @@ export function OfficesPage() {
                   }}
                   autoComplete="off"
                   spellCheck={false}
-                  aria-label="Database slug"
+                  aria-label="Office address"
+                />
+              </label>
+              <label>
+                First password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  minLength={6}
+                  required
                 />
               </label>
             </div>
-            <p className={styles.dbHint}>Database name {previewDb}. The service that uses it is created later, not from this form.</p>
+            <p className={styles.dbHint}>Their sign-in address will be {previewHost}. The password is created on that site.</p>
             <Button variant="primary" type="submit" disabled={busy}>
-              {busy ? 'Adding…' : 'Add office'}
+              {busy ? 'Creating…' : 'Add office'}
             </Button>
           </form>
 
@@ -308,7 +331,7 @@ export function OfficesPage() {
                   <tr>
                     <th>Office</th>
                     <th>Contact</th>
-                    <th>Database</th>
+                    <th>Address</th>
                     <th>Added</th>
                     <th>Status</th>
                     <th />
@@ -326,7 +349,7 @@ export function OfficesPage() {
                         {office.contact_name || '—'}
                         <span className={styles.sub}>{office.email}</span>
                       </td>
-                      <td>{office.db_name || '—'}</td>
+                      <td>{office.hostname || office.db_name || '—'}</td>
                       <td>{when(office.created_at)}</td>
                       <td className={office.status === 'ready' ? styles.trial : styles.paused}>
                         {statusWord(office.status)}
@@ -341,7 +364,7 @@ export function OfficesPage() {
                             Hold
                           </button>
                         )}
-                        {office.status === 'ready' ? (
+                        {office.hostname ? null : office.status === 'ready' ? (
                           <button type="button" onClick={() => void setStatus(office, 'planned')}>
                             Not ready
                           </button>
@@ -366,7 +389,37 @@ export function OfficesPage() {
             <p className={styles.dbHint}>
               One office, one database, one web service, same repo. DGA does not share this database.
             </p>
-            <Setup steps={setup?.steps?.length ? setup.steps : draftSteps(previewDb, email)} />
+            <Setup steps={setup?.steps?.length ? setup.steps : draftSteps(previewHost, email)} />
+            {focus?.dns_records && focus.dns_records.length > 0 && (
+              <ul className={styles.steps}>
+                {focus.dns_records.map((record) => (
+                  <li key={`${record.type}-${record.name}`}>
+                    {record.type} {record.name} {record.content}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {focus && (
+              <form
+                className={styles.erase}
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void eraseOffice(focus)
+                }}
+              >
+                <label>
+                  Erase {focus.name}
+                  <input
+                    value={eraseName}
+                    onChange={(e) => setEraseName(e.target.value)}
+                    placeholder={focus.name}
+                    autoComplete="off"
+                    aria-label="Type the office name to erase it"
+                  />
+                </label>
+                <button type="submit">Erase office</button>
+              </form>
+            )}
           </section>
         </>
       )}

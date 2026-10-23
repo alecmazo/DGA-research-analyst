@@ -1,5 +1,14 @@
 """Office registry checks. No database."""
+import pytest
+
 from api.domains.family_offices import database_name, office_setup, validate_office
+from api.domains.office_provision import (
+    PROTECTED_SERVICES,
+    OfficeProvisionError,
+    erase_office_instance,
+    hostname_for,
+    service_names,
+)
 
 
 def test_office_slug_becomes_its_own_database_name():
@@ -44,6 +53,35 @@ def test_planned_office_still_says_the_database_is_not_created():
     assert "Nothing was created in Postgres yet" in setup["note"]
     assert setup["steps"][1]["done"] is False
     assert setup["steps"][1]["current"] is True
+
+
+def test_office_address_uses_the_private_desk_domain():
+    assert hostname_for("genesis_capital") == "genesis-capital.privateofficedesk.com"
+    web, db = service_names("genesis_capital")
+    assert web == "office-genesis-capital"
+    assert db == "office-genesis-capital-db"
+
+
+def test_ready_hostname_is_where_they_sign_in():
+    setup = office_setup(
+        "Genesis Capital",
+        "dga_genesis_capital",
+        "a@genesis.example",
+        "ready",
+        hostname="genesis-capital.privateofficedesk.com",
+    )
+    assert "https://genesis-capital.privateofficedesk.com" in setup["note"]
+    assert all(step["done"] for step in setup["steps"])
+
+
+def test_erase_refuses_dga_services(monkeypatch):
+    def boom(*_args, **_kwargs):
+        raise AssertionError("DGA services must stay")
+
+    monkeypatch.setattr("api.domains.office_provision.railway_call", boom)
+    monkeypatch.setattr("api.domains.office_provision.delete_dns", boom)
+    with pytest.raises(OfficeProvisionError):
+        erase_office_instance(next(iter(PROTECTED_SERVICES)), "", "", [])
 
 
 def test_office_rejects_the_dga_database_name():
