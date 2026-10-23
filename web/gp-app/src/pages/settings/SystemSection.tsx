@@ -371,7 +371,7 @@ function DemoCard() {
       <div className={styles.hint} style={{ marginBottom: 6 }}>
         Public login <code>demo@dgacapital.com</code> / <code>demo123</code> opens a
         3-book sample workspace. Fully synthetic names — live LPs never appear,
-        even anonymized. Same credentials are listed under Admin User Management.
+        even anonymized. Same credentials are listed under Accounts.
       </div>
       <pre className={styles.mono} style={{ marginBottom: 6, whiteSpace: 'pre-wrap' }}>
         {statusHtml}

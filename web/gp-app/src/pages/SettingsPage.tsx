@@ -14,13 +14,13 @@ import { UsersSection } from './settings/UsersSection'
 import { SystemSection } from './settings/SystemSection'
 
 const JUMP = [
-  { id: 'set-handoff', label: 'Handoff' },
-  { id: 'set-support', label: 'Support' },
+  { id: 'set-users', label: 'Accounts' },
+  { id: 'set-security', label: 'Security' },
   { id: 'set-models', label: 'Models' },
   { id: 'set-connections', label: 'Connections' },
   { id: 'set-publishing', label: 'Publishing' },
-  { id: 'set-security', label: 'Security' },
-  { id: 'set-users', label: 'Users & Funds' },
+  { id: 'set-support', label: 'Support' },
+  { id: 'set-handoff', label: 'Handoff' },
   { id: 'set-system', label: 'System' },
 ] as const
 
@@ -65,7 +65,7 @@ export function SettingsPage() {
           <p className={page.kicker}>Admin</p>
           <h1 className={page.h1}>Settings</h1>
           <p className={page.sub}>
-            Models, connections, users, and the production flow.
+            Accounts, security, then the rest of the desk.
           </p>
         </div>
       </header>
@@ -91,18 +91,18 @@ export function SettingsPage() {
       {panel === 'flows' ? <FlowsSection /> : null}
       {panel === 'office' ? (
       <>
-      <h3 className={styles.groupHead} id="set-handoff">
-        Agent continuity · handoff
+      <h3 className={styles.groupHead} id="set-users">
+        Accounts
       </h3>
       <div className={styles.grid}>
-        <HandoffSection />
+        <UsersSection />
       </div>
 
-      <h3 className={styles.groupHead} id="set-support">
-        Support · fix trail
+      <h3 className={styles.groupHead} id="set-security">
+        Security
       </h3>
       <div className={styles.grid}>
-        <SupportSection />
+        <SecuritySection />
       </div>
 
       <h3 className={styles.groupHead} id="set-models">
@@ -126,18 +126,18 @@ export function SettingsPage() {
         <PublishingSection />
       </div>
 
-      <h3 className={styles.groupHead} id="set-security">
-        Security
+      <h3 className={styles.groupHead} id="set-support">
+        Support · fix trail
       </h3>
       <div className={styles.grid}>
-        <SecuritySection />
+        <SupportSection />
       </div>
 
-      <h3 className={styles.groupHead} id="set-users">
-        Users &amp; funds
+      <h3 className={styles.groupHead} id="set-handoff">
+        Agent continuity · handoff
       </h3>
       <div className={styles.grid}>
-        <UsersSection />
+        <HandoffSection />
       </div>
 
       <h3 className={styles.groupHead} id="set-system">

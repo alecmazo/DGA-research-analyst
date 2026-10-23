@@ -2154,10 +2154,38 @@ def admin_lp_set_password(request: Request, body: LPSetPasswordRequest):
     }
 
 
+class LPClearPasswordRequest(BaseModel):
+    lp_id: str
+
+
+@app.post("/api/v2/admin/lp/clear-password")
+def admin_lp_clear_password(request: Request, body: LPClearPasswordRequest):
+    """GP-only: remove a login password. The account remains and cannot sign in
+    until a password is set again. You cannot clear your own password.
+    """
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(status_code=403, detail="GP role required")
+    if claims.get("demo_mode"):
+        raise HTTPException(status_code=403, detail="Write operations disabled in demo mode")
+    lp_id = (body.lp_id or "").strip()
+    if not lp_id:
+        raise HTTPException(status_code=400, detail="lp_id required")
+    if claims.get("lp_id") == lp_id:
+        raise HTTPException(status_code=400, detail="Cannot remove your own password")
+    ok = auth_v2_mod.gp_clear_password(lp_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="User not found")
+    _audit("gp_clear_password", lp_id, "server", True, "by gp")
+    return {"ok": True, "lp_id": lp_id, "has_password": False}
+
+
 class LPCreateRequest(BaseModel):
     email:               str
     name:                str
     password:            str
+    role:                str = "lp"
+    demo_mode:           bool = False
     fund_memberships:    dict  = {}
     managed_account_ids: list  = []
 
@@ -2176,15 +2204,21 @@ def admin_lp_create(request: Request, body: LPCreateRequest):
         raise HTTPException(403, "GP access required")
     if claims.get("demo_mode"):
         raise HTTPException(status_code=403, detail="Write operations disabled in demo mode")
+    role = (body.role or "lp").strip().lower()
+    if role not in ("lp", "gp", "admin"):
+        raise HTTPException(400, "Role must be lp, gp, or admin")
     try:
         lp_id = auth_v2_mod.create_user(
             email=body.email,
             name=body.name,
             password=body.password,
+            role=role,
             fund_memberships=body.fund_memberships,
             managed_account_ids=body.managed_account_ids,
+            must_change_password=(role == "lp"),
+            demo_mode=bool(body.demo_mode),
         )
-        return {"ok": True, "lp_id": lp_id, "email": body.email, "name": body.name}
+        return {"ok": True, "lp_id": lp_id, "email": body.email, "name": body.name, "role": role}
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -8951,7 +8985,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui772-20261023-account-auth"
+WEB_BUILD_VERSION = "ui773-20261023-account-desk"
 
 
 @app.get("/api/build")

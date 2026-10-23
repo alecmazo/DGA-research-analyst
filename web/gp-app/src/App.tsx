@@ -120,6 +120,95 @@ function LazyPage({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+function MustChangeGate({ onDone }: { onDone: (user: GpUser) => void }) {
+  const [oldPw, setOldPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setMsg('')
+    if (!oldPw || !newPw || !confirm) {
+      setMsg('Fill in all three fields.')
+      return
+    }
+    if (newPw !== confirm) {
+      setMsg('New passwords do not match.')
+      return
+    }
+    if (newPw.length < 8) {
+      setMsg('New password must be at least 8 characters.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api('/api/auth/v2/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+      })
+      const me = await api<MeResponse>('/api/auth/v2/me')
+      try {
+        localStorage.setItem('dga_v2_user', JSON.stringify(me))
+      } catch {
+        /* ignore */
+      }
+      onDone(me)
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Could not change password')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className={styles.boot}>
+      <form
+        className={styles.bootCard}
+        style={{ textAlign: 'left' }}
+        onSubmit={(e) => {
+          e.preventDefault()
+          void save()
+        }}
+      >
+        <div className={styles.mark}>DGA</div>
+        <h1 style={{ textAlign: 'center' }}>Choose a new password</h1>
+        <p style={{ textAlign: 'center' }}>
+          This login is still on a temporary password. Set your own before the desk opens.
+        </p>
+        <label className={styles.fieldLabel}>Current password</label>
+        <input
+          className={styles.field}
+          type="password"
+          autoComplete="current-password"
+          value={oldPw}
+          onChange={(e) => setOldPw(e.target.value)}
+        />
+        <label className={styles.fieldLabel}>New password</label>
+        <input
+          className={styles.field}
+          type="password"
+          autoComplete="new-password"
+          value={newPw}
+          onChange={(e) => setNewPw(e.target.value)}
+        />
+        <label className={styles.fieldLabel}>Confirm</label>
+        <input
+          className={styles.field}
+          type="password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+        />
+        <button className={styles.go} type="submit" disabled={busy}>
+          {busy ? 'Saving…' : 'Save and continue'}
+        </button>
+        {msg && <p>{msg}</p>}
+      </form>
+    </div>
+  )
+}
+
 function AuthBoot({
   children,
 }: {
@@ -186,6 +275,15 @@ function AuthBoot({
   }
 
   if (state !== 'ok' || !user) return null
+  if (user.must_change_password && !user.demo_mode) {
+    return (
+      <MustChangeGate
+        onDone={(me) => {
+          setUser(me)
+        }}
+      />
+    )
+  }
   return <>{children(user, build)}</>
 }
 

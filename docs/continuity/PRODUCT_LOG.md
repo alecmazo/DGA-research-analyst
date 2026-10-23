@@ -36,7 +36,7 @@ DGA Capital is a **single-GP family office / 3(c)(1) fund desk**:
 Canonical GP is **React + TypeScript** at `web/gp-app/` served at `/gp`.  
 Legacy HTML at `/gp-legacy` (`web/gp/`) is **not** the source of truth.
 
-Settings → LP User Management lists every LP login. Saving one person does not delete the others. Edit checks the managed accounts already assigned to that LP, including an older nickname or capitalization of the same account, and that check is still there after Save.
+Settings → Accounts lists every login. Changing one email or password does not delete the others. For an LP, Edit checks the managed accounts already assigned, including an older nickname or capitalization of the same account, and that check is still there after Save books.
 
 ---
 
@@ -93,6 +93,7 @@ Copy these into every new agent session:
 - Gateway: `web/portfolio.html` (`/`)
 - A GP or admin account can open every fund and managed account. An LP account sees only its assigned books (`/api/v2/lp/*`, fund display settings, balance history).
 - There is no shared desk password and no shared fund password. `FUND_DELETE_PASSWORD` is only the extra confirmation on `DELETE /api/fund/admin/delete`, and that route still requires a GP session.
+- Settings → Accounts changes any login's email, sets a password, or removes the password without deleting the account. A temporary password stops the GP desk until that person chooses their own. Your own password, which still requires the current one, is under Security.
 - GP change-password: Settings → Security
 - MFA endpoints exist under `/api/auth/v2/mfa/*`
 - Fail-closed if `TOKEN_SECRET` is missing or the public default

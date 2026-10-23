@@ -96,7 +96,21 @@ def test_delete_still_requires_gp_and_delete_password():
     assert 'request.headers.get("x-delete-password"' in body
 
 
-def test_token_secret_and_leaked_password_block_stay():
+def test_settings_manages_every_login():
+    panel = (ROOT / "web/gp-app/src/pages/settings/AccountsPanel.tsx").read_text()
+    page = (ROOT / "web/gp-app/src/pages/SettingsPage.tsx").read_text()
+    app = (ROOT / "web/gp-app/src/App.tsx").read_text()
+    assert "def gp_clear_password" in AUTH
+    assert '@app.post("/api/v2/admin/lp/clear-password")' in SRV
+    assert "Cannot remove your own password" in SRV
+    assert "password_hash_hex" in AUTH.split("def login")[1].split("def ")[0]
+    assert "Save email" in panel
+    assert "Set password" in panel
+    assert "Remove password" in panel
+    assert "role: newRole" in panel
+    assert page.index('id="set-users"') < page.index('id="set-security"')
+    assert "must_change_password && !user.demo_mode" in app
+    assert "Choose a new password" in app
     assert '_TOKEN_SECRET_ENV = "TOKEN_SECRET"' in AUTH
     assert "def _token_secret" in AUTH
     assert '"genesis"' in AUTH

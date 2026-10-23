@@ -337,20 +337,19 @@ function PasswordCard() {
   }
 
   return (
-    <CollapsibleCard title="🔑 Change password" badge="GP only" defaultOpen>
+    <CollapsibleCard title="Your password" badge="This login" defaultOpen>
       <div className={styles.identity}>
         <div className={styles.avatar}>{initials}</div>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>{name}</div>
           <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1 }}>
-            {email || 'Signed-in GP account'}
+            {email || 'Signed-in account'}
           </div>
         </div>
       </div>
       <p className={styles.hint}>
-        Update the password for <strong>your GP login</strong> (the email you use at the sign-in
-        screen). Minimum 8 characters. This does not change LP passwords — reset those under Users
-        &amp; Funds.
+        This changes the password on the account you are signed in with. To change an email,
+        set or remove someone else's password, use Accounts above.
       </p>
       <label className={styles.fieldLabel}>Current password</label>
       <input

@@ -417,6 +417,10 @@ def login(email: str, password: str) -> Optional[dict]:
     if not user:
         return None
 
+    # A cleared password cannot sign in. Settings can set a new one.
+    if not (user.get("password_hash_hex") or "").strip() or not (user.get("password_salt_hex") or "").strip():
+        return None
+
     if not verify_password(password, user["password_hash_hex"], user["password_salt_hex"]):
         return None
 
@@ -550,6 +554,26 @@ def gp_set_password(lp_id: str, new_password: str, must_change: bool = True) -> 
     return True
 
 
+def gp_clear_password(lp_id: str) -> bool:
+    """Remove a login password. The account stays; sign-in fails until a password is set.
+
+    Persists on the overlay, including for seed users, so a redeploy does not
+    restore the old password.
+    """
+    user = find_user_by_lp_id(lp_id)
+    if not user:
+        return False
+    overlay = _load_overlay()
+    overlay[lp_id] = {
+        **overlay.get(lp_id, {}),
+        "password_hash_hex": "",
+        "password_salt_hex": "",
+        "must_change_password": False,
+    }
+    _save_overlay(overlay)
+    return True
+
+
 def list_users() -> list[dict]:
     """Return a sanitized list of all users (no password hashes)."""
     return [
@@ -559,6 +583,7 @@ def list_users() -> list[dict]:
             "name":                 u["name"],
             "role":                 u["role"],
             "must_change_password": bool(u.get("must_change_password", False)),
+            "has_password":         bool((u.get("password_hash_hex") or "").strip()),
             "fund_memberships":     u.get("fund_memberships", {}),
             "managed_account_ids":  u.get("managed_account_ids", []),
             "created_at":           u.get("created_at", ""),

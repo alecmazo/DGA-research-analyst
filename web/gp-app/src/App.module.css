@@ -62,3 +62,41 @@
     background-position: -100% 0;
   }
 }
+
+.fieldLabel {
+  display: block;
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.field {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.go {
+  width: 100%;
+  margin-top: 16px;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--navy-900);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.go:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
