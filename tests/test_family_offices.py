@@ -5,8 +5,11 @@ from api.domains.family_offices import database_name, office_setup, validate_off
 from api.domains.office_provision import (
     PROTECTED_SERVICES,
     OfficeProvisionError,
+    certificate_ready,
+    cname_should_proxy,
     erase_office_instance,
     hostname_for,
+    publish_dns,
     service_names,
 )
 
@@ -72,6 +75,37 @@ def test_ready_hostname_is_where_they_sign_in():
     )
     assert "https://genesis-capital.privateofficedesk.com" in setup["note"]
     assert all(step["done"] for step in setup["steps"])
+
+
+def test_dns_stays_grey_until_the_certificate_is_valid():
+    assert cname_should_proxy("genesis-capital.privateofficedesk.com", "CNAME")
+    assert not cname_should_proxy("privateofficedesk.com", "CNAME")
+    assert not cname_should_proxy("www.privateofficedesk.com", "CNAME")
+    assert not cname_should_proxy(
+        "_acme-challenge.genesis-capital.privateofficedesk.com", "CNAME"
+    )
+    assert not cname_should_proxy("genesis-capital.privateofficedesk.com", "TXT")
+    assert certificate_ready({
+        "verified": True,
+        "certificateStatus": "CERTIFICATE_STATUS_TYPE_VALID",
+    })
+    assert not certificate_ready({
+        "verified": True,
+        "certificateStatus": "CERTIFICATE_STATUS_TYPE_VALIDATING_OWNERSHIP",
+    })
+    assert not certificate_ready({
+        "verified": False,
+        "certificateStatus": "CERTIFICATE_STATUS_TYPE_VALID",
+    })
+
+
+def test_publish_dns_without_a_token_returns_nothing(monkeypatch):
+    monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+    assert publish_dns([{
+        "recordType": "CNAME",
+        "fqdn": "genesis-capital.privateofficedesk.com",
+        "requiredValue": "example.up.railway.app",
+    }]) == []
 
 
 def test_erase_refuses_dga_services(monkeypatch):

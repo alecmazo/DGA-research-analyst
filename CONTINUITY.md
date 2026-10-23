@@ -350,6 +350,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Client letter** | **`ui768-20261023-client-letter`** | Memos opens with a client letter: pick retiree, school, family principal, foundation, or trustee, then the account and the model. Send is a button. Gamma is optional. Generate on an account uses that model and that account's trades. |
 | **Add office** | **`ui769-20261023-add-office`** | Settings → Offices creates the office database, web service, and privateofficedesk.com address, then the first login. Erase removes that office and leaves DGA's services in place. |
 | **Quarterly letter Grok** | **`ui770-20261023-qletter-grok`** | SUP_20261023_44d7c69a. ANAT-DEF with Grok writes the section from the trades already in the prompt. One call, low effort, no retries, so the memos page receives the draft. |
+| **Office DNS** | **`ui771-20261023-office-dns`** | Add office publishes the privateofficedesk.com records, keeps the zone on SSL Full, and turns the office CNAME orange after Railway's certificate is valid. The apex stays unpublished. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
@@ -549,4 +550,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-23 · Agent: Cursor · Built: `ui770-20261023-qletter-grok` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui771-YYYYMMDD-slug`*
+*Last updated: 2026-10-23 · Agent: Cursor · Built: `ui771-20261023-office-dns` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui772-YYYYMMDD-slug`*

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -192,11 +193,35 @@ def _record_type(raw: str) -> str:
     return ""
 
 
+def cloudflare_token() -> str:
+    return (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+
+
+def cname_should_proxy(name: str, record_type: str) -> bool:
+    """Office hostnames can go orange. The apex and challenge names stay grey."""
+    if (record_type or "").upper() != "CNAME":
+        return False
+    host = (name or "").strip(".").lower()
+    base = BASE_DOMAIN.strip(".").lower()
+    if not host or host == base or host == "www." + base:
+        return False
+    if host.startswith("_acme-challenge.") or host == "_acme-challenge":
+        return False
+    return host.endswith("." + base)
+
+
+def certificate_ready(status: dict) -> bool:
+    """Orange only after Railway has verified the name and issued the certificate."""
+    if not status or not status.get("verified"):
+        return False
+    return (status.get("certificateStatus") or "") == "CERTIFICATE_STATUS_TYPE_VALID"
+
+
 def cloudflare_zone_id() -> str:
     explicit = (os.environ.get("CLOUDFLARE_ZONE_ID") or "").strip()
     if explicit:
         return explicit
-    token = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    token = cloudflare_token()
     if not token:
         return ""
     req = urllib.request.Request(
@@ -211,11 +236,119 @@ def cloudflare_zone_id() -> str:
     return results[0].get("id") or ""
 
 
+def _cloudflare(method: str, path: str, payload: Optional[dict] = None) -> dict:
+    token = cloudflare_token()
+    if not token:
+        raise OfficeProvisionError("This service has no Cloudflare token, so it cannot publish DNS.")
+    data = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://api.cloudflare.com/client/v4" + path,
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:180]
+        raise OfficeProvisionError(f"Cloudflare answered {exc.code}. {detail}") from exc
+    if not body.get("success"):
+        raise OfficeProvisionError("Cloudflare refused the DNS change.")
+    return body
+
+
+def ensure_ssl_full() -> None:
+    """Zone SSL stays Full. Full Strict waits on a certificate that is still issuing."""
+    if not cloudflare_token():
+        return
+    zone = cloudflare_zone_id()
+    if not zone:
+        return
+    _cloudflare("PATCH", f"/zones/{zone}/settings/ssl", {"value": "full"})
+
+
+def _domain_status(domain_id: str) -> dict:
+    data = railway_call(
+        """
+        query($id: String!, $projectId: String!) {
+          customDomain(id: $id, projectId: $projectId) {
+            status { verified certificateStatus }
+          }
+        }
+        """,
+        {"id": domain_id, "projectId": PROJECT_ID},
+    )
+    return ((data.get("customDomain") or {}).get("status") or {})
+
+
+def orange_verified_cnames(domain_id: str, record_ids: list[str]) -> bool:
+    """Proxy the office CNAME once Railway's certificate is valid. TXT stays grey."""
+    if not domain_id or not record_ids or not cloudflare_token():
+        return False
+    if not certificate_ready(_domain_status(domain_id)):
+        return False
+    zone = cloudflare_zone_id()
+    proxied_one = False
+    for record_id in record_ids:
+        if not record_id:
+            continue
+        try:
+            body = _cloudflare("GET", f"/zones/{zone}/dns_records/{record_id}")
+        except OfficeProvisionError:
+            continue
+        result = body.get("result") or {}
+        if not cname_should_proxy(result.get("name") or "", result.get("type") or ""):
+            continue
+        proxied_one = True
+        if result.get("proxied"):
+            continue
+        _cloudflare("PATCH", f"/zones/{zone}/dns_records/{record_id}", {"proxied": True})
+    return proxied_one
+
+
+_orange_lock = threading.Lock()
+_orange_started: set[str] = set()
+_orange_done: set[str] = set()
+
+
+def schedule_orange(domain_id: str, record_ids: list[str]) -> None:
+    """Keep checking until the certificate is valid, then turn the CNAME orange."""
+    ids = [str(item) for item in (record_ids or []) if item]
+    if not domain_id or not ids or not cloudflare_token():
+        return
+    with _orange_lock:
+        if domain_id in _orange_done or domain_id in _orange_started:
+            return
+        _orange_started.add(domain_id)
+
+    def run() -> None:
+        try:
+            for _ in range(40):
+                try:
+                    if orange_verified_cnames(domain_id, ids):
+                        with _orange_lock:
+                            _orange_done.add(domain_id)
+                        return
+                except OfficeProvisionError:
+                    pass
+                time.sleep(30)
+        finally:
+            with _orange_lock:
+                _orange_started.discard(domain_id)
+
+    threading.Thread(target=run, name="office-dns", daemon=True).start()
+
+
 def publish_dns(records: list[dict]) -> list[str]:
     """Create grey-cloud records. Returns Cloudflare record ids. Empty if no token."""
-    token = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    token = cloudflare_token()
     if not token:
         return []
+    try:
+        ensure_ssl_full()
+    except OfficeProvisionError:
+        pass
     zone = cloudflare_zone_id()
     ids: list[str] = []
     for record in records:
@@ -229,8 +362,9 @@ def publish_dns(records: list[dict]) -> list[str]:
             "name": name,
             "content": content,
             "ttl": 1,
-            "proxied": False,
         }
+        if rtype == "CNAME":
+            payload["proxied"] = False
         req = urllib.request.Request(
             f"https://api.cloudflare.com/client/v4/zones/{zone}/dns_records",
             data=json.dumps(payload).encode(),
@@ -246,7 +380,7 @@ def publish_dns(records: list[dict]) -> list[str]:
 
 
 def delete_dns(record_ids: list[str]) -> None:
-    token = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    token = cloudflare_token()
     if not token or not record_ids:
         return
     zone = cloudflare_zone_id()
@@ -361,6 +495,8 @@ def create_office_instance(
             pass
         raise
     dns_ids = publish_dns(records)
+    if dns_ids and domain_id:
+        schedule_orange(domain_id, dns_ids)
     public_records = [
         {
             "type": _record_type(item.get("recordType") or ""),

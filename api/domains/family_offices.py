@@ -315,8 +315,13 @@ def create_router(claims_fn, conn_fn) -> APIRouter:
             with conn.cursor() as cur:
                 cur.execute(_LIST_SQL + " ORDER BY created_at DESC")
                 rows = cur.fetchall()
-        from api.domains.office_provision import BASE_DOMAIN
+        from api.domains.office_provision import BASE_DOMAIN, schedule_orange
 
+        for rec in rows:
+            try:
+                schedule_orange(rec[13] or "", _dns(rec[14] if len(rec) > 14 else ""))
+            except Exception:
+                pass
         return {
             "live": {
                 "name": "DGA Capital",
