@@ -3,8 +3,11 @@ import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Empty'
 import { Panel } from '@/components/ui/Panel'
 import { ApiError, api, apiBlob } from '@/lib/api'
+import { ollamaChat, ollamaStatus, shortModelLabel } from '@/lib/localOllama'
 import page from './page.module.css'
 import styles from './MemosPage.module.css'
+import { ClientLetterPanel } from './memos/ClientLetterPanel'
+import { useWriterModel, writerPayload } from './memos/WriterModelSelect'
 
 /* ── types ─────────────────────────────────────────────────────────── */
 
@@ -187,6 +190,7 @@ async function openPdfBlob(path: string) {
 /* ── component ─────────────────────────────────────────────────────── */
 
 export function MemosPage() {
+  const writer = useWriterModel()
   /* funds for filter + email */
   const [funds, setFunds] = useState<FundOpt[]>([])
   const [fundFilter, setFundFilter] = useState('')
@@ -219,7 +223,7 @@ export function MemosPage() {
   const [qlCurrentId, setQlCurrentId] = useState<string | null>(null)
   const [qlPublished, setQlPublished] = useState<string[]>([])
   const [qlStatus, setQlStatus] = useState(
-    'A shared firm-wide intro + your note go to every LP. Each fund section is seen only by that fund/account\'s holders. Generate each piece, edit, then Save.',
+    'Choose an account, choose a model, generate, read, then save or send.',
   )
   const [qlFreshWarn, setQlFreshWarn] = useState<string | null>(null)
   const [qlSaved, setQlSaved] = useState<QlLetterSummary[]>([])
@@ -516,24 +520,66 @@ export function MemosPage() {
     return id
   }
 
+  async function qlText(
+    path: string,
+    body: Record<string, unknown>,
+    onTick?: (label: string, cost: number) => void,
+  ): Promise<string> {
+    const payload = writerPayload(writer.model)
+    if (!payload) throw new Error('Choose a model.')
+    if (payload.llm_provider === 'local') {
+      const localName = payload.local_model || ''
+      const health = await ollamaStatus(localName)
+      if (!health.ok) throw new Error(health.message)
+      onTick?.(`Writing with ${shortModelLabel(localName)}`, 0)
+      const prep = await api<{
+        ok?: boolean
+        local?: boolean
+        system?: string
+        user?: string
+        error?: string
+      }>(path, {
+        method: 'POST',
+        body: JSON.stringify({ ...body, ...payload }),
+      })
+      if (!prep.ok || !prep.user) throw new Error(prep.error || 'Could not prepare this section')
+      const chat = await ollamaChat({
+        system: prep.system || '',
+        user: prep.user,
+        model: localName,
+        maxTokens: 2500,
+      })
+      const text = (chat.text || '').trim()
+      if (!text) throw new Error(`${shortModelLabel(localName)} returned an empty section.`)
+      return text
+    }
+    const r = await api<{ ok?: boolean; job_id?: string; error?: string; detail?: string }>(path, {
+      method: 'POST',
+      body: JSON.stringify({ ...body, ...payload }),
+    })
+    if (!r.ok || !r.job_id) throw new Error(r.error || r.detail || 'could not start')
+    return pollAgentic(r.job_id, onTick)
+  }
+
   async function qlGenIntro() {
+    if (!writer.model) {
+      setQlStatus('Choose a model.')
+      return
+    }
     if (qlIntro.trim() && !window.confirm('Replace the shared intro with a fresh draft?')) return
     setQlBusy('intro')
     setQlPane('intro')
-    setQlStatus('Intro: starting…')
+    setQlStatus(`Intro: writing with ${writer.label || 'the model you picked'}.`)
     try {
-      const r = await api<{ ok?: boolean; job_id?: string; error?: string; detail?: string }>(
+      const md = await qlText(
         '/api/research/quarterly-letter/intro',
-        { method: 'POST', body: JSON.stringify({ year: qlYear }) },
+        { year: qlYear },
+        (label, cost) => setQlStatus(`Intro: ${label}  ·  $${cost.toFixed(2)}`),
       )
-      if (!r.ok || !r.job_id) throw new Error(r.error || r.detail || 'could not start')
-      const md = await pollAgentic(r.job_id, (label, cost) => {
-        setQlStatus(`Intro: ${label}  ·  $${cost.toFixed(2)}`)
-      })
       setQlIntro(md)
-      setQlStatus('✓ Intro ready — edit freely.')
+      setQlStatus('Intro is ready. Edit it, then save or send.')
     } catch (e) {
-      setQlStatus('❌ intro: ' + (e instanceof Error ? e.message : e))
+      setQlStatus('Intro stopped. ' + (e instanceof Error ? e.message : e))
     } finally {
       setQlBusy(null)
     }
@@ -543,32 +589,40 @@ export function MemosPage() {
     force?: boolean
     rethrow?: boolean
     progressLabel?: string
+    keepBusy?: boolean
   }) {
+    if (!writer.model) {
+      setQlStatus('Choose a model.')
+      return
+    }
     const cur = qlSections[fid] || ''
     if (!opts?.force && cur.trim() && !window.confirm(`Replace the ${name} section with a fresh draft?`))
       return
     setQlBusy(`fund:${fid}`)
     setQlPane(fid)
     try {
-      const r = await api<{ ok?: boolean; job_id?: string; error?: string; detail?: string }>(
+      const md = await qlText(
         '/api/research/quarterly-letter/fund-section',
-        { method: 'POST', body: JSON.stringify({ fund_id: fid, year: qlYear }) },
+        { fund_id: fid, year: qlYear },
+        (label, cost) => {
+          setQlStatus(`${opts?.progressLabel || name}: ${label}  ·  $${cost.toFixed(2)}`)
+        },
       )
-      if (!r.ok || !r.job_id) throw new Error(r.error || r.detail || 'could not start')
-      const md = await pollAgentic(r.job_id, (label, cost) => {
-        setQlStatus(`${opts?.progressLabel || name}: ${label}  ·  $${cost.toFixed(2)}`)
-      })
       setQlSections((prev) => ({ ...prev, [fid]: md }))
-      setQlStatus(`✓ ${name} section ready.`)
+      setQlStatus(`${name} is ready. Read it, then save or send.`)
     } catch (e) {
-      setQlStatus(`❌ ${name}: ` + (e instanceof Error ? e.message : e))
+      setQlStatus(`${name} stopped. ` + (e instanceof Error ? e.message : e))
       if (opts?.rethrow) throw e
     } finally {
-      setQlBusy(null)
+      if (!opts?.keepBusy) setQlBusy(null)
     }
   }
 
   async function qlGenAll() {
+    if (!writer.model) {
+      setQlStatus('Choose a model.')
+      return
+    }
     if (!qlFunds.length) {
       setQlStatus('No funds with live positions yet.')
       return
@@ -590,6 +644,7 @@ export function MemosPage() {
         await qlGenFund(f.fund_id, name, {
           force: true,
           rethrow: true,
+          keepBusy: true,
           progressLabel: `(${i + 1}/${qlFunds.length}) ${name}`,
         })
         done++
@@ -717,6 +772,16 @@ export function MemosPage() {
 
   const publishedSet = useMemo(() => new Set(qlPublished), [qlPublished])
   const qlSelected = qlFunds.find((f) => f.fund_id === qlPane) || null
+  const qlStep = qlBusy
+    ? 3
+    : qlSelected && (qlSections[qlSelected.fund_id] || '').trim()
+      ? 4
+      : qlSelected && writer.model
+        ? 3
+        : qlSelected
+          ? 2
+          : 1
+  const qlSteps = ['Account', 'Model', 'Generate', 'Read', 'Save or send']
 
   const emailFundName = emailTarget?.fundId
     ? fundLabel(fundsById.get(emailTarget.fundId) || { id: emailTarget.fundId })
@@ -730,7 +795,7 @@ export function MemosPage() {
           <p className={page.kicker}>Firm ops</p>
           <h1 className={page.h1}>DGA Capital Memos</h1>
           <p className={page.sub}>
-            LP-ready investment memoranda and the quarterly letter composer.
+            Client letters and quarterly account memos. Pick the account, pick the model, then write.
           </p>
         </div>
         <div className={page.heroActions}>
@@ -763,6 +828,14 @@ export function MemosPage() {
 
       {pageErr && <div className={page.bannerErr}>{pageErr}</div>}
 
+      <ClientLetterPanel
+        model={writer.model}
+        modelLabel={writer.label}
+        options={writer.options}
+        onModel={writer.setModel}
+        contextFundId={qlSelected?.fund_id || ''}
+      />
+
       {/* ── Quarterly Letter ── */}
       <Panel
         title="🗒️ Quarterly Letter"
@@ -780,7 +853,7 @@ export function MemosPage() {
             />
             <Button
               size="sm"
-              disabled={!!qlBusy}
+              disabled={!!qlBusy || !writer.model}
               onClick={() => void qlGenAll()}
             >
               {qlBusy === 'genall' ? '✨ Generating…' : '✨ Generate all fund sections'}
@@ -803,7 +876,16 @@ export function MemosPage() {
         }
       >
         <div className={styles.composerBody}>
-          <div className={qlStatus.startsWith('❌') ? styles.statusBad : styles.status}>
+          <div className={styles.flowBar}>
+            <ol className={styles.flowSteps} aria-label="How an account memo is written">
+              {qlSteps.map((label, i) => (
+                <li key={label} className={qlStep === i + 1 ? styles.flowNow : undefined}>
+                  {i + 1} {label}
+                </li>
+              ))}
+            </ol>
+          </div>
+          <div className={qlStatus.includes('stopped') || qlStatus.startsWith('Choose') ? styles.statusBad : styles.status}>
             {qlStatus}
           </div>
           {qlFreshWarn && <div className={styles.freshWarn}>{qlFreshWarn}</div>}
@@ -887,7 +969,7 @@ export function MemosPage() {
                         Firm-wide. Every LP sees this. No account holdings.
                       </div>
                     </div>
-                    <Button size="sm" disabled={!!qlBusy} onClick={() => void qlGenIntro()}>
+                    <Button size="sm" disabled={!!qlBusy || !writer.model} onClick={() => void qlGenIntro()}>
                       {qlBusy === 'intro' ? 'Generating…' : 'Generate intro'}
                     </Button>
                   </div>
@@ -907,16 +989,31 @@ export function MemosPage() {
                       <div className={styles.editorTitle}>{qlFundLabel(qlSelected)}</div>
                       <div className={styles.editorSub}>
                         {qlSelected.fund_type === 'lp_fund'
-                          ? 'LP fund — shared by all of its LPs'
-                          : 'Managed account — only that holder sees this'}
-                        {!qlSelected.has_attribution ? ' · no YTD CSV on file' : ''}
-                        {publishedSet.has(qlSelected.fund_id) ? ' · published' : ''}
+                          ? 'LP fund. Shared with that fund’s investors.'
+                          : 'Managed account. The holder of this account sees this.'}
+                        {writer.label ? ` ${writer.label} writes this section.` : ' Choose a model, then generate.'}
+                        {!qlSelected.has_attribution ? ' Upload a YTD file to cite trades.' : ''}
+                        {publishedSet.has(qlSelected.fund_id) ? ' Published.' : ''}
                       </div>
                     </div>
                     <div className={styles.editorActions}>
+                      <select
+                        className={styles.select}
+                        aria-label="Model"
+                        value={writer.options.some((row) => row.id === writer.model) ? writer.model : ''}
+                        disabled={!!qlBusy}
+                        onChange={(e) => writer.setModel(e.target.value)}
+                      >
+                        <option value="">Choose a model</option>
+                        {writer.options.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.label}
+                          </option>
+                        ))}
+                      </select>
                       <Button
                         size="sm"
-                        disabled={!!qlBusy}
+                        disabled={!!qlBusy || !writer.model}
                         onClick={() => void qlGenFund(qlSelected.fund_id, qlFundLabel(qlSelected))}
                       >
                         {qlBusy === `fund:${qlSelected.fund_id}` ? 'Generating…' : 'Generate'}

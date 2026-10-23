@@ -157,7 +157,7 @@ const RULES: Rule[] = [
     id: 'positions',
     test: (p) => p.startsWith('/api/v2/lp/me/positions') || p.startsWith('/api/fund/positions'),
   },
-  { id: 'memos', test: (p) => p.startsWith('/api/memos') || p.startsWith('/api/quarterly-letter') },
+  { id: 'memos', test: (p) => p.startsWith('/api/memos') || p.startsWith('/api/quarterly-letter') || p.startsWith('/api/client-letter') },
   {
     id: 'accountBook',
     test: (p) => p.startsWith('/api/v2/lp') || p.startsWith('/api/v2/gp') || p.startsWith('/api/fund'),

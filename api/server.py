@@ -9088,7 +9088,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui767-20261023-fin-sheet"
+WEB_BUILD_VERSION = "ui768-20261023-client-letter"
 
 
 @app.get("/api/build")
@@ -32557,8 +32557,14 @@ def _quarterly_activity_context(fund_ids: list[str] | None, year: int) -> str:
               "div", "end_val", "end_sh", "start_sh", "gain")
     try:
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            cur.execute("SELECT fund_id, result_json FROM managed_account_ytd_cache WHERE fund_id = ANY(%s)",
-                        ([str(f) for f in fund_ids],))
+            # fund_id is UUID. uuid = ANY(text[]) errors, so the account
+            # he clicked lost its trade record and the section was not his book.
+            cur.execute(
+                """SELECT fund_id::text AS fund_id, result_json
+                     FROM managed_account_ytd_cache
+                    WHERE fund_id::text = ANY(%s)""",
+                ([str(f) for f in fund_ids],),
+            )
             for r in cur.fetchall():
                 rj = r["result_json"]
                 if isinstance(rj, str):
@@ -32709,7 +32715,8 @@ _QLETTER_INTRO_SYSTEM = (
     "a notch informal. This intro is SHARED by every LP, so keep it firm-wide and "
     "macro — do NOT discuss individual account holdings (those get their own per-fund "
     "sections later).\n\n"
-    "Ground YTD figures with the tools (get_ytd_attribution, compute). Cover, in 3-5 "
+    "The book figures are already in the prompt. Use compute only if a number you "
+    "must cite is missing. Cover, in 3-5 "
     "short paragraphs under the header '## The quarter in brief': how markets and our "
     "overall book did this year, the themes that drove it, our general stance, and what "
     "we're watching. No per-name detail, no hype. Internal commentary, not advice."
@@ -32756,7 +32763,11 @@ def _qletter_activity_tickers(text: str) -> list[str]:
 
 
 def _qletter_thesis_block(tickers: list[str]) -> str:
-    """Short saved-report lines so the letter does not tool-call every exit."""
+    """Short saved-report lines so the letter does not tool-call every exit.
+
+    A name with no saved report is said in plain language. The model does
+    not invent a thesis for it.
+    """
     names: list[str] = []
     for t in tickers or []:
         tk = str(t or "").upper().strip()
@@ -32765,50 +32776,82 @@ def _qletter_thesis_block(tickers: list[str]) -> str:
         names.append(tk)
         if len(names) >= 8:
             break
-    if not names or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+    if not names:
         return ""
-    try:
-        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            cur.execute(
-                """SELECT ticker, rating, price_target, report_md, report_md_claude
-                     FROM analyst_reports
-                    WHERE ticker = ANY(%s)""",
-                (names,),
-            )
-            rows = cur.fetchall() or []
-    except Exception:
-        return ""
-    by = {str(r.get("ticker") or "").upper(): r for r in rows}
+    by: dict = {}
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT ticker, rating, price_target, report_md, report_md_claude
+                         FROM analyst_reports
+                        WHERE ticker = ANY(%s)""",
+                    (names,),
+                )
+                rows = cur.fetchall() or []
+            by = {str(r.get("ticker") or "").upper(): r for r in rows}
+        except Exception:
+            by = {}
     lines = [
         "SAVED THESIS SNIPPETS (already loaded — do not call read_saved_report for these):"
     ]
     for tk in names:
-        r = by.get(tk)
-        if not r:
-            continue
+        r = by.get(tk) or {}
         snip = (r.get("report_md") or r.get("report_md_claude") or "").strip()
         snip = " ".join(snip.split())
+        if not snip:
+            lines.append(
+                f"- {tk}: No thesis is saved. Say so in plain language. Do not invent one."
+            )
+            continue
         if len(snip) > 280:
             snip = snip[:280].rstrip() + "…"
         pt = r.get("price_target")
         pt_s = f", PT {pt}" if pt not in (None, "") else ""
         lines.append(f"- {tk}: rating {r.get('rating') or '—'}{pt_s}. {snip}")
-    return "\n".join(lines) if len(lines) > 1 else ""
+    return "\n".join(lines)
+
+
+def _qletter_provider(body: dict | None) -> tuple[str, str]:
+    """The model he picked. Empty means the request did not choose one.
+
+    A local name is returned to the browser. This process leaves that model
+    on the machine that is asking.
+    """
+    raw = str((body or {}).get("llm_provider") or (body or {}).get("provider") or "").strip()
+    local_model = str((body or {}).get("local_model") or "").strip()
+    low = raw.lower()
+    if low.startswith("local:"):
+        local_model = local_model or raw.split(":", 1)[1].strip()
+        low = "local"
+    if low == "local":
+        from api.domains.local_finance_llm import local_model_list
+        known = ""
+        for name in local_model_list():
+            if local_model == name:
+                known = name
+                break
+        return "local", known
+    if low in ("claude", "grok", "deepseek"):
+        return low, ""
+    return "", ""
 
 
 def _qletter_kick(job_prefix: str, label: str, question: str, system: str,
-                  background_tasks, claims, meta: dict) -> str:
+                  background_tasks, claims, meta: dict, provider: str) -> str:
     """Queue a quarterly-letter agentic job (shared by intro + fund-section)."""
     _strat_tools = [t for t in _AGENTIC_TOOLS
                     if t.get("name") not in (
-                        "list_portfolios", "get_portfolio_holdings", "read_saved_report")]
+                        "list_portfolios", "get_portfolio_holdings",
+                        "read_saved_report", "get_ytd_attribution")]
     import uuid as _uuid
     job_id = f"{job_prefix}_" + _uuid.uuid4().hex[:12]
     _agentic_jobs[job_id] = {"stage": "queued", "status": "running", "label": label,
                              "started_at": time.time(), "updated_at": time.time(),
                              "question": question, "steps": 0, "tool_calls": [], "cost_usd": 0.0,
                              "mode": "quarterly_letter",
-                             "generated_by": claims.get("email") or "gp", **meta}
+                             "generated_by": claims.get("email") or "gp",
+                             **meta, "llm_provider": provider}
     background_tasks.add_task(_run_agentic_analysis, job_id, question, system, _strat_tools)
     return job_id
 
@@ -32821,6 +32864,9 @@ def research_quarterly_letter_intro(req: Request, background_tasks: BackgroundTa
         raise HTTPException(403, "GP only")
     try: body = _request_json_sync(req)
     except Exception: body = {}
+    provider, local_model = _qletter_provider(body)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "Choose a model."}, status_code=400)
     year = int((body or {}).get("year") or datetime.utcnow().year)
     fund_ids = []
     if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
@@ -32834,12 +32880,18 @@ def research_quarterly_letter_intro(req: Request, background_tasks: BackgroundTa
     pos_ctx = _build_strategist_context(positions[:60], "whole book") if positions else "(No live positions.)"
     question = (
         f"Write the SHARED opening of DGA Capital's {year} quarter-end letter (firm-wide, "
-        f"macro — no per-account detail).\n\n{pos_ctx}\n\nUse get_ytd_attribution for the "
-        f"real whole-book YTD return and compute for any math. Follow your section structure."
+        f"macro — no per-account detail).\n\n{pos_ctx}\n\nThe figures above are the book. "
+        f"Do not call get_ytd_attribution. Follow your section structure."
     )
+    if provider == "local":
+        if not local_model:
+            return JSONResponse({"ok": False, "error": "Choose a model on this Mac."}, status_code=400)
+        return {"ok": True, "local": True, "year": year, "system": _QLETTER_INTRO_SYSTEM,
+                "user": question, "local_model": local_model}
     job_id = _qletter_kick("QLINTRO", "Queued · letter intro", question,
-                           _QLETTER_INTRO_SYSTEM, background_tasks, claims, {"year": year})
-    return {"ok": True, "job_id": job_id, "year": year, "model": _AGENTIC_MODEL}
+                           _QLETTER_INTRO_SYSTEM, background_tasks, claims,
+                           {"year": year}, provider)
+    return {"ok": True, "job_id": job_id, "year": year, "model": provider}
 
 
 @app.post("/api/research/quarterly-letter/fund-section")
@@ -32850,31 +32902,55 @@ def research_quarterly_letter_fund_section(req: Request, background_tasks: Backg
         raise HTTPException(403, "GP only")
     try: body = _request_json_sync(req)
     except Exception: body = {}
+    provider, local_model = _qletter_provider(body)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "Choose a model."}, status_code=400)
     fund_id = str((body or {}).get("fund_id") or "").strip()
     if not fund_id:
         return JSONResponse({"ok": False, "error": "fund_id required"}, status_code=400)
     year = int((body or {}).get("year") or datetime.utcnow().year)
-    positions = _load_fund_positions(fund_id)
     fund_name = _fund_name_lookup(fund_id) or fund_id
-    if not positions:
-        return JSONResponse({"ok": False, "error": f"No live positions for {fund_name}."}, status_code=400)
-    pos_ctx = _build_strategist_context(positions[:60], fund_name)
+    positions = list(_load_fund_positions(fund_id) or [])
     act_ctx = _quarterly_activity_context([fund_id], year)
-    thesis_ctx = _qletter_thesis_block(_qletter_activity_tickers(act_ctx))
+    if not positions:
+        positions = [
+            {"ticker": tk, "weight_pct": 0.0}
+            for tk in _qletter_activity_tickers(act_ctx)
+        ]
+    if not positions:
+        return JSONResponse(
+            {"ok": False, "error": f"{fund_name} has no live holdings to write from."},
+            status_code=400,
+        )
+    pos_ctx = _build_strategist_context(positions[:60], fund_name, fund_ids=[fund_id])
+    thesis_ctx = _qletter_thesis_block(
+        [p["ticker"] for p in positions[:8]] + _qletter_activity_tickers(act_ctx)
+    )
     question = (
+        f"ACCOUNT: {fund_name} ({fund_id}). Write only this account's section.\n\n"
         f"Write the {year} quarter-end letter section for '{fund_name}'.\n\n"
         f"{pos_ctx}\n\n{act_ctx}\n\n{thesis_ctx}\n\nSCOPE: these holdings are the COMPLETE book for this "
         f"section — analyze only '{fund_name}'. The 'YTD TRADES & ATTRIBUTION' block above is "
         f"the authoritative record of every buy, trim, and EXIT — address each "
         f"exited and trimmed name with its realized P&L and the reason we sold, using "
         f"the SAVED THESIS SNIPPETS already in this prompt. Do not call read_saved_report "
-        f"per name. Follow your section structure exactly."
+        f"per name. Do not call get_ytd_attribution — that tool mixes in other accounts. "
+        f"Follow your section structure exactly."
     )
+    if provider == "local":
+        if not local_model:
+            return JSONResponse({"ok": False, "error": "Choose a model on this Mac."}, status_code=400)
+        return {
+            "ok": True, "local": True, "fund_id": fund_id, "fund_name": fund_name,
+            "year": year, "system": _QLETTER_FUND_SYSTEM, "user": question,
+            "local_model": local_model,
+        }
     job_id = _qletter_kick("QLFUND", f"Queued · {fund_name}", question,
                            _QLETTER_FUND_SYSTEM, background_tasks, claims,
-                           {"year": year, "fund_id": fund_id, "fund_name": fund_name})
+                           {"year": year, "fund_id": fund_id, "fund_name": fund_name},
+                           provider)
     return {"ok": True, "job_id": job_id, "fund_id": fund_id, "fund_name": fund_name,
-            "year": year, "model": _AGENTIC_MODEL}
+            "year": year, "model": provider}
 
 
 @app.get("/api/quarterly-letter/funds")
@@ -45001,6 +45077,54 @@ def _mount_portfolio_ship() -> None:
 
 
 _mount_portfolio_ship()
+
+
+def _mount_client_letter() -> None:
+    try:
+        from api.domains.client_letter import cached_market_line, create_router
+
+        def _market() -> str:
+            data = _INDICES_CACHE.get("data") or {}
+            rows = data.get("indices") if isinstance(data, dict) else []
+            return cached_market_line(rows or [])
+
+        def _complete(provider: str, system: str, user: str) -> str:
+            if provider == "grok":
+                return analyst.call_grok(system, user, live_search=False) or ""
+            if provider == "deepseek":
+                return analyst.call_volume_llm(
+                    system, user, provider="deepseek", max_tokens=4000,
+                ) or ""
+            if provider == "claude":
+                return analyst.call_claude(system, user, max_tokens=4000) or ""
+            raise RuntimeError("Choose a model.")
+
+        def _deliver(row: dict, actor: str | None) -> dict:
+            return _qletter_email_lps(
+                "Client letter",
+                target_fund_id=row.get("fund_id"),
+                fallback_email=actor,
+                section_name=str(row.get("fund_name") or "your account"),
+                section_md=str(row.get("body") or ""),
+            )
+
+        app.include_router(create_router(
+            _claims_or_401,
+            _request_json_sync,
+            positions_fn=_load_fund_positions,
+            activity_fn=_quarterly_activity_context,
+            name_fn=_fund_name_lookup,
+            theses_fn=_saved_theses,
+            market_fn=_market,
+            complete_fn=_complete,
+            deliver_fn=_deliver,
+            connect=_fund_conn,
+        ))
+    except Exception as exc:
+        print(f"[client-letter] mount failed: {exc!r}", flush=True)
+
+
+_mount_client_letter()
 
 
 if BRANDING_DIR.exists():

@@ -347,6 +347,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Local Ask layout** | **`ui764-20261022-local-ask`** | SUP_20261022_f7b630e4. An Ask answer sits under the Ask card as a question bar and a note. Podcast Intel, Research, and saved local-report rows are tighter. |
 | **Local Ask stream** | **`ui765-20261022-local-stream`** | Ask writes under the card as Gemma loads and as tokens arrive. A blank local reply says so instead of looking like Ollama is off. |
 | **Financials sheet** | **`ui767-20261023-fin-sheet`** | SUP_20261023_0cda6bd4. The Value Line card follows the company dashboard ticker. The saved-ticker row, the second ticker box, and Open sheet are gone. Print, PDF, and Annual/Quarterly stay. SUP_20261023_f2c7007f. A ready office says where to sign in. It no longer says to create Postgres by hand. |
+| **Client letter** | **`ui768-20261023-client-letter`** | Memos opens with a client letter: pick retiree, school, family principal, foundation, or trustee, then the account and the model. Send is a button. Gamma is optional. Generate on an account uses that model and that account's trades. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
@@ -546,4 +547,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-23 · Agent: Grok Build · Built: `ui767-20261023-fin-sheet` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui768-YYYYMMDD-slug`*
+*Last updated: 2026-10-23 · Agent: Grok Build · Built: `ui768-20261023-client-letter` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui769-YYYYMMDD-slug`*
