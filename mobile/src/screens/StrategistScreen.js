@@ -3,7 +3,7 @@
  *
  * Pick one or more funds/accounts → IC-style agentic review of that book.
  * Same backend as desktop Desk StrategistCard (/api/research/portfolio-strategist).
- * Requires Fund tab unlock (x-fund-token) so we can list accounts.
+ * Lists funds from the signed-in GP account.
  */
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
@@ -67,7 +67,7 @@ export default function StrategistScreen({ navigation }) {
   const loadFunds = useCallback(async () => {
     setFundsErr(null);
     try {
-      // Merge LP funds + managed accounts (fund token required)
+      // Merge LP funds + managed accounts (GP session).
       const [lp, ma] = await Promise.all([
         api.fundList('lp_fund').catch(() => null),
         api.fundList('managed_account').catch(() => null),
@@ -90,11 +90,11 @@ export default function StrategistScreen({ navigation }) {
       });
       setFunds(uniq);
       if (!uniq.length) {
-        setFundsErr('No funds found. Unlock Fund with the fund password first, then pull to refresh.');
+        setFundsErr('No funds found. Pull to refresh.');
       }
     } catch (e) {
       setFunds([]);
-      setFundsErr(String(e?.message || e) + ' — unlock Fund tab first.');
+      setFundsErr(String(e?.message || e));
     }
   }, []);
 

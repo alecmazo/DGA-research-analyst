@@ -17,8 +17,7 @@ const DGA_BUILD = 'ui201-yt-transcript-v1-api-20260529';
 window.fundDiag = async function () {
   const r = await fetch('/api/fund/diagnostic', {
     headers: {
-      'x-auth-token': localStorage.getItem('dga_auth_token') || '',
-      'x-fund-token': localStorage.getItem('dga_fund_token') || '',
+      'x-auth-v2-token': localStorage.getItem('dga_v2_token') || ''
     },
   });
   const j = await r.json().catch(() => ({}));
@@ -30,8 +29,7 @@ window.fundListDiag = async function (fundType = 'lp_fund') {
   const qs = fundType ? `?fund_type=${encodeURIComponent(fundType)}` : '';
   const r = await fetch('/api/fund/list' + qs, {
     headers: {
-      'x-auth-token': localStorage.getItem('dga_auth_token') || '',
-      'x-fund-token': localStorage.getItem('dga_fund_token') || '',
+      'x-auth-v2-token': localStorage.getItem('dga_v2_token') || ''
     },
   });
   const body = await r.text();
@@ -118,57 +116,24 @@ function fixMd(md) {
 }
 
 // ---------- Auth ----------
-const TOKEN_KEY = 'dga_auth_token';
+// The desk uses the same v2 session as the login page (email + password).
+const TOKEN_KEY = 'dga_v2_token';
 
 function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
-function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
-function clearToken() { localStorage.removeItem(TOKEN_KEY); }
-
-function showLogin(errorMsg) {
-  document.getElementById('login-overlay').classList.remove('hidden');
-  const err = document.getElementById('login-error');
-  if (err) err.textContent = errorMsg || '';
-}
-function hideLogin() {
-  document.getElementById('login-overlay').classList.add('hidden');
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem('dga_v2_user');
 }
 
-async function login(password) {
-  const resp = await fetch(`${API_BASE}/api/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
-  });
-  if (!resp.ok) throw new Error('Incorrect password');
-  const { token } = await resp.json();
-  setToken(token);
-  hideLogin();
-  boot();
+function showLogin() {
+  window.location.replace('/');
 }
-
-// Wire up login form
-document.getElementById('login-btn').addEventListener('click', handleLogin);
-document.getElementById('login-password').addEventListener('keydown', e => {
-  if (e.key === 'Enter') handleLogin();
-});
-
-async function handleLogin() {
-  const pw = document.getElementById('login-password').value;
-  const btn = document.getElementById('login-btn');
-  btn.disabled = true;
-  try {
-    await login(pw);
-  } catch {
-    showLogin('Incorrect password — try again');
-  } finally {
-    btn.disabled = false;
-  }
-}
+function hideLogin() {}
 
 // ---------- API helpers ----------
 async function apiGet(path) {
   const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { 'x-auth-token': getToken() },
+    headers: { 'x-auth-v2-token': getToken() },
   });
   if (resp.status === 401) { clearToken(); showLogin('Session expired — please log in again'); throw new Error('Unauthorized'); }
   if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
@@ -177,7 +142,7 @@ async function apiGet(path) {
 async function apiPost(path, body) {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-auth-token': getToken() },
+    headers: { 'Content-Type': 'application/json', 'x-auth-v2-token': getToken() },
     body: JSON.stringify(body),
   });
   if (resp.status === 401) { clearToken(); showLogin('Session expired — please log in again'); throw new Error('Unauthorized'); }
@@ -198,14 +163,13 @@ const api = {
   listStrategies: () => apiGet('/api/strategies'),
   clearCache: () => fetch(`${API_BASE}/api/cache`, {
     method: 'DELETE',
-    headers: { 'x-auth-token': getToken() },
+    headers: { 'x-auth-v2-token': getToken() },
   }).then(r => r.ok ? r.json() : { count: 0 }),
   startPortfolio: (formData) => {
-    formData.append('token', getToken());
     return fetch(`${API_BASE}/api/portfolio`, {
       method: 'POST',
       body: formData,
-      headers: { 'x-auth-token': getToken() },
+      headers: { 'x-auth-v2-token': getToken() },
     }).then(async r => {
       if (r.status === 401) { clearToken(); showLogin('Session expired'); throw new Error('Unauthorized'); }
       if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
@@ -213,20 +177,20 @@ const api = {
     });
   },
   getPortfolioJob: (id) => apiGet(`/api/portfolio/${id}`),
-  portfolioDownloadUrl: (id) => `${API_BASE}/api/portfolio/${id}/download?token=${getToken()}`,
+  portfolioDownloadUrl: (id) => `${API_BASE}/api/portfolio/${id}/download?v2_token=${encodeURIComponent(getToken())}`,
   getLastPortfolio: () => apiGet('/api/portfolio/last'),
   getPortfolioSummary: () => apiGet('/api/portfolio/summary'),
   // Watchlist
   getWatchlist: () => apiGet('/api/watchlist'),
   addWatchlistTicker: (t) => fetch(`${API_BASE}/api/watchlist/${t}`, {
-    method: 'POST', headers: { 'x-auth-token': getToken() }
+    method: 'POST', headers: { 'x-auth-v2-token': getToken() }
   }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || r.status); })),
   removeWatchlistTicker: (t) => fetch(`${API_BASE}/api/watchlist/${t}`, {
-    method: 'DELETE', headers: { 'x-auth-token': getToken() }
+    method: 'DELETE', headers: { 'x-auth-v2-token': getToken() }
   }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || r.status); })),
   // Scan
   startScan: () => fetch(`${API_BASE}/api/scan`, {
-    method: 'POST', headers: { 'x-auth-token': getToken() }
+    method: 'POST', headers: { 'x-auth-v2-token': getToken() }
   }).then(async r => {
     if (r.status === 401) { clearToken(); showLogin('Session expired'); throw new Error('Unauthorized'); }
     if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
@@ -248,7 +212,7 @@ const api = {
   getTracker: (id) => apiGet(`/api/track/${id}`),
   closeTracker: (id) => apiPost(`/api/track/${id}/close`, {}),
   deleteTracker: (id) => fetch(`${API_BASE}/api/track/${id}`, {
-    method: 'DELETE', headers: { 'x-auth-token': getToken() }
+    method: 'DELETE', headers: { 'x-auth-v2-token': getToken() }
   }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || r.status); })),
   getLiveBenchmark: () => apiGet('/api/track/live'),
   getLiveBenchmarkDetail: (snapshotId) => apiGet(
@@ -257,15 +221,15 @@ const api = {
   listYtdSnapshots: () => apiGet('/api/track/live/snapshots'),
   deleteYtdSnapshot: (id) => fetch(`${API_BASE}/api/track/live/snapshots/${encodeURIComponent(id)}`, {
     method: 'DELETE',
-    headers: { 'x-auth-token': getToken() },
+    headers: { 'x-auth-v2-token': getToken() },
   }).then(r => r.json()),
   setCurrentYtdSnapshot: (id) => fetch(
     `${API_BASE}/api/track/live/ytd/set-current/${encodeURIComponent(id)}`,
-    { method: 'POST', headers: { 'x-auth-token': getToken() } }
+    { method: 'POST', headers: { 'x-auth-v2-token': getToken() } }
   ).then(r => r.json()),
   emailYtdReport: (email, snapshotId) => fetch(`${API_BASE}/api/track/live/ytd/email`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'x-auth-token': getToken() },
+    headers: { 'Content-Type': 'application/json', 'x-auth-v2-token': getToken() },
     body:    JSON.stringify({ email, snapshot_id: snapshotId || null }),
   }).then(async r => {
     if (!r.ok) {
@@ -592,9 +556,9 @@ async function openReport(ticker) {
   showView('view-report');
 
   document.getElementById('download-docx').onclick = () =>
-    window.location.href = `${API_BASE}/api/download/${ticker}/docx?token=${getToken()}`;
+    window.location.href = `${API_BASE}/api/download/${ticker}/docx?v2_token=${encodeURIComponent(getToken())}`;
   document.getElementById('download-pptx').onclick = () =>
-    window.location.href = `${API_BASE}/api/download/${ticker}/pptx?token=${getToken()}`;
+    window.location.href = `${API_BASE}/api/download/${ticker}/pptx?v2_token=${encodeURIComponent(getToken())}`;
 
   try {
     const [report, quote, list] = await Promise.all([
@@ -1727,17 +1691,16 @@ async function boot() {
   initTracker();
 }
 
-// On load: if we have a stored token, validate it; otherwise show login.
+// On load: a v2 session is required. Otherwise go to the email login page.
 (async () => {
-  if (getToken()) {
-    try {
-      await apiGet('/api/reports'); // lightweight auth check
-      hideLogin();
-      boot();
-    } catch {
-      showLogin();
-    }
-  } else {
+  if (!getToken()) {
+    showLogin();
+    return;
+  }
+  try {
+    await apiGet('/api/reports');
+    boot();
+  } catch {
     showLogin();
   }
 })();
@@ -2221,12 +2184,11 @@ async function uploadAccountHistory() {
     fd.append('activity_file',  actFile);
     // Only send begin_value when the user actually entered one
     if (beginValue && beginValue > 0) fd.append('begin_value', beginValue);
-    fd.append('token', getToken());
     if (perfFile) fd.append('monthly_perf_file', perfFile);
 
     const res = await fetch(`${API_BASE}/api/track/live/ytd`, {
       method:  'POST',
-      headers: { 'x-auth-token': getToken() },
+      headers: { 'x-auth-v2-token': getToken() },
       body:    fd,
     });
     if (!res.ok) {
@@ -2255,8 +2217,7 @@ async function uploadAccountHistory() {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            'x-auth-token':  getToken(),
-            'x-fund-token':  getFundToken(),
+            'x-auth-v2-token':  getToken()
           },
           body: JSON.stringify({
             nav:         endVal,
@@ -3453,23 +3414,13 @@ async function submitTrack() {
 // Fund Admin — auth gate + data loading
 // ============================================================================
 
-const FUND_TOKEN_KEY = 'dga_fund_token';
-
-function getFundToken()            { return localStorage.getItem(FUND_TOKEN_KEY) || ''; }
-function setFundToken(t)           { localStorage.setItem(FUND_TOKEN_KEY, t); }
-function clearFundToken()          { localStorage.removeItem(FUND_TOKEN_KEY); }
-
 let _fundLoaded   = false;
 let _activeFundId = null;   // UUID of the currently-open fund (null = list view)
 
 // Called when the Fund tab is clicked.
 // Always resets to LP Fund branch — simplest, most reliable behaviour.
 function openFundTab() {
-  if (getFundToken()) {
-    _showFundAuthenticated();
-  } else {
-    showFundLock();
-  }
+  _showFundAuthenticated();
 }
 
 // Show the fund UI after authentication — always starts on LP Fund list.
@@ -3516,7 +3467,7 @@ async function _refreshFundDbStatus() {
   const el = document.getElementById('fund-db-status');
   if (!el) return;
   try {
-    const headers = { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() };
+    const headers = { 'x-auth-v2-token': getToken()};
     const [lpRes, maRes] = await Promise.all([
       fetch('/api/fund/list?fund_type=lp_fund',         { headers }).then(r => r.ok ? r.json() : []),
       fetch('/api/fund/list?fund_type=managed_account', { headers }).then(r => r.ok ? r.json() : []),
@@ -3594,7 +3545,7 @@ async function _rehydrateYtdFromDb(accountId) {
   if (!accountId) return;
   try {
     const r = await fetch(`${API_BASE}/api/fund/account/${encodeURIComponent(accountId)}/ytd-cache`, {
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
     });
     if (!r.ok) return;
     const cache = await r.json();
@@ -3619,7 +3570,7 @@ async function _loadAccountOverview(accountId) {
   if (!wrap) return;
   try {
     const r = await fetch(`${API_BASE}/api/fund/overview?fund_id=${encodeURIComponent(accountId)}`, {
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
     });
     if (!r.ok) { wrap.innerHTML = ''; return; }
     const ov = await r.json();
@@ -3628,7 +3579,7 @@ async function _loadAccountOverview(accountId) {
     let ytdPct = null;
     try {
       const yc = await fetch(`${API_BASE}/api/fund/account/${encodeURIComponent(accountId)}/ytd-cache`, {
-        headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+        headers: { 'x-auth-v2-token': getToken()},
       });
       if (yc.ok) { const yj = await yc.json(); ytdPct = yj.ytd_pct ?? null; }
     } catch (_) {}
@@ -3668,7 +3619,7 @@ async function _loadAccountPositions(accountId) {
   if (!wrap) return;
   try {
     const r = await fetch(`${API_BASE}/api/fund/positions?fund_id=${encodeURIComponent(accountId)}`, {
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
     });
     if (!r.ok) { wrap.innerHTML = '<div class="fund-empty">No positions yet.</div>'; return; }
     const positions = await r.json();
@@ -3802,7 +3753,7 @@ async function handleAccountPositionsUpload(input) {
     if (_activeAccountId) form.append('fund_id', _activeAccountId);
     const r = await fetch(`${API_BASE}/api/fund/import-positions`, {
       method: 'POST',
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
       body: form,
     });
     const body = await r.json().catch(() => ({}));
@@ -3826,11 +3777,10 @@ async function loadAccountList() {
   listEl.innerHTML = '<div class="fund-card-loading">Loading accounts…</div>';
   try {
     const r = await fetch('/api/fund/list?fund_type=managed_account', {
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
     });
     if (r.status === 403) {
-      clearFundToken();
-      showFundLock();
+      listEl.innerHTML = '<div class="fund-error">GP access required.</div>';
       return;
     }
     if (!r.ok) {
@@ -3942,8 +3892,7 @@ async function submitCreateAccount() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-auth-token': getToken(),
-        'x-fund-token': getFundToken(),
+        'x-auth-v2-token': getToken()
       },
       body: JSON.stringify({
         name, short_name: short,
@@ -3973,25 +3922,6 @@ async function submitCreateAccount() {
     statusEl.textContent = `✗ ${e.message}`;
     statusEl.className = 'fund-import-status fund-import-status-err';
   }
-}
-
-function showFundLock() {
-  const overlay = document.getElementById('fund-lock-overlay');
-  const input   = document.getElementById('fund-lock-input');
-  const errEl   = document.getElementById('fund-lock-error');
-  // Hide branch selector while locked
-  const sel = document.getElementById('fund-branch-selector');
-  if (sel) sel.style.display = 'none';
-  overlay.style.display = 'flex';
-  errEl.style.display   = 'none';
-  input.value           = '';
-  setTimeout(() => input.focus(), 80);
-}
-
-function hideFundLock() {
-  document.getElementById('fund-lock-overlay').style.display = 'none';
-  _showFundAuthenticated();
-  _loadMyPortfolioData();
 }
 
 // Show the fund list view (hide detail view)
@@ -4024,41 +3954,7 @@ function showFundDetailView(fundId, fundName) {
   loadFund();
 }
 
-// Wire up the Unlock button (and Enter key) once the DOM is ready.
 document.addEventListener('DOMContentLoaded', () => {
-  // ── Fund lock button ─────────────────────────────────────────────────────
-  const btn   = document.getElementById('fund-lock-btn');
-  const input = document.getElementById('fund-lock-input');
-  if (btn) {
-    async function attemptFundAuth() {
-      const pw = input.value.trim();
-      if (!pw) return;
-      btn.disabled    = true;
-      btn.textContent = 'Checking…';
-      try {
-        const r = await fetch('/api/fund/auth', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json', 'x-auth-token': getToken() },
-          body:    JSON.stringify({ password: pw }),
-        });
-        if (!r.ok) throw new Error('wrong');
-        const { fund_token } = await r.json();
-        setFundToken(fund_token);
-        hideFundLock();
-        _showFundAuthenticated();
-      } catch {
-        document.getElementById('fund-lock-error').style.display = 'block';
-        input.value = '';
-        input.focus();
-      } finally {
-        btn.disabled    = false;
-        btn.textContent = 'Unlock';
-      }
-    }
-    btn.addEventListener('click', attemptFundAuth);
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') attemptFundAuth(); });
-  }
-
   // ── Fund back button ─────────────────────────────────────────────────────
   const backBtn = document.getElementById('fund-back-btn');
   if (backBtn) {
@@ -4145,12 +4041,10 @@ async function loadFundList(fundType = 'lp_fund') {
 
   async function fundFetch(path) {
     const r = await fetch(path, {
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
     });
     if (r.status === 403) {
-      clearFundToken();
-      showFundLock();
-      throw new Error('fund_locked');
+      throw new Error('GP access required');
     }
     if (!r.ok) {
       const body = await r.text().catch(() => '');
@@ -4223,7 +4117,6 @@ async function loadFundList(fundType = 'lp_fund') {
       });
     });
   } catch (e) {
-    if (e.message === 'fund_locked') return;
     listEl.innerHTML = `<div class="fund-error">Unable to load funds: ${e.message}</div>`;
   }
 }
@@ -4240,14 +4133,11 @@ async function loadFund() {
 
   async function fundFetch(path) {
     const r = await fetch(path, {
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
     });
     if (r.status === 403) {
-      // Fund token expired or revoked — re-show the lock screen.
-      clearFundToken();
       _fundLoaded = false;
-      showFundLock();
-      throw new Error('fund_locked');
+      throw new Error('GP access required');
     }
     if (!r.ok) {
       const body = await r.text().catch(() => '');
@@ -4273,7 +4163,6 @@ async function loadFund() {
     _fundLoaded = true;
 
   } catch (e) {
-    if (e.message === 'fund_locked') return;  // lock screen shown — do nothing
     const msg = `<div class="fund-error">Unable to load fund data: ${e.message}</div>`;
     ['fund-overview-cards','fund-lps-wrap','fund-positions-wrap',
      'fund-activity-wrap','fund-waterfall-wrap'].forEach(id => {
@@ -4590,7 +4479,7 @@ async function handlePositionsUpload(input) {
 
     const r = await fetch(`${API_BASE}/api/fund/import-positions`, {
       method: 'POST',
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
       body: form,
     });
     const body = await r.json().catch(() => ({}));
@@ -4630,7 +4519,7 @@ async function handleCaptableUpload(input) {
 
     const r = await fetch(`${API_BASE}/api/fund/import-captable`, {
       method: 'POST',
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
       body: form,
     });
     const body = await r.json().catch(() => ({}));
@@ -4667,7 +4556,7 @@ async function handleAnnualNavUpload(input) {
 
     const r = await fetch(`${API_BASE}/api/fund/import-annual-nav`, {
       method: 'POST',
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
       body: form,
     });
     const body = await r.json().catch(() => ({}));
@@ -4736,8 +4625,7 @@ function confirmDeleteFund(fundId, fundName) {
         `${API_BASE}/api/fund/admin/delete?fund_id=${encodeURIComponent(fundId)}`,
         { method: 'DELETE',
           headers: {
-            'x-auth-token': getToken(),
-            'x-fund-token': getFundToken(),
+            'x-auth-v2-token': getToken(),
             'x-delete-password': pw,
           } }
       );
@@ -4773,7 +4661,7 @@ async function exportFundPdf() {
   try {
     const qs = _activeFundId ? `?fund_id=${encodeURIComponent(_activeFundId)}` : '';
     const r = await fetch(`${API_BASE}/api/fund/export-pdf${qs}`, {
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
     });
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
@@ -4809,7 +4697,7 @@ async function exportFundExcel() {
   try {
     const qs = _activeFundId ? `?fund_id=${encodeURIComponent(_activeFundId)}` : '';
     const r = await fetch(`${API_BASE}/api/fund/export-excel${qs}`, {
-      headers: { 'x-auth-token': getToken(), 'x-fund-token': getFundToken() },
+      headers: { 'x-auth-v2-token': getToken()},
     });
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
@@ -4878,8 +4766,7 @@ async function submitCreateFund() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-auth-token': getToken(),
-        'x-fund-token': getFundToken(),
+        'x-auth-v2-token': getToken()
       },
       body: JSON.stringify({
         name,

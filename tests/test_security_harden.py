@@ -35,7 +35,8 @@ def test_security_headers_middleware():
     assert "def _apply_sec_headers" in SRV
 
 
-def test_login_rate_limit_covers_v1_and_ip():
-    assert "v1|{ip}" in SRV or 'f"v1|{ip}"' in SRV
+def test_login_rate_limit_covers_email_and_ip():
+    assert 'f"ip|{ip}"' in SRV
     assert "_LOGIN_IP_MAX" in SRV
     assert "def _client_ip" in SRV
+    assert '@app.post("/api/auth")' not in SRV

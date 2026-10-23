@@ -9,7 +9,7 @@ import * as Updates from 'expo-updates';
 import { useAppResume } from '../hooks/useAppResume';
 import {
   api, getBaseUrl, setBaseUrl, resetBaseUrlToProd,
-  getStoredPassword, login, logoutV2, getV2User, getV2Token,
+  logoutV2, getV2User, getV2Token,
 } from '../api/client';
 import {
   isBiometricAvailable, isBiometricEnabled, getBiometricLabel,
@@ -91,11 +91,8 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
   const { theme: t } = useTheme();
   const s = useMemo(() => makeStyles(t), [t]);
   const [baseUrl, setBaseUrlState]      = useState('');
-  const [password, setPassword]         = useState('');
   const [serverStatus, setServerStatus] = useState(null);
-  const [authStatus, setAuthStatus]     = useState(null);
   const [testingConn, setTestingConn]   = useState(false);
-  const [savingPw, setSavingPw]         = useState(false);
 
   // Biometric lock (Face ID / Touch ID)
   const [bioAvailable, setBioAvailable] = useState(false);
@@ -128,7 +125,6 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
 
   useEffect(() => {
     getBaseUrl().then(setBaseUrlState);
-    getStoredPassword().then(pw => setPassword(pw || ''));
     getV2User().then(u => setV2User(u || null)).catch(() => setV2User(null));
     refreshServerBuild();
     loadAutomationSettings();
@@ -296,21 +292,6 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
     }
   };
 
-  const savePassword = async () => {
-    const pw = password.trim() || 'dgacapital';
-    setSavingPw(true);
-    setAuthStatus(null);
-    try {
-      await login(pw);
-      setAuthStatus('ok');
-    } catch {
-      setAuthStatus('error');
-      Alert.alert('Wrong Password', 'The server rejected this password. Check your PORTFOLIO_PASSWORD in .env (default is "dgacapital").');
-    } finally {
-      setSavingPw(false);
-    }
-  };
-
   const isUpdating = updateState === 'checking' || updateState === 'downloading' || updateState === 'reloading';
   const sliwEmail = String(v2User?.email || '').trim().toLowerCase();
   const canOpenSliw = SLIW_EMAILS.includes(sliwEmail);
@@ -409,44 +390,6 @@ export default function SettingsScreen({ onLogout, isDemo, onSwitchToLP, onSwitc
           <Text style={s.sectionHint}>
             Tap if "Network request failed" — wipes any stale localhost URL and reconnects to https://dga-portfolio.up.railway.app
           </Text>
-        </View>
-
-        {/* ── Password ── */}
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>SERVER PASSWORD</Text>
-          <Text style={s.sectionHint}>
-            The password set on your server (PORTFOLIO_PASSWORD in .env).{'\n'}
-            <Text style={s.hint_default}>Default is </Text>
-            <Text style={s.hint_code}>dgacapital</Text>
-            <Text style={s.hint_default}> — leave blank to use the default.</Text>
-          </Text>
-          <TextInput
-            style={s.input}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="dgacapital"
-            placeholderTextColor={t.textDim}
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry={false}
-          />
-          <View style={s.buttonRow}>
-            <TouchableOpacity
-              style={[s.saveBtn, s.saveBtnGold, savingPw && s.disabledBtn]}
-              onPress={savePassword}
-              disabled={savingPw}
-            >
-              {savingPw
-                ? <ActivityIndicator size="small" color={t.chromeNavy} />
-                : <Text style={s.saveBtnGoldText}>Save &amp; Connect</Text>
-              }
-            </TouchableOpacity>
-            {authStatus === 'ok'    && <Ionicons name="checkmark-circle" size={22} color={t.green} />}
-            {authStatus === 'error' && <Ionicons name="close-circle"     size={22} color={t.red}   />}
-          </View>
-          {authStatus === 'ok' && (
-            <Text style={s.authOkText}>✓ Connected — token saved</Text>
-          )}
         </View>
 
         {/* ── Security / Biometric lock ── */}

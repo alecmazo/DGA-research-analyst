@@ -1,19 +1,16 @@
 # `@dga/auth` (placeholder)
 
-Single sign-on for the suite. Today every API uses an HMAC-style
-password (`PORTFOLIO_PASSWORD` env var) → token exchange (Research's
-`/api/auth`).
+Sign-in is an email + password account. The API is `POST /api/auth/v2/login`
+in `auth_v2.py`. Sessions are HMAC-signed JSON (`TOKEN_SECRET`) and travel
+in the `x-auth-v2-token` header (or `v2_token` query on downloads).
 
-Phase 1 of the suite split keeps this token model but extends it:
+Roles:
 
-- One **issuer** service (or library) that mints JWTs scoped per app:
-  `{ "sub": "alec", "apps": ["research","fund"], "exp": ... }`.
-- Each app validates the JWT, checks scopes, and only allows access
-  to its own resources.
-- LP users (Fund Admin) get tokens with `apps: ["fund"]` only — they
-  can't see Research, can't see other LPs.
+- **GP / admin** sees every fund and managed account, including the fund
+  admin routes.
+- **LP** sees only the funds and managed accounts assigned to that login
+  (`/api/v2/lp/*`, plus fund display settings and balance history).
 
-This unblocks giving an LP read-only access to their own statements
-without giving them the keys to the rest of the suite.
-
-See `../../MONOREPO.md` Phase 1.
+There is no shared desk password and no shared fund password.
+`FUND_DELETE_PASSWORD` is a separate confirmation on
+`DELETE /api/fund/admin/delete` and still requires a GP session.

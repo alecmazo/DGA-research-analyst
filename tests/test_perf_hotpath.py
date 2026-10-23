@@ -50,7 +50,7 @@ def test_list_reports_sql_skips_valuation_json():
     assert "_quote_from_current_session" in fill
     assert "_batch_quotes_fast" not in fill
     assert "_reports_attach_store_prices(out)" in fn
-    assert 'WEB_BUILD_VERSION = "ui771-20261023-office-dns"' in src
+    assert 'WEB_BUILD_VERSION = "ui772-20261023-account-auth"' in src
 
 
 def test_positions_use_newest_print_not_yahoo():
@@ -191,7 +191,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui771-20261023-office-dns"' in src
+    assert 'WEB_BUILD_VERSION = "ui772-20261023-account-auth"' in src
     assert "if (not lite) and _wl_left()" in wl
 
 

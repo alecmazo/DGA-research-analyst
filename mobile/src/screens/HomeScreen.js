@@ -141,7 +141,7 @@ export default function HomeScreen({ navigation, route }) {
     } catch (err) {
       haptics.onError();
       if (err?.isAuthError) {
-        Alert.alert('Wrong Password', 'Go to Settings → Server Password. The default is "dgacapital".');
+        Alert.alert('Sign in again', 'Your session expired. Sign in with your email and password.');
       } else {
         Alert.alert('Error', err.message);
       }

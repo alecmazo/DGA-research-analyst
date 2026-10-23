@@ -1,10 +1,8 @@
 /**
  * FundScreen — DGA Capital Fund I / Managed Portfolio hub
  *
- * Password gate:  enter "genesis" (FUND_PASSWORD env var) to unlock.
- *   • Wrong password  → server returns 403  → show "Incorrect password"
- *   • 403 on data call → token invalidated  → re-lock
- *   • Main auth token is never affected by fund auth failures
+ * Shown on the GP tabs. The signed-in GP account is enough; there is no
+ * second password. A 403 is a permission error, not a lock screen.
  *
  * Two branches (top selector):
  *   LP Fund       — multi-LP fund with NAV, waterfall, carry calculations
@@ -26,7 +24,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
 import { colors } from '../components/theme';
-import { api, getFundToken, setFundToken, clearFundToken } from '../api/client';
+import { api } from '../api/client';
 import LPPlanningScreen from './LPPlanningScreen';
 
 const LAST_PORTFOLIO_KEY = '@dga_last_portfolio';
@@ -56,12 +54,6 @@ const BRANCHES = ['LP Fund', 'Managed', 'Rebalanced', 'Planning'];
 const LP_TABS  = ['Overview', 'LPs', 'Positions', 'Activity', 'Waterfall'];
 
 export default function FundScreen({ navigation }) {
-  // ── Auth state ───────────────────────────────────────────────────────────
-  const [locked,    setLocked]    = useState(true);
-  const [password,  setPassword]  = useState('');
-  const [authError, setAuthError] = useState(false);
-  const [authBusy,  setAuthBusy]  = useState(false);
-
   // ── Branch / tab state ───────────────────────────────────────────────────
   const [branch,    setBranch]    = useState('LP Fund');
   const [activeTab, setActiveTab] = useState('Overview');
@@ -173,33 +165,18 @@ export default function FundScreen({ navigation }) {
   const [lastRebal,         setLastRebal]         = useState(null);
   const rebalPollRef = useRef(null);
 
-  // ── Check token on focus ─────────────────────────────────────────────────
-  useFocusEffect(useCallback(() => {
-    let active = true;
-    (async () => {
-      const token = await getFundToken();
-      if (!active) return;
-      if (token) { setLocked(false); }
-      else        { setLocked(true); }
-    })();
-    return () => { active = false; };
-  }, []));
-
-  // When unlocked, load fund list, managed accounts, and YTD snapshots
+  // Load fund list, managed accounts, and YTD snapshots for this GP session.
   const fundLoadedAt = useRef(0);
   useFocusEffect(useCallback(() => {
-    if (!locked) {
-      const stale = Date.now() - fundLoadedAt.current > 60_000;
-      if (!stale && fundLoadedAt.current) return;
-      loadFundList();
-      loadYtdSnapshots();
-      loadManagedAccList(null);
-      fundLoadedAt.current = Date.now();
-    }
-  }, [locked])); // eslint-disable-line
+    const stale = Date.now() - fundLoadedAt.current > 60_000;
+    if (!stale && fundLoadedAt.current) return;
+    loadFundList();
+    loadYtdSnapshots();
+    loadManagedAccList(null);
+    fundLoadedAt.current = Date.now();
+  }, [])); // eslint-disable-line
 
   useAppResume(() => {
-    if (locked) return;
     loadFundList();
     loadYtdSnapshots();
     loadManagedAccList(null);
@@ -217,25 +194,6 @@ export default function FundScreen({ navigation }) {
     })();
     return () => { cancelled = true; };
   }, [ytdResult]); // eslint-disable-line
-
-  // ── Auth submit ──────────────────────────────────────────────────────────
-  const submitPassword = async () => {
-    const pw = password.trim();
-    if (!pw) return;
-    setAuthBusy(true);
-    setAuthError(false);
-    try {
-      const { fund_token } = await api.fundAuth(pw);
-      await setFundToken(fund_token);
-      setPassword('');
-      setLocked(false);
-    } catch (e) {
-      setAuthError(true);
-      setPassword('');
-    } finally {
-      setAuthBusy(false);
-    }
-  };
 
   // ── Fund list loading ────────────────────────────────────────────────────
   const loadFundList = useCallback(async () => {
@@ -266,11 +224,6 @@ export default function FundScreen({ navigation }) {
       setFundList(deduped);
       AsyncStorage.setItem(FUND_LIST_KEY, JSON.stringify(deduped)).catch(() => {});
     } catch (e) {
-      if (e.message?.includes('403')) {
-        await clearFundToken();
-        setLocked(true);
-        return;
-      }
       setFundListError(e.message || 'Failed to load funds');
     } finally {
       setFundListLoading(false);
@@ -327,11 +280,6 @@ export default function FundScreen({ navigation }) {
         })).catch(() => {});
       }
     } catch (e) {
-      if (e.message?.includes('403')) {
-        await clearFundToken();
-        setLocked(true);
-        return;
-      }
       setError(e.message || 'Failed to load fund data');
     } finally {
       setLoading(false);
@@ -397,10 +345,7 @@ export default function FundScreen({ navigation }) {
         loadYtdCacheForAccount(first.id);
       }
     } catch (e) {
-      if (e.message?.includes('403')) {
-        await clearFundToken();
-        setLocked(true);
-      }
+      setFundListError(e.message || 'Failed to load accounts');
     } finally {
       setManagedAccLoading(false);
     }
@@ -751,46 +696,6 @@ export default function FundScreen({ navigation }) {
     })();
     return () => { if (rebalPollRef.current) clearInterval(rebalPollRef.current); };
   }, [])); // eslint-disable-line
-
-  // ── Lock screen ──────────────────────────────────────────────────────────
-  if (locked) {
-    return (
-      <View style={s.screen}>
-        <AppHeader title="Fund Admin" subtitle="DGA Capital Fund I, LP" />
-        <KeyboardAvoidingView
-          style={s.lockOuter}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <View style={s.lockCard}>
-            <Text style={s.lockIcon}>🔒</Text>
-            <Text style={s.lockTitle}>Fund Access</Text>
-            <Text style={s.lockHint}>Enter the fund password to continue.</Text>
-            <TextInput
-              style={[s.lockInput, authError && s.lockInputError]}
-              value={password}
-              onChangeText={txt => { setPassword(txt); setAuthError(false); }}
-              placeholder="Fund password"
-              placeholderTextColor="#3a5070"
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              onSubmitEditing={submitPassword}
-              returnKeyType="go"
-              autoFocus
-            />
-            {authError && <Text style={s.lockErrText}>Incorrect password — try again</Text>}
-            <TouchableOpacity
-              style={[s.lockBtn, authBusy && { opacity: 0.6 }]}
-              onPress={submitPassword}
-              disabled={authBusy}
-            >
-              <Text style={s.lockBtnText}>{authBusy ? 'Checking…' : 'Unlock'}</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    );
-  }
 
   // ── Branch: My Portfolio ─────────────────────────────────────────────────
   function FileRow({ label, file, onPick, required }) {
@@ -2095,18 +2000,6 @@ const s = StyleSheet.create({
   retryBtn:    { backgroundColor: 'rgba(91,184,212,.15)', paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8, borderWidth: 1, borderColor: colors.primary },
   retryText:   { color: colors.primary, fontWeight: '700', fontSize: 14 },
   emptyText:   { color: '#3a5070', padding: 24, fontSize: 13 },
-
-  // Lock screen
-  lockOuter:      { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  lockCard:       { backgroundColor: '#0d1f38', borderRadius: 16, padding: 32, width: '100%', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(91,184,212,0.3)' },
-  lockIcon:       { fontSize: 36, marginBottom: 12 },
-  lockTitle:      { fontSize: 18, fontWeight: '800', color: '#f0e8d0', marginBottom: 6 },
-  lockHint:       { fontSize: 12, color: '#4a6080', marginBottom: 20, textAlign: 'center' },
-  lockInput:      { width: '100%', backgroundColor: '#081526', borderWidth: 1, borderColor: '#1e3a5a', borderRadius: 8, color: '#f0e8d0', fontSize: 15, padding: 12, marginBottom: 8 },
-  lockInputError: { borderColor: '#e05a5a' },
-  lockErrText:    { color: '#e05a5a', fontSize: 12, marginBottom: 8 },
-  lockBtn:        { width: '100%', backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 13, alignItems: 'center', marginTop: 4 },
-  lockBtnText:    { color: colors.navy, fontWeight: '800', fontSize: 15, letterSpacing: 0.4 },
 
   // Branch selector
   branchBar:          { flexDirection: 'row', backgroundColor: '#060f1e', borderBottomWidth: 1, borderBottomColor: 'rgba(91,184,212,0.2)', padding: 8, gap: 8 },

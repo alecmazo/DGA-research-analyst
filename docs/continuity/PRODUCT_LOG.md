@@ -91,6 +91,8 @@ Copy these into every new agent session:
 
 - Login: `POST /api/auth/v2/login` · header `x-auth-v2-token`
 - Gateway: `web/portfolio.html` (`/`)
+- A GP or admin account can open every fund and managed account. An LP account sees only its assigned books (`/api/v2/lp/*`, fund display settings, balance history).
+- There is no shared desk password and no shared fund password. `FUND_DELETE_PASSWORD` is only the extra confirmation on `DELETE /api/fund/admin/delete`, and that route still requires a GP session.
 - GP change-password: Settings → Security
 - MFA endpoints exist under `/api/auth/v2/mfa/*`
 - Fail-closed if `TOKEN_SECRET` is missing or the public default

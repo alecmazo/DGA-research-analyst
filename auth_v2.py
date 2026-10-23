@@ -8,10 +8,9 @@ Per-user authentication for the new portfolio.dgacapital.com login flow.
 * LP (limited partner) sees only their own capital account in the
   fund(s) they participate in, plus their own managed account(s).
 
-The v2 system runs *alongside* the existing single-password /api/auth
-endpoint (which the current mobile app and web shell still use).
-Backward compat is preserved until the new login is shipped to both
-surfaces; then /api/auth can be deprecated.
+Login is email + password only. A GP account sees every fund and
+managed account. An LP account sees only the funds and managed accounts
+assigned to that login.
 
 Storage
 -------
@@ -407,9 +406,8 @@ def find_user_by_lp_id(lp_id: str) -> Optional[dict]:
 def login(email: str, password: str) -> Optional[dict]:
     """Validate email + password. On success returns a dict with token + user info.
 
-    Authentication is strictly per-user: each account logs in with its OWN
-    password only. The former master-password ("god-mode") impersonation path —
-    which let the FUND_PASSWORD holder log in as any LP — has been removed.
+    Authentication is strictly per-user: each account logs in with its own
+    password only. There is no shared password and no impersonation path.
 
     If the password matches a historically leaked seed password, login still
     succeeds but ``must_change_password`` is forced True so the client shows

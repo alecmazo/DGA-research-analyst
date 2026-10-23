@@ -1433,10 +1433,10 @@ def _apply_sec_headers(request: Request, response):
     return response
 
 # ---------------------------------------------------------------------------
-# Auth — stateless HMAC token (survives restarts, no DB needed)
+# Auth — v2 email+password sessions only (signed in auth_v2)
 # ---------------------------------------------------------------------------
 _PUBLIC_PATHS = {
-    "/health", "/healthz", "/info", "/api/auth", "/api/build", "/",
+    "/health", "/healthz", "/info", "/api/build", "/",
     "/api/auth/v2/login",   # email+password login is unauthenticated by design
     # Free macro RSS wire — no PII, no LLM. Public so mobile never blanks
     # the Research card on a missing/expired JWT (common with v2-only sessions).
@@ -1445,85 +1445,20 @@ _PUBLIC_PATHS = {
     "/api/v2/news/x-fin-feed",
 }
 
-# Fail-closed defaults: never accept public secrets that lived in git history.
-import secrets as _auth_secrets
-_UNSET_PORTFOLIO_PW = "unset-pf-" + _auth_secrets.token_urlsafe(24)
-_RUNTIME_TOKEN_SECRET: str | None = None
-_WEAK_PASSWORDS = frozenset({"dgacapital", "genesis", "password", "changeme", ""})
-
-def _portfolio_password() -> str:
-    """Legacy v1 desk password. Refuse public defaults from git history."""
-    pw = os.environ.get("PORTFOLIO_PASSWORD", "").strip()
-    if not pw or pw.lower() in _WEAK_PASSWORDS:
-        # Per-process random — matches nothing until a strong PORTFOLIO_PASSWORD
-        # is set on Railway.
-        return _UNSET_PORTFOLIO_PW
-    return pw
-
-def _token_secret() -> str:
-    """HMAC secret for v1 tokens. Refuse the public default baked into git."""
-    global _RUNTIME_TOKEN_SECRET
-    sec = os.environ.get("TOKEN_SECRET", "").strip()
-    if not sec or sec == "dga-capital-jwt-secret":
-        if _RUNTIME_TOKEN_SECRET is None:
-            _RUNTIME_TOKEN_SECRET = "runtime-" + _auth_secrets.token_urlsafe(32)
-            print(
-                "[auth] SECURITY: TOKEN_SECRET missing or is the public default — "
-                "using ephemeral secret (set a strong TOKEN_SECRET on Railway)",
-                flush=True,
-            )
-        return _RUNTIME_TOKEN_SECRET
-    return sec
-
-def _make_token(password: str) -> str:
-    """Derive a deterministic token from password + secret (HMAC-SHA256)."""
-    return hmac.new(  # type: ignore[attr-defined]
-        _token_secret().encode(), password.encode(), hashlib.sha256
-    ).hexdigest()
-
-def _valid_token(token: str) -> bool:
-    expected = _make_token(_portfolio_password())
-    return hmac.compare_digest(token.strip(), expected)
-
-# Fund-specific auth — second layer on top of main auth.
-# FAIL CLOSED: never accept the public default ("genesis"). When FUND_PASSWORD
-# is unset or default, return a random per-process value that matches nothing,
-# so fund operations stay locked until a strong FUND_PASSWORD is configured.
-import secrets as _secrets
-_UNSET_FUND_PW = "unset-" + _secrets.token_urlsafe(24)
-def _fund_password() -> str:
-    pw = os.environ.get("FUND_PASSWORD", "").strip()
-    if not pw or pw == "genesis":
-        return _UNSET_FUND_PW
-    return pw
-
-def _make_fund_token() -> str:
-    """Deterministic fund token: HMAC of 'fund:<password>' with shared secret."""
-    return hmac.new(
-        _token_secret().encode(), f"fund:{_fund_password()}".encode(), hashlib.sha256
-    ).hexdigest()
-
-def _valid_fund_token(token: str) -> bool:
-    return hmac.compare_digest(token.strip(), _make_fund_token())
-
 def _require_fund_token(request: Request) -> None:
-    """Allow either a valid fund_token OR a v2 GP token.
+    """GP authorization for fund and managed-account admin routes.
 
-    Backward compatible with the old fund portal (which uses x-fund-token),
-    while letting the new GP dashboard call the same admin endpoints with
-    its v2 JWT (x-auth-v2-token). LPs can never reach these endpoints.
+    A GP or admin account is allowed because that role already sees every
+    fund and managed account. LPs do not pass this check. Reads an LP is
+    allowed to make (display settings, balance history, /api/v2/lp/*) do
+    not use this gate, or they call it only when the request has no v2
+    session at all.
     """
-    # First check: v2 GP token (attached by auth_middleware)
-    claims = getattr(request.state, 'auth_claims', None)
-    if claims and claims.get("role") in ("gp", "admin"):
-        return  # GP is authorized for all fund admin operations
-
-    # Fall back to legacy fund token
-    token = (request.headers.get("x-fund-token")
-             or request.query_params.get("fund_token")
-             or "")
-    if not _valid_fund_token(token):
-        raise HTTPException(status_code=403, detail="Fund access requires GP authentication or fund token")
+    claims = getattr(request.state, "auth_claims", None)
+    if not claims:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(status_code=403, detail="GP access required")
 
 # ── Idle detection ───────────────────────────────────────────────────────────
 # Heavy background loops (market autosync) gate on recent request activity so an
@@ -1594,29 +1529,6 @@ async def auth_middleware(request: Request, call_next):
                 pass
             request.state.auth_claims = claims
             _blk = await _demo_sandbox_check(request)
-            if _blk is not None:
-                return _blk
-            return await call_next(request)
-
-    # ── v1 token (legacy single-password HMAC) — backward compat for the
-    # existing web shell and mobile app until they're migrated to v2.
-    token = (request.headers.get("x-auth-token")
-             or request.query_params.get("token")
-             or "")
-    if _valid_token(token):
-        _blk = await _demo_sandbox_check(request)   # legacy = real session
-        if _blk is not None:
-            return _blk
-        return await call_next(request)
-
-    # Fund paths may also be accessed with a valid fund token alone
-    # (they perform their own _require_fund_token check internally).
-    if path.startswith("/api/fund/"):
-        fund_tok = (request.headers.get("x-fund-token")
-                    or request.query_params.get("fund_token")
-                    or "")
-        if _valid_fund_token(fund_tok):
-            _blk = await _demo_sandbox_check(request)   # legacy = real session
             if _blk is not None:
                 return _blk
             return await call_next(request)
@@ -1930,9 +1842,6 @@ def _save_job_index_entry(job_id: str, entry: dict) -> None:
 # Pydantic models
 # ---------------------------------------------------------------------------
 
-class FundAuthRequest(BaseModel):
-    password: str
-
 class CreateFundRequest(BaseModel):
     name:           str                 # 'DGA Capital Fund II, LP'
     short_name:     str                 # 'DGA-II'
@@ -1992,32 +1901,10 @@ class IntelligenceRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Auth route
-# ---------------------------------------------------------------------------
-
-class AuthRequest(BaseModel):
-    password: str
-
-@app.post("/api/auth")
-def auth(req: AuthRequest, request: Request):
-    ip = _client_ip(request)
-    if not _rl_allowed(f"v1|{ip}", _LOGIN_IP_MAX):
-        _audit("login_v1", "", ip, False, "rate_limited")
-        raise HTTPException(
-            status_code=429,
-            detail="Too many failed attempts. Please wait 15 minutes and try again.",
-        )
-    if hmac.compare_digest(req.password.strip(), _portfolio_password()):
-        return {"token": _make_token(req.password.strip())}
-    _rl_record_failure(f"v1|{ip}")
-    raise HTTPException(status_code=401, detail="Invalid password")
-
-
-# ---------------------------------------------------------------------------
 # v2 Auth — per-user email+password with role + scope claims
 # ---------------------------------------------------------------------------
-# Runs alongside /api/auth (which the current mobile app still uses).
-# Once the new web + mobile login flows ship, /api/auth can be deprecated.
+# The only login. A GP account sees every fund and managed account.
+# An LP account sees only the funds and accounts assigned to that login.
 import auth_v2 as auth_v2_mod   # noqa: E402  — imported here to avoid top-of-file churn
 
 
@@ -2105,12 +1992,9 @@ def auth_v2_login(req: AuthV2LoginRequest, request: Request):
 
 @app.get("/api/auth/v2/me")
 def auth_v2_me(request: Request):
-    """Return the authenticated user's profile. Read from the
-    x-auth-v2-token header (or x-auth-token / token query param as
-    fallback so it composes with the existing middleware)."""
+    """Return the authenticated user's profile from the v2 session token."""
     token = (request.headers.get("x-auth-v2-token")
-             or request.headers.get("x-auth-token")
-             or request.query_params.get("token")
+             or request.query_params.get("v2_token")
              or "")
     user = auth_v2_mod.whoami(token)
     if not user:
@@ -2127,8 +2011,7 @@ def auth_v2_change_password(request: Request, body: AuthV2ChangePasswordRequest)
     too-short new password).
     """
     token = (request.headers.get("x-auth-v2-token")
-             or request.headers.get("x-auth-token")
-             or request.query_params.get("token")
+             or request.query_params.get("v2_token")
              or "")
     claims = auth_v2_mod.verify_token(token)
     if not claims:
@@ -4219,30 +4102,10 @@ def _wl_remove_db(lp_id: str, ticker: str) -> None:
 
 
 def _claims_or_401(request: Request) -> dict:
-    """Extract v2 auth claims attached by the middleware.
-
-    Mobile (and older web shells) often send only the legacy v1 HMAC token.
-    Financials / watchlist used to 401 those sessions even though middleware
-    already authenticated them — treat valid v1 as a GP-equivalent session so
-    the mobile Financials tab and desk keep working.
-    """
+    """Extract v2 auth claims attached by the middleware."""
     claims = getattr(request.state, "auth_claims", None)
     if claims:
         return claims
-    # Legacy v1 path: middleware already accepted x-auth-token
-    token = (request.headers.get("x-auth-token")
-             or request.query_params.get("token")
-             or "")
-    if token and _valid_token(token):
-        return {
-            "role": "gp",
-            "lp_id": "legacy-v1",
-            "name": "GP",
-            "email": "",
-            "legacy_v1": True,
-            "fund_memberships": {},
-            "managed_account_ids": [],
-        }
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
@@ -9088,7 +8951,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui771-20261023-office-dns"
+WEB_BUILD_VERSION = "ui772-20261023-account-auth"
 
 
 @app.get("/api/build")
@@ -20440,7 +20303,7 @@ def email_live_ytd_report(body: EmailYtdRequest, request: Request):
     the most recent stored snapshot.
     """
     claims = _claims_or_401(request)
-    if claims.get("role") not in ("gp", "admin") and not claims.get("legacy_v1"):
+    if claims.get("role") not in ("gp", "admin"):
         # LPs may only email reports to their own login address
         own = (claims.get("email") or "").strip().lower()
         if (body.email or "").strip().lower() != own:
@@ -22461,7 +22324,7 @@ def fund_list(request: Request, fund_type: str = None):
     N-sequential-query loops.
     """
     _require_fund_token(request)
-    # Check for demo_mode in JWT claims (mobile piggbacks x-auth-v2-token alongside x-fund-token)
+    # Demo sessions are marked on the v2 JWT (x-auth-v2-token).
     _fund_claims  = getattr(request.state, 'auth_claims', None) or {}
     _is_demo      = bool(_fund_claims.get("demo_mode"))
     # 25s response cache — split by demo vs normal so anonymized data isn't served to real admins
@@ -22881,16 +22744,6 @@ def get_account_ytd_cache(fund_id: str, request: Request):
         raise HTTPException(500, f"Failed to load YTD cache: {e}")
     finally:
         conn.close()
-
-
-@app.post("/api/fund/auth")
-def fund_auth_endpoint(body: FundAuthRequest):
-    """Exchange the fund password for a fund-specific access token.
-    Requires the main app token (handled by middleware) + correct FUND_PASSWORD."""
-    if not hmac.compare_digest(body.password.strip(), _fund_password()):
-        # Return 403, NOT 401 — 401 triggers the mobile client's main-auth retry loop.
-        raise HTTPException(status_code=403, detail="Incorrect fund password")
-    return {"fund_token": _make_fund_token()}
 
 
 @app.get("/api/fund/overview")
@@ -23606,9 +23459,8 @@ def _send_via_gmail_with_attachment(
 def email_diag(request: Request):
     """Diagnose email transport — checks Resend API key, verified domains, and SMTP config.
     Returns a full diagnostic report so we know exactly what to fix."""
-    claims = getattr(request.state, "auth_claims", None)
-    if not claims or claims.get("role") not in ("gp", "admin"):
-        _require_fund_token(request)
+    _require_fund_token(request)
+    claims = getattr(request.state, "auth_claims", None) or {}
 
     import urllib.request as _urlreq, urllib.error as _urlerr
 
@@ -23902,10 +23754,8 @@ def run_account_rebalance(fund_id: str, request: Request,
     Suggestion rows are derived from that review. The valuation-only
     rebalance no longer fills this card.
     """
-    claims = getattr(request.state, "auth_claims", None)
-    if not claims or claims.get("role") not in ("gp", "admin"):
-        _require_fund_token(request)
-        claims = claims or {"role": "gp", "email": "fund-token"}
+    _require_fund_token(request)
+    claims = getattr(request.state, "auth_claims", None) or {}
     if _request_is_demo(request):
         return _demo_committee_rebalance(fund_id, claims)
     extra = {}
@@ -23923,9 +23773,8 @@ def run_account_rebalance(fund_id: str, request: Request,
 @app.post("/api/v2/gp/fund/{fund_id}/rebalance/email")
 def email_account_rebalance(fund_id: str, request: Request):
     """Email the committee sizing for a book."""
-    claims = getattr(request.state, "auth_claims", None)
-    if not claims or claims.get("role") not in ("gp", "admin"):
-        _require_fund_token(request)
+    _require_fund_token(request)
+    claims = getattr(request.state, "auth_claims", None) or {}
 
     data = _committee_rebalance_payload(fund_id)
     if not data.get("review_id") or not data.get("rows"):
@@ -25305,10 +25154,11 @@ def fund_import_balance_history(
 
 @app.get("/api/fund/{fund_id}/balance-history")
 def fund_balance_history(fund_id: str, request: Request):
-    # GPs and LPs (viewing their own accounts) are both allowed.
+    # Any signed-in account may read balance history (LP portal and GP desk).
+    # Unauthenticated callers are rejected. This is not a GP-only admin route.
     claims = getattr(request.state, 'auth_claims', None)
     if not claims:
-        _require_fund_token(request)  # legacy fund token fallback
+        _require_fund_token(request)
     conn = _fund_conn()
     try:
         with conn.cursor(cursor_factory=_RealDictCursor) as cur:
@@ -25774,9 +25624,9 @@ def _safe_delete(cur, sql: str, params: tuple) -> None:
 def fund_admin_delete(request: Request, fund_id: str):
     """Permanently delete a fund and ALL its associated data.
 
-    Requires the x-delete-password header to match the FUND_DELETE_PASSWORD
-    environment variable.  If FUND_DELETE_PASSWORD is not set the endpoint
-    is disabled (returns 503).
+    Requires a GP or admin session, plus the x-delete-password header
+    matching FUND_DELETE_PASSWORD. If that variable is not set the
+    endpoint is disabled (returns 503).
     """
     _require_fund_token(request)
 

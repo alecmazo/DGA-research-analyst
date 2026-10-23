@@ -1,15 +1,13 @@
 /**
  * DGA Capital — API client for React Native
  *
- * Auth flow (matches the web app exactly):
- *   1. App calls login(password) → POST /api/auth → server returns HMAC token
- *   2. Token is cached in AsyncStorage
- *   3. Every request sends   x-auth-token: <token>
- *   4. On 401, cached token is cleared and login is retried once with the
- *      stored password.  If that also fails, isAuthError is thrown.
- *
- * Default password is "dgacapital" (matches server default PORTFOLIO_PASSWORD).
- * Users only need to change it if they set a custom PORTFOLIO_PASSWORD in .env.
+ * Auth is the v2 email + password session only:
+ *   1. loginV2(email, password) → POST /api/auth/v2/login
+ *   2. The signed token is cached in AsyncStorage
+ *   3. Every request sends x-auth-v2-token
+ * A GP account can call fund and managed-account routes. An LP account
+ * uses the scoped /api/v2/lp/* routes (and the two fund reads the server
+ * still allows for any signed-in account).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -24,16 +22,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Keep railway.app as a silent fallback if DNS ever hiccups.
 const PROD_API_BASE_URL  = 'https://portfolio.dgacapital.com';
 const DEFAULT_BASE_URL   = process.env.EXPO_PUBLIC_API_BASE_URL || PROD_API_BASE_URL;
-const DEFAULT_PASSWORD   = 'dgacapital';           // server default
 
 const BASE_URL_KEY  = '@dga_api_base_url';
 const GAMMA_KEY     = '@dga_gamma_enabled';
-const PASSWORD_KEY  = '@dga_password';             // plain-text password user entered
-const TOKEN_KEY     = '@dga_token_cache';          // HMAC token returned by /api/auth
-const FUND_TOKEN_KEY = '@dga_fund_token';          // fund-specific access token
 
 // v2 per-user auth — email + password → signed claims token (role + scope).
-// Runs ALONGSIDE the legacy v1 flow until all screens migrate to v2.
 const V2_TOKEN_KEY = '@dga_v2_token';
 const V2_USER_KEY  = '@dga_v2_user';
 
@@ -81,51 +74,6 @@ export async function getGammaEnabled() {
 }
 export async function setGammaEnabled(v) {
   await AsyncStorage.setItem(GAMMA_KEY, v ? 'true' : 'false');
-}
-
-// ── Auth ──────────────────────────────────────────────────────────────────────
-/** Exchange a plain password for the server's HMAC token and cache it. */
-export async function login(password) {
-  const base = await getBaseUrl();
-  const resp = await fetch(`${base}/api/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: password.trim() }),
-  });
-  if (!resp.ok) {
-    const err = new Error('Incorrect password');
-    err.isAuthError = true;
-    throw err;
-  }
-  const { token } = await resp.json();
-  await AsyncStorage.multiSet([
-    [PASSWORD_KEY, password.trim()],
-    [TOKEN_KEY,    token],
-  ]);
-  return token;
-}
-
-/** Get the cached HMAC token, auto-authenticating with the stored password
- *  (or the server default "dgacapital") if no token is cached yet. */
-export async function getToken() {
-  try {
-    const cached = await AsyncStorage.getItem(TOKEN_KEY);
-    if (cached) return cached;
-    // No token yet — silently authenticate with stored/default password
-    const password = (await AsyncStorage.getItem(PASSWORD_KEY)) || DEFAULT_PASSWORD;
-    return await login(password);
-  } catch {
-    return '';
-  }
-}
-
-export async function getStoredPassword() {
-  try { return (await AsyncStorage.getItem(PASSWORD_KEY)) || ''; }
-  catch { return ''; }
-}
-
-export async function clearToken() {
-  await AsyncStorage.removeItem(TOKEN_KEY);
 }
 
 // ── v2 Auth (email + password, role-aware) ────────────────────────────────────
@@ -220,48 +168,27 @@ export async function logoutV2() {
   await AsyncStorage.multiRemove([V2_TOKEN_KEY, V2_USER_KEY]);
 }
 
-/** Wrapped fetch that auto-attaches the v2 token (and v1 HMAC when present).
+/** Wrapped fetch that attaches the v2 session token.
  *  Use for any /api/v2/* call. Returns the raw Response object. */
 export async function v2Fetch(path, options = {}) {
-  const [base, tok, v1] = await Promise.all([getBaseUrl(), getV2Token(), getToken()]);
+  const [base, tok] = await Promise.all([getBaseUrl(), getV2Token()]);
   const url = `${base}${path}`;
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (tok) headers['x-auth-v2-token'] = tok;
-  // Always piggyback v1 so free endpoints still work if v2 JWT is missing/expired
-  if (v1) headers['x-auth-token'] = v1;
   return fetch(url, { ...options, headers, cache: 'no-store' });
 }
 
-// ── Fund token ────────────────────────────────────────────────────────────────
-export async function getFundToken() {
-  try { return (await AsyncStorage.getItem(FUND_TOKEN_KEY)) || ''; }
-  catch { return ''; }
-}
-export async function setFundToken(token) {
-  await AsyncStorage.setItem(FUND_TOKEN_KEY, token);
-}
-export async function clearFundToken() {
-  await AsyncStorage.removeItem(FUND_TOKEN_KEY);
-}
-
 // ── Core fetch helper ─────────────────────────────────────────────────────────
-async function request(path, options = {}, _isRetry = false) {
-  const [base, token, v2Token] = await Promise.all([getBaseUrl(), getToken(), getV2Token()]);
+async function request(path, options = {}) {
+  const [base, v2Token] = await Promise.all([getBaseUrl(), getV2Token()]);
   const url = `${base}${path}`;
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (token)   headers['x-auth-token']    = token;
-  if (v2Token) headers['x-auth-v2-token'] = v2Token;  // piggyback v2 JWT so server sees demo_mode claims
+  if (v2Token) headers['x-auth-v2-token'] = v2Token;
 
   const resp = await fetch(url, { ...options, headers, cache: 'no-store' });
 
   if (resp.status === 401) {
-    // Token may be stale — clear it and retry once by re-authenticating
-    await clearToken();
-    if (!_isRetry) {
-      return request(path, options, true);
-    }
-    // Still 401 after re-auth → wrong password in Settings
-    const err = new Error('Incorrect password. Please update it in Settings → Server Password.');
+    const err = new Error('Sign in again with your email and password.');
     err.isAuthError = true;
     throw err;
   }
@@ -457,11 +384,11 @@ export const api = {
         if (d && (Array.isArray(d.items) || d.ok)) return d;
       }
     } catch (_) { /* fall through */ }
-    // 2) Dual-token request helper
+    // 2) Authenticated request helper
     try {
       return await request(path);
     } catch (e1) {
-      // 3) v2Fetch (v2 + v1 piggyback)
+      // 3) v2Fetch (same session token)
       try {
         const r = await v2Fetch(path);
         if (r.ok) return r.json();
@@ -482,13 +409,11 @@ export const api = {
   deleteReport: (ticker) => request(`/api/report/${ticker}`, { method: 'DELETE' }),
 
   downloadUrl: async (ticker, type) => {
-    // Linking.openURL cannot send headers. Mobile is a v2 (email) session;
-    // the old ?token= HMAC is often empty/invalid now, so Safari got
-    // {"detail":"Unauthorized"} on the Word / PPT buttons.
-    const [base, v1, v2] = await Promise.all([getBaseUrl(), getToken(), getV2Token()]);
+    // Linking.openURL cannot send headers, so the v2 session travels
+    // as ?v2_token= (the middleware accepts that query param).
+    const [base, v2] = await Promise.all([getBaseUrl(), getV2Token()]);
     const qs = new URLSearchParams();
     if (v2) qs.set('v2_token', v2);
-    if (v1) qs.set('token', v1);
     const q = qs.toString();
     const tk = encodeURIComponent(String(ticker || '').trim().toUpperCase());
     const fmt = String(type || 'docx').replace(/[^a-z0-9]/gi, '') || 'docx';
@@ -499,7 +424,7 @@ export const api = {
   listStrategies: () => request('/api/strategies'),
 
   startPortfolio: async ({ fileUri, fileName, mimeType, strategy, reuseExisting, generateGamma }) => {
-    const [base, token] = await Promise.all([getBaseUrl(), getToken()]);
+    const [base, v2] = await Promise.all([getBaseUrl(), getV2Token()]);
     const fd = new FormData();
     fd.append('file', { uri: fileUri, name: fileName || 'portfolio.xlsx',
       type: mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -507,7 +432,7 @@ export const api = {
     fd.append('reuse_existing', reuseExisting ? 'true' : 'false');
     fd.append('generate_gamma', generateGamma ? 'true' : 'false');
     const headers = {};
-    if (token) headers['x-auth-token'] = token;
+    if (v2) headers['x-auth-v2-token'] = v2;
     const resp = await fetch(`${base}/api/portfolio`, { method: 'POST', headers, body: fd });
     if (!resp.ok) {
       const text = await resp.text();
@@ -518,10 +443,9 @@ export const api = {
 
   getPortfolioJob: (jobId) => request(`/api/portfolio/${jobId}`),
   portfolioDownloadUrl: async (jobId) => {
-    const [base, v1, v2] = await Promise.all([getBaseUrl(), getToken(), getV2Token()]);
+    const [base, v2] = await Promise.all([getBaseUrl(), getV2Token()]);
     const qs = new URLSearchParams();
     if (v2) qs.set('v2_token', v2);
-    if (v1) qs.set('token', v1);
     const q = qs.toString();
     return `${base}/api/portfolio/${jobId}/download${q ? `?${q}` : ''}`;
   },
@@ -596,7 +520,7 @@ export const api = {
     monthlyPerfUri, monthlyPerfName, monthlyPerfType,
     beginValue,
   }) => {
-    const [base, token] = await Promise.all([getBaseUrl(), getToken()]);
+    const [base, v2] = await Promise.all([getBaseUrl(), getV2Token()]);
     const fd = new FormData();
     fd.append('positions_file', {
       uri:  positionsUri,
@@ -618,9 +542,8 @@ export const api = {
     if (beginValue != null && beginValue !== '' && Number(beginValue) > 0) {
       fd.append('begin_value', String(beginValue));
     }
-    fd.append('token',       token || '');
     const headers = {};
-    if (token) headers['x-auth-token'] = token;
+    if (v2) headers['x-auth-v2-token'] = v2;
     const resp = await fetch(`${base}/api/track/live/ytd`, {
       method:  'POST',
       headers,
@@ -634,89 +557,67 @@ export const api = {
   },
 
   // ---------- Fund Admin ----------
-  // All fund data endpoints require the x-fund-token header (second auth layer).
-  // Call fundAuth(password) first, then use fundList/fundOverview/etc.
-  // All data endpoints accept an optional fundId parameter to select a specific
-  // fund; omit it to use the server default (DGA-I / FUND_ID env var).
-  fundAuth: (password) => request('/api/fund/auth', {
+  // GP sessions reach these routes directly. fundId selects one book;
+  // omit it to use the server default (DGA-I / FUND_ID env var).
+  createFund: (payload) => request('/api/fund/admin/create', {
     method: 'POST',
-    body:   JSON.stringify({ password }),
+    body: JSON.stringify(payload),
   }),
 
-  createFund: async (payload) => {
-    const ft = await getFundToken();
-    return request('/api/fund/admin/create', {
-      method:  'POST',
-      body:    JSON.stringify(payload),
-      headers: { 'x-fund-token': ft },
-    });
-  },
-
-  fundList: async (fundType) => {
-    const ft = await getFundToken();
+  fundList: (fundType) => {
     const qs = fundType ? `?fund_type=${encodeURIComponent(fundType)}` : '';
-    return request(`/api/fund/list${qs}`, { headers: { 'x-fund-token': ft } });
+    return request(`/api/fund/list${qs}`);
   },
 
-  renameFund: async (fundId, name, shortName) => {
-    const ft = await getFundToken();
-    return request(`/api/v2/gp/fund/${encodeURIComponent(fundId)}/rename`, {
+  renameFund: (fundId, name, shortName) => request(
+    `/api/v2/gp/fund/${encodeURIComponent(fundId)}/rename`,
+    {
       method: 'PATCH',
       body: JSON.stringify({ name, short_name: shortName }),
-      headers: { 'x-fund-token': ft },
-    });
-  },
-  getYtdCache: async (fundId) => {
-    const ft = await getFundToken();
-    return request(`/api/fund/account/${encodeURIComponent(fundId)}/ytd-cache`,
-      { headers: { 'x-fund-token': ft } });
-  },
-  saveYtdCache: async (fundId, nav, ytdPct, resultJson) => {
-    const ft = await getFundToken();
-    return request(`/api/fund/account/${encodeURIComponent(fundId)}/ytd-cache`, {
+    },
+  ),
+  getYtdCache: (fundId) => request(
+    `/api/fund/account/${encodeURIComponent(fundId)}/ytd-cache`,
+  ),
+  saveYtdCache: (fundId, nav, ytdPct, resultJson) => request(
+    `/api/fund/account/${encodeURIComponent(fundId)}/ytd-cache`,
+    {
       method: 'PUT',
       body: JSON.stringify({ nav, ytd_pct: ytdPct, result_json: resultJson }),
-      headers: { 'x-fund-token': ft },
-    });
-  },
-  fundOverview: async (fundId) => {
-    const ft = await getFundToken();
+    },
+  ),
+  fundOverview: (fundId) => {
     const qs = fundId ? `?fund_id=${encodeURIComponent(fundId)}` : '';
-    return request(`/api/fund/overview${qs}`, { headers: { 'x-fund-token': ft } });
+    return request(`/api/fund/overview${qs}`);
   },
-  fundLps: async (fundId) => {
-    const ft = await getFundToken();
+  fundLps: (fundId) => {
     const qs = fundId ? `?fund_id=${encodeURIComponent(fundId)}` : '';
-    return request(`/api/fund/lps${qs}`, { headers: { 'x-fund-token': ft } });
+    return request(`/api/fund/lps${qs}`);
   },
-  fundPositions: async (fundId) => {
-    const ft = await getFundToken();
+  fundPositions: (fundId) => {
     const qs = fundId ? `?fund_id=${encodeURIComponent(fundId)}` : '';
-    return request(`/api/fund/positions${qs}`, { headers: { 'x-fund-token': ft } });
+    return request(`/api/fund/positions${qs}`);
   },
-  fundActivity: async (fundId) => {
-    const ft = await getFundToken();
+  fundActivity: (fundId) => {
     const qs = fundId ? `?fund_id=${encodeURIComponent(fundId)}` : '';
-    return request(`/api/fund/activity${qs}`, { headers: { 'x-fund-token': ft } });
+    return request(`/api/fund/activity${qs}`);
   },
-  fundWaterfall: async (fundId) => {
-    const ft = await getFundToken();
+  fundWaterfall: (fundId) => {
     const qs = fundId ? `?fund_id=${encodeURIComponent(fundId)}` : '';
-    return request(`/api/fund/waterfall${qs}`, { headers: { 'x-fund-token': ft } });
+    return request(`/api/fund/waterfall${qs}`);
   },
 
   // Import Fidelity CSV positions for a fund.
   // fileUri / fileName / mimeType come from expo-document-picker.
   fundImportPositions: async ({ fileUri, fileName, mimeType, fundId }) => {
-    const ft   = await getFundToken();
     const base = await getBaseUrl();
-    const token = await getToken();
+    const v2 = await getV2Token();
     const form = new FormData();
     form.append('file', { uri: fileUri, name: fileName || 'positions.csv', type: mimeType || 'text/csv' });
     if (fundId) form.append('fund_id', fundId);
     const resp = await fetch(`${base}/api/fund/import-positions`, {
       method: 'POST',
-      headers: { 'x-auth-token': token, 'x-fund-token': ft },
+      headers: v2 ? { 'x-auth-v2-token': v2 } : {},
       body: form,
     });
     if (!resp.ok) {
@@ -728,15 +629,14 @@ export const api = {
 
   // Import cap table CSV/XLSX for a fund.
   fundImportCaptable: async ({ fileUri, fileName, mimeType, fundId }) => {
-    const ft   = await getFundToken();
     const base = await getBaseUrl();
-    const token = await getToken();
+    const v2 = await getV2Token();
     const form = new FormData();
     form.append('file', { uri: fileUri, name: fileName || 'captable.csv', type: mimeType || 'text/csv' });
     if (fundId) form.append('fund_id', fundId);
     const resp = await fetch(`${base}/api/fund/import-captable`, {
       method: 'POST',
-      headers: { 'x-auth-token': token, 'x-fund-token': ft },
+      headers: v2 ? { 'x-auth-v2-token': v2 } : {},
       body: form,
     });
     if (!resp.ok) {
