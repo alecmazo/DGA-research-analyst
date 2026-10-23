@@ -103,7 +103,6 @@ export function FinancialsPage() {
 
       <ValueLineSheet
         ticker={ticker}
-        onSelectTicker={selectTicker}
         period={period}
         setPeriod={setPeriod}
       />

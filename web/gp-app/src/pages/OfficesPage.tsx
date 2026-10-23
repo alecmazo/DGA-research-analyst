@@ -6,6 +6,12 @@ import { Button } from '@/components/ui/Button'
 import page from './page.module.css'
 import styles from './OfficesPage.module.css'
 
+type SetupStep = {
+  done: boolean
+  current?: boolean
+  text: string
+}
+
 type Office = {
   id: string
   name: string
@@ -15,6 +21,7 @@ type Office = {
   slug?: string | null
   db_name?: string | null
   created_at?: string | null
+  setup?: { note: string; steps: SetupStep[] }
 }
 
 type Payload = {
@@ -42,20 +49,92 @@ function statusWord(status: string): string {
   return 'Database not created'
 }
 
-function Setup({ dbName, email }: { dbName: string; email: string }) {
-  const steps = [
-    'This page stores the office name in DGA’s database only. It does not copy books, notes, or users.',
-    `Create an empty Postgres database named ${dbName}. Do not add a schema or a tenant column to the DGA database.`,
-    `Create a second web service from this same repo, branch main. Set its DATABASE_URL to ${dbName}. Leave DGA’s DATABASE_URL on the current service.`,
-    'Start that service once. The app creates its own tables on the empty database. Books and notes start empty.',
-    `On that service only, create the GP login for ${email || 'the contact email'}. That login does not exist on portfolio.dgacapital.com.`,
-    'Give the service its own hostname. Logo and office name are settings in that database.',
-    'Come back here and mark the office ready when that service answers. This site never opens their database.',
+function localSetup(office: Office): { note: string; steps: SetupStep[] } {
+  const dbName = office.db_name || 'dga_<name>'
+  const who = office.email || 'the contact email'
+  const ready = office.status === 'ready'
+  const note =
+    office.status === 'held'
+      ? `${office.name} is on hold. Its database name stays ${dbName}.`
+      : ready
+        ? `${dbName} is marked ready for ${office.name}. Log in and test it on the web service that uses ${dbName}: sign in there as ${who}. portfolio.dgacapital.com stays DGA Capital.`
+        : `${office.name} is on the list. Its database name is ${dbName}. Nothing was created in Postgres yet.`
+  const steps: SetupStep[] = [
+    {
+      done: true,
+      text: "This page stores the office name in DGA's database only. It does not copy books, notes, or users.",
+    },
+    {
+      done: ready,
+      text: ready
+        ? `${dbName} is the empty database for this office.`
+        : `Create an empty Postgres database named ${dbName}. Do not add a schema or a tenant column to the DGA database. Mark this row ready when that database exists.`,
+    },
+    {
+      done: false,
+      text: `Create a second web service from this same repo, branch main. Set its DATABASE_URL to ${dbName}. Leave DGA's DATABASE_URL on the current service.`,
+    },
+    {
+      done: false,
+      text: 'Start that service once. The app creates its own tables on the empty database. Books and notes start empty.',
+    },
+    {
+      done: false,
+      text: `On that service, create the GP login for ${who} and sign in to test the empty books.`,
+    },
+    {
+      done: false,
+      text: 'Give the service its own hostname. Logo and office name are settings in that database.',
+    },
   ]
+  const current = steps.find((step) => !step.done)
+  if (current) current.current = true
+  return { note, steps }
+}
+
+function draftSteps(dbName: string, email: string): SetupStep[] {
+  const who = email.trim() || 'the contact email'
+  return [
+    {
+      done: false,
+      current: true,
+      text: "Add the office on this form. This page stores the name in DGA's database only.",
+    },
+    {
+      done: false,
+      text: `Create an empty Postgres database named ${dbName}. Do not add a schema or a tenant column to the DGA database. Mark this row ready when that database exists.`,
+    },
+    {
+      done: false,
+      text: `Create a second web service from this same repo, branch main. Set its DATABASE_URL to ${dbName}. Leave DGA's DATABASE_URL on the current service.`,
+    },
+    {
+      done: false,
+      text: 'Start that service once. The app creates its own tables on the empty database. Books and notes start empty.',
+    },
+    {
+      done: false,
+      text: `On that service, create the GP login for ${who} and sign in to test the empty books.`,
+    },
+    {
+      done: false,
+      text: 'Give the service its own hostname. Logo and office name are settings in that database.',
+    },
+  ]
+}
+
+function Setup({ steps }: { steps: SetupStep[] }) {
   return (
     <ol className={styles.steps}>
-      {steps.map((line) => (
-        <li key={line}>{line}</li>
+      {steps.map((step) => (
+        <li
+          key={step.text}
+          className={step.done ? styles.done : step.current ? styles.current : undefined}
+        >
+          {step.done && <span className={styles.stepMark}>Done</span>}
+          {step.current && <span className={styles.stepMark}>Next</span>}
+          {step.text}
+        </li>
       ))}
     </ol>
   )
@@ -71,7 +150,6 @@ export function OfficesPage() {
   const [contact, setContact] = useState('')
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
-  const [notice, setNotice] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -91,10 +169,10 @@ export function OfficesPage() {
   const offices = data?.offices || []
   const focus = offices.find((o) => o.id === selected) || offices[0] || null
   const previewDb = slug ? `dga_${slug}` : 'dga_<name>'
+  const setup = focus?.setup?.note ? focus.setup : focus ? localSetup(focus) : null
 
   const addOffice = async () => {
     setBusy(true)
-    setNotice('')
     setErr('')
     try {
       const res = await api<{ office: Office }>('/api/offices', {
@@ -112,9 +190,6 @@ export function OfficesPage() {
       setSlug('')
       setSlugTouched(false)
       setSelected(res.office.id)
-      setNotice(
-        `${res.office.name} is on the list. Its database name is ${res.office.db_name}. Nothing was created in Postgres yet.`,
-      )
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not add the office')
@@ -220,7 +295,7 @@ export function OfficesPage() {
             </Button>
           </form>
 
-          {notice && <p className={styles.notice}>{notice}</p>}
+          {setup?.note && <p className={styles.notice}>{setup.note}</p>}
           {err && <p className={styles.warn}>{err}</p>}
 
           <section className={styles.list}>
@@ -285,13 +360,13 @@ export function OfficesPage() {
 
           <section className={styles.form}>
             <h2>
-              Separate database
+              {focus?.status === 'ready' ? 'Log in and test' : 'Separate database'}
               {focus ? ` · ${focus.name}` : ''}
             </h2>
             <p className={styles.dbHint}>
               One office, one database, one web service, same repo. DGA does not share this database.
             </p>
-            <Setup dbName={focus?.db_name || previewDb} email={focus?.email || email} />
+            <Setup steps={setup?.steps?.length ? setup.steps : draftSteps(previewDb, email)} />
           </section>
         </>
       )}

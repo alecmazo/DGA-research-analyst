@@ -120,6 +120,25 @@ def test_colliding_quarter_labels_keep_both_period_ends():
     assert block["labels"] == ["Q3'25 2025-06", "Q3'25 2025-09"]
 
 
+def test_value_line_card_follows_the_dashboard_ticker():
+    """One ticker box. The sheet opens from it. Saved-ticker chips stay off the card."""
+    sheet = (ROOT / "web/gp-app/src/pages/financials/ValueLineSheet.tsx").read_text()
+    page = (ROOT / "web/gp-app/src/pages/FinancialsPage.tsx").read_text()
+    dash = (ROOT / "web/gp-app/src/pages/financials/CompanyDashboard.tsx").read_text()
+    assert "Open sheet" not in sheet
+    assert "sheet-links" not in sheet
+    assert "vlChip" not in sheet
+    assert "onSelectTicker" not in sheet
+    assert "void loadSheet(t)" in sheet
+    assert "Print / Save PDF" in sheet
+    assert "⬇ PDF" in sheet
+    assert "PeriodSeg" in sheet
+    assert 'placeholder="Ticker…"' in dash
+    block = page.split("<ValueLineSheet")[1].split("/>")[0]
+    assert "ticker={ticker}" in block
+    assert "onSelectTicker" not in block
+
+
 def test_financials_card_toggle_switches_the_array():
     sheet = (ROOT / "web/gp-app/src/pages/financials/ValueLineSheet.tsx").read_text()
     page = (ROOT / "web/gp-app/src/pages/FinancialsPage.tsx").read_text()

@@ -44,6 +44,88 @@ def database_name(slug: str) -> str:
     return "dga_" + slug
 
 
+def office_setup(name: str, db_name: str, email: str, status: str) -> dict:
+    """What to do next on this DGA site after an office row exists.
+
+    ``ready`` means the empty database was marked created. The test login
+    still lives on the other web service. This site stays on DGA's books.
+    """
+    name = (name or "").strip() or "This office"
+    db_name = (db_name or "").strip() or "dga_<name>"
+    email = (email or "").strip() or "the contact email"
+    status = status if status in _STATUSES else "planned"
+    ready = status == "ready"
+    if status == "held":
+        note = f"{name} is on hold. Its database name stays {db_name}."
+    elif ready:
+        note = (
+            f"{db_name} is marked ready for {name}. "
+            f"Log in and test it on the web service that uses {db_name}: "
+            f"sign in there as {email}. "
+            "portfolio.dgacapital.com stays DGA Capital."
+        )
+    else:
+        note = (
+            f"{name} is on the list. Its database name is {db_name}. "
+            "Nothing was created in Postgres yet."
+        )
+    steps = [
+        {
+            "done": True,
+            "text": (
+                "This page stores the office name in DGA's database only. "
+                "It does not copy books, notes, or users."
+            ),
+        },
+        {
+            "done": ready,
+            "text": (
+                f"{db_name} is the empty database for this office."
+                if ready
+                else (
+                    f"Create an empty Postgres database named {db_name}. "
+                    "Do not add a schema or a tenant column to the DGA database. "
+                    "Mark this row ready when that database exists."
+                )
+            ),
+        },
+        {
+            "done": False,
+            "text": (
+                "Create a second web service from this same repo, branch main. "
+                f"Set its DATABASE_URL to {db_name}. "
+                "Leave DGA's DATABASE_URL on the current service."
+            ),
+        },
+        {
+            "done": False,
+            "text": (
+                "Start that service once. The app creates its own tables on the empty database. "
+                "Books and notes start empty."
+            ),
+        },
+        {
+            "done": False,
+            "text": (
+                f"On that service, create the GP login for {email} and sign in to test the empty books."
+            ),
+        },
+        {
+            "done": False,
+            "text": (
+                "Give the service its own hostname. Logo and office name are settings in that database."
+            ),
+        },
+    ]
+    marked = False
+    for step in steps:
+        step["current"] = False
+        if not marked and not step["done"]:
+            step["current"] = True
+            marked = True
+    return {"note": note, "steps": steps}
+
+
 def validate_office(name: str, email: str, slug: str = "") -> tuple[str, str, str, str]:
     """Return name, email, slug, and database name, or raise ValueError."""
     name = " ".join((name or "").split())
@@ -112,6 +194,7 @@ def _row(rec) -> dict:
         "created_at": created,
         "slug": rec[7],
         "db_name": rec[8],
+        "setup": office_setup(rec[1], rec[8] or "", rec[3], rec[4] or "planned"),
     }
 
 
@@ -199,18 +282,17 @@ def create_router(claims_fn, conn_fn) -> APIRouter:
                 conn.commit()
         except Exception:
             raise HTTPException(400, "Could not add that office. The email or database name is already used.")
-        return {
-            "ok": True,
-            "office": {
-                "id": office_id,
-                "name": name,
-                "contact_name": contact,
-                "email": email,
-                "status": "planned",
-                "slug": slug,
-                "db_name": db_name,
-            },
+        office = {
+            "id": office_id,
+            "name": name,
+            "contact_name": contact,
+            "email": email,
+            "status": "planned",
+            "slug": slug,
+            "db_name": db_name,
+            "setup": office_setup(name, db_name, email, "planned"),
         }
+        return {"ok": True, "office": office}
 
     @router.post("/{office_id}/status")
     def set_status(office_id: str, request: Request, body: OfficeStatus):
@@ -226,9 +308,12 @@ def create_router(claims_fn, conn_fn) -> APIRouter:
                     (status, office_id),
                 )
                 changed = cur.rowcount
+                cur.execute(_LIST_SQL + " WHERE id = %s", (office_id,))
+                rec = cur.fetchone()
             conn.commit()
-        if not changed:
+        if not changed or not rec:
             raise HTTPException(404, "Office not found")
-        return {"ok": True, "id": office_id, "status": status}
+        office = _row(rec)
+        return {"ok": True, "id": office_id, "status": status, "office": office}
 
     return router

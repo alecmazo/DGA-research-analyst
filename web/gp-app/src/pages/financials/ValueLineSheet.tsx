@@ -3,7 +3,7 @@ import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import { CollapsibleCard } from '@/components/ui/CollapsibleCard'
 import { Button } from '@/components/ui/Button'
 import { api, downloadAuth } from '@/lib/api'
-import type { PeriodType, SheetBlock, SheetData, SheetLink, StatementLine, StatementPack, StatementQuarter } from './types'
+import type { PeriodType, SheetBlock, SheetData, StatementLine, StatementPack, StatementQuarter } from './types'
 import { vlMoney } from './format'
 import styles from '../FinancialsPage.module.css'
 import { BizBlurb } from './BizBlurb'
@@ -11,7 +11,6 @@ import { HoverTip } from './HoverTip'
 
 type Props = {
   ticker: string
-  onSelectTicker: (tk: string) => void
   period: PeriodType
   setPeriod: (p: PeriodType) => void
 }
@@ -47,9 +46,7 @@ function blockReady(block?: SheetBlock | null) {
   return !!((block?.labels?.length || 0) > 0 && (block?.rows?.length || 0) > 0)
 }
 
-export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Props) {
-  const [input, setInput] = useState(ticker)
-  const [links, setLinks] = useState<SheetLink[]>([])
+export function ValueLineSheet({ ticker, period, setPeriod }: Props) {
   const [sheet, setSheet] = useState<SheetData | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -63,21 +60,6 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
   >(null)
   const [openLines, setOpenLines] = useState<Record<string, boolean>>({})
 
-  const loadLinks = useCallback(async () => {
-    try {
-      const j = await api<{ ok?: boolean; links?: SheetLink[]; error?: string }>(
-        '/api/financials/sheet-links?limit=48',
-      )
-      setLinks(Array.isArray(j.links) ? j.links : [])
-    } catch {
-      setLinks([])
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadLinks()
-  }, [loadLinks])
-
   const loadSheet = useCallback(async (tkRaw: string) => {
     const tk = tkRaw.trim().toUpperCase()
     if (!tk) return
@@ -88,7 +70,6 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
     setOpenLines({})
     setStmtErr(null)
     setActiveTk(tk)
-    setInput(tk)
     try {
       const d = await api<SheetData>(
         `/api/financials/${encodeURIComponent(tk)}/sheet`,
@@ -130,20 +111,12 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
     }
   }, [stmts?.ticker, stmtBusy])
 
-  // Sync with dashboard ticker
+  // The company dashboard is the only ticker box. A new ticker opens this sheet.
   useEffect(() => {
     const t = ticker.trim().toUpperCase()
     if (!t) return
-    setInput(t)
     void loadSheet(t)
   }, [ticker, loadSheet])
-
-  const open = () => {
-    const t = input.trim().toUpperCase()
-    if (!t) return
-    onSelectTicker(t)
-    void loadSheet(t)
-  }
 
   const print = () => {
     if (!sheet) return
@@ -151,7 +124,7 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
   }
 
   const downloadPdf = async () => {
-    const tk = (activeTk || input).trim().toUpperCase()
+    const tk = (activeTk || ticker).trim().toUpperCase()
     if (!tk) return
     setPdfBusy(true)
     try {
@@ -168,18 +141,6 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
 
   const action = (
     <div className={styles.dashActions}>
-      <input
-        className={styles.search}
-        list="fin-dash-list"
-        value={input}
-        onChange={(e) => setInput(e.target.value.toUpperCase())}
-        onKeyDown={(e) => e.key === 'Enter' && open()}
-        placeholder="Ticker…"
-        maxLength={8}
-      />
-      <Button variant="primary" size="sm" onClick={open} disabled={!input.trim()}>
-        Open sheet ▶
-      </Button>
       <Button variant="secondary" size="sm" onClick={print} disabled={!sheet}>
         🖨 Print / Save PDF
       </Button>
@@ -221,42 +182,15 @@ export function ValueLineSheet({ ticker, onSelectTicker, period, setPeriod }: Pr
       compact
     >
       <p className={styles.help}>
-        Value Line array — same ticker as the dashboard. SEC store, $ millions.
+        Value Line array for the company dashboard ticker. SEC store, $ millions.
       </p>
-
-      <div className={styles.chipRow}>
-        {links.length === 0 ? (
-          <span className={styles.mutedSm}>
-            No stored financials yet — pull SEC data below, then company links
-            appear here.
-          </span>
-        ) : (
-          links.map((L) => (
-            <button
-              key={L.ticker}
-              type="button"
-              className={`${styles.vlChip} ${activeTk === L.ticker ? styles.vlChipActive : ''}`}
-              title={`${L.name || ''} · ${L.annuals || 0} FY · ${L.quarters || 0}Q`}
-              onClick={() => {
-                const t = (L.ticker || '').toUpperCase()
-                if (!t) return
-                onSelectTicker(t)
-                void loadSheet(t)
-              }}
-            >
-              {L.followed && <span className={styles.chipDot} title="In your universe" />}
-              {L.ticker}
-            </button>
-          ))
-        )}
-      </div>
 
       {err && <div className={styles.inlineErr}>{err}</div>}
       {loading && <div className={styles.mutedSm}>Loading {activeTk}…</div>}
 
       {!loading && !sheet && !err && (
         <div className={styles.mutedSm}>
-          Select a ticker (links above, or type one) to open its financial sheet.
+          Enter a ticker on the company dashboard. This sheet opens with it.
         </div>
       )}
 
