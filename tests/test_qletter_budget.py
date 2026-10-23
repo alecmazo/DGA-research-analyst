@@ -69,13 +69,24 @@ def test_forced_letter_write_is_the_section_not_a_research_note():
     assert '"verdict": "skipped"' in worker
 
 
-def test_letter_stops_after_one_tool_round_and_cannot_read_each_report():
+def test_letter_writes_on_the_first_call():
+    """ANAT-DEF + Grok showed 'timed out — try again' (SUP_20261023_44d7c69a).
+
+    The prompt already has the trades. A tool round, then a write, plus the
+    SDK's two retries, outlasted the memos page.
+    """
     src = (ROOT / "api" / "server.py").read_text(encoding="utf-8")
     kick = src.split("def _qletter_kick", 1)[1].split(
         "def research_quarterly_letter_intro", 1)[0]
     assert '"read_saved_report"' in kick
-    # Grok's per-call budget is 180s. Step 1 must be the write.
-    assert "step >= 1 or _elapsed >= (_wall_s * 0.90)" in src
+    worker = src.split("def _run_agentic_analysis", 1)[1].split(
+        "def research_agentic_start", 1)[0]
+    assert 'if mode == "quarterly_letter":\n                    last_round = True' in worker
+    assert 'if mode == "quarterly_letter":\n                last_round = True' in worker
+    assert "step >= 1 or _elapsed" not in worker
+    assert "max_retries=0" in worker
+    assert '_effort = "low"' in worker
+    assert "_max_out = 2200" in worker
     queue = src.split("def _queue_portfolio_strategist", 1)[1].split(
         "def research_portfolio_strategist", 1)[0]
     assert 'not in ("list_portfolios", "get_portfolio_holdings")' in queue

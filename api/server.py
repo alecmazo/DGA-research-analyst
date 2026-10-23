@@ -9088,7 +9088,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui769-20261023-add-office"
+WEB_BUILD_VERSION = "ui770-20261023-qletter-grok"
 
 
 @app.get("/api/build")
@@ -31105,22 +31105,32 @@ def _agentic_tools_openai(tools: list) -> list:
     return out
 
 
-def _agentic_openai_client(provider: str):
+def _agentic_openai_client(provider: str, *, timeout: float | None = None,
+                           max_retries: int | None = None):
     """OpenAI-compatible client for grok | kimi | deepseek.
 
     Per-request timeout (120s) — without it a hung xAI/Moonshot call can pin
     the agentic worker until the browser's 10‑min poll cap, looking 'stalled'.
+    The SDK retries twice by default. A quarterly letter passes max_retries=0
+    so one slow Grok call cannot outlast the memos page
+    (SUP_20261023_44d7c69a).
     """
     from openai import OpenAI
     p = (provider or "").lower()
     # httpx timeout via openai SDK: float = connect+read budget for the call.
     # Grok final write-ups can be long (12k tokens) — 180s; others 120s.
     _to = 180.0 if p == "grok" else 120.0
+    if timeout is not None:
+        _to = float(timeout)
+    extra = {}
+    if max_retries is not None:
+        extra["max_retries"] = int(max_retries)
     if p == "grok":
         return OpenAI(
             api_key=analyst.get_grok_api_key(),
             base_url="https://api.x.ai/v1",
             timeout=_to,
+            **extra,
         )
     if p == "kimi":
         if not getattr(analyst, "kimi_configured", lambda: False)():
@@ -31129,6 +31139,7 @@ def _agentic_openai_client(provider: str):
             api_key=analyst.KIMI_API_KEY,
             base_url=analyst.KIMI_BASE_URL,
             timeout=_to,
+            **extra,
         )
     if p == "deepseek":
         if not getattr(analyst, "deepseek_configured", lambda: False)():
@@ -31137,6 +31148,7 @@ def _agentic_openai_client(provider: str):
             api_key=analyst.DEEPSEEK_API_KEY,
             base_url=analyst.DEEPSEEK_BASE_URL,
             timeout=_to,
+            **extra,
         )
     raise RuntimeError(f"No OpenAI client for provider {provider!r}")
 
@@ -31397,10 +31409,10 @@ def _run_agentic_analysis(job_id: str, question: str,
             for step in range(max_steps):
                 _elapsed = time.time() - _loop_t0
                 last_round = step >= max_steps - 1
-                # One tool round, then the section. More rounds run past the
-                # memos page poll (SUP_20261021_40e7622c).
-                if mode == "quarterly_letter" and (
-                        step >= 1 or _elapsed >= (wall_s * 0.90)):
+                # The trade record is already in the prompt. A tool round
+                # plus a write ran past the memos page
+                # (SUP_20261023_44d7c69a).
+                if mode == "quarterly_letter":
                     last_round = True
                 _set(stage="thinking",
                      label=f"{provider} · reasoning (step {step+1}/{max_steps})…",
@@ -31468,7 +31480,12 @@ def _run_agentic_analysis(job_id: str, question: str,
         # Same tool schemas as Claude (converted). Goal: full native conclusion,
         # not a thin forced stub. Per-call timeout still guards hangs; wall clock
         # only kicks in late so Grok has room to match Claude-depth research.
-        oai = _agentic_openai_client(provider)
+        # A letter is one write. The default client retries twice at 180s, so
+        # one slow Grok call outlasted the memos page (SUP_20261023_44d7c69a).
+        if mode == "quarterly_letter":
+            oai = _agentic_openai_client(provider, timeout=120.0, max_retries=0)
+        else:
+            oai = _agentic_openai_client(provider)
         oai_tools = _agentic_tools_openai(_tools)
         messages = [
             {"role": "system", "content": system},
@@ -31480,7 +31497,10 @@ def _run_agentic_analysis(job_id: str, question: str,
         _wall_s = wall_s
         _loop_t0 = time.time()
         _oai_temp = 1.0 if provider in ("kimi", "volume") else 0.3
-        _max_out = 12000 if provider == "grok" else 8000
+        if mode == "quarterly_letter":
+            _max_out = 2200
+        else:
+            _max_out = 12000 if provider == "grok" else 8000
 
         def _oai_final_write(msgs, reason: str):
             """One no-tools completion with quality final prompt."""
@@ -31495,11 +31515,10 @@ def _run_agentic_analysis(job_id: str, question: str,
         for step in range(max_steps):
             _elapsed = time.time() - _loop_t0
             last_round = step >= max_steps - 1
-            # A letter may take one tool round, then it must write. Two more
-            # 180s Grok calls run past the 8-minute memos poll
-            # (SUP_20261021_40e7622c). Research jobs still wait for evidence.
-            if mode == "quarterly_letter" and (
-                    step >= 1 or _elapsed >= (_wall_s * 0.90)):
+            # The account's trades are already in the prompt. Opening with
+            # tools, then writing, ran past the 8-minute memos poll
+            # (SUP_20261023_44d7c69a). Research jobs still wait for evidence.
+            if mode == "quarterly_letter":
                 last_round = True
             elif (not last_round) and tool_log and _elapsed >= (_wall_s * 0.90):
                 last_round = True
@@ -31516,10 +31535,16 @@ def _run_agentic_analysis(job_id: str, question: str,
                 temperature=_oai_temp, max_tokens=_max_out,
             )
             if provider == "grok":
-                # Same effort as Settings → Models (Normal unless toggled).
-                _effort = "medium"
-                if hasattr(analyst, "get_grok_report_effort"):
-                    _effort = analyst.get_grok_report_effort()
+                # Reports use Settings → Models. A letter is prose from the
+                # prompt already built, so low effort returns the section
+                # inside the memos poll (SUP_20261023_44d7c69a). grok-4.7
+                # cannot turn reasoning off.
+                if mode == "quarterly_letter":
+                    _effort = "low"
+                else:
+                    _effort = "medium"
+                    if hasattr(analyst, "get_grok_report_effort"):
+                        _effort = analyst.get_grok_report_effort()
                 create_kw["extra_body"] = {"reasoning_effort": _effort}
             if last_round and (mode == "quarterly_letter" or tool_log):
                 create_kw["messages"] = messages + [{
