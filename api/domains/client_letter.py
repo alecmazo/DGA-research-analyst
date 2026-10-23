@@ -316,6 +316,9 @@ class PgStore:
                 )
                 """
             )
+            cur.execute(
+                "ALTER TABLE client_letters ADD COLUMN IF NOT EXISTS letter_date TEXT"
+            )
         conn.commit()
         self._ready = True
 
@@ -327,8 +330,8 @@ class PgStore:
                     """
                     INSERT INTO client_letters
                         (id, fund_id, fund_name, audience, model, title,
-                         body_md, status, updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,'draft', now())
+                         body_md, status, letter_date, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'draft',%s, now())
                     ON CONFLICT (id) DO UPDATE SET
                         fund_id = EXCLUDED.fund_id,
                         fund_name = EXCLUDED.fund_name,
@@ -336,13 +339,18 @@ class PgStore:
                         model = EXCLUDED.model,
                         title = EXCLUDED.title,
                         body_md = EXCLUDED.body_md,
-                        status = 'draft',
+                        letter_date = EXCLUDED.letter_date,
+                        status = CASE
+                            WHEN client_letters.status = 'sent' THEN 'sent'
+                            ELSE 'draft'
+                        END,
                         updated_at = now()
                     """,
                     (
                         row["id"], row.get("fund_id"), row.get("fund_name"),
                         row.get("audience"), row.get("model"), row.get("title"),
                         row.get("body") or "",
+                        (row.get("letter_date") or "")[:10],
                     ),
                 )
             conn.commit()
@@ -355,7 +363,8 @@ class PgStore:
                 cur.execute(
                     """
                     SELECT id, fund_id, fund_name, audience, model, title,
-                           body_md, status, sent_at, gamma_generation_id, gamma_url
+                           body_md, status, sent_at, gamma_generation_id, gamma_url,
+                           letter_date
                       FROM client_letters WHERE id = %s
                     """,
                     (letter_id,),
@@ -376,6 +385,7 @@ class PgStore:
             "sent_at": sent.isoformat() if hasattr(sent, "isoformat") else sent,
             "gamma_generation_id": rec[9],
             "gamma_url": rec[10],
+            "letter_date": rec[11] or "",
         }
 
     def mark_sent(self, letter_id: str) -> None:
@@ -414,7 +424,7 @@ class PgStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, title, audience, fund_name, status, updated_at
+                    SELECT id, title, audience, fund_name, status, updated_at, letter_date
                       FROM client_letters
                      ORDER BY updated_at DESC
                      LIMIT 40
@@ -431,6 +441,7 @@ class PgStore:
                 "fund_name": rec[3],
                 "status": rec[4],
                 "updated_at": updated.isoformat() if hasattr(updated, "isoformat") else updated,
+                "letter_date": rec[6] or "",
             })
         return out
 
@@ -449,22 +460,35 @@ def save_letter(
     body: str,
     letter_id: str | None = None,
     title: str | None = None,
+    letter_date: str | None = None,
 ) -> dict:
-    """Store a draft. This function does not email."""
+    """Store a draft. This function does not email.
+
+    Saving again after Send keeps the sent tag. The date stays on the row.
+    """
     if audience not in AUDIENCES:
         return {"ok": False, "emailed": False, "error": "Choose an audience."}
     text = (body or "").strip()
     if not text:
         return {"ok": False, "emailed": False, "error": "The letter is empty."}
+    existing_id = (letter_id or "").strip()
+    prev = None
+    if existing_id:
+        try:
+            prev = store.get(existing_id)
+        except Exception:
+            prev = None
+    kept = "sent" if prev and prev.get("status") == "sent" else "draft"
     row = {
-        "id": (letter_id or "").strip() or _new_id(),
+        "id": existing_id or _new_id(),
         "fund_id": fund_id,
         "fund_name": fund_name,
         "audience": audience,
         "model": model or "",
         "title": title or f"Client letter · {AUDIENCES[audience]['label']}",
         "body": text,
-        "status": "draft",
+        "status": kept,
+        "letter_date": str(letter_date or (prev or {}).get("letter_date") or "")[:10],
     }
     stored = True
     try:
@@ -488,7 +512,15 @@ def save_letter(
     }
 
 
-def draft_letter(store, *, audience: str, book: dict, provider: str, complete) -> dict:
+def draft_letter(
+    store,
+    *,
+    audience: str,
+    book: dict,
+    provider: str,
+    complete,
+    letter_date: str = "",
+) -> dict:
     """Write with the chosen cloud model, or hand the prompt back for a local one.
 
     Neither path emails.
@@ -517,6 +549,7 @@ def draft_letter(store, *, audience: str, book: dict, provider: str, complete) -
         audience=audience,
         model=provider,
         body=text,
+        letter_date=letter_date,
     )
     saved["emailed"] = False
     saved["local"] = False
@@ -706,6 +739,7 @@ def create_router(
                 book=book,
                 provider=provider,
                 complete=complete_fn,
+                letter_date=str(body.get("letter_date") or "")[:10],
             )
         except KeyError:
             return JSONResponse({"ok": False, "error": "Choose an audience."}, status_code=400)
@@ -728,10 +762,29 @@ def create_router(
             body=str(body.get("body") or ""),
             letter_id=str(body.get("id") or "") or None,
             title=str(body.get("title") or "") or None,
+            letter_date=str(body.get("letter_date") or "")[:10],
         )
         if not out.get("ok"):
             return JSONResponse(out, status_code=400)
         return out
+
+    @router.post("/preview")
+    def preview(request: Request):
+        """The client letter as the email and the reader will show it."""
+        _gp(request)
+        body = _body(request)
+        from api.domains.letter_paper import format_letter_date, paper_html
+        text = str(body.get("body") or "")
+        name = str(body.get("fund_name") or "Account")
+        html = paper_html(
+            date_label=format_letter_date(body.get("letter_date")),
+            period="Client letter",
+            title=str(body.get("title") or "Client letter"),
+            note="",
+            intro="",
+            sections=[{"name": name, "md": text}] if text.strip() else [],
+        )
+        return {"ok": True, "html": html}
 
     @router.get("/{letter_id}")
     def get_letter(letter_id: str, request: Request):

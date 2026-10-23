@@ -14,7 +14,14 @@ type Fund = {
   has_positions?: boolean
   has_attribution?: boolean
 }
-type LetterRow = { id: string; title?: string; status?: string; updated_at?: string | null; fund_name?: string }
+type LetterRow = {
+  id: string
+  title?: string
+  status?: string
+  updated_at?: string | null
+  fund_name?: string
+  letter_date?: string | null
+}
 
 const FALLBACK_AUDIENCES: Audience[] = [
   { id: 'retiree', label: 'Retiree', blurb: 'Someone living on this account.' },
@@ -26,6 +33,10 @@ const FALLBACK_AUDIENCES: Audience[] = [
 
 function fundLabel(f: Fund) {
   return f.short_name || f.name || f.fund_id
+}
+
+function todayIso(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date())
 }
 
 function downloadLetter(title: string, body: string) {
@@ -54,7 +65,10 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
   const [fundId, setFundId] = useState('')
   const [picked, setPicked] = useState(false)
   const [body, setBody] = useState('')
+  const [letterDate, setLetterDate] = useState(todayIso)
   const [letterId, setLetterId] = useState<string | null>(null)
+  const [openingId, setOpeningId] = useState('')
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [fundName, setFundName] = useState('')
   const [busy, setBusy] = useState('')
   const [status, setStatus] = useState('Choose an audience, then the account this letter is about.')
@@ -144,6 +158,7 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
           audience,
           model: modelLabel || model,
           body: text,
+          letter_date: letterDate,
         }),
       },
     )
@@ -186,7 +201,13 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
           error?: string
         }>('/api/client-letter/draft', {
           method: 'POST',
-          body: JSON.stringify({ fund_id: fundId, audience, year: new Date().getFullYear(), ...payload }),
+          body: JSON.stringify({
+            fund_id: fundId,
+            audience,
+            year: new Date().getFullYear(),
+            letter_date: letterDate,
+            ...payload,
+          }),
         })
         if (!prep.ok || !prep.user) throw new Error(prep.error || 'Could not prepare the letter')
         const chat = await ollamaChat({
@@ -212,7 +233,13 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
           error?: string
         }>('/api/client-letter/draft', {
           method: 'POST',
-          body: JSON.stringify({ fund_id: fundId, audience, year: new Date().getFullYear(), ...payload }),
+          body: JSON.stringify({
+            fund_id: fundId,
+            audience,
+            year: new Date().getFullYear(),
+            letter_date: letterDate,
+            ...payload,
+          }),
         })
         if (!drafted.ok || !drafted.body) throw new Error(drafted.error || 'The model returned an empty letter.')
         setBody(drafted.body)
@@ -340,13 +367,17 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
   }
 
   async function openSaved(id: string) {
+    setOpeningId(id)
+    setLetterId(id)
+    setStatus('Opening…')
     try {
-      const data = await api<{ letter?: { id: string; body?: string; audience?: string; fund_id?: string; fund_name?: string; gamma_url?: string } }>(
+      const data = await api<{ letter?: { id: string; body?: string; audience?: string; fund_id?: string; fund_name?: string; gamma_url?: string; letter_date?: string } }>(
         `/api/client-letter/${encodeURIComponent(id)}`,
       )
       const letter = data.letter
       if (!letter) return
       setLetterId(letter.id)
+      setLetterDate((letter.letter_date || '').slice(0, 10) || todayIso())
       setBody(letter.body || '')
       if (letter.audience) setAudience(letter.audience)
       if (letter.fund_id) {
@@ -358,6 +389,8 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
       setStatus('Loaded the saved letter.')
     } catch (e) {
       setStatus(e instanceof Error ? e.message : 'Could not open the letter')
+    } finally {
+      setOpeningId('')
     }
   }
 
@@ -424,6 +457,17 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
           )}
         </nav>
         <div className={styles.editor}>
+          <label className={styles.dateField}>
+            <span>Date</span>
+            <input
+              className={styles.dateInput}
+              type="date"
+              aria-label="Letter date"
+              value={letterDate}
+              onChange={(e) => setLetterDate(e.target.value)}
+            />
+          </label>
+          {openingId && <div className={styles.status}>Opening this letter…</div>}
           <div className={styles.editorHead}>
             <div>
               <div className={styles.editorTitle}>
@@ -440,6 +484,9 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
               </Button>
               <Button size="sm" disabled={!!busy || !body.trim()} onClick={() => void save()}>
                 {busy === 'save' ? 'Saving…' : 'Save'}
+              </Button>
+              <Button size="sm" disabled={!body.trim()} onClick={() => setPreviewOpen(true)}>
+                Preview
               </Button>
             </div>
           </div>
@@ -482,26 +529,99 @@ export function ClientLetterPanel({ model, modelLabel, options, onModel, context
       {!saved.length ? (
         <div className={styles.muted}>No saved letters yet.</div>
       ) : (
-        saved.map((row) => (
-          <div
-            key={row.id}
-            className={styles.draftRow}
-            role="button"
-            tabIndex={0}
-            onClick={() => void openSaved(row.id)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') void openSaved(row.id)
-            }}
-          >
-            <span>
-              {row.title || row.fund_name || row.id}{' '}
+        saved.map((row) => {
+          const sent = (row.status || '') === 'sent'
+          const tag = sent ? `Sent · ${row.fund_name || 'account'}` : `Draft · ${row.fund_name || 'account'}`
+          return (
+            <button
+              key={row.id}
+              type="button"
+              className={openingId === row.id || letterId === row.id ? styles.draftOn : styles.draftRow}
+              onClick={() => void openSaved(row.id)}
+            >
+              <span className={styles.draftTitle}>{row.title || row.fund_name || row.id}</span>
               <span className={styles.draftMeta}>
-                · {row.status || 'draft'} · {(row.updated_at || '').slice(0, 16).replace('T', ' ')}
+                {tag}
+                {' · '}
+                {row.letter_date || (row.updated_at || '').slice(0, 10)}
               </span>
-            </span>
-          </div>
-        ))
+            </button>
+          )
+        })
+      )}
+      {previewOpen && (
+        <ClientPreview
+          letterDate={letterDate}
+          title={fund ? `Client letter · ${fundLabel(fund)}` : 'Client letter'}
+          fundName={fund ? fundLabel(fund) : fundName || 'Account'}
+          body={body}
+          onClose={() => setPreviewOpen(false)}
+        />
       )}
     </Panel>
+  )
+}
+
+function ClientPreview({
+  letterDate,
+  title,
+  fundName,
+  body,
+  onClose,
+}: {
+  letterDate: string
+  title: string
+  fundName: string
+  body: string
+  onClose: () => void
+}) {
+  const [html, setHtml] = useState('')
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let alive = true
+    void api<{ html?: string }>('/api/client-letter/preview', {
+      method: 'POST',
+      body: JSON.stringify({
+        letter_date: letterDate,
+        title,
+        fund_name: fundName,
+        body,
+      }),
+    })
+      .then((data) => {
+        if (alive) setHtml(data.html || '')
+      })
+      .catch((e) => {
+        if (alive) setErr(e instanceof Error ? e.message : 'Preview failed')
+      })
+    return () => {
+      alive = false
+    }
+  }, [letterDate, title, fundName, body])
+  return (
+    <div
+      className={styles.overlay}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div className={`${styles.modal} ${styles.modalWide}`} role="dialog" aria-modal="true">
+        <div className={styles.modalHead}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: '#0A1628' }}>Letter preview</span>
+          <span className={styles.toolbarSpacer} />
+          <button type="button" className={styles.modalClose} onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <p className={styles.previewFoot}>This is the letter in the email.</p>
+        {err ? (
+          <div className={styles.statusBad}>{err}</div>
+        ) : html ? (
+          <div dangerouslySetInnerHTML={{ __html: html }} />
+        ) : (
+          <div className={styles.muted}>Opening the letter…</div>
+        )}
+      </div>
+    </div>
   )
 }

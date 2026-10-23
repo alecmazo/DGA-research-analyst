@@ -8985,7 +8985,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui773-20261023-account-desk"
+WEB_BUILD_VERSION = "ui774-20261023-letter-desk"
 
 
 @app.get("/api/build")
@@ -32914,6 +32914,7 @@ def _ensure_quarterly_letters_table() -> None:
             cur.execute("ALTER TABLE quarterly_letters ADD COLUMN IF NOT EXISTS shared_intro_md TEXT")
             cur.execute("ALTER TABLE quarterly_letters ADD COLUMN IF NOT EXISTS fund_sections JSONB")
             cur.execute("ALTER TABLE quarterly_letters ADD COLUMN IF NOT EXISTS year INTEGER")
+            cur.execute("ALTER TABLE quarterly_letters ADD COLUMN IF NOT EXISTS letter_date TEXT")
             # Which fund sections are published (decoupled from content saves so
             # editing/saving never changes what LPs can see). LP visibility = a
             # fund being in this list AND held by that LP.
@@ -32934,7 +32935,11 @@ def _ensure_quarterly_letters_table() -> None:
 @app.post("/api/quarterly-letter/save")
 def quarterly_letter_save(request: Request):
     """GP-only: create/update a quarterly letter draft. Body: {id?, title, period,
-    scope_fund_ids, manual_note, body_md, status}."""
+    scope_fund_ids, manual_note, body_md, status, letter_date}.
+
+    A later edit does not flip a published letter back to draft. Publishing
+    is recorded on published_fund_ids, and that stays the row's status.
+    """
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
@@ -32944,17 +32949,25 @@ def quarterly_letter_save(request: Request):
     _ensure_quarterly_letters_table()
     import uuid as _uuid
     lid = (body or {}).get("id") or _uuid.uuid4().hex
+    letter_date = str((body or {}).get("letter_date") or "")[:10]
     with _fund_conn() as conn, conn.cursor() as cur:
         cur.execute("""
             INSERT INTO quarterly_letters
                 (id, title, period, year, scope_fund_ids, manual_note, shared_intro_md,
-                 fund_sections, body_md, status, generated_by, updated_at)
-            VALUES (%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s,%s,%s, now())
+                 fund_sections, body_md, status, letter_date, generated_by, updated_at)
+            VALUES (%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s,%s,%s,%s, now())
             ON CONFLICT (id) DO UPDATE SET
                 title=EXCLUDED.title, period=EXCLUDED.period, year=EXCLUDED.year,
                 scope_fund_ids=EXCLUDED.scope_fund_ids, manual_note=EXCLUDED.manual_note,
                 shared_intro_md=EXCLUDED.shared_intro_md, fund_sections=EXCLUDED.fund_sections,
-                body_md=EXCLUDED.body_md, status=EXCLUDED.status, updated_at=now()
+                body_md=EXCLUDED.body_md, letter_date=EXCLUDED.letter_date,
+                status=CASE
+                    WHEN COALESCE(quarterly_letters.published_fund_ids, '[]'::jsonb)::text
+                         NOT IN ('[]', 'null', '')
+                    THEN 'published'
+                    ELSE EXCLUDED.status
+                END,
+                updated_at=now()
         """, (lid, (body or {}).get("title"), (body or {}).get("period"),
               (body or {}).get("year"),
               json.dumps((body or {}).get("scope_fund_ids") or []),
@@ -32962,27 +32975,79 @@ def quarterly_letter_save(request: Request):
               json.dumps((body or {}).get("fund_sections") or {}),
               (body or {}).get("body_md"),
               (body or {}).get("status") or "draft",
+              letter_date,
               claims.get("email") or "gp"))
         conn.commit()
     return {"ok": True, "id": lid}
 
 
+@app.post("/api/quarterly-letter/preview")
+def quarterly_letter_preview(request: Request):
+    """The letter one account's LP will see. Other accounts are left out."""
+    claims = _claims_or_401(request)
+    if claims.get("role") not in ("gp", "admin"):
+        raise HTTPException(403, "GP only")
+    body = _request_json_sync(request) or {}
+    from api.domains.letter_paper import (
+        format_letter_date,
+        one_account_sections,
+        paper_html,
+    )
+    fund_id = str(body.get("fund_id") or "").strip()
+    sections = one_account_sections(body.get("fund_sections") or {}, fund_id)
+    year = body.get("year")
+    period = str(body.get("period") or (f"YTD {year}" if year else "") or "Letter")
+    html = paper_html(
+        date_label=format_letter_date(body.get("letter_date")),
+        period=period,
+        title=str(body.get("title") or "Quarterly Letter"),
+        note=str(body.get("manual_note") or ""),
+        intro=str(body.get("shared_intro_md") or ""),
+        sections=sections,
+    )
+    name = sections[0]["name"] if sections else ""
+    return {"ok": True, "html": html, "fund_id": fund_id, "account_name": name}
+
+
 @app.get("/api/quarterly-letter/list")
 def quarterly_letter_list(request: Request):
-    """GP-only: saved quarterly letters, newest first."""
+    """GP-only: saved quarterly letters, newest first.
+
+    A published row names the accounts that were published, so the desk
+    can say Published · ANAT-DEF instead of a bare draft tag.
+    """
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return {"ok": True, "letters": []}
     _ensure_quarterly_letters_table()
+    from api.domains.letter_paper import published_accounts
     out = []
     with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-        cur.execute("SELECT id, title, period, status, updated_at FROM quarterly_letters ORDER BY updated_at DESC")
+        cur.execute("""SELECT id, title, period, status, year, letter_date,
+                              published_fund_ids, fund_sections, updated_at
+                         FROM quarterly_letters ORDER BY updated_at DESC""")
         for r in cur.fetchall():
-            out.append({"id": r["id"], "title": r["title"], "period": r["period"],
-                        "status": r["status"],
-                        "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None})
+            pub = r.get("published_fund_ids") or []
+            if isinstance(pub, str):
+                try:
+                    pub = json.loads(pub)
+                except Exception:
+                    pub = []
+            secs = r.get("fund_sections") or {}
+            if isinstance(secs, str):
+                try:
+                    secs = json.loads(secs)
+                except Exception:
+                    secs = {}
+            out.append({
+                "id": r["id"], "title": r["title"], "period": r["period"],
+                "status": r["status"], "year": r.get("year"),
+                "letter_date": r.get("letter_date") or "",
+                "published_accounts": published_accounts(pub, secs if isinstance(secs, dict) else {}),
+                "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            })
     return {"ok": True, "letters": out}
 
 
@@ -33005,6 +33070,7 @@ def quarterly_letter_get(letter_id: str, request: Request):
         "scope_fund_ids": r["scope_fund_ids"] or [], "manual_note": r["manual_note"],
         "shared_intro_md": r.get("shared_intro_md"), "fund_sections": r.get("fund_sections") or {},
         "published_fund_ids": r.get("published_fund_ids") or [],
+        "letter_date": r.get("letter_date") or "",
         "body_md": r["body_md"], "status": r["status"],
         "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None}}
 
@@ -33074,6 +33140,20 @@ def lp_quarterly_letter(request: Request):
     if not sections and not is_priv:
         return {"ok": True, "letter": None}
     sections.sort(key=lambda s: (s["name"] or "").lower())
+    from api.domains.letter_paper import format_letter_date, paper_html
+    letter_date = r.get("letter_date") or ""
+    if not letter_date and r.get("updated_at"):
+        letter_date = r["updated_at"].date().isoformat()
+    date_label = format_letter_date(letter_date)
+    period = r.get("period") or (f"YTD {r.get('year')}" if r.get("year") else "Letter")
+    paper = paper_html(
+        date_label=date_label,
+        period=period,
+        title=r.get("title") or "Quarterly Letter",
+        note=r.get("manual_note") or "",
+        intro=r.get("shared_intro_md") or r.get("body_md") or "",
+        sections=sections,
+    )
     # Per-LP read receipt → drives the dismissible Performance banner.
     lp_key = str(claims.get("lp_id") or claims.get("email") or "")
     unread = True
@@ -33087,6 +33167,7 @@ def lp_quarterly_letter(request: Request):
             pass
     return {"ok": True, "letter": {
         "id": r["id"], "title": r["title"], "period": r["period"], "year": r.get("year"),
+        "letter_date": letter_date, "date_label": date_label, "html": paper,
         "manual_note": r["manual_note"], "shared_intro_md": r.get("shared_intro_md") or r.get("body_md"),
         "sections": sections, "unread": unread,
         "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None}}
@@ -33168,6 +33249,8 @@ def _qletter_email_lps(
     fallback_email: str | None = None,
     section_name: str = "",
     section_md: str = "",
+    html_body: str | None = None,
+    date_line: str = "",
 ) -> dict:
     """Email the account's investors the published section.
 
@@ -33210,15 +33293,24 @@ def _qletter_email_lps(
             if used_fallback
             else f"Your {label} commentary for {period} is below."
         )
+        dated = (date_line.strip() + "\n\n") if date_line and date_line.strip() else ""
         plain = (
             f"Hi {name},\n\n{lead}\n\n"
+            + dated
             + (body_md + "\n\n" if body_md else "")
             + f"The letter is also in the portal: {portal}\n\n— DGA Capital"
         )
-        safe_md = _html.escape(body_md).replace("\n", "<br>\n") if body_md else ""
-        html_body = (
+        if html_body:
+            letter_html = html_body
+        else:
+            safe_md = _html.escape(body_md).replace("\n", "<br>\n") if body_md else ""
+            letter_html = (
+                f"<div style=\"font-family:Georgia,serif;font-size:15px;line-height:1.5;\">{safe_md}</div>"
+                if safe_md else ""
+            )
+        html_msg = (
             f"<p>Hi {_html.escape(name)},</p><p>{_html.escape(lead)}</p>"
-            + (f"<div style=\"font-family:Georgia,serif;font-size:15px;line-height:1.5;\">{safe_md}</div>" if safe_md else "")
+            + letter_html
             + f"<p><a href=\"{portal}\" style=\"background:#5BB8D4;color:#0A1628;"
             f"font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none;\">"
             f"Open the portal</a></p><p style=\"color:#64748b;font-size:12px;\">— DGA Capital</p>"
@@ -33228,7 +33320,7 @@ def _qletter_email_lps(
         msg["From"] = from_addr
         msg["To"] = email
         msg.set_content(plain)
-        msg.add_alternative(html_body, subtype="html")
+        msg.add_alternative(html_msg, subtype="html")
         try:
             res = analyst.send_portfolio_email(msg)
             if res and res.get("ok") is False:
@@ -33250,7 +33342,9 @@ def _qletter_publish(letter_id: str, fund_ids: list[str] | None, actor_email: st
     the affected LPs. Returns {published_fund_ids, email}."""
     _ensure_quarterly_letters_table()
     with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-        cur.execute("SELECT period, year, fund_sections, published_fund_ids FROM quarterly_letters WHERE id=%s",
+        cur.execute("""SELECT period, year, title, manual_note, shared_intro_md, letter_date,
+                              fund_sections, published_fund_ids
+                         FROM quarterly_letters WHERE id=%s""",
                     (letter_id,))
         L = cur.fetchone()
         if not L:
@@ -33271,17 +33365,30 @@ def _qletter_publish(letter_id: str, fund_ids: list[str] | None, actor_email: st
                     (json.dumps(new_pub), letter_id))
         conn.commit()
     period = L["period"] or (f"YTD {L['year']}" if L.get("year") else "the latest quarter")
+    from api.domains.letter_paper import format_letter_date, one_account_sections, paper_html
+    date_label = format_letter_date(L.get("letter_date") or "")
     agg = {"sent": 0, "skipped": 0, "errors": [], "fallback": False}
     for fid in targets:
         sec = secs.get(fid) or {}
         if not isinstance(sec, dict):
             sec = {}
+        only = one_account_sections(secs, fid)
+        paper = paper_html(
+            date_label=date_label,
+            period=period,
+            title=L.get("title") or "Quarterly Letter",
+            note=L.get("manual_note") or "",
+            intro=L.get("shared_intro_md") or "",
+            sections=only,
+        )
         r = _qletter_email_lps(
             period,
             target_fund_id=fid,
             fallback_email=actor_email,
             section_name=str(sec.get("name") or ""),
             section_md=str(sec.get("md") or ""),
+            html_body=paper,
+            date_line=date_label,
         )
         agg["errors"] += r.get("errors") or []
         agg["sent"] += int(r.get("sent") or 0)
@@ -45009,12 +45116,27 @@ def _mount_client_letter() -> None:
             raise RuntimeError("Choose a model.")
 
         def _deliver(row: dict, actor: str | None) -> dict:
+            from api.domains.letter_paper import format_letter_date, paper_html
+            date_label = format_letter_date(row.get("letter_date") or "")
+            paper = paper_html(
+                date_label=date_label,
+                period="Client letter",
+                title=str(row.get("title") or "Client letter"),
+                note="",
+                intro="",
+                sections=[{
+                    "name": str(row.get("fund_name") or "Account"),
+                    "md": str(row.get("body") or ""),
+                }],
+            )
             return _qletter_email_lps(
                 "Client letter",
                 target_fund_id=row.get("fund_id"),
                 fallback_email=actor,
                 section_name=str(row.get("fund_name") or "your account"),
                 section_md=str(row.get("body") or ""),
+                html_body=paper,
+                date_line=date_label,
             )
 
         app.include_router(create_router(

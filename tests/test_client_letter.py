@@ -78,6 +78,36 @@ def test_save_does_not_email_until_send():
     assert store.get(saved["id"])["sent_at"]
 
 
+def test_save_keeps_a_sent_letter_sent_and_stores_the_date():
+    store = MemoryStore()
+    saved = save_letter(
+        store,
+        fund_id="acct-1",
+        fund_name="Sample account",
+        audience="retiree",
+        model="grok",
+        body="Hello from the book.",
+        letter_date="2026-10-23",
+    )
+    assert store.get(saved["id"])["letter_date"] == "2026-10-23"
+    assert store.get(saved["id"])["status"] == "draft"
+    store.mark_sent(saved["id"])
+    save_letter(
+        store,
+        fund_id="acct-1",
+        fund_name="Sample account",
+        audience="retiree",
+        model="grok",
+        body="Hello from the book, revised.",
+        letter_id=saved["id"],
+        letter_date="2026-10-23",
+    )
+    kept = store.get(saved["id"])
+    assert kept["status"] == "sent"
+    assert kept["sent_at"]
+    assert kept["letter_date"] == "2026-10-23"
+
+
 def test_cloud_draft_stores_without_emailing_and_local_stays_in_the_browser():
     store = MemoryStore()
 

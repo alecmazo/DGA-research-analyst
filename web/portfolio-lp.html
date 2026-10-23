@@ -2605,7 +2605,11 @@
     // Full letter → Reports tab (white "paper" card, fully readable).
     const rpt = document.getElementById('lp-rpt-letter');
     if (rpt) {
+      if (L.html) {
+        rpt.innerHTML = L.html;
+      } else {
       let h = '<div style="background:#fff;border-radius:14px;padding:28px 32px;box-shadow:0 2px 14px rgba(0,0,0,0.12);">'
+        + (L.date_label ? '<div style="font-size:15px;font-weight:700;color:#0A1628;margin:0 0 10px;">' + esc(L.date_label) + '</div>' : '')
         + '<div style="font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:#5BB8D4;">DGA Capital · ' + esc(L.period || ('Letter ' + (L.year||''))) + '</div>'
         + '<div style="font-size:24px;font-weight:800;color:#0A1628;margin:4px 0 16px;">' + esc(L.title || 'Quarterly Letter') + '</div>';
       if ((L.manual_note||'').trim())
@@ -2619,6 +2623,7 @@
       });
       h += '</div>';
       rpt.innerHTML = h;
+      }
     }
     // Dismissible banner on Performance — only while unread.
     const wrap = document.getElementById('lp-quarterly-letter');

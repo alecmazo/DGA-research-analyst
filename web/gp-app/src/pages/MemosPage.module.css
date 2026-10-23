@@ -326,24 +326,76 @@
   margin: 16px 0 6px;
 }
 
-.draftRow {
+.dateField {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border-subtle, #f1f5f9);
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-primary);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 12px;
 }
 
-.draftRow:hover {
-  color: var(--brand-600);
+.dateField span {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.dateInput {
+  width: 180px;
+  max-width: 100%;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  box-sizing: border-box;
+}
+
+.draftRow,
+.draftOn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  background: var(--bg-surface, #fff);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+.draftRow:hover,
+.draftOn:hover {
+  border-color: #5bb8d4;
+}
+
+.draftOn {
+  border-color: #5bb8d4;
+  background: #f3fbfd;
+}
+
+.draftTitle {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 .draftMeta {
   color: var(--text-tertiary);
-  font-weight: 400;
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .muted {

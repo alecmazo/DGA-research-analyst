@@ -353,6 +353,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Office DNS** | **`ui771-20261023-office-dns`** | Add office publishes the privateofficedesk.com records, keeps the zone on SSL Full, and turns the office CNAME orange after Railway's certificate is valid. The apex stays unpublished. |
 | **Account auth** | **`ui772-20261023-account-auth`** | Sign-in is email + password only. A GP account opens every fund and managed account. The shared desk password and the shared fund password are gone. Delete still asks for the delete password and a GP session. |
 | **Account desk** | **`ui773-20261023-account-desk`** | Settings opens on Accounts. A GP can change any login's email, set a password, or remove the password without deleting the account. A temporary password stops the desk until that person chooses their own. |
+| **Letter desk** | **`ui774-20261023-letter-desk`** | SUP_20261023_ce5c2636. The letter date is the first line of a quarterly letter and a client letter. Generate writes the account that is open. Preview is the same paper the LP portal and the email use. A saved row opens that letter and, once published, names the account. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
@@ -552,4 +553,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-23 · Agent: Cursor · Built: `ui773-20261023-account-desk` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui774-YYYYMMDD-slug`*
+*Last updated: 2026-10-23 · Agent: Cursor · Built: `ui774-20261023-letter-desk` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui775-YYYYMMDD-slug`*

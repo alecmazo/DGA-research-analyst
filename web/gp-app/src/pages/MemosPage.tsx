@@ -45,6 +45,8 @@ type QlLetterSummary = {
   title?: string
   period?: string
   status?: string
+  letter_date?: string | null
+  published_accounts?: { fund_id: string; name: string }[]
   updated_at?: string | null
 }
 
@@ -58,6 +60,7 @@ type QlLetter = {
   body_md?: string | null
   fund_sections?: Record<string, { md?: string; name?: string } | string>
   published_fund_ids?: string[]
+  letter_date?: string | null
   status?: string
 }
 
@@ -82,6 +85,17 @@ function qlFundLabel(f: QlFund) {
   return f.short_name || f.name || f.fund_id
 }
 
+function todayIso(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date())
+}
+
+function draftTag(letter: QlLetterSummary): string {
+  const names = (letter.published_accounts || []).map((row) => row.name).filter(Boolean)
+  if (names.length) return `Published · ${names.join(', ')}`
+  if ((letter.status || '') === 'published') return 'Published'
+  return 'Draft'
+}
+
 function sectionMd(
   secs: QlLetter['fund_sections'] | undefined,
   fid: string,
@@ -91,39 +105,6 @@ function sectionMd(
   if (!s) return ''
   if (typeof s === 'string') return s
   return s.md || ''
-}
-
-/** Lightweight markdown → safe HTML for QL preview (matches legacy _qlPreviewMd). */
-function previewMd(text: string): string {
-  const LINK = 'color:#2563eb;text-decoration:underline;font-weight:600;'
-  return String(text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(
-      /^### (.+)$/gm,
-      '<div style="font-size:12px;font-weight:800;color:#5BB8D4;letter-spacing:.6px;margin:14px 0 4px;text-transform:uppercase;">$1</div>',
-    )
-    .replace(
-      /^## (.+)$/gm,
-      '<div style="font-size:16px;font-weight:800;color:#0A1628;margin:16px 0 6px;">$1</div>',
-    )
-    .replace(
-      /^# (.+)$/gm,
-      '<div style="font-size:17px;font-weight:800;color:#0A1628;margin:16px 0 6px;">$1</div>',
-    )
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(
-      /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-      `<a href="$2" target="_blank" rel="noopener noreferrer" style="${LINK}">$1</a>`,
-    )
-    .replace(
-      /^- (.+)$/gm,
-      '<div style="padding:2px 0 2px 12px;border-left:2px solid #5BB8D4;margin:3px 0;">$1</div>',
-    )
-    .replace(/\n{2,}/g, '<div style="height:9px;"></div>')
-    .replace(/\n/g, ' ')
 }
 
 function emailMsg(em: {
@@ -216,6 +197,7 @@ export function MemosPage() {
 
   /* quarterly letter */
   const [qlYear, setQlYear] = useState(new Date().getFullYear())
+  const [qlDate, setQlDate] = useState(todayIso)
   const [qlNote, setQlNote] = useState('')
   const [qlIntro, setQlIntro] = useState('')
   const [qlFunds, setQlFunds] = useState<QlFund[]>([])
@@ -230,6 +212,7 @@ export function MemosPage() {
   const [qlFundsLoading, setQlFundsLoading] = useState(true)
   const [qlBusy, setQlBusy] = useState<string | null>(null) // which action is busy
   const [qlPreviewOpen, setQlPreviewOpen] = useState(false)
+  const [qlOpeningId, setQlOpeningId] = useState<string | null>(null)
   const [qlPane, setQlPane] = useState('note')
   const [pageErr, setPageErr] = useState<string | null>(null)
 
@@ -504,11 +487,12 @@ export function MemosPage() {
       title: `Quarterly Letter ${qlYear}`,
       period: `YTD ${qlYear}`,
       year: qlYear,
+      letter_date: qlDate,
       manual_note: qlNote,
       shared_intro_md: qlIntro,
       fund_sections: sections,
       scope_fund_ids: Object.keys(sections),
-      status: 'draft',
+      status: qlPublished.length ? 'published' : 'draft',
     }
     const r = await api<{ ok?: boolean; id?: string; detail?: string }>(
       '/api/quarterly-letter/save',
@@ -600,6 +584,7 @@ export function MemosPage() {
       return
     setQlBusy(`fund:${fid}`)
     setQlPane(fid)
+    setQlStatus(`Writing ${name}.`)
     try {
       const md = await qlText(
         '/api/research/quarterly-letter/fund-section',
@@ -703,6 +688,7 @@ export function MemosPage() {
           emailMsg(r.email),
       )
       setQlPublished(r.published_fund_ids || [])
+      void loadQlSaved()
     } catch (e) {
       setQlStatus('❌ ' + (e instanceof Error ? e.message : e))
     } finally {
@@ -737,6 +723,7 @@ export function MemosPage() {
       if (!r.ok) throw new Error(r.detail || 'publish failed')
       setQlStatus(`📢 Published ${name}.` + emailMsg(r.email))
       setQlPublished(r.published_fund_ids || [])
+      void loadQlSaved()
     } catch (e) {
       setQlStatus(`❌ ${name}: ` + (e instanceof Error ? e.message : e))
     } finally {
@@ -745,6 +732,9 @@ export function MemosPage() {
   }
 
   async function qlOpen(id: string) {
+    setQlOpeningId(id)
+    setQlCurrentId(id)
+    setQlStatus('Opening…')
     try {
       const d = await api<{ letter?: QlLetter }>(
         `/api/quarterly-letter/${encodeURIComponent(id)}`,
@@ -753,25 +743,37 @@ export function MemosPage() {
       if (!l) return
       setQlCurrentId(l.id)
       if (l.year) setQlYear(l.year)
+      setQlDate((l.letter_date || '').slice(0, 10) || todayIso())
       setQlNote(l.manual_note || '')
       setQlIntro(l.shared_intro_md || l.body_md || '')
       const secs = l.fund_sections || {}
-      setQlSections((prev) => {
-        const next = { ...prev }
-        Object.keys(secs).forEach((fid) => {
-          next[fid] = sectionMd(secs, fid)
-        })
-        return next
+      const next: Record<string, string> = {}
+      qlFunds.forEach((f) => {
+        next[f.fund_id] = ''
       })
-      setQlPublished(l.published_fund_ids || [])
+      Object.keys(secs).forEach((fid) => {
+        next[fid] = sectionMd(secs, fid)
+      })
+      setQlSections(next)
+      const published = l.published_fund_ids || []
+      setQlPublished(published)
+      const focus =
+        published.find((fid) => sectionMd(secs, fid).trim()) ||
+        Object.keys(secs).find((fid) => sectionMd(secs, fid).trim()) ||
+        'note'
+      setQlPane(focus)
       setQlStatus(`Loaded "${l.title || l.id}".`)
     } catch (e) {
       setQlStatus('Could not open draft: ' + (e instanceof Error ? e.message : e))
+    } finally {
+      setQlOpeningId(null)
     }
   }
 
   const publishedSet = useMemo(() => new Set(qlPublished), [qlPublished])
   const qlSelected = qlFunds.find((f) => f.fund_id === qlPane) || null
+  const filledFunds = qlFunds.filter((f) => (qlSections[f.fund_id] || '').trim())
+  const previewFund = qlSelected || (filledFunds.length === 1 ? filledFunds[0] : null)
   const qlStep = qlBusy
     ? 3
     : qlSelected && (qlSections[qlSelected.fund_id] || '').trim()
@@ -941,6 +943,17 @@ export function MemosPage() {
             </nav>
 
             <div className={styles.editor}>
+              <label className={styles.dateField}>
+                <span>Date</span>
+                <input
+                  className={styles.dateInput}
+                  type="date"
+                  aria-label="Letter date"
+                  value={qlDate}
+                  onChange={(e) => setQlDate(e.target.value)}
+                />
+              </label>
+              {qlOpeningId && <div className={styles.status}>Opening this letter…</div>}
               {qlPane === 'note' && (
                 <>
                   <div className={styles.editorHead}>
@@ -1051,23 +1064,21 @@ export function MemosPage() {
             <div className={styles.muted}>No saved drafts yet.</div>
           ) : (
             qlSaved.map((l) => (
-              <div
+              <button
                 key={l.id}
-                className={styles.draftRow}
+                type="button"
+                className={
+                  qlOpeningId === l.id || qlCurrentId === l.id ? styles.draftOn : styles.draftRow
+                }
                 onClick={() => void qlOpen(l.id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') void qlOpen(l.id)
-                }}
               >
-                <span>
-                  {l.title || l.period || l.id}{' '}
-                  <span className={styles.draftMeta}>
-                    · {l.status || ''} · {(l.updated_at || '').slice(0, 16).replace('T', ' ')}
-                  </span>
+                <span className={styles.draftTitle}>{l.title || l.period || l.id}</span>
+                <span className={styles.draftMeta}>
+                  {draftTag(l)}
+                  {' · '}
+                  {l.letter_date || (l.updated_at || '').slice(0, 10)}
                 </span>
-              </div>
+              </button>
             ))
           )}
         </div>
@@ -1252,10 +1263,17 @@ export function MemosPage() {
       {/* ── QL Preview modal ── */}
       {qlPreviewOpen && (
         <QlPreviewModal
-          year={qlYear}
-          note={qlNote}
-          intro={qlIntro}
-          sections={collectSections()}
+          payload={{
+            year: qlYear,
+            letter_date: qlDate,
+            period: `YTD ${qlYear}`,
+            title: `Quarterly Letter ${qlYear}`,
+            manual_note: qlNote,
+            shared_intro_md: qlIntro,
+            fund_id: previewFund?.fund_id || '',
+            fund_sections: collectSections(),
+          }}
+          accountName={previewFund ? qlFundLabel(previewFund) : ''}
           onClose={() => setQlPreviewOpen(false)}
         />
       )}
@@ -1264,19 +1282,44 @@ export function MemosPage() {
 }
 
 function QlPreviewModal({
-  year,
-  note,
-  intro,
-  sections,
+  payload,
+  accountName,
   onClose,
 }: {
-  year: number
-  note: string
-  intro: string
-  sections: Record<string, { md: string; name: string }>
+  payload: {
+    year: number
+    letter_date: string
+    period: string
+    title: string
+    manual_note: string
+    shared_intro_md: string
+    fund_id: string
+    fund_sections: Record<string, { md: string; name: string }>
+  }
+  accountName: string
   onClose: () => void
 }) {
-  const slist = Object.values(sections)
+  const [html, setHtml] = useState('')
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let alive = true
+    void api<{ html?: string; detail?: string }>('/api/quarterly-letter/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+      .then((data) => {
+        if (alive) setHtml(data.html || '')
+      })
+      .catch((e) => {
+        if (alive) setErr(e instanceof Error ? e.message : 'Preview failed')
+      })
+    return () => {
+      alive = false
+    }
+  }, [payload])
+  const caption = accountName
+    ? `This is the ${accountName} letter in the LP portal and in the email.`
+    : 'Select an account to preview the letter that account receives. This is the shared opening.'
   return (
     <div
       className={styles.overlay}
@@ -1286,47 +1329,20 @@ function QlPreviewModal({
     >
       <div className={`${styles.modal} ${styles.modalWide}`} role="dialog" aria-modal="true">
         <div className={styles.modalHead} style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 12 }}>
-          <span style={{ fontSize: 13, fontWeight: 800, color: '#0A1628' }}>👁 Letter preview</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: '#0A1628' }}>Letter preview</span>
           <span className={styles.toolbarSpacer} />
           <button type="button" className={styles.modalClose} onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
-        <div style={{ paddingTop: 8 }}>
-          <div className={styles.previewKicker}>DGA Capital · YTD {year}</div>
-          <div className={styles.previewTitle}>Quarterly Letter</div>
-          {note.trim() ? (
-            <div
-              className={styles.previewNote}
-              dangerouslySetInnerHTML={{ __html: previewMd(note) }}
-            />
-          ) : null}
-          {intro.trim() ? (
-            <div
-              className={styles.previewBody}
-              dangerouslySetInnerHTML={{ __html: previewMd(intro) }}
-            />
-          ) : null}
-          {slist.length ? (
-            slist.map((s, i) => (
-              <div key={i} className={styles.previewSection}>
-                <div className={styles.previewSectionName}>{s.name}</div>
-                <div
-                  className={styles.previewBody}
-                  dangerouslySetInnerHTML={{ __html: previewMd(s.md) }}
-                />
-              </div>
-            ))
-          ) : (
-            <div className={styles.muted} style={{ marginTop: 14 }}>
-              No fund sections filled in yet.
-            </div>
-          )}
-          <div className={styles.previewFoot}>
-            GP preview — shows ALL filled sections. Each LP sees the note, intro, and only the
-            sections for funds they hold.
-          </div>
-        </div>
+        <p className={styles.previewFoot}>{caption}</p>
+        {err ? (
+          <div className={styles.statusBad}>{err}</div>
+        ) : html ? (
+          <div dangerouslySetInnerHTML={{ __html: html }} />
+        ) : (
+          <div className={styles.muted}>Opening the letter…</div>
+        )}
       </div>
     </div>
   )
