@@ -1,19 +1,9 @@
-// Build tag — bump on every JS change so we can verify the OTA landed.
-// Shown in the screen header so the device tells us which bundle is loaded.
-const PODCAST_BUILD = 'pc-v16-public-share-20260525';
-
 /**
- * PodcastScreen — DGA HiTech Podcast player (mobile)
+ * PodcastScreen — phone player for both shows.
  *
- * Lists all generated episodes (from /api/podcast/list) and plays the
- * selected one via expo-audio. Streams from the auth-bypassed
- * /api/podcast/{TICKER}/audio.mp3 endpoint (whitelisted server-side
- * so the player doesn't need to attach tokens to the audio URL).
- *
- * Cast (display only — backend owns the voice mapping):
- *   Opus    — host         (onyx)
- *   Rock    — Grok analyst (fable, British inflection)
- *   Claudia — Claude analyst (nova)
+ * DGA HiTech is the company debates. Systems Over Goals Daily is the
+ * morning episode. Each row plays its own public MP3 (`audio_url`),
+ * because every Daily episode shares the ticker SOGD.
  */
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
@@ -121,6 +111,36 @@ function safeToggle(player, status, setLastErr) {
   }
 }
 
+const SHOWS = [
+  { id: 'dga-hitech', label: 'DGA HiTech', blurb: 'Company debates. Kimi hosts.' },
+  { id: 'systems-over-goals', label: 'Daily', blurb: 'Systems Over Goals. One episode each morning.' },
+];
+
+const SHOW_KEY = '@dga_podcast_show';
+
+function showOf(ep) {
+  return ep?.show || 'dga-hitech';
+}
+
+function isDaily(ep) {
+  return showOf(ep) === 'systems-over-goals';
+}
+
+function showTitle(ep) {
+  return isDaily(ep) ? 'Systems Over Goals Daily' : 'DGA HiTech Podcast';
+}
+
+const FORMAT_LABEL = {
+  debate: 'Debate',
+  pre_mortem: 'Pre-mortem',
+  memo: 'Memo',
+  catalysts: 'Catalysts',
+  quick_hit: 'Quick hit',
+  roundup: 'Roundup',
+  portfolio_roundup: 'Portfolio',
+  sogd: 'Daily',
+};
+
 function fmtDuration(sec) {
   if (!sec) return '—';
   const m = Math.floor(sec / 60);
@@ -186,14 +206,19 @@ export default function PodcastScreen() {
   // episodes (one per format: debate, pre_mortem, memo, catalysts, quick_hit,
   // portfolio_roundup). Keying off ticker alone made the screen highlight
   // ALL formats for the same ticker on tap.
-  const [selectedKey, setSelectedKey] = useState(null);   // "TICKER::format"
+  const [selectedKey, setSelectedKey] = useState(null);
   const [audioUrl, setAudioUrl] = useState(null);
   const [lastErr,  setLastErr]  = useState(null);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [showId, setShowId] = useState('dga-hitech');
 
-  // Helper — compound key builder. Falls back to 'debate' for legacy rows
-  // that don't have a format yet.
-  const epKey = (ep) => (ep ? `${ep.ticker}::${ep.format || 'debate'}` : null);
+  // A Daily episode is always ticker SOGD / format sogd. The guid is the
+  // only thing that separates Monday from Tuesday.
+  const epKey = (ep) => {
+    if (!ep) return null;
+    if (ep.episode_guid) return ep.episode_guid;
+    return `${showOf(ep)}::${ep.ticker}::${ep.format || 'debate'}::${ep.generated_at || ''}`;
+  };
   const selectedEp = () =>
     episodes.find((e) => epKey(e) === selectedKey) || null;
 
@@ -210,6 +235,11 @@ export default function PodcastScreen() {
       .then((v) => {
         const n = parseFloat(v || '1');
         if (n && n >= 0.5 && n <= 2.5) setPlaybackRate(n);
+      })
+      .catch(() => {});
+    AsyncStorage.getItem(SHOW_KEY)
+      .then((v) => {
+        if (SHOWS.some((show) => show.id === v)) setShowId(v);
       })
       .catch(() => {});
   }, []);
@@ -286,15 +316,18 @@ export default function PodcastScreen() {
     // FIRST LINE: force player card visible + show tap feedback so we know
     // the touch registered, even if everything downstream fails.
     setSelectedKey(key);
-    setLastErr(`TAP ${ep.ticker} (${fmt})`);
+    setLastErr(null);
     try { haptics.light(); } catch {}
     // Tap the SAME (ticker, format) → toggle play/pause
     if (selectedKey === key) {
       safeToggle(player, status, setLastErr);
       return;
     }
-    // New episode: build format-aware URL → replace → play
-    const url = await api.getPodcastAudioUrl(ep.ticker, fmt);
+    // Prefer the per-episode public file. The ticker URL is the latest
+    // HiTech mix and would play the same Daily file for every morning.
+    const url = ep.audio_url
+      ? await api.resolvePodcastMediaUrl(ep.audio_url)
+      : await api.getPodcastAudioUrl(ep.ticker, fmt);
     setAudioUrl(url);
     console.log('[podcast] loading', key, '→', url);
 
@@ -335,26 +368,29 @@ export default function PodcastScreen() {
       // no auth required to play, so recipients outside the app can listen).
       // Fall back to the auth-required audio URL if minting fails for any
       // reason (offline, server error, etc.).
-      let url = null;
+      let url = ep.audio_url ? await api.resolvePodcastMediaUrl(ep.audio_url) : null;
       let expiresLine = '';
-      try {
-        const minted = await api.mintPodcastShareLink(ep.ticker, fmt, 720);
-        if (minted && minted.url) {
-          url = minted.url;
-          if (minted.expires_in_hours) {
-            const days = Math.round(minted.expires_in_hours / 24);
-            expiresLine = `Link expires in ${days} day${days === 1 ? '' : 's'}.`;
+      if (!url && !isDaily(ep)) {
+        try {
+          const minted = await api.mintPodcastShareLink(ep.ticker, fmt, 720);
+          if (minted && minted.url) {
+            url = minted.url;
+            if (minted.expires_in_hours) {
+              const days = Math.round(minted.expires_in_hours / 24);
+              expiresLine = `Link expires in ${days} day${days === 1 ? '' : 's'}.`;
+            }
           }
-        }
-      } catch (_) { /* fall back to auth URL */ }
+        } catch (_) { /* fall back below */ }
+      }
       if (!url) {
         url = audioUrl || (await api.getPodcastAudioUrl(ep.ticker, fmt));
       }
-      const title = cleanTitle(ep.title, ep.ticker, ep.format)
-                     || (shortTicker(ep.ticker) + ' · ' + fmt);
+      const title = isDaily(ep)
+        ? (ep.title || 'Systems Over Goals Daily')
+        : (cleanTitle(ep.title, ep.ticker, ep.format) || (shortTicker(ep.ticker) + ' · ' + fmt));
       const dateStr = fmtDateShort(ep.generated_at);
       const lines = [
-        `DGA HiTech Podcast: ${title}`,
+        `${showTitle(ep)}: ${title}`,
         dateStr ? `Produced ${dateStr}` : '',
         '',
         url,
@@ -373,23 +409,27 @@ export default function PodcastScreen() {
     }
   }, [selectedEp, audioUrl]);
 
-  // Format icon for the row label — visually distinguishes Debate / Pre-Mortem
-  // / Memo / Catalysts / Quick Hit / Roundup / Portfolio Roundup at a glance.
-  const FORMAT_ICON = {
-    debate:            '⚔️',
-    pre_mortem:        '🪦',
-    memo:              '📋',
-    catalysts:         '📅',
-    quick_hit:         '⚡',
-    roundup:           '📰',
-    portfolio_roundup: '🧰',
+  const visible = episodes.filter((ep) => showOf(ep) === showId);
+  const activeShow = SHOWS.find((show) => show.id === showId) || SHOWS[0];
+  const playing = selectedEp();
+
+  const chooseShow = (id) => {
+    setShowId(id);
+    AsyncStorage.setItem(SHOW_KEY, id).catch(() => {});
+    try { haptics.light(); } catch {}
   };
 
   const renderEpisode = ({ item }) => {
     const key = epKey(item);
     const isActive = key === selectedKey;
+    const daily = isDaily(item);
     const fmt = item.format || 'debate';
-    const ic = FORMAT_ICON[fmt] || '';
+    const headline = daily
+      ? (item.title || 'Systems Over Goals Daily')
+      : shortTicker(item.ticker);
+    const detail = daily
+      ? null
+      : cleanTitle(item.title, item.ticker, item.format);
     return (
       <TouchableOpacity
         onPress={() => handleSelect(item)}
@@ -404,18 +444,19 @@ export default function PodcastScreen() {
           />
         </View>
         <View style={{ flex: 1, marginLeft: spacing.md }}>
-          <Text style={s.epTicker}>
-            {shortTicker(item.ticker)} {ic}
+          <Text style={daily ? s.epDaily : s.epTicker} numberOfLines={daily ? 2 : 1}>
+            {headline}
             {item.duration_sec ? (
               <Text style={s.epMeta}>  ·  {fmtDuration(item.duration_sec)}</Text>
             ) : null}
           </Text>
-          <Text style={s.epTitle} numberOfLines={1}>
-            {cleanTitle(item.title, item.ticker, item.format)}
-          </Text>
+          {!daily && detail ? (
+            <Text style={s.epTitle} numberOfLines={1}>{detail}</Text>
+          ) : null}
           <Text style={s.epSub}>
-            {fmtWhen(item.generated_at)}
-            {item.cost_usd != null ? `  ·  $${Number(item.cost_usd).toFixed(2)}` : ''}
+            {daily
+              ? (fmtWhen(item.generated_at) || 'Daily episode')
+              : `${FORMAT_LABEL[fmt] || 'Episode'}${item.generated_at ? `  ·  ${fmtWhen(item.generated_at)}` : ''}`}
           </Text>
         </View>
       </TouchableOpacity>
@@ -425,36 +466,42 @@ export default function PodcastScreen() {
   return (
     <View style={[s.root, { paddingTop: insets.top }]}>
       <View style={s.header}>
-        <Text style={s.brand}>🎙️  DGA HiTech</Text>
-        <Text style={s.brandSub}>Rock vs Claudia · Opus calls it · {PODCAST_BUILD}</Text>
+        <Text style={s.brand}>Podcasts</Text>
+        <Text style={s.brandSub}>{activeShow.blurb}</Text>
+        <View style={s.showSwitch}>
+          {SHOWS.map((show) => {
+            const on = show.id === showId;
+            return (
+              <TouchableOpacity
+                key={show.id}
+                onPress={() => chooseShow(show.id)}
+                style={[s.showBtn, on && s.showBtnOn]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: on }}
+              >
+                <Text style={[s.showBtnTxt, on && s.showBtnTxtOn]}>{show.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
 
-      {/* Active episode player (sticky at top once an episode is selected) */}
       {selectedKey ? (
         <Card style={s.playerCard}>
-          <Text style={s.playerTicker}>
-            {shortTicker(selectedEp()?.ticker || selectedKey.split('::')[0])}
-            {'  '}
-            <Text style={{ fontSize: 12, opacity: 0.7 }}>
-              {FORMAT_ICON[selectedEp()?.format || 'debate'] || ''}
-            </Text>
-            {selectedEp()?.generated_at ? (
-              <Text style={{ fontSize: 11, opacity: 0.65, fontWeight: '600' }}>
-                {'   '}📅 {fmtDateShort(selectedEp()?.generated_at)}
-              </Text>
-            ) : null}
+          <Text style={s.playerShow}>{playing ? showTitle(playing) : ''}</Text>
+          <Text style={playing && isDaily(playing) ? s.playerDaily : s.playerTicker} numberOfLines={2}>
+            {playing && isDaily(playing)
+              ? (playing.title || 'Systems Over Goals Daily')
+              : shortTicker(playing?.ticker || '')}
           </Text>
-          <Text style={s.playerTitle} numberOfLines={1}>
-            {cleanTitle(selectedEp()?.title, selectedEp()?.ticker, selectedEp()?.format)}
+          <Text style={s.playerTitle} numberOfLines={2}>
+            {playing && isDaily(playing)
+              ? (fmtDateShort(playing.generated_at) || 'Daily episode')
+              : cleanTitle(playing?.title, playing?.ticker, playing?.format)}
           </Text>
-          {/* Diagnostic strip — temporary until playback is reliable */}
-          <Text style={s.diag} numberOfLines={2}>
-            {lastErr
-              ? `⚠ ${lastErr}`
-              : status?.isLoaded
-                ? `▸ loaded · ${status.playing ? 'PLAYING' : 'paused'} · ${Math.round(status.duration || 0)}s`
-                : `⏳ loading audio…  url: ${(audioUrl || '').replace(/^https?:\/\//, '')}`}
-          </Text>
+          {lastErr ? (
+            <Text style={s.diag} numberOfLines={2}>{lastErr}</Text>
+          ) : null}
           <View style={s.scrubRow}>
             <Text style={s.scrubTime}>{fmtDuration(status?.currentTime || 0)}</Text>
             <View style={s.scrubTrack}>
@@ -527,17 +574,21 @@ export default function PodcastScreen() {
             <Text style={s.retryTxt}>Retry</Text>
           </TouchableOpacity>
         </View>
-      ) : episodes.length === 0 ? (
+      ) : visible.length === 0 ? (
         <View style={s.center}>
           <MaterialCommunityIcons name="podcast" size={48} color={t.textSecondary} />
-          <Text style={s.emptyTitle}>No episodes yet</Text>
+          <Text style={s.emptyTitle}>
+            {showId === 'systems-over-goals' ? 'No daily episode yet' : 'No HiTech episodes yet'}
+          </Text>
           <Text style={s.emptySub}>
-            Generate one from the web app (LLM Lab → Podcast → Generate audio).
+            {showId === 'systems-over-goals'
+              ? 'A new episode is recorded each morning and the feed stays quiet until 7:00 AM Pacific. Pull to refresh.'
+              : 'Record an episode in the podcast studio on the desk, then pull to refresh.'}
           </Text>
         </View>
       ) : (
         <FlatList
-          data={episodes}
+          data={visible}
           keyExtractor={(item) => epKey(item)}
           renderItem={renderEpisode}
           contentContainerStyle={{ paddingBottom: 120 }}
@@ -565,6 +616,31 @@ function makeStyles(t) {
   },
   brand:    { color: t.textPrimary, fontSize: fontSize.xl, fontWeight: '800', letterSpacing: -0.3 },
   brandSub: { color: t.textSecondary, fontSize: fontSize.caption, marginTop: 2 },
+  showSwitch: {
+    flexDirection: 'row',
+    marginTop: spacing.md,
+    backgroundColor: t.surfaceAlt,
+    borderRadius: radius.pill,
+    padding: 3,
+  },
+  showBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+  },
+  showBtnOn: { backgroundColor: t.chromeNavy },
+  showBtnTxt: { color: t.textSecondary, fontSize: fontSize.small, fontWeight: '700' },
+  showBtnTxtOn: { color: t.onChrome },
+  playerShow: {
+    color: '#84CCE3',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
 
   // Player card (navy)
   playerCard: {
@@ -580,6 +656,13 @@ function makeStyles(t) {
     fontSize: fontSize.hero,
     fontWeight: '800',
     letterSpacing: letterSpacing.ticker,
+  },
+  playerDaily: {
+    color: t.gold,
+    fontSize: fontSize.lg,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+    lineHeight: 22,
   },
   playerTitle: {
     color: t.onChrome,
@@ -657,6 +740,9 @@ function makeStyles(t) {
   epTicker: {
     color: t.textPrimary, fontSize: fontSize.lg, fontWeight: '800',
     letterSpacing: letterSpacing.ticker,
+  },
+  epDaily: {
+    color: t.textPrimary, fontSize: fontSize.bodyLg, fontWeight: '700', lineHeight: 19,
   },
   epMeta: { color: t.textSecondary, fontSize: fontSize.small, fontWeight: '500' },
   epTitle: { color: t.textPrimary, fontSize: fontSize.small, marginTop: 2 },

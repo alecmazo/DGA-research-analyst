@@ -13,7 +13,7 @@ import { spacing, radius, shadow, fontSize, useTheme } from '../design';
 const ITEMS = [
   { route: 'Fund',         icon: 'briefcase-outline', title: 'Fund', sub: 'Fund admin, managed accounts, planning' },
   { route: 'Planning',     icon: 'clipboard-text-outline', title: 'Planning', sub: 'Shared LP household worksheet' },
-  { route: 'Podcast',      icon: 'microphone', title: 'DGA HiTech Podcast', sub: 'AI-narrated episodes' },
+  { route: 'Podcast',      icon: 'microphone', title: 'Podcasts', sub: 'DGA HiTech and Systems Over Goals Daily' },
   { route: 'PaperTracker', icon: 'chart-timeline-variant', title: 'Paper Tracker', sub: 'Paper portfolios vs SPY + live book' },
   { route: 'Settings',     icon: 'tune',       title: 'Settings',           sub: 'Server, security, automation' },
 ];

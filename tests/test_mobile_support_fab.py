@@ -74,7 +74,7 @@ def test_ota_cold_start_never_reloads():
     settings = (ROOT / "mobile" / "src" / "screens" / "SettingsScreen.js").read_text(
         encoding="utf-8"
     )
-    assert "APP_BUILD = 'mobile-ui32-markets-news-20261015'" in settings
+    assert "APP_BUILD = 'mobile-ui33-podcast-shows-20261026'" in settings
 
 
 def test_gp_tabs_split_markets_and_watchlist():
@@ -144,3 +144,18 @@ def test_positions_and_financials_paint_from_cache():
     client = (ROOT / "mobile" / "src" / "api" / "client.js").read_text(encoding="utf-8")
     assert "getMobileHome" in client
     assert "/api/mobile/home" in client
+
+
+def test_phone_podcast_has_both_shows():
+    screen = (ROOT / "mobile" / "src" / "screens" / "PodcastScreen.js").read_text(
+        encoding="utf-8"
+    )
+    client = (ROOT / "mobile" / "src" / "api" / "client.js").read_text(encoding="utf-8")
+    more = (ROOT / "mobile" / "src" / "screens" / "MoreScreen.js").read_text(encoding="utf-8")
+    assert "systems-over-goals" in screen
+    assert "dga-hitech" in screen
+    assert "episode_guid" in screen
+    assert "audio_url" in screen
+    assert "resolvePodcastMediaUrl" in screen
+    assert "resolvePodcastMediaUrl" in client
+    assert "Systems Over Goals Daily" in more

@@ -210,11 +210,20 @@ export const api = {
     return resp.json();
   },
 
-  // ---------- DGA HiTech Podcast ----------
-  listPodcastEpisodes: async () => {
-    const r = await v2Fetch('/api/podcast/list');
+  // ---------- Podcasts (DGA HiTech and Systems Over Goals Daily) ----------
+  listPodcastEpisodes: async (show) => {
+    const q = show ? `?show=${encodeURIComponent(show)}` : '';
+    const r = await v2Fetch(`/api/podcast/list${q}`);
     if (!r.ok) throw new Error(`podcast/list ${r.status}`);
     return r.json();
+  },
+  // Episode rows carry a public path (`/api/public/podcast/media/...`).
+  // The player cannot attach the session header, so that path is the one to stream.
+  resolvePodcastMediaUrl: async (pathOrUrl) => {
+    if (!pathOrUrl) return null;
+    if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+    const base = await getBaseUrl();
+    return `${base}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`;
   },
   // Build the public audio URL — the /audio.mp3 endpoint is auth-bypassed
   // (whitelisted in the server's auth middleware) so <Audio.Sound> can stream
