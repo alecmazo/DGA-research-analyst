@@ -292,7 +292,7 @@ def manual_release(now: datetime, publish_at: datetime) -> dict:
 
 
 def date_guard(existing: dict | None, *, force: bool = False, now: datetime | None = None,
-               stale_after_sec: int = 3 * 3600) -> dict:
+               stale_after_sec: int = 3 * 3600, lock_held: bool = False) -> dict:
     if not existing:
         return {"ok": True}
     status = (existing.get("status") or "published").strip().lower()
@@ -301,6 +301,9 @@ def date_guard(existing: dict | None, *, force: bool = False, now: datetime | No
     if status in ("failed", "cost_cap_hit"):
         return {"ok": True, "retry": status == "failed"}
     if status == "running":
+        # The caller already holds the daily lock, so this row's worker is gone.
+        if lock_held:
+            return {"ok": True, "retry": True}
         started = _as_local(existing.get("started_at"), timezone.utc)
         clock = now or datetime.now(timezone.utc)
         if clock.tzinfo is None:
@@ -462,15 +465,35 @@ def ensure_disclosure(script: dict) -> dict:
     return script
 
 
+_ABBREV_RE = re.compile(
+    r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Gen|Sen|Rep|Gov|Inc|Ltd|Corp|Co|No|vs|Fig|"
+    r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.",
+    re.IGNORECASE,
+)
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split on sentence ends. Keep decimals and dotted names in one sentence."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    shielded = re.sub(r"(?<=\d)\.(?=\d)", "∯", raw)
+    shielded = _ABBREV_RE.sub(lambda match: match.group(0).replace(".", "∯"), shielded)
+    shielded = re.sub(r"\b(?:[A-Z]\.){2,}", lambda match: match.group(0).replace(".", "∯"), shielded)
+    out = []
+    for part in re.split(r"(?<=[.!?])\s+", shielded):
+        sentence = part.replace("∯", ".").strip()
+        if sentence:
+            out.append(sentence)
+    return out
+
+
 def extract_claims(script: dict) -> list[dict]:
     claims = []
     n = 0
     for sec in script.get("sections") or []:
         for turn in sec.get("turns") or []:
-            for sent in re.split(r"(?<=[.!?])\s+", turn.get("text") or ""):
-                sent = sent.strip()
-                if not sent:
-                    continue
+            for sent in split_sentences(turn.get("text") or ""):
                 n += 1
                 claims.append({
                     "id": f"c{n}",
@@ -511,12 +534,18 @@ def pick_fact_checker(ollama_ok: bool) -> str:
 
 def judge_claims(claims, stories, *, ollama_ok: bool, ollama_fn, grok_fn) -> dict:
     """Ollama gemma4 when it is up. Any failure falls through to Grok."""
+    def pack(provider: str, raw, **extra) -> dict:
+        verdicts, usage = _as_verdicts(raw)
+        out = {"provider": provider, "verdicts": verdicts, "usage": usage}
+        out.update(extra)
+        return out
+
     if ollama_ok:
         try:
-            return {"provider": "ollama", "verdicts": ollama_fn(claims, stories)}
+            return pack("ollama", ollama_fn(claims, stories))
         except Exception:
-            return {"provider": "grok", "verdicts": grok_fn(claims, stories), "fallback": True}
-    return {"provider": "grok", "verdicts": grok_fn(claims, stories)}
+            return pack("grok", grok_fn(claims, stories), fallback=True)
+    return pack("grok", grok_fn(claims, stories))
 
 
 def episode_title(episode_date: date, lead: str) -> str:
@@ -698,6 +727,8 @@ def live_writer(stories: list[dict], lenses, episode_date: date, *, word_min: in
         "Return JSON only: {\"sections\":[{\"id\":\"\",\"text\":\"\"}]}. "
         f"Sections in order: cold_open, story_1..story_N, systems_takeaway. "
         f"Total between {word_min} and {word_max} words. "
+        "Every number, date, quote, and who-did-what must come from the stories. "
+        "Do not invent those. "
         f"The cold open starts with: {DISCLOSURE} "
         + LENS_GUARD,
         json.dumps({"date": episode_date.isoformat(), "stories": stories, "lens": lenses}),
@@ -723,42 +754,141 @@ def live_expand(section: dict, need: int) -> dict:
     return updated
 
 
+FACT_CHUNK = 40
+FACT_INSTRUCTION = (
+    "Return JSON only: {\"verdicts\":[{\"id\":\"\",\"keep\":true}]}. "
+    "Set keep to false only when the sentence states a concrete fact "
+    "(a number, a date, a quote, or a specific who-did-what) that the sources "
+    "do not support or that they contradict. "
+    "Keep the disclosure, transitions, and analysis of incentives or systems "
+    "that does not add a new fact. When unsure, keep is true."
+)
+
+
+def _keep_flag(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "keep")
+    return bool(value)
+
+
+def _source_brief(stories) -> list[dict]:
+    brief = []
+    for story in stories or []:
+        if not isinstance(story, dict):
+            continue
+        brief.append({
+            "title": story.get("title") or "",
+            "url": story.get("url") or "",
+            "summary": str(story.get("summary") or "")[:500],
+        })
+    return brief
+
+
 def _verdict_map(text: str) -> dict:
     data = _json_obj(text)
     rows = data.get("verdicts") or []
     out = {}
     if isinstance(rows, dict):
-        return rows
+        for key, value in rows.items():
+            if isinstance(value, dict):
+                out[str(key)] = {"keep": _keep_flag(value.get("keep", False))}
+            else:
+                out[str(key)] = {"keep": _keep_flag(value)}
+        return out
     for row in rows:
         if isinstance(row, dict) and row.get("id"):
-            out[str(row["id"])] = {"keep": bool(row.get("keep", False))}
+            out[str(row["id"])] = {"keep": _keep_flag(row.get("keep", False))}
     return out
 
 
+def _as_verdicts(raw) -> tuple[dict, dict]:
+    if isinstance(raw, dict) and "verdicts" in raw:
+        verdicts = raw.get("verdicts") or {}
+        if not isinstance(verdicts, dict):
+            verdicts = {}
+        usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        return verdicts, usage
+    if isinstance(raw, dict):
+        return raw, {}
+    return {}, {}
+
+
+def _chunked_verdicts(claims, stories, ask) -> dict:
+    merged: dict = {}
+    usage = {"input_tokens": 0, "output_tokens": 0, "x_search_calls": 0, "cost_usd": 0.0}
+    rows = list(claims or [])
+    for start in range(0, max(1, len(rows)), FACT_CHUNK):
+        if not rows:
+            break
+        part = ask(rows[start:start + FACT_CHUNK])
+        verdicts, part_usage = _as_verdicts(part)
+        merged.update(verdicts or {})
+        summed = _sum_usage([part_usage])
+        usage["input_tokens"] += summed["input_tokens"]
+        usage["output_tokens"] += summed["output_tokens"]
+        usage["x_search_calls"] += summed["x_search_calls"]
+        usage["cost_usd"] += summed["cost_usd"]
+    usage["cost_usd"] = round(usage["cost_usd"], 6)
+    return {"verdicts": merged, "usage": usage}
+
+
 def live_grok_verdicts(claims, stories) -> dict:
-    text, _usage = _call_grok(
-        "Return JSON only: {\"verdicts\":[{\"id\":\"\",\"keep\":true}]}. "
-        "keep is true only when the claim is supported by the sources.",
-        json.dumps({"claims": claims, "sources": stories}),
-    )
-    return _verdict_map(text)
+    def ask(chunk):
+        text, usage = _call_grok(
+            FACT_INSTRUCTION,
+            json.dumps({"claims": chunk, "sources": _source_brief(stories)}),
+        )
+        return {"verdicts": _verdict_map(text), "usage": usage}
+    return _chunked_verdicts(claims, stories, ask)
 
 
 def live_ollama_verdicts(claims, stories) -> dict:
-    prompt = (
-        "Check each claim against the sources. "
-        "Return JSON only: {\"verdicts\":[{\"id\":\"\",\"keep\":true}]}. "
-        "keep is false when the sources do not support the claim.\n"
-        + json.dumps({"claims": claims, "sources": stories})
+    def ask(chunk):
+        prompt = FACT_INSTRUCTION + "\n" + json.dumps({
+            "claims": chunk,
+            "sources": _source_brief(stories),
+        })
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/generate",
+            data=json.dumps({"model": "gemma4", "prompt": prompt, "stream": False}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        return _verdict_map(payload.get("response") or "")
+    return _chunked_verdicts(claims, stories, ask)
+
+
+def live_repair_script(script, dropped, stories, episode_date: date) -> dict:
+    """One rewrite when the checker rejects too much of the episode."""
+    sections = []
+    for sec in (script or {}).get("sections") or []:
+        sections.append({"id": sec.get("id"), "text": _section_text(sec)})
+    text, usage = _call_grok(
+        "Return JSON only: {\"sections\":[{\"id\":\"\",\"text\":\"\"}]}. "
+        "Rewrite the script without the dropped sentences. "
+        "Replace the lost length with incentive and systems analysis grounded in the sources. "
+        "Do not add a number, date, quote, or who-did-what that is not in the sources. "
+        f"The cold open starts with: {DISCLOSURE} "
+        + LENS_GUARD,
+        json.dumps({
+            "sections": sections,
+            "dropped": [claim.get("text") for claim in (dropped or [])],
+            "sources": _source_brief(stories),
+        }),
     )
-    req = urllib.request.Request(
-        "http://127.0.0.1:11434/api/generate",
-        data=json.dumps({"model": "gemma4", "prompt": prompt, "stream": False}).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    return _verdict_map(payload.get("response") or "")
+    data = _json_obj(text)
+    got = data.get("sections") or []
+    if not got:
+        return {"script": script, "usage": usage}
+    lead = ""
+    if stories:
+        lead = (stories[0].get("title") or "").strip()
+    lead = lead or (script or {}).get("episode_title") or "Daily briefing"
+    rebuilt = _assemble(episode_date, lead, got)
+    if (script or {}).get("episode_title"):
+        rebuilt["episode_title"] = script["episode_title"]
+    return {"script": rebuilt, "usage": usage}
 
 
 def _synthesize_engine(script, voice, pronunciation, on_progress) -> dict:
@@ -809,6 +939,7 @@ def run_daily_episode(
     trim_section=None,
     synthesize=None,
     store_put=None,
+    repair=None,
     word_min: int | None = None,
     word_max: int | None = None,
 ) -> dict:
@@ -955,22 +1086,56 @@ def run_daily_episode(
         if not validation["ok"]:
             raise RuntimeError("script invalid: " + "; ".join(validation["errors"]))
 
+        def _judge(script_now):
+            claims_now = extract_claims(script_now)
+            provider_name_now = pick_fact_checker(bool(ollama_ok))
+            if fact_checker:
+                checked_now = fact_checker(claims_now, stories, provider_name_now)
+            else:
+                checked_now = judge_claims(
+                    claims_now, stories, ollama_ok=bool(ollama_ok),
+                    ollama_fn=live_ollama_verdicts, grok_fn=live_grok_verdicts,
+                )
+            if isinstance(checked_now, dict) and "verdicts" in checked_now:
+                verdicts_now = checked_now.get("verdicts") or {}
+            else:
+                verdicts_now = checked_now or {}
+            charge("fact_check", checked_now.get("usage") if isinstance(checked_now, dict) else {})
+            return apply_fact_check(script_now, claims_now, verdicts_now), checked_now, provider_name_now
+
         before("fact_check")
         progress("fact_check", "claims against sources")
-        claims = extract_claims(script)
         if ollama_ok is None and fact_checker is None:
             ollama_ok = ollama_reachable()
-        provider_name = pick_fact_checker(bool(ollama_ok))
-        if fact_checker:
-            checked = fact_checker(claims, stories, provider_name)
-        else:
-            checked = judge_claims(
-                claims, stories, ollama_ok=bool(ollama_ok),
-                ollama_fn=live_ollama_verdicts, grok_fn=live_grok_verdicts,
+        applied, checked, provider_name = _judge(script)
+        if not applied["ok"]:
+            progress("fact_check", "rewriting unsupported lines")
+            if repair:
+                repaired = repair(script, applied["dropped"], stories)
+            else:
+                repaired = live_repair_script(script, applied["dropped"], stories, episode_date)
+            charge("fact_check", repaired.get("usage") if isinstance(repaired, dict) else {})
+            rewritten = repaired.get("script") if isinstance(repaired, dict) else None
+            if rewritten:
+                script = rewritten
+            guarded = guard_script(script)
+            if not guarded["ok"]:
+                raise RuntimeError("likeness guard rejected: " + ", ".join(guarded["hits"]))
+            spent = len(regen_usage)
+            budget = enforce_word_budget(
+                script,
+                word_count=_word_count,
+                regenerate_section=_regen,
+                trim_section=trim_section or trim_section_words,
+                word_min=word_min,
+                word_max=word_max,
             )
-        verdicts = checked.get("verdicts") if isinstance(checked, dict) and "verdicts" in checked else checked
-        charge("fact_check", (checked or {}).get("usage") if isinstance(checked, dict) else {})
-        applied = apply_fact_check(script, claims, verdicts or {})
+            for extra in regen_usage[spent:]:
+                charge("script", extra)
+            if not budget["ok"]:
+                raise RuntimeError(f"word count {budget['words']} outside {word_min}-{word_max}")
+            script = ensure_disclosure(budget["script"])
+            applied, checked, provider_name = _judge(script)
         result["dropped"] = applied["dropped"]
         result["fact_checker"] = (checked or {}).get("provider") if isinstance(checked, dict) else provider_name
         if not applied["ok"]:
@@ -978,6 +1143,7 @@ def run_daily_episode(
                 f"fact-check dropped {applied['drop_ratio']:.0%} of claims"
             )
         script = ensure_disclosure(applied["script"])
+        spent = len(regen_usage)
         budget = enforce_word_budget(
             script,
             word_count=_word_count,
@@ -986,6 +1152,8 @@ def run_daily_episode(
             word_min=word_min,
             word_max=word_max,
         )
+        for extra in regen_usage[spent:]:
+            charge("script", extra)
         if not budget["ok"]:
             raise RuntimeError(f"word count {budget['words']} outside {word_min}-{word_max} after fact-check")
         script = budget["script"]
@@ -1144,6 +1312,28 @@ def load_run_context(episode_date: date | None, connect) -> dict:
     except Exception as exc:
         print(f"[sogd] context skipped: {exc!s:.180}", flush=True)
     return ctx
+
+
+def abandon_running(connect, episode_date: date) -> None:
+    """A lock holder is the only live worker. An older running row is a dead one."""
+    if connect is None or not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        with connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE podcast_runs
+                   SET finished_at = NOW(),
+                       status = 'failed',
+                       error = COALESCE(NULLIF(error, ''), 'worker stopped before the run finished')
+                 WHERE show = %s AND episode_date = %s AND status = 'running'
+                """,
+                (SHOW_ID, episode_date),
+            )
+            conn.commit()
+    except Exception as exc:
+        print(f"[sogd] abandon skipped: {exc!s:.160}", flush=True)
 
 
 def begin_run(connect, episode_date: date):
@@ -1371,7 +1561,8 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
     """Scheduler, button, and CLI all enter here. The lock wraps one local date."""
     def work():
         ctx = load_run_context(episode_date, connect if os.environ.get("DATABASE_URL") else None)
-        guard = date_guard(ctx["existing"], force=force, now=ctx["now"])
+        locked = connect is not None and bool(os.environ.get("DATABASE_URL"))
+        guard = date_guard(ctx["existing"], force=force, now=ctx["now"], lock_held=locked and not dry_run)
         if not dry_run and not guard["ok"]:
             return {
                 "ok": True,
@@ -1381,12 +1572,19 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
                 "episode_date": ctx["episode_date"].isoformat(),
                 "show": SHOW_ID,
             }
+        retry_running = (
+            not dry_run
+            and guard.get("retry")
+            and ((ctx.get("existing") or {}).get("status") or "").strip().lower() == "running"
+        )
+        if retry_running:
+            abandon_running(connect, ctx["episode_date"])
         run_id = None if dry_run else begin_run(connect, ctx["episode_date"])
         result = run_daily_episode(
             ctx["episode_date"],
             force=force,
             dry_run=dry_run,
-            existing=None if force else ctx["existing"],
+            existing=None if force or retry_running else ctx["existing"],
             voice=kwargs.get("voice") or ctx["voice"],
             auto_publish=ctx["auto_publish"],
             cost_cap=ctx["cost_cap_usd"],

@@ -255,6 +255,51 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertEqual(pick_fact_checker(False), "grok")
         self.assertEqual(pick_fact_checker(True), "ollama")
 
+        from podcast_sogd import _verdict_map, split_sentences
+        sentences = split_sentences("The Fed held at 5.25 percent. U.S. markets rose. Mr. Smith agreed.")
+        self.assertEqual(sentences, [
+            "The Fed held at 5.25 percent.",
+            "U.S. markets rose.",
+            "Mr. Smith agreed.",
+        ])
+        mapped = _verdict_map('{"verdicts":[{"id":"c1","keep":"false"},{"id":"c2","keep":"true"}]}')
+        self.assertFalse(mapped["c1"]["keep"])
+        self.assertTrue(mapped["c2"]["keep"])
+
+    def test_fact_check_repairs_once_then_records(self):
+        from podcast_sogd import run_daily_episode
+        seen = {"checks": 0, "dropped": 0}
+
+        def checker(claims, stories, provider):
+            seen["checks"] += 1
+            keep = seen["checks"] > 1
+            return {"verdicts": {claim["id"]: {"keep": keep} for claim in claims}, "usage": {}}
+
+        def repair(script, dropped, stories):
+            seen["dropped"] = len(dropped)
+            return {"script": _script(), "usage": {"cost_usd": 0.01}}
+
+        result = self._run(fact_checker=checker, repair=repair)
+        self.assertEqual(result["status"] in ("published", "ready_pending"), True, result["error"])
+        self.assertEqual(seen["checks"], 2)
+        self.assertGreater(seen["dropped"], 0)
+        self.assertGreater(result["usage"]["cost_usd_by_stage"].get("fact_check", 0), 0)
+
+        def always_drop(claims, stories, provider):
+            return {"verdicts": {claim["id"]: {"keep": False} for claim in claims}, "usage": {}}
+
+        failed = self._run(fact_checker=always_drop, repair=repair)
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("fact-check dropped", failed["error"])
+        self.assertEqual(failed.get("stage"), "fact_check")
+
+    def test_dead_running_row_retries_while_lock_is_held(self):
+        from podcast_sogd import date_guard
+        fresh = {"status": "running", "started_at": datetime.now(timezone.utc)}
+        self.assertEqual(date_guard(fresh)["reason"], "in_progress")
+        self.assertTrue(date_guard(fresh, lock_held=True)["ok"])
+        self.assertTrue(date_guard({"status": "failed"})["ok"])
+
     def test_disclosure_and_existing_disclaimer(self):
         from podcast_engine import DEFAULT_DISCLAIMER_INTRO, DEFAULT_DISCLAIMER_OUTRO
         from podcast_sogd import DISCLOSURE, ensure_disclosure, script_text
