@@ -8987,7 +8987,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui781-20261026-sogd-daily"
+WEB_BUILD_VERSION = "ui782-20261026-studio-cast"
 
 
 @app.get("/api/build")
@@ -38962,10 +38962,14 @@ def _run_podcast_generation(ticker: str, tts_model: str, format: str = "debate")
         disc_outro = dcfg.get("outro_text", pe.DEFAULT_DISCLAIMER_OUTRO) \
                         if dcfg.get("outro_enabled", True) else None
         disc_voice = dcfg.get("voice", pe.DEFAULT_DISCLAIMER_VOICE)
+        from podcast_tts import XAI_VOICES
+        if (disc_voice or "").strip().lower() not in XAI_VOICES:
+            disc_voice = pe.DEFAULT_DISCLAIMER_VOICE
         syn = pe.synthesize_episode(
             script,
             out_path=out_path,
-            tts_model=tts_model,
+            tts_model="xai",
+            tts_provider="xai",
             disclaimer_intro=disc_intro,
             disclaimer_outro=disc_outro,
             disclaimer_voice=disc_voice,
@@ -38983,7 +38987,7 @@ def _run_podcast_generation(ticker: str, tts_model: str, format: str = "debate")
             media_key=media_key,
             show_id=show_id,
             store=store,
-            tts_model=tts_model,
+            tts_model="xai",
             job_key=job_key,
         )
         dropbox_path = saved.get("dropbox_path")
@@ -39020,20 +39024,15 @@ def podcast_generate(ticker: str, background_tasks: BackgroundTasks,
     When status.stage='done', play GET /api/podcast/{ticker}/audio.mp3?format=X.
     """
     tk = ticker.upper().strip()
-    from podcast_tts import provider_name
-    pname = provider_name()
-    if pname in ("", "openai", "openaitts") and not os.environ.get("OPENAI_API_KEY"):
-        return JSONResponse({"ok": False, "error": "OPENAI_API_KEY not set on server"},
-                            status_code=400)
-    if pname in ("xai", "grok", "xaitts") and not os.environ.get("XAI_API_KEY"):
+    if not os.environ.get("XAI_API_KEY"):
         return JSONResponse({"ok": False, "error": "XAI_API_KEY not set on server"},
                             status_code=400)
     job_key = f"{tk}::{format}"
     existing = _podcast_jobs.get(job_key)
     if existing and existing.get("status") == "running":
         return {"ok": True, "ticker": tk, "format": format, "already_running": True}
-    background_tasks.add_task(_run_podcast_generation, tk, tts_model, format)
-    return {"ok": True, "ticker": tk, "format": format, "tts_model": tts_model}
+    background_tasks.add_task(_run_podcast_generation, tk, "xai", format)
+    return {"ok": True, "ticker": tk, "format": format, "tts_model": "xai"}
 
 
 @app.get("/api/podcast/{ticker}/status")
@@ -39686,9 +39685,10 @@ def podcast_reset_speed_config():
 # Short, character-flavored so the user can hear how a candidate voice
 # delivers that character's typical line. ~10–15 words each.
 PODCAST_SAMPLE_LINES = {
-    "opus":    "Welcome to the show — I'm Opus. Rock and Claudia disagree on this one.",
-    "rock":    "Right then, mate — the consensus is dead wrong, and the chart's a coiled spring.",
-    "claudia": "Look, honestly — the multiple's stretched and the catalysts are weaker than the bulls claim.",
+    "kimi":    "Welcome to the show. I'm Kimi. Rock and Claudia disagree on this one.",
+    "opus":    "Welcome to the show. I'm Kimi. Rock and Claudia disagree on this one.",
+    "rock":    "The consensus is dead wrong, and the chart is a coiled spring.",
+    "claudia": "The multiple is stretched, and the catalysts are weaker than the bulls claim.",
 }
 
 
@@ -39704,7 +39704,7 @@ def podcast_voice_sample(speaker: str, voice: str):
     sp_l = (speaker or "").lower().strip()
     v    = (voice   or "").lower().strip()
     from podcast_tts import get_provider
-    provider = get_provider(pe.TTS_MODEL_DEFAULT)
+    provider = get_provider(name="xai")
     if sp_l not in PODCAST_SAMPLE_LINES:
         return JSONResponse({"ok": False, "error": f"unknown speaker {speaker!r}"}, status_code=400)
     allowed = [x.lower() for x in provider.voices()]
@@ -39717,7 +39717,7 @@ def podcast_voice_sample(speaker: str, voice: str):
 
     cache_dir = analyst.STOCKS_FOLDER / "voice_samples"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    out_path = cache_dir / f"sample_{sp_l}_{v}.mp3"
+    out_path = cache_dir / f"sample_xai_{sp_l}_{v}.mp3"
 
     if not out_path.exists():
         try:
@@ -39736,7 +39736,7 @@ def podcast_voice_sample(speaker: str, voice: str):
 
 @app.get("/api/podcast/voice-config")
 def podcast_get_voice_config():
-    """Return current voice assignments + the list of available OpenAI voices."""
+    """Return current cast assignments and the Grok voices the studio can pick."""
     import podcast_engine as pe
     saved = _kv_get("podcast.voice_config") or {}
     pe.apply_voice_overrides(voices=saved.get("voices"))
@@ -39747,7 +39747,7 @@ def podcast_get_voice_config():
 def podcast_set_voice_config(req: Request):
     """Persist UI edits to the cast voice assignments.
 
-    Body: { voices: { opus: 'onyx', rock: 'fable', claudia: 'nova' } }
+    Body: { voices: { kimi: 'leo', rock: 'rex', claudia: 'ara' } }
     """
     import podcast_engine as pe
     try:
@@ -39762,7 +39762,7 @@ def podcast_set_voice_config(req: Request):
 
 @app.post("/api/podcast/voice-config/reset")
 def podcast_reset_voice_config():
-    """Reset voice assignments to engine defaults (Opus=onyx etc)."""
+    """Reset the cast to the Grok defaults (Kimi=leo, Rock=rex, Claudia=ara)."""
     import podcast_engine as pe
     pe._RUNTIME_VOICE_MAP = dict(pe.VOICE_MAP)
     _kv_put("podcast.voice_config", {"voices": dict(pe.VOICE_MAP)})
@@ -39774,14 +39774,18 @@ def podcast_get_disclaimer_config():
     """Return the current compliance disclaimer config (intro + outro text,
     voice, enabled flags). Defaults from the engine if no override set."""
     import podcast_engine as pe
+    from podcast_tts import XAI_VOICES
     cfg = _kv_get("podcast.disclaimer_config") or {}
+    voice = (cfg.get("voice") or pe.DEFAULT_DISCLAIMER_VOICE).strip().lower()
+    if voice not in XAI_VOICES:
+        voice = pe.DEFAULT_DISCLAIMER_VOICE
     return {
         "ok":             True,
         "intro_enabled":  bool(cfg.get("intro_enabled", True)),
         "outro_enabled":  bool(cfg.get("outro_enabled", True)),
         "intro_text":     cfg.get("intro_text") or pe.DEFAULT_DISCLAIMER_INTRO,
         "outro_text":     cfg.get("outro_text") or pe.DEFAULT_DISCLAIMER_OUTRO,
-        "voice":          cfg.get("voice")      or pe.DEFAULT_DISCLAIMER_VOICE,
+        "voice":          voice,
         "default_intro":  pe.DEFAULT_DISCLAIMER_INTRO,
         "default_outro":  pe.DEFAULT_DISCLAIMER_OUTRO,
         "default_voice":  pe.DEFAULT_DISCLAIMER_VOICE,
@@ -39795,7 +39799,7 @@ def podcast_set_disclaimer_config(request: Request):
     Body fields (all optional — omitted fields keep their current value):
       intro_enabled (bool), outro_enabled (bool),
       intro_text (str),    outro_text (str),
-      voice (str — must be a valid OpenAI TTS voice)
+      voice (str — a Grok voice id)
 
     Applies to the NEXT audio generation. Doesn't retroactively re-render."""
     claims = _claims_or_401(request)
@@ -39812,8 +39816,11 @@ def podcast_set_disclaimer_config(request: Request):
         "outro_enabled": bool(body.get("outro_enabled", cur.get("outro_enabled", True))),
         "intro_text":    (body.get("intro_text",  cur.get("intro_text"))  or pe.DEFAULT_DISCLAIMER_INTRO).strip(),
         "outro_text":    (body.get("outro_text",  cur.get("outro_text"))  or pe.DEFAULT_DISCLAIMER_OUTRO).strip(),
-        "voice":         (body.get("voice",        cur.get("voice"))       or pe.DEFAULT_DISCLAIMER_VOICE).strip(),
+        "voice":         (body.get("voice",        cur.get("voice"))       or pe.DEFAULT_DISCLAIMER_VOICE).strip().lower(),
     }
+    from podcast_tts import XAI_VOICES
+    if merged["voice"] not in XAI_VOICES:
+        merged["voice"] = pe.DEFAULT_DISCLAIMER_VOICE
     # Length guardrails — anything longer than ~600 chars adds noticeable
     # dead air to every episode; very short defeats the purpose
     for k in ("intro_text", "outro_text"):
@@ -39897,9 +39904,9 @@ def _known_podcast_show(show: str) -> dict:
 
 @app.get("/api/podcast/tts/voices")
 def podcast_tts_voices(request: Request):
-    """Providers the desk can preview. OpenAI and Kokoro appear only when configured."""
+    """Grok voices for the studio. Kokoro appears only when that package is installed."""
     _claims_or_401(request)
-    from podcast_tts import OPENAI_MODEL_DEFAULT, XAI_VOICES, cached_xai_voices, voices_for_openai_model
+    from podcast_tts import XAI_VOICES, cached_xai_voices
     providers = []
     xai_voices = list(XAI_VOICES)
     if os.environ.get("XAI_API_KEY"):
@@ -39926,12 +39933,6 @@ def podcast_tts_voices(request: Request):
         "voices": xai_voices,
         "configured": bool(os.environ.get("XAI_API_KEY")),
     })
-    if os.environ.get("OPENAI_API_KEY"):
-        providers.append({
-            "provider": "openai",
-            "voices": voices_for_openai_model(OPENAI_MODEL_DEFAULT),
-            "configured": True,
-        })
     try:
         import kokoro  # noqa: F401
         from podcast_tts import KOKORO_VOICES

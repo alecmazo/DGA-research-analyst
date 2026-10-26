@@ -49,7 +49,6 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [status, setStatus] = useState<DailyStatus | null>(null)
   const [providers, setProviders] = useState<ProviderVoices[]>([])
-  const [provider, setProvider] = useState('xai')
   const [voice, setVoice] = useState('kepler')
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
@@ -60,9 +59,11 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
       api<{ providers: ProviderVoices[] }>('/api/podcast/tts/voices'),
     ])
     setStatus(daily)
-    setProviders(listed.providers || [])
-    setProvider(daily.voice?.provider || 'xai')
-    setVoice(daily.voice?.voice || 'kepler')
+    const xai = (listed.providers || []).find((item) => item.provider === 'xai')
+    setProviders(xai ? [xai] : [{ provider: 'xai', voices: ['kepler'] }])
+    const names = xai?.voices || []
+    const saved = daily.voice?.provider === 'xai' ? daily.voice.voice : 'kepler'
+    setVoice(names.length && saved && !names.includes(saved) ? names[0] : saved || 'kepler')
   }, [])
 
   useEffect(() => {
@@ -70,10 +71,9 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
   }, [load])
 
   const voices = useMemo(() => {
-    const row = providers.find((item) => item.provider === provider)
-    const list = row?.voices?.length ? row.voices : provider === 'xai' ? ['kepler'] : []
-    return list
-  }, [providers, provider])
+    const row = providers.find((item) => item.provider === 'xai')
+    return row?.voices?.length ? row.voices : ['kepler']
+  }, [providers])
 
   useEffect(() => {
     if (voices.length && !voices.includes(voice)) setVoice(voices[0])
@@ -85,7 +85,7 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
     try {
       await api('/api/podcast/systems-over-goals/voice', {
         method: 'PUT',
-        body: JSON.stringify({ provider, voice, speed: 1 }),
+        body: JSON.stringify({ provider: 'xai', voice, speed: 1 }),
       })
       setNote('Voice saved. The next episode uses it.')
       await load()
@@ -102,7 +102,7 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
     try {
       const res = await api<{ audio_b64: string }>('/api/podcast/tts/preview', {
         method: 'POST',
-        body: JSON.stringify({ provider, voice, text: SAMPLE, speed: 1 }),
+        body: JSON.stringify({ provider: 'xai', voice, text: SAMPLE, speed: 1 }),
       })
       const binary = atob(res.audio_b64)
       const bytes = new Uint8Array(binary.length)
@@ -178,21 +178,11 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
       )}
       <div className={styles.sogdRow}>
         <label className={styles.field}>
-          <span>Provider</span>
-          <select className={styles.select} value={provider} onChange={(e) => setProvider(e.target.value)}>
-            {(providers.length ? providers : [{ provider: 'xai', voices: ['kepler'] }]).map((item) => (
-              <option key={item.provider} value={item.provider}>
-                {item.provider}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className={styles.field}>
-          <span>Voice</span>
+          <span>Grok voice</span>
           <select className={styles.select} value={voice} onChange={(e) => setVoice(e.target.value)}>
             {voices.map((name) => (
               <option key={name} value={name}>
-                {name}
+                {name.charAt(0).toUpperCase() + name.slice(1)}
               </option>
             ))}
           </select>

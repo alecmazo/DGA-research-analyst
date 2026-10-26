@@ -1,9 +1,17 @@
 .pageHead {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.lede {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
 .h1 {
@@ -90,6 +98,14 @@
   gap: 8px;
   align-items: center;
   min-width: 0;
+}
+
+.feedLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
 }
 
 .feedUrl {
@@ -959,4 +975,113 @@
 .sogdAudio {
   width: 100%;
   margin-top: 4px;
+}
+
+.stepHead {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.stepHead .pcTitle {
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  margin-bottom: 2px;
+}
+
+.stepHead .pcDesc {
+  font-size: 13px;
+  line-height: 1.45;
+  max-width: 44rem;
+}
+
+.stepNum {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #0a1628;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin-top: 1px;
+}
+
+.castGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.castCard {
+  border: 1px solid #d7e7ef;
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.castCard .field,
+.castCard .select {
+  width: 100%;
+}
+
+.castRole {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5b7c8a;
+}
+
+.castName {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.castLine {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.castNow {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+}
+
+.sampleAudio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+@media (max-width: 860px) {
+  .castGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+[data-theme='dark'] .castCard {
+  background: var(--bg-subtle);
+  border-color: var(--border-subtle);
+}
+
+[data-theme='dark'] .stepNum {
+  background: #e8eef2;
+  color: #0a1628;
 }

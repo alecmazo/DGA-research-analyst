@@ -27,7 +27,7 @@ def test_list_jobs_route_exists():
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
     assert '@app.get("/api/jobs")' in src
     assert "def list_jobs" in src
-    assert 'WEB_BUILD_VERSION = "ui781-20261026-sogd-daily"' in src
+    assert 'WEB_BUILD_VERSION = "ui782-20261026-studio-cast"' in src
     analyst = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
     assert '_optional_env("GROK_MODEL", "grok-4.7")' in analyst
     assert '"agentic"' in analyst and '"default": "grok"' in analyst

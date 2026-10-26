@@ -3,9 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api, apiBlob } from '@/lib/api'
-import { pollJob } from '@/lib/jobs'
 import { useAnalysisScene } from '@/hooks/useAnalysisScene'
-import { relativeTime } from '@/lib/format'
 import { ScriptRender } from './podcasts/ScriptRender'
 import { SogdDaily } from './podcasts/SogdDaily'
 import {
@@ -14,9 +12,6 @@ import {
   displayTicker,
   fmtWhen,
   type AudioStatus,
-  type LabComparison,
-  type LabStats,
-  type LabVote,
   type PodcastEpisode,
   type PodcastFormat,
   type PodcastScript,
@@ -30,35 +25,35 @@ import {
 import page from './page.module.css'
 import styles from './PodcastsPage.module.css'
 
-const TTS_MODELS = [
-  { value: 'gpt-4o-mini-tts', label: 'gpt-4o-mini-tts (default)' },
-  { value: 'tts-1-hd', label: 'tts-1-hd (legacy HD)' },
-  { value: 'tts-1', label: 'tts-1' },
-]
-
 const PODCAST_SHOWS = [
   { id: 'dga-hitech', label: 'DGA HiTech' },
   { id: 'systems-over-goals', label: 'Systems Over Goals Daily' },
 ] as const
 
-const VOICE_BLURBS: Record<string, string> = {
-  alloy: 'neutral, balanced',
-  ash: 'rich, slightly raspy male',
-  ballad: 'soft, melodic',
-  coral: 'warm female',
-  echo: 'warm, conversational male',
-  fable: 'British male, storyteller cadence',
-  nova: 'bright, energetic female',
-  onyx: 'deep male, gravitas',
-  sage: 'wise, measured',
-  shimmer: 'soft, measured female',
-  verse: 'expressive, modern',
-}
+const CAST = [
+  {
+    key: 'kimi',
+    name: 'Kimi',
+    role: 'Host',
+    line: 'Opens the show, runs the rounds, and calls a winner.',
+  },
+  {
+    key: 'rock',
+    name: 'Rock',
+    role: 'Grok analyst',
+    line: 'Contrarian. Argues the long case from the Grok note.',
+  },
+  {
+    key: 'claudia',
+    name: 'Claudia',
+    role: 'Claude analyst',
+    line: 'Measured skeptic. Tests the thesis from the Claude note.',
+  },
+] as const
 
-const SPEAKER_LABELS: Record<string, string> = {
-  opus: 'Opus (host) — sets up the show, runs the rounds, calls a winner',
-  rock: 'Rock (Grok analyst) — British, punchy, contrarian',
-  claudia: 'Claudia (Claude analyst) — female, measured, skeptic',
+function voiceLabel(id: string) {
+  if (!id) return ''
+  return id.charAt(0).toUpperCase() + id.slice(1)
 }
 
 function bothReports(r: SavedReportRow) {
@@ -99,7 +94,6 @@ export function PodcastsPage() {
 
   // ② Audio
   const [audioTk, setAudioTk] = useState('')
-  const [ttsModel, setTtsModel] = useState('gpt-4o-mini-tts')
   const [audioBusy, setAudioBusy] = useState(false)
   const [audioProg, setAudioProg] = useState<{ label: string; pct: number } | null>(
     null,
@@ -121,23 +115,14 @@ export function PodcastsPage() {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [savedAudioKey, setSavedAudioKey] = useState('')
 
-  // ③ Voice / speed
+  // ③ Cast
   const [voiceCfg, setVoiceCfg] = useState<VoiceConfig | null>(null)
+  const [grokVoices, setGrokVoices] = useState<string[]>([])
   const [speedCfg, setSpeedCfg] = useState<SpeedConfig | null>(null)
   const [voiceStatus, setVoiceStatus] = useState('')
   const [speedStatus, setSpeedStatus] = useState('')
   const sampleRef = useRef<HTMLAudioElement>(null)
-
-  // Lab
-  const [labTk, setLabTk] = useState('')
-  const [labData, setLabData] = useState<LabComparison | null>(null)
-  const [labLoading, setLabLoading] = useState(false)
-  const [labStats, setLabStats] = useState<LabStats | null>(null)
-  const [labVotes, setLabVotes] = useState<LabVote[]>([])
-  const [voteNote, setVoteNote] = useState('')
-  const [voteWinner, setVoteWinner] = useState<string | null>(null)
-  const [voteStatus, setVoteStatus] = useState('')
-  const [runBusy, setRunBusy] = useState<string | null>(null)
+  const savedVoices = useRef<Record<string, string> | null>(null)
 
   useAnalysisScene(
     'podcast-script',
@@ -175,36 +160,29 @@ export function PodcastsPage() {
 
   const loadVoiceSpeed = useCallback(async () => {
     try {
-      const [v, s] = await Promise.all([
+      const [v, s, listed] = await Promise.all([
         api<VoiceConfig>('/api/podcast/voice-config'),
         api<SpeedConfig>('/api/podcast/speed-config'),
+        api<{ providers?: { provider: string; voices: string[] }[] }>(
+          '/api/podcast/tts/voices',
+        ).catch(() => ({ providers: [] })),
       ])
       setVoiceCfg(v)
+      savedVoices.current = v.voices || null
       setSpeedCfg(s)
+      const xai = (listed.providers || []).find((p) => p.provider === 'xai')
+      setGrokVoices(xai?.voices?.length ? xai.voices : v.available || [])
     } catch {
       /* optional panels */
     }
   }, [])
 
-  const loadLabMeta = useCallback(async () => {
-    try {
-      const [st, votes] = await Promise.all([
-        api<LabStats>('/api/v2/lab/stats').catch(() => null),
-        api<{ votes?: LabVote[] }>('/api/v2/lab/votes').catch(() => ({ votes: [] })),
-      ])
-      setLabStats(st)
-      setLabVotes(votes.votes || [])
-    } catch {
-      /* ignore */
-    }
-  }, [])
-
   useEffect(() => {
     ;(async () => {
-      await Promise.all([refreshLists(), loadVoiceSpeed(), loadLabMeta()])
+      await Promise.all([refreshLists(), loadVoiceSpeed()])
       setBoot(false)
     })()
-  }, [refreshLists, loadVoiceSpeed, loadLabMeta])
+  }, [refreshLists, loadVoiceSpeed])
 
   const eligibleBoth = useMemo(
     () => reports.filter(bothReports),
@@ -472,8 +450,9 @@ export function PodcastsPage() {
     setAudioProg({ label: 'Starting…', pct: 0 })
     setPlayer(null)
     try {
+      await persistCast()
       const d = await api<{ ok?: boolean; error?: string }>(
-        `/api/podcast/${encodeURIComponent(tk)}/generate?tts_model=${encodeURIComponent(ttsModel)}&format=${encodeURIComponent(fmt)}`,
+        `/api/podcast/${encodeURIComponent(tk)}/generate?format=${encodeURIComponent(fmt)}`,
         { method: 'POST' },
       )
       if (!d.ok) throw new Error(d.error || 'Failed to start')
@@ -624,20 +603,56 @@ export function PodcastsPage() {
     }
   }
 
-  // ── Voice config ───────────────────────────────────────────────
+  // ── Cast ───────────────────────────────────────────────────────
+  const castPayload = () => {
+    const voices = { ...(voiceCfg?.voices || {}) }
+    if (voices.kimi) voices.opus = voices.kimi
+    return voices
+  }
+
+  const persistCast = async () => {
+    if (!voiceCfg?.voices) return
+    const voices = castPayload()
+    const prev = savedVoices.current
+    const dirty =
+      !prev ||
+      CAST.some((c) => prev[c.key] !== voices[c.key]) ||
+      prev.opus !== voices.opus
+    if (!dirty) return
+    const d = await api<VoiceConfig>('/api/podcast/voice-config', {
+      method: 'POST',
+      body: JSON.stringify({ voices }),
+    })
+    setVoiceCfg(d)
+    savedVoices.current = d.voices || voices
+    setVoiceStatus('Saved. The next episode uses this cast.')
+  }
+
   const saveVoices = async () => {
     if (!voiceCfg?.voices) return
     setVoiceStatus('Saving…')
     try {
+      const voices = castPayload()
       const d = await api<VoiceConfig>('/api/podcast/voice-config', {
         method: 'POST',
-        body: JSON.stringify({ voices: voiceCfg.voices }),
+        body: JSON.stringify({ voices }),
       })
       setVoiceCfg(d)
-      setVoiceStatus('✓ Saved')
+      savedVoices.current = d.voices || voices
+      setVoiceStatus('Saved. The next episode uses this cast.')
     } catch (e) {
       setVoiceStatus(e instanceof Error ? e.message : 'Failed')
     }
+  }
+
+  const setCastVoice = (speaker: string, voice: string) => {
+    setVoiceCfg((cur) => {
+      if (!cur) return cur
+      const voices = { ...(cur.voices || {}), [speaker]: voice }
+      if (speaker === 'kimi') voices.opus = voice
+      return { ...cur, voices }
+    })
+    setVoiceStatus('')
   }
 
   const resetVoices = async () => {
@@ -646,7 +661,8 @@ export function PodcastsPage() {
       method: 'POST',
     })
     setVoiceCfg(d)
-    setVoiceStatus('✓ Reset')
+    savedVoices.current = d.voices || null
+    setVoiceStatus('Reset to Leo, Rex, and Ara.')
   }
 
   const playSample = async (speaker: string, voice: string) => {
@@ -690,89 +706,6 @@ export function PodcastsPage() {
     setSpeedStatus('✓ Reset')
   }
 
-  // ── Lab compare ────────────────────────────────────────────────
-  const labOrder = useMemo(() => {
-    if (!labData) return [] as string[]
-    const engines = labData.engines || {}
-    if (labData.show?.length) return labData.show
-    return ['grok', 'claude', 'deepseek', 'kimi'].filter((p) => {
-      const e = engines[p] || {}
-      return e.has_report || e.configured || p === 'grok'
-    })
-  }, [labData])
-
-  const loadLab = async (tk: string) => {
-    if (!tk) return
-    setLabTk(tk)
-    setLabLoading(true)
-    setErr(null)
-    setVoteWinner(null)
-    setVoteNote('')
-    setVoteStatus('')
-    try {
-      const data = await api<LabComparison>(
-        `/api/reports/${encodeURIComponent(tk)}/comparison`,
-      )
-      setLabData(data)
-      const existing = labVotes.find((v) => v.ticker === tk)
-      if (existing) {
-        setVoteWinner(existing.winner || null)
-        setVoteNote(existing.note || '')
-        setVoteStatus(`✓ Previously voted ${relativeTime(existing.voted_at)}`)
-      }
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Compare failed')
-      setLabData(null)
-    } finally {
-      setLabLoading(false)
-    }
-  }
-
-  const runLabProvider = async (provider: string) => {
-    if (!labTk) return
-    setRunBusy(provider)
-    try {
-      const job = await api<{ job_id?: string }>(
-        `/api/reports/${encodeURIComponent(labTk)}/compare?provider=${encodeURIComponent(provider)}`,
-        { method: 'POST' },
-      )
-      if (!job.job_id) throw new Error('No job_id')
-      await pollJob(job.job_id)
-      await loadLab(labTk)
-      void loadLabMeta()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Run failed')
-    } finally {
-      setRunBusy(null)
-    }
-  }
-
-  const castVote = async (winner: string) => {
-    if (!labData || !labTk) return
-    const engines = labData.engines || {}
-    const gs = engines.grok?.summary || {}
-    const cs = engines.claude?.summary || labData.alt?.summary || {}
-    try {
-      await api('/api/v2/lab/vote', {
-        method: 'POST',
-        body: JSON.stringify({
-          ticker: labTk,
-          winner,
-          note: voteNote || null,
-          grok_target: gs.price_target ?? null,
-          claude_target: cs.price_target ?? null,
-          grok_upside: gs.upside_pct ?? null,
-          claude_upside: cs.upside_pct ?? null,
-        }),
-      })
-      setVoteWinner(winner)
-      setVoteStatus(`✓ Vote saved · ${winner.toUpperCase()}`)
-      void loadLabMeta()
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Vote failed')
-    }
-  }
-
   const toggleRoundup = (tk: string) => {
     setRoundupSel((prev) => {
       const next = new Set(prev)
@@ -803,11 +736,12 @@ export function PodcastsPage() {
   return (
     <div className={page.page}>
       <header className={styles.pageHead}>
-        <h1 className={styles.h1}>Podcasts</h1>
-        <p className={styles.sub}>
-          Script and synthesize research podcasts from saved reports. Optional A/B
-          compare of engines on any report.
-        </p>
+        <div>
+          <h1 className={styles.h1}>Podcast studio</h1>
+          <p className={styles.lede}>
+            Write the script, cast Grok voices, then record. The feed stays with the show.
+          </p>
+        </div>
       </header>
 
       {err && (
@@ -822,7 +756,7 @@ export function PodcastsPage() {
       {/* ══ Show + feed ══ */}
       <section className={styles.pcCard}>
         <header className={styles.pcHead}>
-          {showId === 'dga-hitech' ? '🎙️ DGA HiTech Podcast' : '🎙️ Systems Over Goals Daily'}
+          {showId === 'dga-hitech' ? 'DGA HiTech' : 'Systems Over Goals Daily'}
         </header>
         <div className={styles.showBar}>
           <div className={styles.showSwitch} role="tablist" aria-label="Podcast show">
@@ -840,6 +774,7 @@ export function PodcastsPage() {
             ))}
           </div>
           <div className={styles.feedRow}>
+            <span className={styles.feedLabel}>Feed</span>
             <code className={styles.feedUrl}>{feedUrl}</code>
             <Button
               size="sm"
@@ -858,18 +793,27 @@ export function PodcastsPage() {
               {feedCopied ? 'Copied' : 'Copy feed'}
             </Button>
           </div>
-          {showId === 'systems-over-goals' && <SogdDaily episodes={showEpisodes} />}
         </div>
+
+        {showId === 'systems-over-goals' && (
+          <div className={styles.pcSection}>
+            <SogdDaily episodes={showEpisodes} />
+          </div>
+        )}
 
         {showId === 'dga-hitech' && (
         <>
         {/* ① Script */}
         <div className={styles.pcSection} ref={scriptAnchor}>
-          <div className={styles.pcTitle}>① Script Generator</div>
-          <div className={styles.pcDesc}>
-            Pick a ticker with BOTH Grok + Claude reports. <strong>Kimi narrates</strong>{' '}
-            (host); Rock = Grok analyst, Claudia = Claude analyst. Dialogue as chat
-            bubbles. <strong>~$0.10–0.25 / script</strong>.
+          <div className={styles.stepHead}>
+            <span className={styles.stepNum}>1</span>
+            <div>
+              <div className={styles.pcTitle}>Script</div>
+              <div className={styles.pcDesc}>
+                Kimi hosts. Rock argues from the Grok note. Claudia argues from the Claude
+                note. A company needs both reports.
+              </div>
+            </div>
           </div>
 
           <div className={styles.pcRow}>
@@ -916,7 +860,7 @@ export function PodcastsPage() {
               disabled={scriptBusy}
               onClick={() => void generateScript()}
             >
-              {scriptBusy ? '⏳ Working…' : '🎬 Generate script'}
+              {scriptBusy ? 'Writing…' : 'Generate script'}
             </Button>
           </div>
 
@@ -1014,77 +958,218 @@ export function PodcastsPage() {
           )}
         </div>
 
-        {/* ② Audio */}
+        {/* ② Cast */}
         <div className={styles.pcSection}>
-          <div className={styles.pcTitle}>② Audio Episode</div>
-          <div className={styles.pcDesc}>
-            Synthesizes dialogue with OpenAI TTS (voices in Cast below), music stings +
-            disclaimer, Dropbox mirror. <strong>~$0.35–0.55 / episode</strong>.
+          <div className={styles.stepHead}>
+            <span className={styles.stepNum}>2</span>
+            <div>
+              <div className={styles.pcTitle}>Cast</div>
+              <div className={styles.pcDesc}>
+                Each character speaks with a Grok voice. Preview a line, then save.
+                Recording uses the saved cast.
+              </div>
+            </div>
+          </div>
+          <audio ref={sampleRef} className={styles.sampleAudio} />
+          {!voiceCfg ? (
+            <Spinner />
+          ) : (
+            <>
+              <div className={styles.castGrid}>
+                {CAST.map((character) => {
+                  const selected = voiceCfg.voices?.[character.key] || ''
+                  const options = (grokVoices.length ? grokVoices : voiceCfg.available || [])
+                  return (
+                    <article key={character.key} className={styles.castCard}>
+                      <div className={styles.castRole}>{character.role}</div>
+                      <div className={styles.castName}>{character.name}</div>
+                      <p className={styles.castLine}>{character.line}</p>
+                      <label className={styles.field}>
+                        <span>Grok voice</span>
+                        <select
+                          className={styles.select}
+                          value={selected}
+                          onChange={(e) => setCastVoice(character.key, e.target.value)}
+                        >
+                          {options.map((id) => (
+                            <option key={id} value={id}>
+                              {voiceLabel(id)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!selected}
+                        onClick={() => void playSample(character.key, selected)}
+                      >
+                        Preview
+                      </Button>
+                    </article>
+                  )
+                })}
+              </div>
+              <div className={styles.cfgActions}>
+                <Button size="sm" variant="primary" onClick={() => void saveVoices()}>
+                  Save cast
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => void resetVoices()}>
+                  Reset
+                </Button>
+                <span className={styles.muted}>{voiceStatus}</span>
+              </div>
+            </>
+          )}
+          <details className={styles.details}>
+            <summary>Pacing</summary>
+            <div className={styles.detailsBody}>
+              <p className={styles.pcDesc}>
+                Intensity times each speaker’s baseline. The next recording uses the saved table.
+              </p>
+              {!speedCfg ? (
+                <Spinner />
+              ) : (
+                <>
+                  <div className={styles.tableWrap}>
+                    <table className={styles.speedTable}>
+                      <thead>
+                        <tr>
+                          <th>Speaker</th>
+                          {(speedCfg.intensities || ['calm', 'normal', 'heated']).map((i) => (
+                            <th key={i}>{i}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(speedCfg.speakers || Object.keys(speedCfg.speeds || []))
+                          .filter((sp) => sp !== 'opus')
+                          .map((sp) => (
+                            <tr key={sp}>
+                              <td>
+                                <strong>{voiceLabel(sp)}</strong>
+                              </td>
+                              {(speedCfg.intensities || ['calm', 'normal', 'heated']).map(
+                                (intensity) => (
+                                  <td key={intensity}>
+                                    <input
+                                      type="number"
+                                      step="0.05"
+                                      min="0.85"
+                                      max="1.2"
+                                      className={styles.speedInput}
+                                      value={speedCfg.speeds?.[sp]?.[intensity] ?? 1}
+                                      onChange={(e) => {
+                                        const v = parseFloat(e.target.value)
+                                        setSpeedCfg({
+                                          ...speedCfg,
+                                          speeds: {
+                                            ...(speedCfg.speeds || {}),
+                                            [sp]: {
+                                              ...(speedCfg.speeds?.[sp] || {}),
+                                              [intensity]: v,
+                                            },
+                                          },
+                                        })
+                                      }}
+                                    />
+                                  </td>
+                                ),
+                              )}
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className={styles.cfgActions}>
+                    <Button size="sm" variant="primary" onClick={() => void saveSpeeds()}>
+                      Save pacing
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => void resetSpeeds()}>
+                      Reset
+                    </Button>
+                    <span className={styles.muted}>{speedStatus}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </details>
+        </div>
+
+        {/* ③ Record */}
+        <div className={styles.pcSection}>
+          <div className={styles.stepHead}>
+            <span className={styles.stepNum}>3</span>
+            <div>
+              <div className={styles.pcTitle}>Record</div>
+              <div className={styles.pcDesc}>
+                Mixes the open script with the saved cast, the music, and the compliance notice.
+              </div>
+            </div>
           </div>
 
+          {voiceCfg && (
+            <p className={styles.castNow}>
+              {CAST.map(
+                (c) => `${c.name} · ${voiceLabel(voiceCfg.voices?.[c.key] || '')}`,
+              ).join('   ')}
+            </p>
+          )}
+
           <div className={styles.pcRow}>
-            <div className={styles.pcControls}>
-              <label className={styles.field} style={{ flex: 1 }}>
-                <span>Ticker</span>
-                <select
-                  className={styles.select}
-                  value={audioTk}
-                  onChange={(e) => syncTk(e.target.value)}
-                >
-                  <option value="">
-                    — select a ticker ({eligibleBoth.length} eligible) —
-                  </option>
-                  {eligibleBoth.map((r) => (
-                    <option key={r.ticker} value={r.ticker}>
-                      {r.ticker}
+            <label className={styles.field} style={{ flex: 1 }}>
+              <span>Script</span>
+              <select
+                className={styles.select}
+                value={audioTk ? `${audioTk}::${format}` : ''}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (!raw) {
+                    syncTk('')
+                    return
+                  }
+                  const [tk, fmt] = raw.split('::')
+                  syncTk(tk)
+                  setFormat((fmt as PodcastFormat) || 'debate')
+                }}
+              >
+                <option value="">Open a script ({scripts.length})</option>
+                {audioTk &&
+                  !scripts.some(
+                    (s) => s.ticker === audioTk && (s.format || 'debate') === format,
+                  ) && (
+                    <option value={`${audioTk}::${format}`}>
+                      {displayTicker(audioTk)}
                     </option>
-                  ))}
-                  {/* include synthetic keys from scripts */}
-                  {scripts
-                    .filter(
-                      (s) =>
-                        s.ticker.startsWith('ROUNDUP_') ||
-                        s.ticker.startsWith('PORTFOLIO_'),
-                    )
-                    .map((s) => (
-                      <option key={s.ticker} value={s.ticker}>
-                        {displayTicker(s.ticker, s.title)}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label className={styles.field}>
-                <span>TTS quality</span>
-                <select
-                  className={styles.select}
-                  value={ttsModel}
-                  onChange={(e) => setTtsModel(e.target.value)}
-                >
-                  {TTS_MODELS.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
+                  )}
+                {scripts.map((s) => {
+                  const fmtKey = s.format || 'debate'
+                  return (
+                    <option key={`${s.ticker}::${fmtKey}`} value={`${s.ticker}::${fmtKey}`}>
+                      {displayTicker(s.ticker, s.title)}
+                      {fmtKey !== 'debate' ? ` · ${fmtKey}` : ''}
                     </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+                  )
+                })}
+              </select>
+            </label>
             <Button
               variant="primary"
-              disabled={audioBusy}
+              disabled={audioBusy || !audioTk}
               onClick={() => void generateAudio()}
             >
-              {audioBusy ? '⏳ Generating…' : '🎧 Generate audio'}
+              {audioBusy ? 'Recording…' : 'Record'}
             </Button>
           </div>
 
           <div className={styles.orRow}>
-            <span className={styles.orLabel}>Or</span>
+            <span className={styles.orLabel}>Library</span>
             <select
               className={styles.orSelect}
               value={savedAudioKey}
               onChange={(e) => loadSavedAudio(e.target.value)}
             >
-              <option value="">🎧 Open a saved episode… ({showEpisodes.length})</option>
+              <option value="">Open a finished episode ({showEpisodes.length})</option>
               {showEpisodes.map((e) => {
                 const fmt = e.format || 'debate'
                 const key = episodeKey(e)
@@ -1119,16 +1204,16 @@ export function PodcastsPage() {
           {player && (
             <div className={styles.player}>
               <div className={styles.playerTop}>
-                <div className={styles.playerTitle}>🎙️ {player.title}</div>
+                <div className={styles.playerTitle}>{player.title}</div>
                 <button type="button" className={styles.playerBtn} onClick={() => void shareLink()}>
-                  🔗 Share
+                  Share
                 </button>
                 <button
                   type="button"
                   className={styles.playerBtnDanger}
                   onClick={() => void deleteAudio()}
                 >
-                  🗑️
+                  Delete
                 </button>
               </div>
               <audio
@@ -1159,392 +1244,9 @@ export function PodcastsPage() {
           )}
         </div>
 
-        {/* ③ Voice config */}
-        <div className={`${styles.pcSection} ${styles.pcMuted}`}>
-          <div className={styles.pcTitle}>
-            ③ Voice configuration{' '}
-            <span className={styles.pcTitleNote}>— applied at next audio generation</span>
-          </div>
-          <details className={styles.details}>
-            <summary>🎭 Cast — pick the voice for each character</summary>
-            <div className={styles.detailsBody}>
-              <audio ref={sampleRef} style={{ display: 'none' }} />
-              {!voiceCfg ? (
-                <Spinner />
-              ) : (
-                <>
-                  {Object.keys(voiceCfg.voices || {}).map((sp) => (
-                    <div key={sp} className={styles.voiceRow}>
-                      <div className={styles.voiceLbl}>
-                        <strong>{sp}</strong>
-                        <div className={styles.muted}>{SPEAKER_LABELS[sp] || ''}</div>
-                      </div>
-                      <select
-                        className={styles.select}
-                        value={voiceCfg.voices?.[sp] || ''}
-                        onChange={(e) =>
-                          setVoiceCfg({
-                            ...voiceCfg,
-                            voices: {
-                              ...(voiceCfg.voices || {}),
-                              [sp]: e.target.value,
-                            },
-                          })
-                        }
-                      >
-                        {(voiceCfg.available || []).map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                            {VOICE_BLURBS[v] ? ` — ${VOICE_BLURBS[v]}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={() =>
-                          void playSample(sp, voiceCfg.voices?.[sp] || 'alloy')
-                        }
-                      >
-                        ▶ Sample
-                      </Button>
-                    </div>
-                  ))}
-                  <div className={styles.cfgActions}>
-                    <Button size="sm" variant="primary" onClick={() => void saveVoices()}>
-                      💾 Save cast
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => void resetVoices()}>
-                      ↺ Reset
-                    </Button>
-                    <span className={styles.muted}>{voiceStatus}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </details>
-
-          <details className={styles.details}>
-            <summary>🎚 Voice speed — per-speaker × intensity</summary>
-            <div className={styles.detailsBody}>
-              {!speedCfg ? (
-                <Spinner />
-              ) : (
-                <>
-                  <div className={styles.tableWrap}>
-                    <table className={styles.speedTable}>
-                      <thead>
-                        <tr>
-                          <th>Speaker</th>
-                          {(speedCfg.intensities || ['calm', 'normal', 'heated']).map(
-                            (i) => (
-                              <th key={i}>{i}</th>
-                            ),
-                          )}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(
-                          speedCfg.speakers ||
-                          Object.keys(speedCfg.speeds || {}) ||
-                          []
-                        ).map((sp) => (
-                          <tr key={sp}>
-                            <td>
-                              <strong>{sp}</strong>
-                            </td>
-                            {(speedCfg.intensities || ['calm', 'normal', 'heated']).map(
-                              (intensity) => (
-                                <td key={intensity}>
-                                  <input
-                                    type="number"
-                                    step="0.05"
-                                    min="0.5"
-                                    max="2"
-                                    className={styles.speedInput}
-                                    value={
-                                      speedCfg.speeds?.[sp]?.[intensity] ?? 1
-                                    }
-                                    onChange={(e) => {
-                                      const v = parseFloat(e.target.value)
-                                      setSpeedCfg({
-                                        ...speedCfg,
-                                        speeds: {
-                                          ...(speedCfg.speeds || {}),
-                                          [sp]: {
-                                            ...(speedCfg.speeds?.[sp] || {}),
-                                            [intensity]: v,
-                                          },
-                                        },
-                                      })
-                                    }}
-                                  />
-                                </td>
-                              ),
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className={styles.cfgActions}>
-                    <Button size="sm" variant="primary" onClick={() => void saveSpeeds()}>
-                      💾 Save
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => void resetSpeeds()}>
-                      ↺ Reset
-                    </Button>
-                    <span className={styles.muted}>{speedStatus}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </details>
-        </div>
         </>
         )}
       </section>
-
-      {/* ══ Lab: multi-engine compare ══ */}
-      <div className={styles.labGrid}>
-        <section className={styles.labCard} style={{ gridColumn: 'span 2' }}>
-          <header className={styles.labHead}>Pick a ticker to compare</header>
-          <div className={styles.labBody}>
-            <div className={styles.labPick}>
-              <label className={styles.field} style={{ flex: 1 }}>
-                <span>Saved report</span>
-                <select
-                  className={styles.select}
-                  value={labTk}
-                  onChange={(e) => setLabTk(e.target.value)}
-                >
-                  <option value="">
-                    — select a saved report ({reports.length} available) —
-                  </option>
-                  {reports.map((r) => (
-                    <option key={r.ticker} value={r.ticker}>
-                      {r.ticker}
-                      {r.rating ? ` · ${r.rating}` : ''}
-                      {r.upside_pct != null
-                        ? ` · ${r.upside_pct >= 0 ? '+' : ''}${r.upside_pct.toFixed(1)}%`
-                        : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <Button
-                variant="primary"
-                disabled={!labTk || labLoading}
-                onClick={() => void loadLab(labTk)}
-              >
-                {labLoading ? '…' : 'Load Comparison →'}
-              </Button>
-            </div>
-            {labData && (
-              <div className={styles.runBtns}>
-                {['claude', 'deepseek', 'kimi']
-                  .filter((p) => {
-                    const e = labData.engines?.[p]
-                    return e && !e.has_report && e.configured !== false
-                  })
-                  .map((p) => (
-                    <Button
-                      key={p}
-                      size="sm"
-                      variant="secondary"
-                      disabled={runBusy === p}
-                      onClick={() => void runLabProvider(p)}
-                    >
-                      {runBusy === p
-                        ? `⏳ ${p}…`
-                        : `⚡ Run ${p === 'deepseek' ? 'DeepSeek · live EDGAR' : p === 'kimi' ? 'Kimi' : 'Claude'}`}
-                    </Button>
-                  ))}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className={styles.labCard}>
-          <header className={styles.labHead}>Leaderboard</header>
-          <div className={styles.labBody}>
-            {!labStats?.total ? (
-              <div className={styles.muted}>
-                No votes yet — load a comparison and cast one.
-              </div>
-            ) : (
-              <>
-                <div className={styles.lbTotal}>
-                  <strong>{labStats.total}</strong> vote
-                  {labStats.total !== 1 ? 's' : ''} cast
-                </div>
-                <div className={styles.lbBar}>
-                  <div
-                    className={styles.segGrok}
-                    style={{ width: `${labStats.grok_win_pct || 0}%` }}
-                  />
-                  <div
-                    className={styles.segTie}
-                    style={{ width: `${labStats.tie_pct || 0}%` }}
-                  />
-                  <div
-                    className={styles.segClaude}
-                    style={{ width: `${labStats.claude_win_pct || 0}%` }}
-                  />
-                </div>
-                <div className={styles.lbRow}>
-                  <span>GROK</span>
-                  <strong>
-                    {labStats.grok_wins} · {labStats.grok_win_pct}%
-                  </strong>
-                </div>
-                <div className={styles.lbRow}>
-                  <span style={{ color: '#d97706' }}>CLAUDE</span>
-                  <strong>
-                    {labStats.claude_wins} · {labStats.claude_win_pct}%
-                  </strong>
-                </div>
-                <div className={styles.lbRow}>
-                  <span style={{ color: '#64748b' }}>TIE</span>
-                  <strong>
-                    {labStats.ties} · {labStats.tie_pct}%
-                  </strong>
-                </div>
-              </>
-            )}
-          </div>
-        </section>
-      </div>
-
-      {labData && (
-        <section className={styles.labCard} style={{ marginTop: 14 }}>
-          <header className={styles.labHead}>
-            <span>
-              🔬 {labData.ticker}: {labOrder.map((p) => p.toUpperCase()).join(' · ')}
-            </span>
-          </header>
-          {labOrder.filter((p) => labData.engines?.[p]?.has_report).length >= 2 && (
-            <div className={styles.summaryStrip}>
-              {labOrder
-                .filter((p) => labData.engines?.[p]?.has_report)
-                .map((p) => {
-                  const s = labData.engines?.[p]?.summary || {}
-                  return (
-                    <div key={p}>
-                      {p.toUpperCase()}: <strong>{s.rating || '—'}</strong> · target{' '}
-                      <strong>
-                        {s.price_target != null
-                          ? `$${Number(s.price_target).toFixed(2)}`
-                          : '—'}
-                      </strong>{' '}
-                      · upside{' '}
-                      <strong>
-                        {s.upside_pct != null
-                          ? `${s.upside_pct >= 0 ? '+' : ''}${Number(s.upside_pct).toFixed(1)}%`
-                          : '—'}
-                      </strong>
-                    </div>
-                  )
-                })}
-            </div>
-          )}
-          <div
-            className={styles.labPanes}
-            style={{
-              gridTemplateColumns: `repeat(${Math.max(2, labOrder.length)}, 1fr)`,
-            }}
-          >
-            {labOrder.map((eng) => {
-              const e = labData.engines?.[eng] || {}
-              return (
-                <div key={eng} className={styles.labPane}>
-                  <div className={styles.paneHdr}>
-                    <span className={`${styles.engBadge} ${styles[`eng_${eng}`] || ''}`}>
-                      {eng.toUpperCase()}
-                    </span>
-                    <span className={styles.paneMeta}>
-                      {e.model || eng} · {relativeTime(e.generated_at) || '—'}
-                    </span>
-                  </div>
-                  <div className={styles.paneBody}>
-                    {e.has_report && e.text ? (
-                      <pre className={styles.md}>{e.text.slice(0, 12000)}</pre>
-                    ) : (
-                      <div className={styles.muted}>
-                        No {eng.toUpperCase()} report yet
-                        {eng === 'grok'
-                          ? ' — run Analyze from the desk first.'
-                          : ` — click Run ${eng.toUpperCase()} above.`}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className={styles.voteBar}>
-            <strong>Which is better?</strong>
-            {(['grok', 'tie', 'claude'] as const).map((w) => (
-              <button
-                key={w}
-                type="button"
-                className={`${styles.voteBtn} ${voteWinner === w ? styles.voteOn : ''} ${styles[`vote_${w}`]}`}
-                onClick={() => void castVote(w)}
-              >
-                {w === 'tie' ? 'TIE' : `${w.toUpperCase()} WINS`}
-              </button>
-            ))}
-            <input
-              className={styles.voteNote}
-              placeholder="One-line reason (optional)"
-              value={voteNote}
-              onChange={(e) => setVoteNote(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && voteWinner) void castVote(voteWinner)
-              }}
-            />
-            {voteStatus && <span className={styles.voteStatus}>{voteStatus}</span>}
-          </div>
-        </section>
-      )}
-
-      {labVotes.length > 0 && (
-        <section className={styles.labCard} style={{ marginTop: 14 }}>
-          <header className={styles.labHead}>
-            <span>Vote history</span>
-            <span className={styles.muted}>{labVotes.length}</span>
-          </header>
-          <div className={styles.histList}>
-            {labVotes.slice(0, 40).map((v, i) => (
-              <div key={i} className={styles.histRow}>
-                <strong
-                  className={styles.histTk}
-                  onClick={() => {
-                    setLabTk(v.ticker || '')
-                    void loadLab(v.ticker || '')
-                  }}
-                >
-                  {v.ticker}
-                </strong>
-                <span
-                  className={`${styles.histWin} ${
-                    v.winner === 'grok'
-                      ? styles.winGrok
-                      : v.winner === 'claude'
-                        ? styles.winClaude
-                        : ''
-                  }`}
-                >
-                  {(v.winner || '—').toUpperCase()}
-                </span>
-                <span className={styles.muted}>{relativeTime(v.voted_at)}</span>
-                {v.note && <span className={styles.histNote}>{v.note}</span>}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {!episodes.length && !scripts.length && !reports.length && (
         <Empty

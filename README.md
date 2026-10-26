@@ -232,7 +232,7 @@ Do not submit a show, and do not add `<itunes:block>`, before that.
 Shows: `dga-hitech` (alias `/api/podcast/rss.xml`) and `systems-over-goals`.
 Set `PODCAST_MEDIA_BASE_URL` so enclosure URLs do not depend on the app host.
 `PODCAST_MEDIA_STORE` is `local` (disk + Dropbox), `r2`, or `s3`.
-`PODCAST_TTS_PROVIDER` is `openai` (default model `gpt-4o-mini-tts`), `kokoro`, or `xai`.
+`PODCAST_TTS_PROVIDER` still selects a default for generic calls (`openai`, `kokoro`, or `xai`). DGA HiTech and the studio cast always use Grok voices.
 
 ## Systems Over Goals Daily
 

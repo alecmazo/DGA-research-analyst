@@ -149,7 +149,7 @@ def pronunciation_map() -> dict:
 def default_voice(show_id: str = SHOW_ID) -> dict:
     if show_id == SHOW_ID:
         return {"provider": "xai", "voice": "kepler", "speed": 1.0}
-    return {"provider": "openai", "voice": "onyx", "speed": 1.0}
+    return {"provider": "xai", "voice": "leo", "speed": 1.0}
 
 
 def normalize_voice(raw, show_id: str = SHOW_ID) -> dict:
@@ -157,9 +157,15 @@ def normalize_voice(raw, show_id: str = SHOW_ID) -> dict:
     if not isinstance(raw, dict):
         return dict(base)
     provider = str(raw.get("provider") or base["provider"]).strip().lower()
-    if provider not in ("xai", "openai", "kokoro"):
+    if provider == "openai":
+        provider = "xai"
+    if provider not in ("xai", "kokoro"):
         provider = base["provider"]
     voice = str(raw.get("voice") or base["voice"]).strip().lower() or base["voice"]
+    if provider == "xai":
+        from podcast_tts import XAI_VOICES
+        if voice not in XAI_VOICES:
+            voice = base["voice"] if base["provider"] == "xai" else "kepler"
     try:
         speed = float(base["speed"] if raw.get("speed") is None else raw.get("speed"))
     except (TypeError, ValueError):

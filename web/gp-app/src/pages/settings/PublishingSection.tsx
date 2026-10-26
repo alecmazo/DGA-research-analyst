@@ -20,15 +20,10 @@ type Archived = {
 }
 
 const VOICES = [
-  { value: 'alloy', label: 'alloy — neutral' },
-  { value: 'echo', label: 'echo — calm male' },
-  { value: 'onyx', label: 'onyx — deep male' },
-  { value: 'nova', label: 'nova — bright female' },
-  { value: 'shimmer', label: 'shimmer — soft female' },
-  { value: 'ash', label: 'ash — rich male' },
-  { value: 'sage', label: 'sage — measured female' },
-  { value: 'fable', label: 'fable — British' },
-]
+  'ara', 'eve', 'leo', 'rex', 'sal', 'carina', 'zagan', 'helix', 'orion', 'luna',
+  'iris', 'altair', 'zenith', 'perseus', 'helios', 'lux', 'kepler', 'rigel', 'cosmo',
+  'celeste', 'ursa', 'sirius', 'lumen', 'castor', 'naksh', 'atlas', 'aurora', 'liora',
+].map((id) => ({ value: id, label: id.charAt(0).toUpperCase() + id.slice(1) }))
 
 function RssCard() {
   const feedUrl = `${window.location.origin}/api/podcast/rss.xml`
@@ -218,7 +213,7 @@ function DisclaimerCard() {
         <select
           className={styles.select}
           style={{ flex: 1, minWidth: 140 }}
-          value={cfg.voice || 'alloy'}
+          value={VOICES.some((v) => v.value === cfg.voice) ? cfg.voice : 'sal'}
           onChange={(e) => setCfg({ ...cfg, voice: e.target.value })}
         >
           {VOICES.map((v) => (

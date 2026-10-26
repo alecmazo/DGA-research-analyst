@@ -196,6 +196,46 @@ class PodcastFeedTests(unittest.TestCase):
         self.assertIn('"-b:a", "128k"', src)
         self.assertTrue(callable(apply_loudnorm))
 
+    def test_hitech_cast_is_grok(self):
+        import podcast_engine as pe
+        from podcast_tts import XAI_VOICES
+
+        pe._RUNTIME_VOICE_MAP = dict(pe.VOICE_MAP)
+        try:
+            for voice in pe.VOICE_MAP.values():
+                self.assertIn(voice, XAI_VOICES)
+            self.assertEqual(set(pe.AVAILABLE_VOICES), set(XAI_VOICES))
+            self.assertIn(pe.DEFAULT_DISCLAIMER_VOICE, XAI_VOICES)
+            pe.apply_voice_overrides({
+                "kimi": "onyx", "opus": "alloy", "rock": "fable", "claudia": "nova",
+            })
+            reverted = pe.get_voice_config()["voices"]
+            for voice in reverted.values():
+                self.assertIn(voice, XAI_VOICES)
+            self.assertEqual(reverted["kimi"], "leo")
+            self.assertEqual(reverted["opus"], "leo")
+            pe.apply_voice_overrides({"kimi": "eve", "rock": "rex", "claudia": "ara"})
+            picked = pe.get_voice_config()["voices"]
+            self.assertEqual(picked["kimi"], "eve")
+            self.assertEqual(picked["opus"], "eve")
+            self.assertEqual(picked["rock"], "rex")
+            self.assertEqual(picked["claudia"], "ara")
+        finally:
+            pe._RUNTIME_VOICE_MAP = dict(pe.VOICE_MAP)
+
+        server = (ROOT / "api" / "server.py").read_text(encoding="utf-8")
+        sample = server[server.index("def podcast_voice_sample"):server.index("def podcast_get_voice_config")]
+        self.assertIn('name="xai"', sample)
+        self.assertIn("sample_xai_", sample)
+        gen = server[server.index("def _run_podcast_generation"):server.index("def podcast_generate")]
+        self.assertIn('tts_provider="xai"', gen)
+        voices = server[server.index("def podcast_tts_voices"):server.index("def podcast_tts_preview")]
+        self.assertNotIn('"provider": "openai"', voices)
+        page = (ROOT / "web" / "gp-app" / "src" / "pages" / "PodcastsPage.tsx").read_text(encoding="utf-8")
+        self.assertNotIn("Leaderboard", page)
+        self.assertNotIn("gpt-4o-mini-tts", page)
+        self.assertIn("Grok voice", page)
+
 
 def podcast_engine_source() -> Path:
     return ROOT / "podcast_engine.py"
