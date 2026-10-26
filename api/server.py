@@ -8985,7 +8985,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui778-20261026-keep-password"
+WEB_BUILD_VERSION = "ui779-20261026-local-compare"
 
 
 @app.get("/api/build")
@@ -10492,6 +10492,48 @@ def local_reports_list(request: Request):
                     "version_count": 1,
                 })
     return rows
+
+
+@app.get("/api/local/compare/{ticker}")
+def local_compare_pack(ticker: str, request: Request):
+    """Price targets and thesis excerpts for the frontier notes and the local notes.
+
+    The full report stays out of this response. Explain differences on this Mac
+    reads the packet.
+    """
+    _claims_or_401(request)
+    tk = (ticker or "").strip().upper()
+    if not tk or len(tk) > 12 or not tk.replace(".", "").replace("-", "").isalnum():
+        raise HTTPException(400, "ticker required")
+    row: dict = {}
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT ticker,
+                           report_md, generated_at, rating, price_target, upside_pct,
+                           report_md_claude, claude_generated_at, claude_rating,
+                           claude_price_target, claude_upside_pct,
+                           report_md_kimi, kimi_generated_at, kimi_rating,
+                           kimi_price_target, kimi_upside_pct,
+                           report_md_deepseek, deepseek_generated_at, deepseek_rating,
+                           deepseek_price_target, deepseek_upside_pct,
+                           report_md_local, local_generated_at, local_rating,
+                           local_price_target, local_upside_pct,
+                           local_model, local_report_date, local_runs
+                      FROM analyst_reports
+                     WHERE ticker = %s AND archived IS NOT TRUE
+                    """,
+                    (tk,),
+                )
+                row = dict(cur.fetchone() or {})
+        except Exception as exc:
+            print(f"[local-compare] {tk}: {exc!s:.180}", flush=True)
+            row = {}
+    from api.domains.report_compare_pack import build_compare_pack, fill_missing_reports
+    filled = fill_missing_reports(tk, row, analyst.STOCKS_FOLDER)
+    return build_compare_pack(tk, filled)
 
 
 @app.delete("/api/local/reports/{ticker}")

@@ -14,6 +14,7 @@ import {
   parseToolCall,
   shortModelLabel,
 } from '@/lib/localOllama'
+import { LocalCompare } from '@/components/local/LocalCompare'
 import { LocalDcf } from '@/components/local/LocalDcf'
 import { LocalModelPick, useLocalModelChoice } from '@/components/local/LocalModelPick'
 import {
@@ -653,16 +654,21 @@ export function LocalPage() {
           )}
         </section>
       )}
+      <LocalCompare
+        ticker={ticker}
+        online={online}
+        model={askModel.picked[0] || LOCAL_MODEL}
+      />
       </div>
       <div className={`${styles.pair} ${styles.saved}`}>
-        <Panel title="Desk saved reports" badge="frontier" flush className={styles.saved}>
+        <Panel title="Desk saved reports" badge="frontier" flush collapsible className={styles.saved}>
           <SavedReports
             embed
             refreshKey={reportsKey}
             onAnalyze={(tk) => setTicker(tk)}
           />
         </Panel>
-        <Panel title="Saved Local Reports" badge="local" flush className={styles.saved}>
+        <Panel title="Saved Local Reports" badge="local" flush collapsible className={styles.saved}>
           <SavedReports
             provider="local"
             embed

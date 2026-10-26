@@ -83,9 +83,65 @@
   align-items: start;
 }
 
+.comp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.compCol {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.compHead {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.compRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.compRow strong {
+  font-size: 13px;
+}
+
+.compNums {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.compThesis {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 @media (max-width: 960px) {
   .grid,
-  .pair {
+  .pair,
+  .comp {
     grid-template-columns: 1fr;
   }
 }

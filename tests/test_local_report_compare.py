@@ -17,6 +17,7 @@ def test_local_page_compares_desk_and_local_reports():
     desk, local = pair.split("<SavedReports", 2)[1:]
     assert "provider=" not in desk
     assert 'provider="local"' in local
+    assert pair.count("collapsible") == 2
     assert "provider = 'grok'" in saved
     assert "local ? '/api/local/reports' : '/api/reports'" in saved
     assert "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)" in css
