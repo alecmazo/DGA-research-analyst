@@ -115,6 +115,12 @@ def test_settings_manages_every_login():
     assert "def _token_secret" in AUTH
     assert '"genesis"' in AUTH
     assert '"dgacapital"' in AUTH
+    login_body = AUTH.split("def login(", 1)[1].split("\ndef ", 1)[0]
+    assert 'user["must_change_password"] = True' not in login_body
+    seed = AUTH.split("LP_CREDENTIALS_SEED", 1)[1].split("\n]", 1)[0]
+    assert '"must_change_password": True' not in seed
+    assert seed.count('"must_change_password": False') >= 4
+    assert "cachedBlocks" in app
     assert "DATA_ENCRYPTION_KEY" in SRV
 
 

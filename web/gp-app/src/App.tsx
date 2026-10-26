@@ -217,10 +217,13 @@ function AuthBoot({
   const cached = getCachedUser()
   const cachedOk =
     !!cached && (cached.role === 'gp' || cached.role === 'admin')
+  // A deploy reload can be holding a stale "change your password" flag.
+  // Confirm it with /me before blocking the desk.
+  const cachedBlocks = !!cached?.must_change_password && !cached?.demo_mode
   const [user, setUser] = useState<GpUser | null>(cachedOk ? cached : null)
   const [build, setBuild] = useState<string>()
   const [state, setState] = useState<'loading' | 'ok' | 'fail'>(
-    cachedOk ? 'ok' : 'loading',
+    cachedOk && !cachedBlocks ? 'ok' : 'loading',
   )
 
   useEffect(() => {

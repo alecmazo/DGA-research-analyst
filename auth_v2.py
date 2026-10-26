@@ -90,12 +90,11 @@ def _token_secret() -> bytes:
 #   managed_account_ids    – list of managed-account names this LP owns
 #                            (matches the names used in the rebalance system).
 #                            empty [] for GP or LPs without accounts.
-#   must_change_password   – True until the LP changes their initial pw
+#   must_change_password   – True only for a temporary password set in Settings
 #   created_at             – ISO date string
 # ---------------------------------------------------------------------------
 # SECURITY (ui410): Never store or comment plaintext passwords in this file.
-# Hashes only. Rotate any password that was ever written in git history.
-# Known-weak passwords (detected at login) force must_change_password.
+# Hashes only. A deploy keeps the password already saved for each login.
 LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
     {
         "lp_id":                "gp_alec",
@@ -106,8 +105,8 @@ LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
         "password_salt_hex":    "55124b6cd276470f1f5b120dcb33e896",
         "fund_memberships":     {},   # GP sees everything — empty = no filter
         "managed_account_ids":  [],   # GP sees all managed accounts
-        # Force change if still on a password that appeared in old git comments
-        "must_change_password": True,
+        # The saved password stays. A deploy must not demand a new one.
+        "must_change_password": False,
         "created_at":           "2026-05-10",
     },
     {
@@ -122,7 +121,7 @@ LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
         # imported). Use case-insensitive comparison in the data layer
         # to tolerate any future capitalization changes.
         "managed_account_ids":  ["ANAT TOD"],
-        "must_change_password": True,
+        "must_change_password": False,
         "created_at":           "2026-05-10",
     },
     {
@@ -137,7 +136,7 @@ LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
             "DGA Capital Fund II, LP": "EM",
         },
         "managed_account_ids":  ["EM DEFENSIVE"],
-        "must_change_password": True,
+        "must_change_password": False,
         "created_at":           "2026-05-10",
     },
     {
@@ -149,13 +148,14 @@ LP_CREDENTIALS_SEED: list[dict[str, Any]] = [
         "password_salt_hex":    "708474ec6382c4f01b6dcf89b8e4f775",
         "fund_memberships":     {},
         "managed_account_ids":  [],
-        "must_change_password": True,
+        "must_change_password": False,
         "created_at":           "2026-05-10",
     },
 ]
 
 # Passwords that once appeared in source control comments — never log these.
-# On successful login with one of these, force a password change.
+# Choosing one as a new password is rejected. Signing in with the password
+# already on the account does not open the change-password gate.
 _KNOWN_LEAKED_PASSWORDS = frozenset({
     "genesis",
     "dgacapital",
@@ -275,16 +275,26 @@ def _load_overlay() -> dict[str, dict]:
         return _copy_overlay(_OVERLAY_CACHE["data"])
     file_data = _load_overlay_from_file()
     data = file_data
-    if _OVERLAY_DB_LOAD is not None:
-        try:
-            db_data = _OVERLAY_DB_LOAD()
-            # DB wins — merge file first, then DB on top
-            data = {**file_data, **db_data}
-        except Exception:
-            # Desk DB is busy. Keep serving the last good user list so
-            # sign-in is not stuck behind an analysis job.
-            if _OVERLAY_CACHE["data"] is not None:
-                return _copy_overlay(_OVERLAY_CACHE["data"])
+    if _OVERLAY_DB_LOAD is None:
+        # A deploy accepts traffic before startup registers Postgres. Caching
+        # the file alone would hide saved passwords, and the seed flag would
+        # ask for a new password, for the whole cache window.
+        if not os.environ.get("DATABASE_URL"):
+            _OVERLAY_CACHE["data"] = data
+            _OVERLAY_CACHE["ts"] = now
+        return _copy_overlay(data)
+    try:
+        db_data = _OVERLAY_DB_LOAD()
+    except Exception:
+        db_data = None
+    if db_data is None:
+        # Desk DB is busy. Keep serving the last good user list so
+        # sign-in is not stuck behind an analysis job.
+        if _OVERLAY_CACHE["data"] is not None:
+            return _copy_overlay(_OVERLAY_CACHE["data"])
+        return _copy_overlay(data)
+    # DB wins — merge file first, then DB on top.
+    data = {**file_data, **db_data}
     _OVERLAY_CACHE["data"] = data
     _OVERLAY_CACHE["ts"] = now
     return _copy_overlay(data)
@@ -409,9 +419,8 @@ def login(email: str, password: str) -> Optional[dict]:
     Authentication is strictly per-user: each account logs in with its own
     password only. There is no shared password and no impersonation path.
 
-    If the password matches a historically leaked seed password, login still
-    succeeds but ``must_change_password`` is forced True so the client shows
-    the change-password gate before any fund data is usable.
+    A password the person already uses keeps working. The change-password
+    gate appears only when that account is marked with a temporary password.
     """
     user = find_user_by_email(email)
     if not user:
@@ -423,29 +432,6 @@ def login(email: str, password: str) -> Optional[dict]:
 
     if not verify_password(password, user["password_hash_hex"], user["password_salt_hex"]):
         return None
-
-    # Force rotation when the account is still on a password that was ever
-    # written in git (hashes alone are not enough — salts+hashes were public).
-    # Demo accounts are exempt: the advertised preview password is short on
-    # purpose and must never trap a prospect in a change-password gate.
-    if (not user.get("demo_mode")) and (password or "") in _KNOWN_LEAKED_PASSWORDS:
-        try:
-            user = dict(user)
-            user["must_change_password"] = True
-            try:
-                overlay = _load_overlay()
-                lp = user["lp_id"]
-                overlay[lp] = {**overlay.get(lp, {}), "must_change_password": True}
-                _save_overlay(overlay)
-            except Exception:
-                pass
-            print(
-                f"[auth] SECURITY: user {user.get('lp_id')} logged in with a "
-                f"historically-leaked seed password — must_change_password forced",
-                flush=True,
-            )
-        except Exception:
-            pass
 
     claims = {
         "lp_id":               user["lp_id"],

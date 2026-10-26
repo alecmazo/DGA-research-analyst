@@ -2021,8 +2021,8 @@ def auth_v2_change_password(request: Request, body: AuthV2ChangePasswordRequest)
     new_pw = (body.new_password or "")
     if len(new_pw) < 8:
         raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
-    # Block historically leaked seed passwords
-    if new_pw.lower() in ("genesis", "dgacapital", "password", "changeme"):
+    # Block historically leaked seed passwords when choosing a new one.
+    if new_pw.lower() in auth_v2_mod._KNOWN_LEAKED_PASSWORDS or new_pw.lower() in ("password", "changeme"):
         raise HTTPException(
             status_code=400,
             detail="Choose a stronger password (not a default/shared phrase)",
@@ -8985,7 +8985,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui777-20261026-resume-local"
+WEB_BUILD_VERSION = "ui778-20261026-keep-password"
 
 
 @app.get("/api/build")
@@ -21889,7 +21889,9 @@ def _db_load_lp_overlay() -> dict:
         finally:
             conn.close()
     except Exception:
-        return {}
+        # None means the read failed. An empty table is {}. Caching a failure
+        # as empty would fall back to the seed logins after a deploy.
+        return None
 
 
 def _db_upsert_lp_overlay(cur, lp_id: str, data: dict) -> None:

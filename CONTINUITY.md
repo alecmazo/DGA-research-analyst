@@ -357,6 +357,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Desk local batch** | **`ui775-20261026-desk-local`** | On this Mac, Research can run the selected local models on every company in the desk saved-reports list. One company finishes before the next starts. Stop waits until the company in progress is saved. |
 | **Report compare** | **`ui776-20261026-report-compare`** | On this Mac, Desk saved reports sit beside Saved Local Reports. Frontier price targets and local price targets are on the same row of cards. Wide screens show them side by side. Narrow screens stack them. Run desk reports still walks the desk list one company at a time. |
 | **Resume local run** | **`ui777-20261026-resume-local`** | On this Mac, Resume desk reports continues the desk list and skips a local note written in the last 6 hours. Run desk reports still starts from the first company. One company finishes before the next starts. |
+| **Keep password** | **`ui778-20261026-keep-password`** | A deploy opens the desk with the password already on the account. The change-password screen stays for a temporary password set in Settings. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 
@@ -556,4 +557,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-26 · Agent: Cursor · Built: `ui777-20261026-resume-local` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui778-YYYYMMDD-slug`*
+*Last updated: 2026-10-26 · Agent: Cursor · Built: `ui778-20261026-keep-password` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui32-markets-news-20261015` · Next: `ui779-YYYYMMDD-slug`*
