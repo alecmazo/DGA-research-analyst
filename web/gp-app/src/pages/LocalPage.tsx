@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '@/lib/api'
+import { api, type SavedReport } from '@/lib/api'
 import { openPortfolioReport, openReportWindow } from '@/lib/openWindows'
 import {
   ensureOllama,
@@ -59,6 +59,9 @@ export function LocalPage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [ticker, setTicker] = useState('AAPL')
   const [running, setRunning] = useState(false)
+  const [batching, setBatching] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const stopDesk = useRef(false)
   const [progress, setProgress] = useState('')
   const [runErr, setRunErr] = useState<string | null>(null)
   const [doneTicker, setDoneTicker] = useState<string | null>(null)
@@ -158,10 +161,91 @@ export function LocalPage() {
     }
   }
 
+  const researchModelList = () =>
+    researchModels.picked.length ? researchModels.picked : [LOCAL_MODEL]
+
+  const writeLocalNote = async (tk: string, model: string, where: string) => {
+    const name = shortModelLabel(model)
+    const place = where ? `${where} · ${name}` : name
+    const health = await ollamaStatus(model)
+    if (!health.ok) throw new Error(health.message)
+    setProgress(`${place} · gathering the filing and Yahoo news…`)
+    const prep = await api<{
+      ok?: boolean
+      system?: string
+      user?: string
+      munger_system?: string
+      detail?: string
+    }>(
+      '/api/local/research-prompt',
+      { method: 'POST', body: JSON.stringify({ ticker: tk, model }) },
+    )
+    if (!prep.system || !prep.user || !prep.munger_system) {
+      throw new Error(prep.detail || 'Could not build the prompt')
+    }
+    setProgress(`${place} · writing the note on this Mac…`)
+    let chat = await ollamaChat({
+      system: prep.system,
+      user: prep.user,
+      model,
+    })
+    if (isModelRefusal(chat.text)) {
+      setProgress(`${place} · writing the note again…`)
+      chat = await ollamaChat({
+        system: prep.system,
+        user: prep.user,
+        model,
+      })
+    }
+    if (!chat.text || isModelRefusal(chat.text)) {
+      throw new Error(
+        `${name} refused this run. Earlier notes were kept. ${refusalDiagnosis(chat)}`,
+      )
+    }
+    setProgress(`${place} · writing the Munger section…`)
+    const mungerUser =
+      `The equity note is below. Write only Section 8.5 from it. Do not repeat the note.\n\n${chat.text}`
+    let munger = await ollamaChat({
+      system: prep.munger_system,
+      user: mungerUser,
+      model,
+    })
+    if (!mungerSectionReady(munger.text)) {
+      setProgress(`${place} · writing the Munger section again…`)
+      munger = await ollamaChat({
+        system: prep.munger_system,
+        user: mungerUser,
+        model,
+      })
+    }
+    if (!mungerSectionReady(munger.text)) {
+      throw new Error(
+        `${name} wrote the note, but not the Munger section, so that model was not saved. ${refusalDiagnosis(munger)}`,
+      )
+    }
+    const full = `${chat.text.trim()}\n\n${munger.text.trim()}\n`
+    setProgress(`${place} · saving…`)
+    const latency = chat.latencyMs + munger.latencyMs
+    const speedSrc = munger.tokensPerSec ?? chat.tokensPerSec
+    await api('/api/local/save', {
+      method: 'POST',
+      body: JSON.stringify({
+        ticker: tk,
+        text: full,
+        model,
+        tokens_per_sec: speedSrc,
+        latency_ms: latency,
+      }),
+    })
+    setReportsKey((n) => n + 1)
+    const speed = speedSrc != null ? ` · ${speedSrc.toFixed(1)} tok/s` : ''
+    setProgress(`${place} saved · ${Math.round(latency / 1000)}s${speed} · cost: $0`)
+  }
+
   const runResearch = async () => {
     const tk = ticker.trim().toUpperCase()
-    if (!tk) return
-    const models = researchModels.picked.length ? researchModels.picked : [LOCAL_MODEL]
+    if (!tk || running) return
+    const models = researchModelList()
     setRunning(true)
     setRunErr(null)
     setDoneTicker(null)
@@ -169,82 +253,9 @@ export function LocalPage() {
     let lastSaved = models[0]
     try {
       for (const model of models) {
-        const name = shortModelLabel(model)
-        const health = await ollamaStatus(model)
-        if (!health.ok) throw new Error(health.message)
-        setProgress(`${name} · gathering the filing and Yahoo news…`)
-        const prep = await api<{
-          ok?: boolean
-          system?: string
-          user?: string
-          munger_system?: string
-          detail?: string
-        }>(
-          '/api/local/research-prompt',
-          { method: 'POST', body: JSON.stringify({ ticker: tk, model }) },
-        )
-        if (!prep.system || !prep.user || !prep.munger_system) {
-          throw new Error(prep.detail || 'Could not build the prompt')
-        }
-        setProgress(`${name} · writing the note on this Mac…`)
-        let chat = await ollamaChat({
-          system: prep.system,
-          user: prep.user,
-          model,
-        })
-        if (isModelRefusal(chat.text)) {
-          setProgress(`${name} · writing the note again…`)
-          chat = await ollamaChat({
-            system: prep.system,
-            user: prep.user,
-            model,
-          })
-        }
-        if (!chat.text || isModelRefusal(chat.text)) {
-          throw new Error(
-            `${name} refused this run. Earlier notes were kept. ${refusalDiagnosis(chat)}`,
-          )
-        }
-        setProgress(`${name} · writing the Munger section…`)
-        const mungerUser =
-          `The equity note is below. Write only Section 8.5 from it. Do not repeat the note.\n\n${chat.text}`
-        let munger = await ollamaChat({
-          system: prep.munger_system,
-          user: mungerUser,
-          model,
-        })
-        if (!mungerSectionReady(munger.text)) {
-          setProgress(`${name} · writing the Munger section again…`)
-          munger = await ollamaChat({
-            system: prep.munger_system,
-            user: mungerUser,
-            model,
-          })
-        }
-        if (!mungerSectionReady(munger.text)) {
-          throw new Error(
-            `${name} wrote the note, but not the Munger section, so that model was not saved. ${refusalDiagnosis(munger)}`,
-          )
-        }
-        const full = `${chat.text.trim()}\n\n${munger.text.trim()}\n`
-        setProgress(`${name} · saving…`)
-        const latency = chat.latencyMs + munger.latencyMs
-        const speedSrc = munger.tokensPerSec ?? chat.tokensPerSec
-        await api('/api/local/save', {
-          method: 'POST',
-          body: JSON.stringify({
-            ticker: tk,
-            text: full,
-            model,
-            tokens_per_sec: speedSrc,
-            latency_ms: latency,
-          }),
-        })
+        await writeLocalNote(tk, model, '')
         saved += 1
         lastSaved = model
-        setReportsKey((n) => n + 1)
-        const speed = speedSrc != null ? ` · ${speedSrc.toFixed(1)} tok/s` : ''
-        setProgress(`${name} saved · ${Math.round(latency / 1000)}s${speed} · cost: $0`)
       }
       setDoneTicker(tk)
       openReportWindow(tk, 'local', lastSaved)
@@ -254,6 +265,76 @@ export function LocalPage() {
       if (saved) openReportWindow(tk, 'local', lastSaved)
     } finally {
       setRunning(false)
+    }
+  }
+
+  const requestStop = () => {
+    stopDesk.current = true
+    setStopping(true)
+  }
+
+  const runDeskReports = async () => {
+    if (running) return
+    const models = researchModelList()
+    setRunning(true)
+    setBatching(false)
+    setStopping(false)
+    stopDesk.current = false
+    setRunErr(null)
+    setDoneTicker(null)
+    setProgress('Loading the desk saved reports…')
+    let saved = 0
+    const failed: string[] = []
+    try {
+      const list = await api<SavedReport[]>('/api/reports')
+      const seen = new Set<string>()
+      const tickers: string[] = []
+      for (const row of Array.isArray(list) ? list : []) {
+        const tk = String(row?.ticker || '').trim().toUpperCase()
+        if (!tk || seen.has(tk)) continue
+        seen.add(tk)
+        tickers.push(tk)
+      }
+      if (!tickers.length) {
+        setRunErr('The desk has no saved reports.')
+        setProgress('')
+        return
+      }
+      const modelNames = models.map((model) => shortModelLabel(model)).join(', ')
+      const go = window.confirm(
+        `Run ${modelNames} on ${tickers.length} desk companies, one company at a time? Each company finishes before the next starts.`,
+      )
+      if (!go) {
+        setProgress('')
+        return
+      }
+      setBatching(true)
+      for (let i = 0; i < tickers.length; i++) {
+        if (stopDesk.current) break
+        const tk = tickers[i]
+        const where = `${i + 1} of ${tickers.length} · ${tk}`
+        for (const model of models) {
+          try {
+            await writeLocalNote(tk, model, where)
+            saved += 1
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'This company stopped'
+            failed.push(`${tk} · ${shortModelLabel(model)}: ${msg}`)
+          }
+        }
+      }
+      const notes = `${saved} note${saved === 1 ? '' : 's'} saved`
+      setProgress(stopDesk.current ? `Stopped. ${notes}.` : `Finished ${tickers.length} companies. ${notes}.`)
+      if (failed.length) {
+        setRunErr(`${failed.length} did not save. ${failed.slice(0, 3).join(' ')}`)
+      }
+    } catch (e) {
+      setRunErr(e instanceof Error ? e.message : 'Could not load the desk reports')
+    } finally {
+      setRunning(false)
+      setBatching(false)
+      setStopping(false)
+      stopDesk.current = false
     }
   }
 
@@ -442,9 +523,19 @@ export function LocalPage() {
             disabled={running}
           />
           <Button size="sm" variant="primary" disabled={running || !online} onClick={() => void runResearch()}>
-            {running ? 'Running…' : 'Run local analysis'}
+            {running && !batching ? 'Running…' : 'Run local analysis'}
+          </Button>
+          <Button
+            size="sm"
+            disabled={(!online && !batching) || (running && !batching) || stopping}
+            onClick={() => (batching ? requestStop() : void runDeskReports())}
+          >
+            {stopping ? 'Stopping…' : batching ? 'Stop after this company' : 'Run desk reports'}
           </Button>
         </div>
+        <p className={styles.meta}>
+          Run desk reports uses the companies on the desk saved-reports list, one company at a time.
+        </p>
         {progress && <p className={styles.meta}>{progress}</p>}
         {runErr && <p className={styles.warn}>{runErr}</p>}
         {doneTicker && (
