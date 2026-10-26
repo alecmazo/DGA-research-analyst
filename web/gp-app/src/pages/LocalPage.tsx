@@ -586,14 +586,23 @@ export function LocalPage() {
         </section>
       )}
       </div>
-      <Panel title="Saved Local Reports" badge="local" flush className={styles.saved}>
-        <SavedReports
-          provider="local"
-          embed
-          refreshKey={reportsKey}
-          onAnalyze={(tk) => setTicker(tk)}
-        />
-      </Panel>
+      <div className={`${styles.pair} ${styles.saved}`}>
+        <Panel title="Desk saved reports" badge="frontier" flush className={styles.saved}>
+          <SavedReports
+            embed
+            refreshKey={reportsKey}
+            onAnalyze={(tk) => setTicker(tk)}
+          />
+        </Panel>
+        <Panel title="Saved Local Reports" badge="local" flush className={styles.saved}>
+          <SavedReports
+            provider="local"
+            embed
+            refreshKey={reportsKey}
+            onAnalyze={(tk) => setTicker(tk)}
+          />
+        </Panel>
+      </div>
       </div>
 
       <section className={styles.card}>
