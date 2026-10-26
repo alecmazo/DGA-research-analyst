@@ -16,6 +16,13 @@ import {
 } from '@/lib/localOllama'
 import { LocalDcf } from '@/components/local/LocalDcf'
 import { LocalModelPick, useLocalModelChoice } from '@/components/local/LocalModelPick'
+import {
+  clearDeskMemory,
+  deskTickers,
+  pendingQueue,
+  readDeskMemory,
+  rememberDeskSave,
+} from '@/lib/deskResume'
 import { relativeTime } from '@/lib/format'
 import { renderMd } from '@/lib/md'
 import { Button } from '@/components/ui/Button'
@@ -273,6 +280,31 @@ export function LocalPage() {
     setStopping(true)
   }
 
+  const runTickerQueue = async (queue: { tk: string; models: string[] }[]) => {
+    let saved = 0
+    const failed: string[] = []
+    for (let i = 0; i < queue.length; i++) {
+      if (stopDesk.current) break
+      const step = queue[i]
+      const where = `${i + 1} of ${queue.length} · ${step.tk}`
+      for (const model of step.models) {
+        try {
+          await writeLocalNote(step.tk, model, where)
+          rememberDeskSave(step.tk, model, Date.now(), window.localStorage)
+          saved += 1
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'This company stopped'
+          failed.push(`${step.tk} · ${shortModelLabel(model)}: ${msg}`)
+        }
+      }
+    }
+    const notes = `${saved} note${saved === 1 ? '' : 's'} saved`
+    setProgress(stopDesk.current ? `Stopped. ${notes}.` : `Finished ${queue.length} companies. ${notes}.`)
+    if (failed.length) {
+      setRunErr(`${failed.length} did not save. ${failed.slice(0, 3).join(' ')}`)
+    }
+  }
+
   const runDeskReports = async () => {
     if (running) return
     const models = researchModelList()
@@ -283,18 +315,9 @@ export function LocalPage() {
     setRunErr(null)
     setDoneTicker(null)
     setProgress('Loading the desk saved reports…')
-    let saved = 0
-    const failed: string[] = []
     try {
       const list = await api<SavedReport[]>('/api/reports')
-      const seen = new Set<string>()
-      const tickers: string[] = []
-      for (const row of Array.isArray(list) ? list : []) {
-        const tk = String(row?.ticker || '').trim().toUpperCase()
-        if (!tk || seen.has(tk)) continue
-        seen.add(tk)
-        tickers.push(tk)
-      }
+      const tickers = deskTickers(list)
       if (!tickers.length) {
         setRunErr('The desk has no saved reports.')
         setProgress('')
@@ -308,26 +331,63 @@ export function LocalPage() {
         setProgress('')
         return
       }
+      clearDeskMemory(window.localStorage)
       setBatching(true)
-      for (let i = 0; i < tickers.length; i++) {
-        if (stopDesk.current) break
-        const tk = tickers[i]
-        const where = `${i + 1} of ${tickers.length} · ${tk}`
-        for (const model of models) {
-          try {
-            await writeLocalNote(tk, model, where)
-            saved += 1
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : 'This company stopped'
-            failed.push(`${tk} · ${shortModelLabel(model)}: ${msg}`)
-          }
-        }
+      await runTickerQueue(tickers.map((tk) => ({ tk, models })))
+    } catch (e) {
+      setRunErr(e instanceof Error ? e.message : 'Could not load the desk reports')
+    } finally {
+      setRunning(false)
+      setBatching(false)
+      setStopping(false)
+      stopDesk.current = false
+    }
+  }
+
+  const resumeDeskReports = async () => {
+    if (running) return
+    const models = researchModelList()
+    setRunning(true)
+    setBatching(false)
+    setStopping(false)
+    stopDesk.current = false
+    setRunErr(null)
+    setDoneTicker(null)
+    setProgress('Checking which desk companies already have a local note…')
+    try {
+      const [desk, local] = await Promise.all([
+        api<SavedReport[]>('/api/reports'),
+        api<SavedReport[]>('/api/local/reports'),
+      ])
+      const tickers = deskTickers(desk)
+      if (!tickers.length) {
+        setRunErr('The desk has no saved reports.')
+        setProgress('')
+        return
       }
-      const notes = `${saved} note${saved === 1 ? '' : 's'} saved`
-      setProgress(stopDesk.current ? `Stopped. ${notes}.` : `Finished ${tickers.length} companies. ${notes}.`)
-      if (failed.length) {
-        setRunErr(`${failed.length} did not save. ${failed.slice(0, 3).join(' ')}`)
+      const now = Date.now()
+      const { queue, skipped } = pendingQueue(
+        tickers,
+        models,
+        Array.isArray(local) ? local : [],
+        readDeskMemory(now, window.localStorage),
+        now,
+      )
+      if (!queue.length) {
+        setProgress('Every desk company already has a local note from the last 6 hours.')
+        return
       }
+      const modelNames = models.map((model) => shortModelLabel(model)).join(', ')
+      const noteWord = skipped === 1 ? 'note' : 'notes'
+      const go = window.confirm(
+        `Resume ${modelNames} on ${queue.length} desk companies. ${skipped} local ${noteWord} from the last 6 hours will be skipped. Each remaining company finishes before the next starts.`,
+      )
+      if (!go) {
+        setProgress('')
+        return
+      }
+      setBatching(true)
+      await runTickerQueue(queue)
     } catch (e) {
       setRunErr(e instanceof Error ? e.message : 'Could not load the desk reports')
     } finally {
@@ -532,9 +592,17 @@ export function LocalPage() {
           >
             {stopping ? 'Stopping…' : batching ? 'Stop after this company' : 'Run desk reports'}
           </Button>
+          <Button
+            size="sm"
+            disabled={!online || running || stopping}
+            onClick={() => void resumeDeskReports()}
+          >
+            Resume desk reports
+          </Button>
         </div>
         <p className={styles.meta}>
           Run desk reports uses the companies on the desk saved-reports list, one company at a time.
+          Resume desk reports skips a local note written in the last 6 hours and continues with the rest.
         </p>
         {progress && <p className={styles.meta}>{progress}</p>}
         {runErr && <p className={styles.warn}>{runErr}</p>}
