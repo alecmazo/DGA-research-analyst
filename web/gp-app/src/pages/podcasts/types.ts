@@ -41,6 +41,8 @@ export type PodcastEpisode = {
   ticker: string
   title?: string
   format?: string
+  show?: string
+  episode_guid?: string
   duration_sec?: number
   generated_at?: string
   cost_usd?: number

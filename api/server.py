@@ -1498,6 +1498,8 @@ async def auth_middleware(request: Request, call_next):
             # who don't have an account can play the embedded audio.
             or path.endswith("/audio.mp3")
             or path == "/api/podcast/rss.xml"
+            or (path.startswith("/api/podcast/") and path.endswith("/rss.xml"))
+            or path.startswith("/api/public/podcast/media/")
             or path.startswith("/listen/")):
         return await call_next(request)
 
@@ -8985,7 +8987,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui779-20261026-local-compare"
+WEB_BUILD_VERSION = "ui780-20261026-podcast-feeds"
 
 
 @app.get("/api/build")
@@ -29834,6 +29836,121 @@ def delete_memo(memo_id: str, request: Request):
 
 # ── Podcast DB schema ──────────────────────────────────────────────────
 @_ddl_once
+def _ensure_podcast_episode_history(cur, conn) -> None:
+    """Episode GUID, byte size, and one row per generation.
+
+    Existing rows keep the legacy ``ticker::format`` GUID so a subscriber
+    does not see that episode twice. New generations mint a UUID.
+    """
+    for stmt in (
+        "ALTER TABLE analyst_podcasts ADD COLUMN IF NOT EXISTS episode_guid TEXT",
+        "ALTER TABLE analyst_podcasts ADD COLUMN IF NOT EXISTS byte_size BIGINT",
+        "ALTER TABLE analyst_podcasts ADD COLUMN IF NOT EXISTS media_key TEXT",
+        "ALTER TABLE analyst_podcasts ADD COLUMN IF NOT EXISTS show TEXT NOT NULL DEFAULT 'dga-hitech'",
+        """
+        CREATE TABLE IF NOT EXISTS analyst_podcast_episodes (
+            episode_guid       TEXT PRIMARY KEY,
+            show               TEXT NOT NULL DEFAULT 'dga-hitech',
+            ticker             TEXT NOT NULL,
+            format             TEXT NOT NULL DEFAULT 'debate',
+            episode_title      TEXT,
+            script_json        JSONB,
+            media_key          TEXT,
+            byte_size          BIGINT,
+            duration_sec       REAL,
+            audio_local_path   TEXT,
+            audio_dropbox_path TEXT,
+            tts_model          TEXT,
+            voice_map          JSONB,
+            published_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            cost_usd           REAL
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS analyst_podcast_episodes_show_pub
+            ON analyst_podcast_episodes (show, published_at DESC)
+        """,
+    ):
+        try:
+            cur.execute(stmt)
+            conn.commit()
+        except Exception as _e:
+            print(f"⚠️  [podcast] episode schema skipped: {_e!s:.160}", flush=True)
+    try:
+        cur.execute(
+            """
+            UPDATE analyst_podcasts
+               SET episode_guid = ticker || '::' || COALESCE(format, 'debate')
+             WHERE episode_guid IS NULL OR episode_guid = ''
+            """
+        )
+        cur.execute(
+            """
+            UPDATE analyst_podcasts
+               SET show = 'dga-hitech'
+             WHERE show IS NULL OR show = ''
+            """
+        )
+        conn.commit()
+    except Exception as _e:
+        print(f"⚠️  [podcast] legacy guid backfill skipped: {_e!s:.160}", flush=True)
+    try:
+        cur.execute(
+            """
+            SELECT ticker, format, audio_local_path
+              FROM analyst_podcasts
+             WHERE audio_local_path IS NOT NULL
+               AND (byte_size IS NULL OR byte_size <= 0)
+            """
+        )
+        for ticker, fmt, local_path in cur.fetchall() or []:
+            try:
+                p = Path(local_path or "")
+                if p.is_file() and p.stat().st_size > 0:
+                    cur.execute(
+                        """UPDATE analyst_podcasts SET byte_size = %s
+                            WHERE ticker = %s AND format = %s""",
+                        (p.stat().st_size, ticker, fmt),
+                    )
+            except Exception:
+                pass
+        conn.commit()
+    except Exception as _e:
+        print(f"⚠️  [podcast] byte_size backfill skipped: {_e!s:.160}", flush=True)
+    try:
+        cur.execute(
+            """
+            INSERT INTO analyst_podcast_episodes (
+                episode_guid, show, ticker, format, episode_title, script_json,
+                media_key, byte_size, duration_sec, audio_local_path,
+                audio_dropbox_path, tts_model, voice_map, published_at, cost_usd
+            )
+            SELECT
+                episode_guid,
+                COALESCE(NULLIF(show, ''), 'dga-hitech'),
+                ticker,
+                COALESCE(format, 'debate'),
+                episode_title,
+                script_json,
+                media_key,
+                byte_size,
+                duration_sec,
+                audio_local_path,
+                audio_dropbox_path,
+                tts_model,
+                voice_map,
+                COALESCE(generated_at, NOW()),
+                cost_usd
+              FROM analyst_podcasts
+             WHERE episode_guid IS NOT NULL AND episode_guid <> ''
+            ON CONFLICT (episode_guid) DO NOTHING
+            """
+        )
+        conn.commit()
+    except Exception as _e:
+        print(f"⚠️  [podcast] episode history backfill skipped: {_e!s:.160}", flush=True)
+
+
 def _ensure_podcast_table() -> None:
     """Create analyst_podcasts if missing. Idempotent, per-ALTER commits."""
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
@@ -29900,6 +30017,7 @@ def _ensure_podcast_table() -> None:
                 conn.commit()
             except Exception as _e:
                 print(f"⚠️  [podcast] PK migration skipped: {_e!s:.120}", flush=True)
+            _ensure_podcast_episode_history(cur, conn)
     except Exception as e:
         print(f"❌ [podcast] table ensure failed: {e!s:.200}", flush=True)
 
@@ -38573,6 +38691,94 @@ def _podcast_progress(ticker: str):
     return _record
 
 
+def _persist_podcast_episode(
+    *,
+    ticker: str,
+    format: str,
+    script: dict,
+    syn: dict,
+    out_path: Path,
+    episode_guid: str,
+    media_key: str,
+    show_id: str,
+    store,
+    tts_model: str,
+    job_key: str,
+) -> dict:
+    """Write the MP3 once and record both the latest pointer and the history row."""
+    import podcast_engine as pe
+    audio_bytes = Path(out_path).read_bytes()
+    byte_size = len(audio_bytes) or int(syn.get("bytes") or 0)
+    if byte_size <= 0:
+        raise RuntimeError("episode MP3 is empty")
+    store.put(media_key, audio_bytes)
+    written = store.local_path(media_key)
+    local_path = str(written) if written is not None else str(out_path)
+    dropbox_path = store.dropbox_path(media_key)
+    cost = pe.estimate_tts_cost(script, tts_model)
+    title = script.get("episode_title") or f"{ticker}: Bull vs Bear"
+    try:
+        _ensure_podcast_table()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO analyst_podcast_episodes (
+                    episode_guid, show, ticker, format, episode_title, script_json,
+                    media_key, byte_size, duration_sec, audio_local_path,
+                    audio_dropbox_path, tts_model, voice_map, published_at, cost_usd
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+                ON CONFLICT (episode_guid) DO NOTHING
+                """,
+                (
+                    episode_guid, show_id, ticker, format, title, json.dumps(script),
+                    media_key, byte_size, syn.get("duration_sec"), local_path,
+                    dropbox_path, syn.get("tts_model") or tts_model,
+                    json.dumps(syn.get("voice_map") or {}), cost.get("estimated_usd"),
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO analyst_podcasts
+                    (ticker, format, show, episode_guid, episode_title, script_json,
+                     audio_local_path, audio_dropbox_path, media_key, byte_size,
+                     duration_sec, tts_model, voice_map, generated_at, cost_usd)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+                ON CONFLICT (ticker, format) DO UPDATE SET
+                    show               = EXCLUDED.show,
+                    episode_guid       = EXCLUDED.episode_guid,
+                    episode_title      = EXCLUDED.episode_title,
+                    script_json        = EXCLUDED.script_json,
+                    audio_local_path   = EXCLUDED.audio_local_path,
+                    audio_dropbox_path = EXCLUDED.audio_dropbox_path,
+                    media_key          = EXCLUDED.media_key,
+                    byte_size          = EXCLUDED.byte_size,
+                    duration_sec       = EXCLUDED.duration_sec,
+                    tts_model          = EXCLUDED.tts_model,
+                    voice_map          = EXCLUDED.voice_map,
+                    generated_at       = NOW(),
+                    cost_usd           = EXCLUDED.cost_usd
+                """,
+                (
+                    ticker, format, show_id, episode_guid, title, json.dumps(script),
+                    local_path, dropbox_path, media_key, byte_size,
+                    syn.get("duration_sec"), syn.get("tts_model") or tts_model,
+                    json.dumps(syn.get("voice_map") or {}), cost.get("estimated_usd"),
+                ),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"❌ [podcast] DB persist failed for {job_key}: {e!s:.200}", flush=True)
+    return {
+        "episode_guid": episode_guid,
+        "byte_size": byte_size,
+        "dropbox_path": dropbox_path,
+        "local_path": local_path,
+        "media_key": media_key,
+        "cost": cost,
+    }
+
+
 def _run_podcast_generation(ticker: str, tts_model: str, format: str = "debate") -> None:
     """Background worker: pull script (or generate one), synthesize audio,
     upload to Dropbox, update DB.
@@ -38681,11 +38887,19 @@ def _run_podcast_generation(ticker: str, tts_model: str, format: str = "debate")
             print(f"🎙️ [podcast/audio {job_key}] speed={pe.get_speed_config()} voices={pe.get_voice_config()['voices']}", flush=True)
         except Exception as _e:
             print(f"⚠️  [podcast/audio {job_key}] config override load failed: {_e!s:.120}", flush=True)
-        out_dir = analyst.STOCKS_FOLDER / "podcasts"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        # Format-specific filename so Pre-Mortem doesn't clobber Debate on disk
-        mp3_name = f"{tk}_{format}_podcast.mp3" if format != "debate" else f"{tk}_podcast.mp3"
-        out_path = out_dir / mp3_name
+        from podcast_feed import mint_episode_guid
+        from podcast_media import get_media_store
+        episode_guid = mint_episode_guid()
+        show_id = "dga-hitech"
+        media_key = f"{show_id}/{episode_guid}.mp3"
+        store = get_media_store()
+        out_path = store.local_path(media_key)
+        if out_path is None:
+            out_dir = analyst.STOCKS_FOLDER / "podcasts"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / f"{episode_guid}.mp3"
+        else:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
         # Compliance disclaimer (intro + outro audio) — looked up from
         # kv_store so legal/counsel can edit text via the API without a
         # deploy. Defaults inside the engine are conservative and ON.
@@ -38705,61 +38919,22 @@ def _run_podcast_generation(ticker: str, tts_model: str, format: str = "debate")
             on_progress=_podcast_progress(job_key),
         )
 
-        # 4. Upload to Dropbox under /podcast/episodes/
-        dropbox_path = None
-        try:
-            dbx = analyst._dropbox_client()
-            if dbx is not None:
-                import dropbox as _dbx
-                base = analyst._dropbox_folder()
-                sub = f"{base}/podcast/episodes" if base else "/podcast/episodes"
-                dropbox_path = f"{sub}/{mp3_name}"
-                dbx.files_upload(
-                    out_path.read_bytes(),
-                    dropbox_path,
-                    mode=_dbx.files.WriteMode.overwrite,
-                    mute=True,
-                )
-                print(f"✅ [podcast] uploaded {tk} → {dropbox_path}", flush=True)
-        except Exception as e:
-            print(f"⚠️  [podcast] dropbox upload failed for {tk}: {e!s:.200}", flush=True)
-
-        # 5. Persist row
-        cost = pe.estimate_tts_cost(script, tts_model)
-        try:
-            _ensure_podcast_table()
-            with _fund_conn() as conn, conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO analyst_podcasts
-                        (ticker, format, episode_title, script_json, audio_local_path,
-                         audio_dropbox_path, duration_sec, tts_model, voice_map,
-                         generated_at, cost_usd)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
-                    ON CONFLICT (ticker, format) DO UPDATE SET
-                        episode_title      = EXCLUDED.episode_title,
-                        script_json        = EXCLUDED.script_json,
-                        audio_local_path   = EXCLUDED.audio_local_path,
-                        audio_dropbox_path = EXCLUDED.audio_dropbox_path,
-                        duration_sec       = EXCLUDED.duration_sec,
-                        tts_model          = EXCLUDED.tts_model,
-                        voice_map          = EXCLUDED.voice_map,
-                        generated_at       = NOW(),
-                        cost_usd           = EXCLUDED.cost_usd
-                """, (
-                    tk,
-                    format,
-                    script.get("episode_title") or f"{tk}: Bull vs Bear",
-                    json.dumps(script),
-                    str(out_path),
-                    dropbox_path,
-                    syn.get("duration_sec"),
-                    syn.get("tts_model"),
-                    json.dumps(syn.get("voice_map") or {}),
-                    cost.get("estimated_usd"),
-                ))
-                conn.commit()
-        except Exception as e:
-            print(f"❌ [podcast] DB persist failed for {job_key}: {e!s:.200}", flush=True)
+        # 4–5. One store write (disk + Dropbox) and one DB write (latest + history).
+        saved = _persist_podcast_episode(
+            ticker=tk,
+            format=format,
+            script=script,
+            syn=syn,
+            out_path=out_path,
+            episode_guid=episode_guid,
+            media_key=media_key,
+            show_id=show_id,
+            store=store,
+            tts_model=tts_model,
+            job_key=job_key,
+        )
+        dropbox_path = saved.get("dropbox_path")
+        cost = saved.get("cost") or {}
 
         _podcast_jobs[job_key] = {
             **_podcast_jobs[job_key],
@@ -38781,18 +38956,24 @@ def _run_podcast_generation(ticker: str, tts_model: str, format: str = "debate")
 
 @app.post("/api/podcast/{ticker}/generate")
 def podcast_generate(ticker: str, background_tasks: BackgroundTasks,
-                     tts_model: str = "tts-1-hd", format: str = "debate"):
+                     tts_model: str = "gpt-4o-mini-tts", format: str = "debate"):
     """Kick off podcast audio generation in the background.
 
     format scopes the entire job — separate MP3 + DB row per (ticker, format)
     so Pre-Mortem audio doesn't overwrite Debate audio for the same ticker.
+    Each run also appends an episode-history row with its own GUID.
 
     Poll progress via GET /api/podcast/{ticker}/status?format=X.
     When status.stage='done', play GET /api/podcast/{ticker}/audio.mp3?format=X.
     """
     tk = ticker.upper().strip()
-    if not os.environ.get("OPENAI_API_KEY"):
+    from podcast_tts import provider_name
+    pname = provider_name()
+    if pname in ("", "openai", "openaitts") and not os.environ.get("OPENAI_API_KEY"):
         return JSONResponse({"ok": False, "error": "OPENAI_API_KEY not set on server"},
+                            status_code=400)
+    if pname in ("xai", "grok", "xaitts") and not os.environ.get("XAI_API_KEY"):
+        return JSONResponse({"ok": False, "error": "XAI_API_KEY not set on server"},
                             status_code=400)
     job_key = f"{tk}::{format}"
     existing = _podcast_jobs.get(job_key)
@@ -38993,7 +39174,7 @@ RSS_CHANNEL_DESCRIPTION = os.environ.get("PODCAST_RSS_DESCRIPTION",
     "Informational only; not investment advice.")
 RSS_CHANNEL_LANGUAGE    = os.environ.get("PODCAST_RSS_LANGUAGE",    "en-us")
 RSS_CHANNEL_AUTHOR      = os.environ.get("PODCAST_RSS_AUTHOR",      "DGA Capital")
-RSS_CHANNEL_OWNER_EMAIL = os.environ.get("PODCAST_RSS_OWNER_EMAIL", "reports@dgacapital.com")
+RSS_CHANNEL_OWNER_EMAIL = os.environ.get("PODCAST_RSS_OWNER_EMAIL", "alecmazo1@gmail.com")
 RSS_CHANNEL_CATEGORY    = os.environ.get("PODCAST_RSS_CATEGORY",    "Business")
 RSS_CHANNEL_SUBCATEGORY = os.environ.get("PODCAST_RSS_SUBCATEGORY", "Investing")
 RSS_CHANNEL_ARTWORK_URL = os.environ.get("PODCAST_RSS_ARTWORK_URL", "")  # 3000x3000 png/jpg
@@ -39052,110 +39233,144 @@ def _clean_display_title(raw_title: str, ticker: str) -> str:
     return ticker
 
 
-@app.get("/api/podcast/rss.xml")
-def podcast_rss_feed(request: Request):
-    """Public RSS 2.0 feed with iTunes/Apple Podcasts extensions.
-    Subscribed by Apple Podcasts, Spotify, Overcast, Pocket Casts, etc.
-    No auth — entire feed is public once an episode has audio."""
+def _podcast_request_base(request: Request) -> str:
+    return f"{request.url.scheme}://{request.url.netloc}".rstrip("/")
+
+
+def _podcast_episode_rows(show_id: str) -> list[dict]:
+    """History for one show, newest first. Items with no bytes are dropped later."""
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
-        return Response(content="<rss><channel></channel></rss>",
-                          media_type="application/rss+xml")
-
-    base = f"{request.url.scheme}://{request.url.netloc}".rstrip("/")
-    feed_url = f"{base}/api/podcast/rss.xml"
-
-    items_xml: list[str] = []
+        return []
     try:
+        _ensure_podcast_table()
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            cur.execute("""
-                SELECT ticker, format, episode_title, generated_at, duration_sec,
+            cur.execute(
+                """
+                SELECT episode_guid, show, ticker, format, episode_title,
+                       published_at, duration_sec, byte_size, media_key,
                        script_json, audio_local_path, audio_dropbox_path
-                  FROM analyst_podcasts
-                 WHERE audio_local_path IS NOT NULL OR audio_dropbox_path IS NOT NULL
-                 ORDER BY generated_at DESC
+                  FROM analyst_podcast_episodes
+                 WHERE show = %s
+                 ORDER BY published_at DESC
                  LIMIT 200
-            """)
-            rows = cur.fetchall() or []
-        for r in rows:
-            tk = r["ticker"]
-            fmt = r.get("format") or "debate"
-            ep_title = _clean_display_title(r.get("episode_title"), tk)
-            summary  = _episode_summary(r.get("script_json")) or ep_title
-            duration = int(r.get("duration_sec") or 0)
-            # Mint a long-TTL (5y) share token so the same enclosure URL keeps
-            # working for years. Permanence matters for RSS — podcast clients
-            # cache GUIDs and revisit URLs on refresh.
-            token, _exp = _make_share_token(tk, fmt, ttl_seconds=5 * 365 * 86400)
-            enclosure_url = f"{base}/api/public/podcast/{token}/audio.mp3"
-            listen_url    = f"{base}/listen/{token}"
-            # Stable GUID — survives URL changes
-            guid = f"{tk}::{fmt}"
-            pub_date = _rfc2822(r.get("generated_at"))
-            # itunes:duration → HH:MM:SS
-            h = duration // 3600
-            m = (duration % 3600) // 60
-            s = duration % 60
-            itunes_duration = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
-            # Build description with disclaimer footer for compliance
-            desc = (
-                f"{summary}\n\n"
-                f"DGA Capital is an exempt reporting adviser in California. "
-                f"This episode is for informational purposes only — "
-                f"it is not investment advice or a solicitation."
+                """,
+                (show_id,),
             )
-            items_xml.append(
-                "    <item>\n"
-                f"      <title>{_xml_escape(ep_title)}</title>\n"
-                f"      <description><![CDATA[{desc}]]></description>\n"
-                f"      <itunes:summary><![CDATA[{desc}]]></itunes:summary>\n"
-                f"      <pubDate>{pub_date}</pubDate>\n"
-                f"      <guid isPermaLink=\"false\">{_xml_escape(guid)}</guid>\n"
-                f"      <link>{_xml_escape(listen_url)}</link>\n"
-                f"      <enclosure url=\"{_xml_escape(enclosure_url)}\" "
-                f"type=\"audio/mpeg\" length=\"0\"/>\n"
-                f"      <itunes:duration>{itunes_duration}</itunes:duration>\n"
-                f"      <itunes:author>{_xml_escape(RSS_CHANNEL_AUTHOR)}</itunes:author>\n"
-                f"      <itunes:explicit>false</itunes:explicit>\n"
-                "    </item>"
-            )
+            fetched = cur.fetchall() or []
     except Exception as e:
         print(f"⚠️ rss feed query failed: {e!s:.200}", flush=True)
+        return []
+    rows = []
+    for r in fetched:
+        tk = r.get("ticker") or ""
+        fmt = r.get("format") or "debate"
+        title = _clean_display_title(r.get("episode_title"), tk)
+        token, _exp = _make_share_token(tk, fmt, ttl_seconds=5 * 365 * 86400)
+        rows.append({
+            "episode_guid": r.get("episode_guid"),
+            "show": r.get("show") or show_id,
+            "ticker": tk,
+            "format": fmt,
+            "title": title,
+            "episode_title": title,
+            "summary": _episode_summary(r.get("script_json")) or title,
+            "published_at": r.get("published_at"),
+            "duration_sec": r.get("duration_sec"),
+            "byte_size": r.get("byte_size"),
+            "media_key": r.get("media_key"),
+            "audio_local_path": r.get("audio_local_path"),
+            "link": f"/listen/{token}",
+        })
+    return rows
 
-    artwork_tag = (
-        f"    <itunes:image href=\"{_xml_escape(RSS_CHANNEL_ARTWORK_URL)}\"/>\n"
-        if RSS_CHANNEL_ARTWORK_URL else ""
+
+def _podcast_feed_response(show_id: str | None, request: Request):
+    from podcast_feed import UnknownShow, render_show_feed
+    from podcast_shows import ALIAS_SHOW
+    base = _podcast_request_base(request)
+    sid = show_id or ALIAS_SHOW
+    try:
+        # Absolute listen links need the request host. Patch them before render.
+        episodes = _podcast_episode_rows(sid)
+        for ep in episodes:
+            link = ep.get("link") or ""
+            if link.startswith("/"):
+                ep["link"] = base + link
+        xml = render_show_feed(
+            None if show_id is None else show_id,
+            episodes,
+            request_base=base,
+        )
+    except UnknownShow:
+        raise HTTPException(404, "unknown show")
+    return Response(
+        content=xml,
+        media_type="application/rss+xml; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=600"},
     )
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<rss version="2.0"\n'
-        '     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"\n'
-        '     xmlns:content="http://purl.org/rss/1.0/modules/content/"\n'
-        '     xmlns:atom="http://www.w3.org/2005/Atom">\n'
-        '  <channel>\n'
-        f'    <title>{_xml_escape(RSS_CHANNEL_TITLE)}</title>\n'
-        f'    <link>{_xml_escape(base)}</link>\n'
-        f'    <description>{_xml_escape(RSS_CHANNEL_DESCRIPTION)}</description>\n'
-        f'    <language>{_xml_escape(RSS_CHANNEL_LANGUAGE)}</language>\n'
-        f'    <itunes:author>{_xml_escape(RSS_CHANNEL_AUTHOR)}</itunes:author>\n'
-        f'    <itunes:summary><![CDATA[{RSS_CHANNEL_DESCRIPTION}]]></itunes:summary>\n'
-        f'    <itunes:owner>\n'
-        f'      <itunes:name>{_xml_escape(RSS_CHANNEL_AUTHOR)}</itunes:name>\n'
-        f'      <itunes:email>{_xml_escape(RSS_CHANNEL_OWNER_EMAIL)}</itunes:email>\n'
-        f'    </itunes:owner>\n'
-        f'    <itunes:explicit>false</itunes:explicit>\n'
-        f'    <itunes:type>episodic</itunes:type>\n'
-        f'    <itunes:category text="{_xml_escape(RSS_CHANNEL_CATEGORY)}">\n'
-        f'      <itunes:category text="{_xml_escape(RSS_CHANNEL_SUBCATEGORY)}"/>\n'
-        f'    </itunes:category>\n'
-        f'{artwork_tag}'
-        f'    <atom:link href="{_xml_escape(feed_url)}" rel="self" type="application/rss+xml"/>\n'
-        f'    <copyright>© DGA Capital. All rights reserved.</copyright>\n'
-        + "\n".join(items_xml) + "\n"
-        '  </channel>\n'
-        '</rss>\n'
-    )
-    return Response(content=xml, media_type="application/rss+xml; charset=utf-8",
-                     headers={"Cache-Control": "public, max-age=600"})
+
+
+@app.get("/api/podcast/rss.xml")
+def podcast_rss_feed(request: Request):
+    """Public RSS for DGA HiTech. Alias of /api/podcast/dga-hitech/rss.xml."""
+    return _podcast_feed_response(None, request)
+
+
+@app.get("/api/podcast/{show}/rss.xml")
+def podcast_show_rss(show: str, request: Request):
+    """Public RSS for one show. Unknown shows are 404."""
+    return _podcast_feed_response(show, request)
+
+
+@app.get("/api/public/podcast/media/{show}/{guid}.mp3")
+def podcast_public_media(show: str, guid: str):
+    """Stable enclosure. Old share-token URLs keep using the token route."""
+    from podcast_media import get_media_store
+    from podcast_shows import known_show
+    if not known_show(show) or "/" in guid or ".." in guid or not guid:
+        raise HTTPException(404, "not found")
+    key = f"{show}/{guid}.mp3"
+    store = get_media_store()
+    path = store.local_path(key)
+    if path is not None and path.is_file() and path.stat().st_size > 0:
+        from fastapi.responses import FileResponse
+        return FileResponse(path, media_type="audio/mpeg", filename=f"{guid}.mp3")
+    try:
+        data = store.get(key)
+    except Exception:
+        data = None
+    if data:
+        return Response(content=data, media_type="audio/mpeg")
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT audio_local_path, audio_dropbox_path
+                         FROM analyst_podcast_episodes
+                        WHERE episode_guid = %s AND show = %s LIMIT 1""",
+                    (guid, show),
+                )
+                row = cur.fetchone()
+            raw_local = (row or {}).get("audio_local_path") or ""
+            local = Path(raw_local) if raw_local else None
+            if (local is None or not local.is_file()) and path is not None:
+                local = path
+            dropbox_path = (row or {}).get("audio_dropbox_path")
+            if local is not None and (not local.is_file() or local.stat().st_size <= 0) and dropbox_path:
+                try:
+                    dbx = analyst._dropbox_client()
+                    if dbx is not None:
+                        _, res = dbx.files_download(dropbox_path)
+                        local.parent.mkdir(parents=True, exist_ok=True)
+                        local.write_bytes(res.content)
+                except Exception as e:
+                    print(f"⚠️ [podcast-media] rehydrate failed: {e!s:.160}", flush=True)
+            if local is not None and local.is_file() and local.stat().st_size > 0:
+                from fastapi.responses import FileResponse
+                return FileResponse(local, media_type="audio/mpeg", filename=f"{guid}.mp3")
+        except Exception as e:
+            print(f"⚠️ [podcast-media] lookup failed: {e!s:.160}", flush=True)
+    raise HTTPException(404, "not found")
 
 
 @app.get("/listen/{token}")
@@ -39222,8 +39437,10 @@ margin:0;padding:60px 24px;text-align:center;}}h1{{color:#5BB8D4;font-size:22px;
     # OpenGraph + Twitter card meta — controls how the link previews on
     # Twitter, LinkedIn, iMessage, Slack, Discord, etc.
     og_title       = ep_title
-    og_description = (summary[:200] + "…") if len(summary) > 200 else (summary or RSS_CHANNEL_DESCRIPTION[:200])
-    og_image       = RSS_CHANNEL_ARTWORK_URL  # blank if not configured — most platforms still render
+    from podcast_shows import show_config as _show_cfg
+    _show = _show_cfg("dga-hitech") or {}
+    og_description = (summary[:200] + "…") if len(summary) > 200 else (summary or (_show.get("description") or "")[:200])
+    og_image       = _show.get("artwork_url") or ""  # blank if not configured — most platforms still render
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -39390,14 +39607,17 @@ def podcast_voice_sample(speaker: str, voice: str):
     import podcast_engine as pe
     sp_l = (speaker or "").lower().strip()
     v    = (voice   or "").lower().strip()
+    from podcast_tts import get_provider
+    provider = get_provider(pe.TTS_MODEL_DEFAULT)
     if sp_l not in PODCAST_SAMPLE_LINES:
         return JSONResponse({"ok": False, "error": f"unknown speaker {speaker!r}"}, status_code=400)
-    if v not in pe.AVAILABLE_VOICES:
+    allowed = [x.lower() for x in provider.voices()]
+    if v not in allowed:
         return JSONResponse({"ok": False, "error": f"unknown voice {voice!r}"}, status_code=400)
-
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return JSONResponse({"ok": False, "error": "OPENAI_API_KEY not set"}, status_code=500)
+    try:
+        provider.ensure_ready()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
 
     cache_dir = analyst.STOCKS_FOLDER / "voice_samples"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -39405,20 +39625,11 @@ def podcast_voice_sample(speaker: str, voice: str):
 
     if not out_path.exists():
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
             # Apply the same speaker-baseline speed so the sample sounds like
             # what the actual episode would (e.g., Opus's 1.06× lilt).
             speed = max(pe.SPEED_MIN, min(pe.SPEED_MAX,
                         pe._RUNTIME_SPEAKER.get(sp_l, 1.0)))
-            with client.audio.speech.with_streaming_response.create(
-                model="gpt-4o-mini-tts",   # cheap; samples don't need HD
-                voice=v,
-                input=PODCAST_SAMPLE_LINES[sp_l],
-                response_format="mp3",
-                speed=speed,
-            ) as resp:
-                resp.stream_to_file(out_path)
+            out_path.write_bytes(provider.synthesize(PODCAST_SAMPLE_LINES[sp_l], v, speed))
             print(f"🎙️ [voice-sample] cached {sp_l}/{v} → {out_path.stat().st_size}b", flush=True)
         except Exception as e:
             print(f"❌ [voice-sample] {sp_l}/{v}: {e!s:.300}", flush=True)
@@ -39534,32 +39745,66 @@ def podcast_reset_disclaimer_config(request: Request):
 
 
 @app.get("/api/podcast/list")
-def podcast_list():
-    """All episodes — used by the in-app player + (later) the RSS feed."""
+def podcast_list(show: str | None = None):
+    """Episodes for the in-app player. `show` filters one feed; omit it for all."""
+    from podcast_shows import ALIAS_SHOW, known_show
+    from urllib.parse import quote as _quote
+    if show and not known_show(show):
+        raise HTTPException(404, "unknown show")
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
-        return {"ok": True, "episodes": []}
+        return {"ok": True, "show": show, "episodes": []}
     try:
         _ensure_podcast_table()
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-            cur.execute("""SELECT ticker, format, episode_title, duration_sec, generated_at,
-                                  tts_model, cost_usd, audio_dropbox_path
-                           FROM analyst_podcasts
-                           WHERE audio_local_path IS NOT NULL OR audio_dropbox_path IS NOT NULL
-                           ORDER BY generated_at DESC""")
+            if show:
+                cur.execute(
+                    """SELECT episode_guid, show, ticker, format, episode_title,
+                              duration_sec, published_at, tts_model, cost_usd,
+                              audio_dropbox_path, media_key, byte_size
+                         FROM analyst_podcast_episodes
+                        WHERE show = %s
+                        ORDER BY published_at DESC""",
+                    (show,),
+                )
+            else:
+                cur.execute(
+                    """SELECT episode_guid, show, ticker, format, episode_title,
+                              duration_sec, published_at, tts_model, cost_usd,
+                              audio_dropbox_path, media_key, byte_size
+                         FROM analyst_podcast_episodes
+                        ORDER BY published_at DESC"""
+                )
             rows = cur.fetchall()
-        return {"ok": True, "episodes": [
-            {
+        episodes = []
+        for r in rows:
+            sid = r.get("show") or ALIAS_SHOW
+            guid = r.get("episode_guid") or ""
+            fmt = r.get("format") or "debate"
+            if guid:
+                audio_url = f"/api/public/podcast/media/{sid}/{_quote(guid, safe='')}.mp3"
+            else:
+                audio_url = f"/api/podcast/{r['ticker']}/audio.mp3?format={fmt}"
+            published = r.get("published_at")
+            episodes.append({
                 "ticker":       r["ticker"],
-                "format":       r.get("format") or "debate",
+                "format":       fmt,
+                "show":         sid,
+                "episode_guid": guid,
                 "title":        r["episode_title"],
                 "duration_sec": r["duration_sec"],
-                "generated_at": r["generated_at"].isoformat() if r["generated_at"] else None,
+                "generated_at": published.isoformat() if published else None,
                 "tts_model":    r["tts_model"],
                 "cost_usd":     r["cost_usd"],
-                "audio_url":    f"/api/podcast/{r['ticker']}/audio.mp3?format={r.get('format') or 'debate'}",
+                "audio_url":    audio_url,
                 "dropbox_path": r["audio_dropbox_path"],
-            } for r in rows
-        ]}
+                "byte_size":    r.get("byte_size"),
+            })
+        return {
+            "ok": True,
+            "show": show,
+            "feed_path": f"/api/podcast/{show}/rss.xml" if show else "/api/podcast/rss.xml",
+            "episodes": episodes,
+        }
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
 
@@ -40437,7 +40682,8 @@ def podcast_delete(ticker: str, format: str = "debate", what: str = "all"):
     if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
         try:
             with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
-                cur.execute("""SELECT audio_local_path, audio_dropbox_path
+                cur.execute("""SELECT audio_local_path, audio_dropbox_path,
+                                      episode_guid, media_key
                                FROM analyst_podcasts
                                WHERE ticker = %s AND format = %s
                                LIMIT 1""", (tk, format))
@@ -40485,6 +40731,12 @@ def podcast_delete(ticker: str, format: str = "debate", what: str = "all"):
                 if what == "all":
                     cur.execute("DELETE FROM analyst_podcasts WHERE ticker = %s AND format = %s",
                                 (tk, format))
+                    guid = (row or {}).get("episode_guid")
+                    if guid:
+                        cur.execute(
+                            "DELETE FROM analyst_podcast_episodes WHERE episode_guid = %s",
+                            (guid,),
+                        )
                     db_action = "row_deleted"
                 elif what == "script":
                     cur.execute("""UPDATE analyst_podcasts SET
@@ -40500,10 +40752,23 @@ def podcast_delete(ticker: str, format: str = "debate", what: str = "all"):
                                        audio_local_path = NULL,
                                        audio_dropbox_path = NULL,
                                        duration_sec = NULL,
+                                       byte_size = NULL,
                                        cost_usd = NULL,
                                        tts_model = NULL,
                                        voice_map = NULL
                                    WHERE ticker = %s AND format = %s""", (tk, format))
+                    guid = (row or {}).get("episode_guid")
+                    if guid:
+                        cur.execute(
+                            """UPDATE analyst_podcast_episodes SET
+                                   audio_local_path = NULL,
+                                   audio_dropbox_path = NULL,
+                                   duration_sec = NULL,
+                                   byte_size = 0,
+                                   cost_usd = NULL
+                               WHERE episode_guid = %s""",
+                            (guid,),
+                        )
                     db_action = "audio_cleared"
                 conn.commit()
         except Exception as e:
@@ -40641,21 +40906,16 @@ def podcast_audition():
         voices: [{voice, blurb, filename, bytes, dropbox_path}, ...],
         dropbox_folder: "..." }
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+    from podcast_tts import get_provider
+    import podcast_engine as pe
+    provider = get_provider(pe.TTS_MODEL_DEFAULT)
+    try:
+        provider.ensure_ready()
+    except Exception as e:
         return JSONResponse(
-            {"ok": False, "error": "OPENAI_API_KEY not set on server"},
+            {"ok": False, "error": str(e)[:200]},
             status_code=400,
         )
-    try:
-        from openai import OpenAI
-    except ImportError:
-        return JSONResponse(
-            {"ok": False, "error": "openai package not installed"},
-            status_code=500,
-        )
-
-    client = OpenAI(api_key=api_key)
 
     # Write MP3s locally first, then bulk-upload via the existing helper.
     out_dir = analyst.STOCKS_FOLDER / "podcast_auditions"
@@ -40666,14 +40926,7 @@ def podcast_audition():
     for voice, blurb in PODCAST_AUDITION_VOICES:
         out_path = out_dir / f"audition_{voice}.mp3"
         try:
-            with client.audio.speech.with_streaming_response.create(
-                model="gpt-4o-mini-tts",
-                voice=voice,
-                input=PODCAST_AUDITION_TEXT,
-                response_format="mp3",
-                speed=1.0,
-            ) as resp:
-                resp.stream_to_file(out_path)
+            out_path.write_bytes(provider.synthesize(PODCAST_AUDITION_TEXT, voice, 1.0))
             local_paths.append(out_path)
             results.append({
                 "voice":    voice,

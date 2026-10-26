@@ -53,6 +53,58 @@
   border-bottom: 1px solid #c7e8f3;
 }
 
+.showBar {
+  padding: 12px 18px 4px;
+  border-bottom: 1px solid #e0f0f7;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.showSwitch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.showBtn,
+.showBtnOn {
+  border-radius: 999px;
+  border: 1px solid #c7e8f3;
+  background: #fff;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.showBtnOn {
+  background: #0a1628;
+  color: #fff;
+  border-color: #0a1628;
+}
+
+.feedRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.feedUrl {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f4fafd;
+  border: 1px solid #e0f0f7;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
 .pcSection {
   padding: 16px 18px;
   border-bottom: 1px solid #e0f0f7;

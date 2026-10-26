@@ -15,8 +15,7 @@ Outputs:
 
 Notes
 -----
-• Uses `gpt-4o-mini-tts` (cheap; ~$0.015/min). For final episodes we'll
-  bump to `tts-1-hd` per turn, but for casting these are indistinguishable.
+• Uses the podcast TTS provider (default gpt-4o-mini-tts).
 • The passage runs ~35 sec — long enough to judge timbre, pacing, and
   how each voice handles a swear word (only one, mildly placed).
 """
@@ -39,10 +38,13 @@ if not API_KEY:
         "   then re-run: python podcast/audition_voices.py"
     )
 
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 try:
-    from openai import OpenAI
+    from podcast_tts import get_provider
 except ImportError:
-    sys.exit("❌ `openai` package missing. Install: pip install openai>=1.40")
+    sys.exit("❌ podcast_tts missing. Run from the repo root.")
 
 # Same passage for every voice — lets you A/B by ear.
 # Hits: a calm opener, a heated jab, a punchy close, one mild swear.
@@ -66,22 +68,14 @@ VOICES = [
 OUT_DIR = Path(__file__).resolve().parent / "audio"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-client = OpenAI(api_key=API_KEY)
+provider = get_provider("gpt-4o-mini-tts")
 
 print(f"🎙️  Generating {len(VOICES)} auditions → {OUT_DIR}\n")
 for voice, blurb in VOICES:
     out_path = OUT_DIR / f"audition_{voice}.mp3"
     t0 = time.time()
     try:
-        # Streaming response — avoids loading whole file into memory.
-        with client.audio.speech.with_streaming_response.create(
-            model="gpt-4o-mini-tts",
-            voice=voice,
-            input=AUDITION_TEXT,
-            response_format="mp3",
-            speed=1.0,
-        ) as resp:
-            resp.stream_to_file(out_path)
+        out_path.write_bytes(provider.synthesize(AUDITION_TEXT, voice, 1.0))
         dt = time.time() - t0
         size_kb = out_path.stat().st_size / 1024
         print(f"  ✅ {voice:8s} ({blurb})  →  {out_path.name}  [{size_kb:.0f}KB, {dt:.1f}s]")

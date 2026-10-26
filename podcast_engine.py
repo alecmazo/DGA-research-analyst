@@ -68,12 +68,12 @@ _RUNTIME_INTENSITY  = dict(INTENSITY_SPEED)
 _RUNTIME_SPEAKER    = dict(SPEAKER_SPEED_OFFSET)
 _RUNTIME_VOICE_MAP  = dict(VOICE_MAP)
 
-# Valid OpenAI TTS voices for the tts-1 / tts-1-hd models we use.
-# Empirically tested via the API error response — these 8 are what
-# tts-1-hd accepts. 'ballad', 'coral', and 'verse' are gpt-4o-mini-tts
-# only and return HTTP 400 from tts-1-hd despite what some docs imply.
-AVAILABLE_VOICES = ["alloy", "ash", "echo", "fable",
-                    "nova", "onyx", "sage", "shimmer"]
+# Voice whitelist is model-aware (see podcast_tts.voices_for_openai_model).
+# tts-1 / tts-1-hd accept the original 8. ballad, coral, and verse are
+# gpt-4o-mini-tts only and return HTTP 400 from tts-1-hd.
+from podcast_tts import OPENAI_MODEL_DEFAULT, voices_for_openai_model
+
+AVAILABLE_VOICES = voices_for_openai_model(OPENAI_MODEL_DEFAULT)
 
 
 def get_speed_config() -> dict:
@@ -1663,7 +1663,7 @@ def generate_script(
 import io
 from pathlib import Path
 
-TTS_MODEL_DEFAULT = "tts-1-hd"   # higher quality than gpt-4o-mini-tts for final episodes
+TTS_MODEL_DEFAULT = OPENAI_MODEL_DEFAULT  # gpt-4o-mini-tts; tts-1-hd still accepted
 TTS_FORMAT        = "mp3"
 
 # Pacing (milliseconds)
@@ -1781,7 +1781,13 @@ def _ensure_stings() -> tuple[Path, Path]:
 
 def _tts_turn(client, speaker: str, text: str, intensity: str,
               model: str = TTS_MODEL_DEFAULT) -> bytes:
-    """Synthesize one turn via OpenAI TTS. Returns raw MP3 bytes."""
+    """Synthesize one turn through the selected TTS provider. Returns MP3 bytes.
+
+    `client` is unused. Samples, auditions, and the disclaimer call the
+    same provider so there is one speech implementation.
+    """
+    del client
+    from podcast_tts import get_provider
     sp_l = speaker.lower()
     # Legacy speaker-key aliases — old scripts may have "alec"/"alex"/"claude"
     # before the cast rename to opus / claudia. Map them so they keep working.
@@ -1789,32 +1795,22 @@ def _tts_turn(client, speaker: str, text: str, intensity: str,
         "alec": "kimi", "alex": "kimi", "opus": "kimi", "host": "kimi",
         "narrator": "kimi", "claude": "claudia",
     }.get(sp_l, sp_l)
+    provider = get_provider(model)
+    allowed = [v.lower() for v in provider.voices()]
     # Read voice + speed from the RUNTIME tables so UI edits take effect immediately.
     voice = _RUNTIME_VOICE_MAP.get(sp_l, "alloy")
-    # Safety net: if the saved voice was valid earlier but is no longer in
-    # AVAILABLE_VOICES (e.g., user previously picked 'verse' before we
-    # learned tts-1-hd rejects it), fall back to a sane default for this
-    # speaker rather than crashing the whole episode generation.
-    if voice not in AVAILABLE_VOICES:
+    # tts-1-hd rejects ballad/coral/verse. Another provider may not know
+    # the OpenAI cast names at all. Fall back instead of failing the episode.
+    if voice not in allowed:
         safe_default = VOICE_MAP.get(sp_l, "alloy")
+        if safe_default not in allowed:
+            safe_default = allowed[0] if allowed else voice
         print(f"⚠️  [tts] {sp_l!r} had unsupported voice {voice!r}; falling back to {safe_default!r}", flush=True)
         voice = safe_default
     intensity_mult = _RUNTIME_INTENSITY.get(intensity.lower(), 1.0)
     speaker_mult   = _RUNTIME_SPEAKER.get(sp_l, 1.0)
     speed = max(SPEED_MIN, min(SPEED_MAX, intensity_mult * speaker_mult))
-    resp = client.audio.speech.create(
-        model=model,
-        voice=voice,
-        input=text,
-        response_format=TTS_FORMAT,
-        speed=speed,
-    )
-    # Newer openai sdk: resp.read() returns bytes
-    if hasattr(resp, "read"):
-        return resp.read()
-    if hasattr(resp, "content"):
-        return resp.content
-    return bytes(resp)
+    return provider.synthesize(text, voice, speed)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1839,6 +1835,79 @@ DEFAULT_DISCLAIMER_OUTRO = (
 )
 DEFAULT_DISCLAIMER_VOICE = "alloy"   # neutral, even-toned — not in the cast
 
+# EBU R128 target for spoken-word podcasts. Tests assert this exact string.
+LOUDNORM_FILTER = "loudnorm=I=-16:TP=-1.5:LRA=11"
+
+
+def _parse_loudnorm_json(stderr: str) -> dict | None:
+    """Pull the loudnorm measurement JSON out of ffmpeg's stderr."""
+    import json as _json
+    start = stderr.rfind("{")
+    end = stderr.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        data = _json.loads(stderr[start:end + 1])
+    except _json.JSONDecodeError:
+        return None
+    needed = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+    if not all(k in data for k in needed):
+        return None
+    return data
+
+
+def apply_loudnorm(src: Path, dst: Path, *, title: str = "", artist: str = "") -> bool:
+    """Two-pass loudnorm, then a 128 kbps 44.1 kHz MP3.
+
+    Returns False when ffmpeg is missing or the filter fails. The caller
+    keeps the pydub file in that case.
+    """
+    import shutil
+    import subprocess
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        print("⚠️ [podcast] ffmpeg missing; skipping loudnorm", flush=True)
+        return False
+    probe = subprocess.run(
+        [
+            ffmpeg, "-hide_banner", "-i", str(src),
+            "-af", f"{LOUDNORM_FILTER}:print_format=json",
+            "-f", "null", "-",
+        ],
+        capture_output=True, text=True,
+    )
+    measured = _parse_loudnorm_json(probe.stderr or "")
+    if measured:
+        af = (
+            f"{LOUDNORM_FILTER}"
+            f":measured_I={measured['input_i']}"
+            f":measured_TP={measured['input_tp']}"
+            f":measured_LRA={measured['input_lra']}"
+            f":measured_thresh={measured['input_thresh']}"
+            f":offset={measured['target_offset']}"
+            f":linear=true"
+        )
+    else:
+        af = LOUDNORM_FILTER
+    cmd = [
+        ffmpeg, "-y", "-hide_banner", "-i", str(src),
+        "-af", af,
+        "-ar", "44100",
+        "-codec:a", "libmp3lame",
+        "-b:a", "128k",
+    ]
+    if title:
+        cmd += ["-metadata", f"title={title}"]
+    if artist:
+        cmd += ["-metadata", f"artist={artist}", "-metadata", f"album={artist}"]
+    cmd.append(str(dst))
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"⚠️ [podcast] loudnorm failed: {e!s:.200}", flush=True)
+        return False
+    return dst.is_file() and dst.stat().st_size > 0
+
 
 def synthesize_episode(
     script: dict[str, Any],
@@ -1858,22 +1927,16 @@ def synthesize_episode(
     at script start, before each turn, and at the final stitch step. Lets
     the UI render a progress bar without polling.
     """
-    import os as _os
-    api_key = _os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY not set")
-    try:
-        from openai import OpenAI
-    except ImportError as e:
-        raise RuntimeError("openai package missing") from e
     try:
         from pydub import AudioSegment
     except ImportError as e:
         raise RuntimeError(
             "pydub missing — pip install pydub (and ensure ffmpeg on PATH)"
         ) from e
+    from podcast_tts import get_provider
+    provider = get_provider(tts_model)
+    provider.ensure_ready()
 
-    client = OpenAI(api_key=api_key)
     sections = script.get("sections") or []
 
     # Flatten all turns with the section they came from so we can insert
@@ -1915,7 +1978,7 @@ def synthesize_episode(
             try: on_progress("turn", i, total,
                              f"{sp.upper()} ({intensity}) · {sid} · turn {i}/{total}")
             except Exception: pass
-        mp3_bytes = _tts_turn(client, sp, text, intensity, model=tts_model)
+        mp3_bytes = _tts_turn(None, sp, text, intensity, model=tts_model)
         seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
         # Inter-turn gap depends on whether we're crossing a section boundary
         if prev_section is not None:
@@ -1967,11 +2030,11 @@ def synthesize_episode(
                 try: on_progress("disclaimer", total, total,
                                    f"Synthesizing compliance disclaimer ({len(text)} ch)…")
                 except Exception: pass
-            r = client.audio.speech.create(
-                model=tts_model, voice=disclaimer_voice,
-                input=text.strip(), speed=1.0,
-            )
-            mp3 = r.content if hasattr(r, "content") else r.read()
+            voice = disclaimer_voice
+            allowed = [v.lower() for v in provider.voices()]
+            if voice.lower() not in allowed and allowed:
+                voice = allowed[0]
+            mp3 = provider.synthesize(text.strip(), voice, 1.0)
             seg = AudioSegment.from_file(io.BytesIO(mp3), format="mp3")
             # Match dialogue loudness then sit a hair below
             dsf = seg.dBFS if seg.dBFS != float("-inf") else -16.0
@@ -2000,15 +2063,25 @@ def synthesize_episode(
     full = full.normalize(headroom=1.0)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    ep_title = script.get("episode_title") or script.get("ticker") or "DGA HiTech"
+    artist = "DGA HiTech Podcast"
     full.export(out_path, format="mp3", bitrate="128k",
                 tags={
-                    "title":  script.get("episode_title") or script.get("ticker") or "DGA HiTech",
-                    "artist": "DGA HiTech Podcast",
-                    "album":  "DGA HiTech Podcast",
+                    "title":  ep_title,
+                    "artist": artist,
+                    "album":  artist,
                     "genre":  "Business",
                 })
+    # -16 LUFS after the mix. A missing ffmpeg leaves the pydub MP3 in place.
+    norm_path = out_path.with_suffix(".loudnorm.mp3")
+    if apply_loudnorm(out_path, norm_path, title=ep_title, artist=artist):
+        norm_path.replace(out_path)
 
-    duration_sec = len(full) / 1000.0
+    try:
+        measured = AudioSegment.from_file(out_path)
+        duration_sec = len(measured) / 1000.0
+    except Exception:
+        duration_sec = len(full) / 1000.0
     return {
         "ok":            True,
         "duration_sec":  round(duration_sec, 1),

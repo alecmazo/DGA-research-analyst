@@ -30,10 +30,15 @@ import page from './page.module.css'
 import styles from './PodcastsPage.module.css'
 
 const TTS_MODELS = [
-  { value: 'tts-1-hd', label: 'tts-1-hd (best, ~$0.50)' },
-  { value: 'tts-1', label: 'tts-1 (good, ~$0.25)' },
-  { value: 'gpt-4o-mini-tts', label: 'gpt-4o-mini-tts (draft, ~$0.01)' },
+  { value: 'gpt-4o-mini-tts', label: 'gpt-4o-mini-tts (default)' },
+  { value: 'tts-1-hd', label: 'tts-1-hd (legacy HD)' },
+  { value: 'tts-1', label: 'tts-1' },
 ]
+
+const PODCAST_SHOWS = [
+  { id: 'dga-hitech', label: 'DGA HiTech' },
+  { id: 'systems-over-goals', label: 'Systems Over Goals Daily' },
+] as const
 
 const VOICE_BLURBS: Record<string, string> = {
   alloy: 'neutral, balanced',
@@ -70,6 +75,8 @@ export function PodcastsPage() {
   const [reports, setReports] = useState<SavedReportRow[]>([])
   const [scripts, setScripts] = useState<PodcastScriptMeta[]>([])
   const [episodes, setEpisodes] = useState<PodcastEpisode[]>([])
+  const [showId, setShowId] = useState<(typeof PODCAST_SHOWS)[number]['id']>('dga-hitech')
+  const [feedCopied, setFeedCopied] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [boot, setBoot] = useState(true)
 
@@ -91,7 +98,7 @@ export function PodcastsPage() {
 
   // ② Audio
   const [audioTk, setAudioTk] = useState('')
-  const [ttsModel, setTtsModel] = useState('tts-1-hd')
+  const [ttsModel, setTtsModel] = useState('gpt-4o-mini-tts')
   const [audioBusy, setAudioBusy] = useState(false)
   const [audioProg, setAudioProg] = useState<{ label: string; pct: number } | null>(
     null,
@@ -151,7 +158,9 @@ export function PodcastsPage() {
         api<{ scripts?: PodcastScriptMeta[] }>('/api/podcast/scripts').catch(() => ({
           scripts: [],
         })),
-        api<{ episodes?: PodcastEpisode[] }>('/api/podcast/list').catch(() => ({
+        api<{ episodes?: PodcastEpisode[] }>(
+          `/api/podcast/list?show=${encodeURIComponent(showId)}`,
+        ).catch(() => ({
           episodes: [],
         })),
       ])
@@ -161,7 +170,7 @@ export function PodcastsPage() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load podcast data')
     }
-  }, [])
+  }, [showId])
 
   const loadVoiceSpeed = useCallback(async () => {
     try {
@@ -436,12 +445,15 @@ export function PodcastsPage() {
     if (status?.duration_sec) parts.push(`${Math.round(status.duration_sec)}s`)
     if (status?.cost_usd != null) parts.push(`$${Number(status.cost_usd).toFixed(3)}`)
     if (status?.dropbox_path) parts.push('Dropbox ✓')
+    const audioUrl = status?.audio_url
     setPlayer({
       ticker,
       format: fmt,
       title: epTitle,
       meta: parts.length ? parts.join(' · ') : 'Ready',
-      src: `/api/podcast/${encodeURIComponent(ticker)}/audio.mp3?format=${encodeURIComponent(fmt)}&t=${Date.now()}`,
+      src: audioUrl
+        ? `${audioUrl}${audioUrl.includes('?') ? '&' : '?'}t=${Date.now()}`
+        : `/api/podcast/${encodeURIComponent(ticker)}/audio.mp3?format=${encodeURIComponent(fmt)}&t=${Date.now()}`,
     })
   }
 
@@ -509,15 +521,17 @@ export function PodcastsPage() {
     }
   }
 
+  const episodeKey = (e: PodcastEpisode) =>
+    e.episode_guid || `${e.ticker}::${e.format || 'debate'}`
+
   const loadSavedAudio = (raw: string) => {
     setSavedAudioKey(raw)
     if (!raw) return
-    const [tk, fmt] = raw.includes('::') ? raw.split('::') : [raw, 'debate']
-    const ep = episodes.find(
-      (e) => e.ticker === tk && (e.format || 'debate') === fmt,
-    )
-    syncTk(tk)
-    showPlayer(tk, fmt, ep || { format: fmt })
+    const ep = episodes.find((e) => episodeKey(e) === raw)
+    if (!ep) return
+    const fmt = ep.format || 'debate'
+    syncTk(ep.ticker)
+    showPlayer(ep.ticker, fmt, ep)
   }
 
   useEffect(() => {
@@ -767,6 +781,16 @@ export function PodcastsPage() {
     })
   }
 
+  const feedUrl = useMemo(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/api/podcast/${showId}/rss.xml`
+  }, [showId])
+
+  const showEpisodes = useMemo(
+    () => episodes.filter((e) => (e.show || 'dga-hitech') === showId),
+    [episodes, showId],
+  )
+
   if (boot) {
     return (
       <div className={page.page}>
@@ -794,9 +818,53 @@ export function PodcastsPage() {
         </div>
       )}
 
-      {/* ══ DGA HiTech Podcast ══ */}
+      {/* ══ Show + feed ══ */}
       <section className={styles.pcCard}>
-        <header className={styles.pcHead}>🎙️ DGA HiTech Podcast</header>
+        <header className={styles.pcHead}>
+          {showId === 'dga-hitech' ? '🎙️ DGA HiTech Podcast' : '🎙️ Systems Over Goals Daily'}
+        </header>
+        <div className={styles.showBar}>
+          <div className={styles.showSwitch} role="tablist" aria-label="Podcast show">
+            {PODCAST_SHOWS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                role="tab"
+                aria-selected={showId === s.id}
+                className={showId === s.id ? styles.showBtnOn : styles.showBtn}
+                onClick={() => setShowId(s.id)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <div className={styles.feedRow}>
+            <code className={styles.feedUrl}>{feedUrl}</code>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                const text = feedUrl
+                void navigator.clipboard.writeText(text).then(
+                  () => {
+                    setFeedCopied(true)
+                    window.setTimeout(() => setFeedCopied(false), 1500)
+                  },
+                  () => setErr('Could not copy the feed URL'),
+                )
+              }}
+            >
+              {feedCopied ? 'Copied' : 'Copy feed'}
+            </Button>
+          </div>
+          {showId === 'systems-over-goals' && (
+            <p className={styles.pcDesc}>
+              Systems Over Goals Daily is one 20–30 minute episode. This feed is
+              live. Episodes are not generated from this page yet, so an empty
+              list is expected.
+            </p>
+          )}
+        </div>
 
         {/* ① Script */}
         <div className={styles.pcSection} ref={scriptAnchor}>
@@ -1019,13 +1087,14 @@ export function PodcastsPage() {
               value={savedAudioKey}
               onChange={(e) => loadSavedAudio(e.target.value)}
             >
-              <option value="">🎧 Open a saved episode… ({episodes.length})</option>
-              {episodes.map((e) => {
+              <option value="">🎧 Open a saved episode… ({showEpisodes.length})</option>
+              {showEpisodes.map((e) => {
                 const fmt = e.format || 'debate'
+                const key = episodeKey(e)
                 return (
                   <option
-                    key={`${e.ticker}::${fmt}`}
-                    value={`${e.ticker}::${fmt}`}
+                    key={key}
+                    value={key}
                   >
                     {displayTicker(e.ticker, e.title)}
                     {e.duration_sec ? ` · ${Math.round(e.duration_sec)}s` : ''}
