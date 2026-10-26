@@ -8987,7 +8987,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui780-20261026-podcast-feeds"
+WEB_BUILD_VERSION = "ui781-20261026-sogd-daily"
 
 
 @app.get("/api/build")
@@ -21731,7 +21731,46 @@ def _start_automation_schedulers() -> None:
                      name="pulse-scheduler").start()
     threading.Thread(target=_auto_snaptrade_sync_worker, daemon=True,
                      name="snaptrade-scheduler").start()
+    threading.Thread(target=_sogd_scheduler_worker, daemon=True,
+                     name="sogd-scheduler").start()
     print("[automation] schedulers started (after kv helpers ready)", flush=True)
+
+
+def _sogd_scheduler_worker() -> None:
+    """One thread. Scout around 6:35 AM Pacific, publish at 7:00, catch up after a restart."""
+    import time as _time
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    from podcast_sogd import blocking_row, execute_daily, load_run_context, plan_tick, release_ready
+    tz = ZoneInfo("America/Los_Angeles")
+    while True:
+        try:
+            connect = _fund_conn if (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")) else None
+            now = _dt.now(tz)
+            ctx = load_run_context(now.date(), connect)
+            decision = plan_tick(
+                now,
+                blocking_row(ctx),
+                start_local=ctx["start_local"],
+                publish_local=ctx["publish_local"],
+                auto_publish=ctx["auto_publish"],
+            )
+            print(f"[sogd-scheduler] {decision['action']} ({decision['reason']})", flush=True)
+            if decision["action"] == "generate":
+                result = execute_daily(now.date(), connect=connect)
+                status = (result or {}).get("status")
+                if status in ("failed", "cost_cap_hit"):
+                    _time.sleep(900)
+                    continue
+                if status == "locked":
+                    _time.sleep(60)
+                    continue
+            elif decision["action"] == "release":
+                release_ready(now.date(), connect, now=now)
+            _time.sleep(max(5.0, min(float(decision.get("sleep_sec") or 30), 900)))
+        except Exception as exc:
+            print(f"[sogd-scheduler] {exc!s:.200}", flush=True)
+            _time.sleep(60)
 
 
 # Do NOT start schedulers at import — that raced import, opened DB traffic
@@ -29949,6 +29988,20 @@ def _ensure_podcast_episode_history(cur, conn) -> None:
         conn.commit()
     except Exception as _e:
         print(f"⚠️  [podcast] episode history backfill skipped: {_e!s:.160}", flush=True)
+    try:
+        from podcast_sogd import SCHEMA_STATEMENTS
+        for stmt in SCHEMA_STATEMENTS:
+            try:
+                cur.execute(stmt)
+                conn.commit()
+            except Exception as _e:
+                print(f"⚠️  [podcast] sogd schema skipped: {_e!s:.160}", flush=True)
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+    except Exception as _e:
+        print(f"⚠️  [podcast] sogd schema skipped: {_e!s:.160}", flush=True)
 
 
 def _ensure_podcast_table() -> None:
@@ -39239,6 +39292,7 @@ def _podcast_request_base(request: Request) -> str:
 
 def _podcast_episode_rows(show_id: str) -> list[dict]:
     """History for one show, newest first. Items with no bytes are dropped later."""
+    from urllib.parse import quote as _quote
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
         return []
     try:
@@ -39248,9 +39302,13 @@ def _podcast_episode_rows(show_id: str) -> list[dict]:
                 """
                 SELECT episode_guid, show, ticker, format, episode_title,
                        published_at, duration_sec, byte_size, media_key,
-                       script_json, audio_local_path, audio_dropbox_path
+                       script_json, audio_local_path, audio_dropbox_path,
+                       status, show_notes,
+                       (transcript IS NOT NULL AND transcript <> '') AS has_transcript
                   FROM analyst_podcast_episodes
                  WHERE show = %s
+                   AND (status IS NULL OR status = 'published')
+                   AND (published_at IS NULL OR published_at <= NOW())
                  ORDER BY published_at DESC
                  LIMIT 200
                 """,
@@ -39273,7 +39331,12 @@ def _podcast_episode_rows(show_id: str) -> list[dict]:
             "format": fmt,
             "title": title,
             "episode_title": title,
-            "summary": _episode_summary(r.get("script_json")) or title,
+            "summary": r.get("show_notes") or _episode_summary(r.get("script_json")) or title,
+            "status": r.get("status"),
+            "transcript_url": (
+                f"/api/public/podcast/media/{show_id}/{_quote(r.get('episode_guid') or '', safe='')}.transcript.txt"
+                if r.get("has_transcript") and r.get("episode_guid") else ""
+            ),
             "published_at": r.get("published_at"),
             "duration_sec": r.get("duration_sec"),
             "byte_size": r.get("byte_size"),
@@ -39296,6 +39359,9 @@ def _podcast_feed_response(show_id: str | None, request: Request):
             link = ep.get("link") or ""
             if link.startswith("/"):
                 ep["link"] = base + link
+            transcript = ep.get("transcript_url") or ""
+            if transcript.startswith("/"):
+                ep["transcript_url"] = base + transcript
         xml = render_show_feed(
             None if show_id is None else show_id,
             episodes,
@@ -39371,6 +39437,36 @@ def podcast_public_media(show: str, guid: str):
         except Exception as e:
             print(f"⚠️ [podcast-media] lookup failed: {e!s:.160}", flush=True)
     raise HTTPException(404, "not found")
+
+
+@app.get("/api/public/podcast/media/{show}/{guid}.transcript.txt")
+def podcast_public_transcript(show: str, guid: str):
+    """Plain-text transcript linked from podcast:transcript. Same public prefix as the MP3."""
+    from podcast_shows import known_show
+    if not known_show(show) or "/" in guid or ".." in guid or not guid:
+        raise HTTPException(404, "not found")
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        raise HTTPException(404, "not found")
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """SELECT transcript FROM analyst_podcast_episodes
+                    WHERE episode_guid = %s AND show = %s
+                      AND (status IS NULL OR status = 'published')
+                      AND (published_at IS NULL OR published_at <= NOW())
+                    LIMIT 1""",
+                (guid, show),
+            )
+            row = cur.fetchone()
+        text = row[0] if row else ""
+        if not text:
+            raise HTTPException(404, "not found")
+        return Response(content=text, media_type="text/plain; charset=utf-8")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"⚠️ [podcast] transcript lookup failed: {e!s:.160}", flush=True)
+        raise HTTPException(404, "not found")
 
 
 @app.get("/listen/{token}")
@@ -39744,6 +39840,283 @@ def podcast_reset_disclaimer_config(request: Request):
     return {"ok": True, **defaults}
 
 
+_SOGD_PREVIEW_HITS: list[float] = []
+
+
+def _sogd_preview_allowed(now: float | None = None, limit: int = 8) -> bool:
+    import time as _time
+    moment = _time.time() if now is None else now
+    fresh = [stamp for stamp in _SOGD_PREVIEW_HITS if moment - stamp < 60]
+    _SOGD_PREVIEW_HITS[:] = fresh
+    if len(fresh) >= limit:
+        return False
+    _SOGD_PREVIEW_HITS.append(moment)
+    return True
+
+
+class PodcastVoiceIn(BaseModel):
+    provider: str = "xai"
+    voice: str = "kepler"
+    speed: float | None = 1.0
+
+
+class PodcastPreviewIn(BaseModel):
+    provider: str = "xai"
+    voice: str = "kepler"
+    text: str | None = None
+    speed: float | None = 1.0
+
+
+class PodcastDailyIn(BaseModel):
+    force: bool = False
+
+
+class PodcastShowSettingsIn(BaseModel):
+    auto_publish: bool | None = None
+    cost_cap_usd: float | None = None
+
+
+_SOGD_XAI_VOICE_CACHE: dict = {}
+
+
+def _podcast_voice_key(show: str) -> str:
+    return f"podcast.voice.{show}"
+
+
+def _podcast_settings_key(show: str) -> str:
+    return f"podcast.settings.{show}"
+
+
+def _known_podcast_show(show: str) -> dict:
+    from podcast_shows import show_config
+    cfg = show_config(show)
+    if cfg is None:
+        raise HTTPException(404, "unknown show")
+    return cfg
+
+
+@app.get("/api/podcast/tts/voices")
+def podcast_tts_voices(request: Request):
+    """Providers the desk can preview. OpenAI and Kokoro appear only when configured."""
+    _claims_or_401(request)
+    from podcast_tts import OPENAI_MODEL_DEFAULT, XAI_VOICES, cached_xai_voices, voices_for_openai_model
+    providers = []
+    xai_voices = list(XAI_VOICES)
+    if os.environ.get("XAI_API_KEY"):
+        def _fetch():
+            from podcast_tts import XaiTTS
+            return XaiTTS().fetch_voices()
+
+        def _read():
+            row = _kv_get("podcast.tts.xai_voices") or {}
+            return row if isinstance(row, dict) else {}
+
+        def _write(row):
+            _kv_put("podcast.tts.xai_voices", row)
+
+        try:
+            import time as _time
+            xai_voices = cached_xai_voices(
+                _fetch, _read, _write, now=_time.time(), state=_SOGD_XAI_VOICE_CACHE,
+            ) or xai_voices
+        except Exception as exc:
+            print(f"[sogd] xAI voice list skipped: {exc!s:.160}", flush=True)
+    providers.append({
+        "provider": "xai",
+        "voices": xai_voices,
+        "configured": bool(os.environ.get("XAI_API_KEY")),
+    })
+    if os.environ.get("OPENAI_API_KEY"):
+        providers.append({
+            "provider": "openai",
+            "voices": voices_for_openai_model(OPENAI_MODEL_DEFAULT),
+            "configured": True,
+        })
+    try:
+        import kokoro  # noqa: F401
+        from podcast_tts import KOKORO_VOICES
+        providers.append({"provider": "kokoro", "voices": list(KOKORO_VOICES), "configured": True})
+    except Exception:
+        pass
+    return {"ok": True, "providers": providers}
+
+
+@app.post("/api/podcast/tts/preview")
+def podcast_tts_preview(body: PodcastPreviewIn, request: Request):
+    """Short MP3 for the voice dropdown. A few previews a minute."""
+    _claims_or_401(request)
+    if not _sogd_preview_allowed():
+        raise HTTPException(429, "Too many previews. Wait a minute and try again.")
+    from podcast_tts import get_provider
+    sample = (body.text or "This episode is AI-generated and AI-narrated. Here is the voice for Systems Over Goals Daily.").strip()
+    sample = sample[:400]
+    try:
+        provider = get_provider(name=body.provider)
+        provider.ensure_ready()
+        audio = provider.synthesize(sample, body.voice, float(body.speed or 1.0))
+    except Exception as exc:
+        raise HTTPException(400, f"{exc!s:.200}")
+    import base64
+    return {"ok": True, "audio_b64": base64.b64encode(audio).decode("ascii"), "content_type": "audio/mpeg"}
+
+
+@app.get("/api/podcast/{show}/voice")
+def podcast_get_voice(show: str, request: Request):
+    _claims_or_401(request)
+    _known_podcast_show(show)
+    from podcast_sogd import default_voice, normalize_voice
+    stored = _kv_get(_podcast_voice_key(show))
+    voice = normalize_voice(stored, show)
+    if not stored:
+        voice = default_voice(show)
+    return {"ok": True, "show": show, "voice": voice}
+
+
+@app.put("/api/podcast/{show}/voice")
+def podcast_put_voice(show: str, body: PodcastVoiceIn, request: Request):
+    _claims_or_401(request)
+    _known_podcast_show(show)
+    from podcast_sogd import normalize_voice
+    voice = normalize_voice(body.model_dump(), show)
+    if not _kv_put(_podcast_voice_key(show), voice):
+        raise HTTPException(503, "Could not save the voice setting")
+    return {"ok": True, "show": show, "voice": voice}
+
+
+@app.get("/api/podcast/{show}/daily")
+def podcast_daily_status(show: str, request: Request):
+    """Last runs, month-to-date spend, and the voice the next episode will use."""
+    _claims_or_401(request)
+    _known_podcast_show(show)
+    from podcast_sogd import SHOW_ID, auto_publish_default, cost_cap_usd, default_voice, normalize_voice
+    voice = normalize_voice(_kv_get(_podcast_voice_key(show)) or default_voice(show), show)
+    settings = _kv_get(_podcast_settings_key(show)) or {}
+    if not isinstance(settings, dict):
+        settings = {}
+    payload = {
+        "ok": True,
+        "show": show,
+        "voice": voice,
+        "auto_publish": bool(settings["auto_publish"]) if "auto_publish" in settings else auto_publish_default(),
+        "cost_cap_usd": float(settings["cost_cap_usd"]) if settings.get("cost_cap_usd") is not None else cost_cap_usd(),
+        "month_spend_usd": 0.0,
+        "runs": [],
+        "today": None,
+    }
+    if show != SHOW_ID or not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return payload
+    try:
+        _ensure_podcast_table()
+        with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, episode_date, started_at, finished_at, status, stage, error,
+                       cost_usd_total, tts_chars, x_search_calls
+                  FROM podcast_runs
+                 WHERE show = %s
+                 ORDER BY started_at DESC
+                 LIMIT 14
+                """,
+                (show,),
+            )
+            runs = []
+            for row in cur.fetchall() or []:
+                item = dict(row)
+                for key in ("started_at", "finished_at", "episode_date"):
+                    if item.get(key) is not None and hasattr(item[key], "isoformat"):
+                        item[key] = item[key].isoformat()
+                runs.append(item)
+            payload["runs"] = runs
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(cost_usd_total), 0) AS spend
+                  FROM podcast_runs
+                 WHERE show = %s
+                   AND started_at >= (
+                        date_trunc('month', (NOW() AT TIME ZONE 'America/Los_Angeles'))
+                        AT TIME ZONE 'America/Los_Angeles'
+                   )
+                """,
+                (show,),
+            )
+            spend = cur.fetchone()
+            payload["month_spend_usd"] = float((spend or {}).get("spend") or 0)
+            cur.execute(
+                """
+                SELECT episode_guid, episode_title, status, published_at
+                  FROM analyst_podcast_episodes
+                 WHERE show = %s AND episode_date = (NOW() AT TIME ZONE 'America/Los_Angeles')::date
+                 LIMIT 1
+                """,
+                (show,),
+            )
+            today = cur.fetchone()
+            if today:
+                item = dict(today)
+                if item.get("published_at") is not None:
+                    item["published_at"] = item["published_at"].isoformat()
+                payload["today"] = item
+    except Exception as exc:
+        payload["error"] = f"{exc!s:.200}"
+    return payload
+
+
+@app.put("/api/podcast/{show}/daily-settings")
+def podcast_daily_settings(show: str, body: PodcastShowSettingsIn, request: Request):
+    _claims_or_401(request)
+    _known_podcast_show(show)
+    from podcast_sogd import auto_publish_default, cost_cap_usd
+    current = _kv_get(_podcast_settings_key(show)) or {}
+    if not isinstance(current, dict):
+        current = {}
+    if body.auto_publish is None and "auto_publish" not in current:
+        current["auto_publish"] = auto_publish_default()
+    elif body.auto_publish is not None:
+        current["auto_publish"] = bool(body.auto_publish)
+    if body.cost_cap_usd is None and current.get("cost_cap_usd") is None:
+        current["cost_cap_usd"] = cost_cap_usd()
+    elif body.cost_cap_usd is not None:
+        current["cost_cap_usd"] = float(body.cost_cap_usd)
+    if not _kv_put(_podcast_settings_key(show), current):
+        raise HTTPException(503, "Could not save the show settings")
+    return {"ok": True, "show": show, **current}
+
+
+@app.post("/api/podcast/{show}/generate-daily")
+def podcast_generate_daily(show: str, body: PodcastDailyIn, request: Request):
+    """Manual run of today's episode. Force replaces the row after a confirmation in the UI."""
+    _claims_or_401(request)
+    from podcast_sogd import SHOW_ID
+    if show != SHOW_ID:
+        raise HTTPException(404, "daily generation is only for systems-over-goals")
+    connect = _fund_conn if (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")) else None
+
+    def _job():
+        from podcast_sogd import execute_daily
+        try:
+            execute_daily(force=body.force, connect=connect)
+        except Exception as exc:
+            print(f"[sogd] manual run failed: {exc!s:.240}", flush=True)
+
+    threading.Thread(target=_job, daemon=True, name="sogd-manual").start()
+    return {"ok": True, "status": "started", "force": body.force}
+
+
+@app.post("/api/podcast/{show}/publish-daily")
+def podcast_publish_daily(show: str, request: Request):
+    """Publish a held episode. It stays hidden until 7:00 AM Pacific."""
+    _claims_or_401(request)
+    from podcast_sogd import SHOW_ID, release_ready
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    if show != SHOW_ID:
+        raise HTTPException(404, "unknown show")
+    connect = _fund_conn if (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")) else None
+    now = _dt.now(ZoneInfo("America/Los_Angeles"))
+    decision = release_ready(now.date(), connect, now=now, manual=True)
+    return {"ok": True, **{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in decision.items()}}
+
+
 @app.get("/api/podcast/list")
 def podcast_list(show: str | None = None):
     """Episodes for the in-app player. `show` filters one feed; omit it for all."""
@@ -39756,22 +40129,24 @@ def podcast_list(show: str | None = None):
     try:
         _ensure_podcast_table()
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+            visible = "(status IS NULL OR status = 'published') AND (published_at IS NULL OR published_at <= NOW())"
             if show:
                 cur.execute(
-                    """SELECT episode_guid, show, ticker, format, episode_title,
+                    f"""SELECT episode_guid, show, ticker, format, episode_title,
                               duration_sec, published_at, tts_model, cost_usd,
-                              audio_dropbox_path, media_key, byte_size
+                              audio_dropbox_path, media_key, byte_size, status
                          FROM analyst_podcast_episodes
-                        WHERE show = %s
+                        WHERE show = %s AND {visible}
                         ORDER BY published_at DESC""",
                     (show,),
                 )
             else:
                 cur.execute(
-                    """SELECT episode_guid, show, ticker, format, episode_title,
+                    f"""SELECT episode_guid, show, ticker, format, episode_title,
                               duration_sec, published_at, tts_model, cost_usd,
-                              audio_dropbox_path, media_key, byte_size
+                              audio_dropbox_path, media_key, byte_size, status
                          FROM analyst_podcast_episodes
+                        WHERE {visible}
                         ORDER BY published_at DESC"""
                 )
             rows = cur.fetchall()

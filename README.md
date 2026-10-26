@@ -234,6 +234,73 @@ Set `PODCAST_MEDIA_BASE_URL` so enclosure URLs do not depend on the app host.
 `PODCAST_MEDIA_STORE` is `local` (disk + Dropbox), `r2`, or `s3`.
 `PODCAST_TTS_PROVIDER` is `openai` (default model `gpt-4o-mini-tts`), `kokoro`, or `xai`.
 
+## Systems Over Goals Daily
+
+The server scheduler scouts at 6:35 AM America/Los_Angeles and publishes at
+7:00 AM. An episode that finishes early stays `ready_pending` until 7:00.
+The feed hides it until `published_at`. One episode per show per local date.
+
+The manual path is the same orchestrator:
+
+```bash
+python3 scripts/sogd_daily.py --dry-run
+python3 scripts/sogd_daily.py --date 2026-10-26
+python3 scripts/sogd_daily.py --force
+```
+
+`--dry-run` does not call Grok or speech. The job uses Grok for the scout,
+the lens, the script, and the fact-check when Ollama is not on
+`127.0.0.1:11434`. Speech uses the per-show voice (default xAI / kepler).
+
+Env:
+
+| Name | Default | Role |
+|---|---|---|
+| `XAI_API_KEY` | | xAI speech and, with the existing Grok client, the scout |
+| `XAI_TTS_MAX_CHARS` | `3000` | Characters per speech request |
+| `SOGD_START_LOCAL` | `06:35` | Scout clock, America/Los_Angeles |
+| `SOGD_PUBLISH_LOCAL` | `07:00` | Feed clock |
+| `SOGD_COST_CAP_USD` | `40` | Monthly cap. A hit does not publish |
+| `SOGD_AUTO_PUBLISH` | `true` | `false` leaves the episode `ready_pending` |
+| `SOGD_WORD_MIN` / `SOGD_WORD_MAX` | `3800` / `4300` | Script gate |
+| `SOGD_PRONUNCIATIONS` | empty JSON object | Phrase map applied before speech |
+
+`PODCAST_MEDIA_BASE_URL`, `PODCAST_FEED_BASE_URL`, `PODCAST_MEDIA_STORE`, and
+`PODCAST_S3_*` are unchanged. Spotify and Apple stay disabled.
+
+A Mac `launchd` job is optional. The server thread is the one that runs in
+production. Do not install this plist unless you want a second machine to
+call the CLI. `StartCalendarInterval` follows the Mac clock, so the Mac
+timezone should be America/Los_Angeles.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dgacapital.sogd-daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/ABSOLUTE/PATH/scripts/sogd_daily.py</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>35</integer>
+  </dict>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TZ</key>
+    <string>America/Los_Angeles</string>
+  </dict>
+</dict>
+</plist>
+```
+
 ---
 
 ## Sample output

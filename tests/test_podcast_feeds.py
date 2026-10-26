@@ -47,8 +47,8 @@ class PodcastFeedTests(unittest.TestCase):
         xml = render_show_feed(
             "dga-hitech",
             [
-                _episode(first, now),
-                _episode(second, now + timedelta(minutes=1)),
+                _episode(first, now - timedelta(minutes=1)),
+                _episode(second, now),
             ],
             request_base="https://portfolio.dgacapital.com",
             media_base="https://cdn.example/audio",

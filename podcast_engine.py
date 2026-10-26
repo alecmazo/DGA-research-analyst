@@ -223,6 +223,17 @@ EPISODE_FORMATS = {
         "approx_minutes":   "10-22 (scales with ticker count)",
         "title_pattern":    "Portfolio Roundup · {TICKERS}",
     },
+    "sogd": {
+        "label":   "Systems Over Goals Daily",
+        "icon":    "🧭",
+        "tagline": "One daily briefing through incentives, persuasion, and systems",
+        "multi_ticker":     False,
+        "dynamic_sections": True,
+        "word_budget_low":  3800,
+        "word_budget_high": 4300,
+        "approx_minutes":   "26-29",
+        "title_pattern":    "SOGD — {DATE}: {LEAD}",
+    },
 }
 
 
@@ -552,6 +563,13 @@ FORMAT_SECTIONS = {
         "rebalance",
         "twelve_month",
         "pm_verdict",
+    ],
+    # Story sections are dynamic (story_1, story_2, …). Cold open and the
+    # close are fixed. The narrator is Kimi; the daily voice setting replaces
+    # the cast map at synthesis time.
+    "sogd": [
+        "cold_open",
+        "systems_takeaway",
     ],
 }
 
@@ -1019,20 +1037,29 @@ def validate_script(script: dict[str, Any]) -> dict[str, Any]:
         if k not in script:
             errors.append(f"missing top-level key: {k}")
 
-    winner = (script.get("winner") or "").lower()
-    if winner not in ("rock", "claudia"):
-        errors.append(f"winner must be 'rock' or 'claudia', got: {winner!r}")
-
-    sections = script.get("sections") or []
-    section_ids = [s.get("id") for s in sections]
     # Format-aware required sections. Falls back to debate format for
     # legacy scripts that don't include a 'format' field.
     fmt_name = (script.get("format") or "debate").lower()
+    winner = (script.get("winner") or "").lower()
+    allowed_winners = ("kimi", "opus") if fmt_name == "sogd" else ("rock", "claudia")
+    if winner not in allowed_winners:
+        errors.append(
+            f"winner must be {' or '.join(repr(w) for w in allowed_winners)}, got: {winner!r}"
+        )
+
+    sections = script.get("sections") or []
+    section_ids = [s.get("id") for s in sections]
     required_secs = FORMAT_SECTIONS.get(fmt_name, FORMAT_SECTIONS["debate"])
     fmt_meta = EPISODE_FORMATS.get(fmt_name, EPISODE_FORMATS["debate"])
     is_multi_ticker = bool(fmt_meta.get("multi_ticker"))
 
-    if is_multi_ticker:
+    if fmt_meta.get("dynamic_sections"):
+        for required in required_secs:
+            if required not in section_ids:
+                errors.append(f"missing required section: {required}")
+        if not any(str(sid or "").startswith("story_") for sid in section_ids):
+            errors.append("missing story section")
+    elif is_multi_ticker:
         # roundup            → cold_open + per-ticker dynamics + wrap
         # portfolio_roundup  → full fixed section list (no per-ticker dynamics)
         if fmt_name == "portfolio_roundup":
@@ -1078,13 +1105,14 @@ def validate_script(script: dict[str, Any]) -> dict[str, Any]:
         "catalysts":  {"cold_open", "setup_quarter", "verdict"},
         "quick_hit":  {"cold_open", "company_one_breath", "verdict"},
         "roundup":    {"cold_open"},   # per-ticker intros are dynamic
+        "sogd":       {"cold_open", "systems_takeaway"},
     }
     opus_only_ids = OPUS_ONLY_BY_FORMAT.get(fmt_name, OPUS_ONLY_BY_FORMAT["debate"])
 
     for sec in sections:
         sid = sec.get("id")
         turns = sec.get("turns") or []
-        if sid in opus_only_ids:
+        if sid in opus_only_ids or (fmt_name == "sogd" and str(sid or "").startswith("story_")):
             non_opus = [t for t in turns
                         if (t.get("speaker") or "").lower() not in ("opus", "kimi")]
             if non_opus:
@@ -1780,7 +1808,11 @@ def _ensure_stings() -> tuple[Path, Path]:
 
 
 def _tts_turn(client, speaker: str, text: str, intensity: str,
-              model: str = TTS_MODEL_DEFAULT) -> bytes:
+              model: str = TTS_MODEL_DEFAULT, *,
+              provider_name: str | None = None,
+              voice_override: str | None = None,
+              speed_override: float | None = None,
+              replacements: dict | None = None) -> bytes:
     """Synthesize one turn through the selected TTS provider. Returns MP3 bytes.
 
     `client` is unused. Samples, auditions, and the disclaimer call the
@@ -1795,10 +1827,14 @@ def _tts_turn(client, speaker: str, text: str, intensity: str,
         "alec": "kimi", "alex": "kimi", "opus": "kimi", "host": "kimi",
         "narrator": "kimi", "claude": "claudia",
     }.get(sp_l, sp_l)
-    provider = get_provider(model)
+    provider = get_provider(model, name=provider_name)
     allowed = [v.lower() for v in provider.voices()]
-    # Read voice + speed from the RUNTIME tables so UI edits take effect immediately.
-    voice = _RUNTIME_VOICE_MAP.get(sp_l, "alloy")
+    # A per-show voice replaces the cast map for that run.
+    if voice_override:
+        voice = voice_override.lower()
+    else:
+        # Read voice + speed from the RUNTIME tables so UI edits take effect immediately.
+        voice = _RUNTIME_VOICE_MAP.get(sp_l, "alloy")
     # tts-1-hd rejects ballad/coral/verse. Another provider may not know
     # the OpenAI cast names at all. Fall back instead of failing the episode.
     if voice not in allowed:
@@ -1807,9 +1843,18 @@ def _tts_turn(client, speaker: str, text: str, intensity: str,
             safe_default = allowed[0] if allowed else voice
         print(f"⚠️  [tts] {sp_l!r} had unsupported voice {voice!r}; falling back to {safe_default!r}", flush=True)
         voice = safe_default
-    intensity_mult = _RUNTIME_INTENSITY.get(intensity.lower(), 1.0)
-    speaker_mult   = _RUNTIME_SPEAKER.get(sp_l, 1.0)
-    speed = max(SPEED_MIN, min(SPEED_MAX, intensity_mult * speaker_mult))
+    if speed_override is not None:
+        speed = max(0.7, min(1.5, float(speed_override)))
+    else:
+        intensity_mult = _RUNTIME_INTENSITY.get(intensity.lower(), 1.0)
+        speaker_mult   = _RUNTIME_SPEAKER.get(sp_l, 1.0)
+        speed = max(SPEED_MIN, min(SPEED_MAX, intensity_mult * speaker_mult))
+    if replacements:
+        try:
+            return provider.synthesize(text, voice, speed, replacements=replacements)
+        except TypeError:
+            from podcast_tts import apply_pronunciation
+            text = apply_pronunciation(text, replacements)
     return provider.synthesize(text, voice, speed)
 
 
@@ -1837,6 +1882,21 @@ DEFAULT_DISCLAIMER_VOICE = "alloy"   # neutral, even-toned — not in the cast
 
 # EBU R128 target for spoken-word podcasts. Tests assert this exact string.
 LOUDNORM_FILTER = "loudnorm=I=-16:TP=-1.5:LRA=11"
+
+
+def loudnorm_apply_filter(measured: dict | None) -> str:
+    """Second-pass loudnorm. The measured values come from pass 1."""
+    if not measured:
+        return LOUDNORM_FILTER
+    return (
+        f"{LOUDNORM_FILTER}"
+        f":measured_I={measured['input_i']}"
+        f":measured_TP={measured['input_tp']}"
+        f":measured_LRA={measured['input_lra']}"
+        f":measured_thresh={measured['input_thresh']}"
+        f":offset={measured['target_offset']}"
+        f":linear=true"
+    )
 
 
 def _parse_loudnorm_json(stderr: str) -> dict | None:
@@ -1877,18 +1937,7 @@ def apply_loudnorm(src: Path, dst: Path, *, title: str = "", artist: str = "") -
         capture_output=True, text=True,
     )
     measured = _parse_loudnorm_json(probe.stderr or "")
-    if measured:
-        af = (
-            f"{LOUDNORM_FILTER}"
-            f":measured_I={measured['input_i']}"
-            f":measured_TP={measured['input_tp']}"
-            f":measured_LRA={measured['input_lra']}"
-            f":measured_thresh={measured['input_thresh']}"
-            f":offset={measured['target_offset']}"
-            f":linear=true"
-        )
-    else:
-        af = LOUDNORM_FILTER
+    af = loudnorm_apply_filter(measured)
     cmd = [
         ffmpeg, "-y", "-hide_banner", "-i", str(src),
         "-af", af,
@@ -1918,6 +1967,10 @@ def synthesize_episode(
     disclaimer_outro: str | None = DEFAULT_DISCLAIMER_OUTRO,
     disclaimer_voice: str = DEFAULT_DISCLAIMER_VOICE,
     on_progress=None,
+    tts_provider: str | None = None,
+    voice_override: str | None = None,
+    speed_override: float | None = None,
+    pronunciation: dict | None = None,
 ) -> dict[str, Any]:
     """Synthesize a full episode from a validated script. Writes MP3 to `out_path`.
 
@@ -1934,7 +1987,7 @@ def synthesize_episode(
             "pydub missing — pip install pydub (and ensure ffmpeg on PATH)"
         ) from e
     from podcast_tts import get_provider
-    provider = get_provider(tts_model)
+    provider = get_provider(tts_model, name=tts_provider)
     provider.ensure_ready()
 
     sections = script.get("sections") or []
@@ -1978,7 +2031,11 @@ def synthesize_episode(
             try: on_progress("turn", i, total,
                              f"{sp.upper()} ({intensity}) · {sid} · turn {i}/{total}")
             except Exception: pass
-        mp3_bytes = _tts_turn(None, sp, text, intensity, model=tts_model)
+        mp3_bytes = _tts_turn(
+            None, sp, text, intensity, model=tts_model,
+            provider_name=tts_provider, voice_override=voice_override,
+            speed_override=speed_override, replacements=pronunciation,
+        )
         seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
         # Inter-turn gap depends on whether we're crossing a section boundary
         if prev_section is not None:
@@ -2030,11 +2087,19 @@ def synthesize_episode(
                 try: on_progress("disclaimer", total, total,
                                    f"Synthesizing compliance disclaimer ({len(text)} ch)…")
                 except Exception: pass
-            voice = disclaimer_voice
+            voice = voice_override or disclaimer_voice
             allowed = [v.lower() for v in provider.voices()]
             if voice.lower() not in allowed and allowed:
                 voice = allowed[0]
-            mp3 = provider.synthesize(text.strip(), voice, 1.0)
+            spoken = text.strip()
+            if pronunciation:
+                try:
+                    mp3 = provider.synthesize(spoken, voice, speed_override or 1.0, replacements=pronunciation)
+                except TypeError:
+                    from podcast_tts import apply_pronunciation
+                    mp3 = provider.synthesize(apply_pronunciation(spoken, pronunciation), voice, speed_override or 1.0)
+            else:
+                mp3 = provider.synthesize(spoken, voice, speed_override or 1.0)
             seg = AudioSegment.from_file(io.BytesIO(mp3), format="mp3")
             # Match dialogue loudness then sit a hair below
             dsf = seg.dBFS if seg.dBFS != float("-inf") else -16.0
@@ -2064,7 +2129,7 @@ def synthesize_episode(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ep_title = script.get("episode_title") or script.get("ticker") or "DGA HiTech"
-    artist = "DGA HiTech Podcast"
+    artist = "Systems Over Goals Daily" if (script.get("format") or "") == "sogd" else "DGA HiTech Podcast"
     full.export(out_path, format="mp3", bitrate="128k",
                 tags={
                     "title":  ep_title,
@@ -2088,8 +2153,9 @@ def synthesize_episode(
         "turn_count":    total,
         "out_path":      str(out_path),
         "bytes":         out_path.stat().st_size,
-        "voice_map":     dict(VOICE_MAP),
-        "tts_model":     tts_model,
+        "voice_map":     {**(VOICE_MAP), **({"kimi": voice_override} if voice_override else {})},
+        "tts_model":     tts_provider or tts_model,
+        "tts_chars":     int(getattr(provider, "chars_used", 0) or 0),
         "disclaimer": {
             "intro_used":   disc_intro_seg is not None,
             "outro_used":   disc_outro_seg is not None,
@@ -2806,3 +2872,16 @@ def script_to_transcript(script: dict[str, Any]) -> str:
             tag = "" if intensity == "normal" else f" _({intensity})_"
             out.append(f"**{sp}**{tag}: {t.get('text', '')}\n")
     return "\n".join(out)
+
+
+def generate_sogd_episode(episode_date, *, on_progress=None, usage_capture=None, **kwargs):
+    """Systems Over Goals Daily. One orchestrator, shared with the scheduler and CLI.
+
+    Stage work lives in podcast_sogd so the script, disclaimer, stings, and
+    loudnorm path stay the ones synthesize_episode already uses.
+    """
+    from podcast_sogd import execute_daily
+    result = execute_daily(episode_date, on_progress=on_progress, **kwargs)
+    if usage_capture:
+        usage_capture(result.get("usage") or {})
+    return result

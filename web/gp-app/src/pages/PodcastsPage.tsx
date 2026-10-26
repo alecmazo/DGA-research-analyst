@@ -7,6 +7,7 @@ import { pollJob } from '@/lib/jobs'
 import { useAnalysisScene } from '@/hooks/useAnalysisScene'
 import { relativeTime } from '@/lib/format'
 import { ScriptRender } from './podcasts/ScriptRender'
+import { SogdDaily } from './podcasts/SogdDaily'
 import {
   FORMAT_OPTIONS,
   SCRIPT_STAGE_PCT,
@@ -857,15 +858,11 @@ export function PodcastsPage() {
               {feedCopied ? 'Copied' : 'Copy feed'}
             </Button>
           </div>
-          {showId === 'systems-over-goals' && (
-            <p className={styles.pcDesc}>
-              Systems Over Goals Daily is one 20–30 minute episode. This feed is
-              live. Episodes are not generated from this page yet, so an empty
-              list is expected.
-            </p>
-          )}
+          {showId === 'systems-over-goals' && <SogdDaily episodes={showEpisodes} />}
         </div>
 
+        {showId === 'dga-hitech' && (
+        <>
         {/* ① Script */}
         <div className={styles.pcSection} ref={scriptAnchor}>
           <div className={styles.pcTitle}>① Script Generator</div>
@@ -1304,6 +1301,8 @@ export function PodcastsPage() {
             </div>
           </details>
         </div>
+        </>
+        )}
       </section>
 
       {/* ══ Lab: multi-engine compare ══ */}

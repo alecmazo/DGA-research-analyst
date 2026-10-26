@@ -130,6 +130,36 @@ def _item_description(episode: dict) -> str:
     )
 
 
+_HIDDEN_STATUS = {"ready_pending", "failed", "cost_cap_hit", "draft", "running"}
+
+
+def _as_utc(value):
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def episode_visible(episode: dict, now: datetime | None = None) -> bool:
+    """The feed and the player hide a row until it is published and due."""
+    status = (episode.get("status") or "").strip().lower()
+    if status in _HIDDEN_STATUS:
+        return False
+    pub = _as_utc(episode.get("published_at"))
+    if pub is None:
+        return True
+    clock = _as_utc(now) or datetime.now(timezone.utc)
+    return pub <= clock
+
+
 def _sorted_episodes(episodes: list[dict]) -> list[dict]:
     def _key(ep: dict):
         dt = ep.get("published_at") or ep.get("generated_at")
@@ -157,6 +187,7 @@ def render_show_feed(
     request_base: str,
     media_base: str | None = None,
     feed_base: str | None = None,
+    now: datetime | None = None,
 ) -> str:
     """RSS for `show_id`. None is the `/api/podcast/rss.xml` alias of dga-hitech."""
     sid = ALIAS_SHOW if not show_id else show_id
@@ -184,6 +215,8 @@ def render_show_feed(
 
     items: list[str] = []
     for ep in _sorted_episodes(episodes or []):
+        if not episode_visible(ep, now=now):
+            continue
         length = episode_byte_size(ep)
         if length <= 0:
             continue
@@ -196,6 +229,11 @@ def render_show_feed(
         duration = _itunes_duration(ep.get("duration_sec"))
         enc = enclosure_url(sid, guid, media_base=media_base, request_base=request_base)
         link = ep.get("link") or enc
+        transcript = (ep.get("transcript_url") or "").strip()
+        transcript_tag = (
+            f'      <podcast:transcript url="{_xml_escape(transcript)}" type="text/plain"/>\n'
+            if transcript else ""
+        )
         items.append(
             "    <item>\n"
             f"      <title>{_xml_escape(title)}</title>\n"
@@ -207,6 +245,7 @@ def render_show_feed(
             f"      <link>{_xml_escape(link)}</link>\n"
             f'      <enclosure url="{_xml_escape(enc)}" '
             f'type="audio/mpeg" length="{length}"/>\n'
+            f"{transcript_tag}"
             f"      <itunes:duration>{duration}</itunes:duration>\n"
             f"      <itunes:author>{_xml_escape(author)}</itunes:author>\n"
             f"      <itunes:explicit>{explicit}</itunes:explicit>\n"
