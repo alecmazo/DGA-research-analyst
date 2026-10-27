@@ -45,6 +45,36 @@ function money(value: number | null | undefined): string {
   return `$${n.toFixed(2)}`
 }
 
+function stageLabel(stage: string | null | undefined): string {
+  switch ((stage || '').toLowerCase()) {
+    case 'scout': return 'Searching'
+    case 'lens': return 'Reading the stories'
+    case 'script': return 'Writing'
+    case 'fact_check': return 'Checking facts'
+    case 'tts': return 'Recording'
+    default: return 'Working'
+  }
+}
+
+function runSeconds(run: DailyRun, now: number): number | null {
+  const start = Date.parse(run.started_at || '')
+  if (!Number.isFinite(start)) return null
+  const end = run.status === 'running' ? now : Date.parse(run.finished_at || '')
+  if (!Number.isFinite(end)) return null
+  return Math.max(0, Math.round((end - start) / 1000))
+}
+
+function formatElapsed(seconds: number | null): string {
+  if (seconds == null) return ''
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  if (m >= 60) {
+    const h = Math.floor(m / 60)
+    return `${h}h ${m % 60}m`
+  }
+  return m ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`
+}
+
 export function SogdDaily({ episodes }: { episodes: Playable[] }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [status, setStatus] = useState<DailyStatus | null>(null)
@@ -52,6 +82,7 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
   const [voice, setVoice] = useState('kepler')
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
+  const [now, setNow] = useState(() => Date.now())
 
   const load = useCallback(async () => {
     const [daily, listed] = await Promise.all([
@@ -69,6 +100,20 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
   useEffect(() => {
     void load().catch((err: Error) => setNote(err.message))
   }, [load])
+
+  const running = (status?.runs || []).some((run) => run.status === 'running')
+
+  useEffect(() => {
+    if (!running) return
+    const tick = window.setInterval(() => setNow(Date.now()), 1000)
+    const poll = window.setInterval(() => {
+      void load().catch(() => undefined)
+    }, 5000)
+    return () => {
+      window.clearInterval(tick)
+      window.clearInterval(poll)
+    }
+  }, [running, load])
 
   const voices = useMemo(() => {
     const row = providers.find((item) => item.provider === 'xai')
@@ -160,6 +205,7 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
   const spend = status?.month_spend_usd ?? 0
   const capped = spend >= cap || (status?.runs || []).some((run) => run.status === 'cost_cap_hit')
   const held = status?.today?.status === 'ready_pending'
+  const live = (status?.runs || []).find((run) => run.status === 'running')
 
   return (
     <div className={styles.sogd}>
@@ -204,6 +250,11 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
       </div>
       <audio ref={audioRef} className={styles.sogdAudio} controls />
       {note && <p className={styles.pcDesc}>{note}</p>}
+      {live && (
+        <p className={styles.pcDesc}>
+          {stageLabel(live.stage)} · {formatElapsed(runSeconds(live, now))}
+        </p>
+      )}
       {status?.today?.episode_title && (
         <p className={styles.pcDesc}>
           Today: {status.today.episode_title} · {status.today.status}
@@ -216,6 +267,7 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
               <th>Date</th>
               <th>Status</th>
               <th>Stage</th>
+              <th>Time</th>
               <th>Cost</th>
               <th>Note</th>
             </tr>
@@ -225,7 +277,8 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
               <tr key={run.id}>
                 <td>{(run.episode_date || '').slice(0, 10)}</td>
                 <td>{run.status}</td>
-                <td>{run.stage}</td>
+                <td>{run.status === 'running' ? stageLabel(run.stage) : run.stage}</td>
+                <td>{formatElapsed(runSeconds(run, now))}</td>
                 <td>{money(run.cost_usd_total)}</td>
                 <td>{run.error || ''}</td>
               </tr>

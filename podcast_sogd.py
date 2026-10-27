@@ -1358,6 +1358,52 @@ def begin_run(connect, episode_date: date):
         return None
 
 
+def touch_run(connect, run_id, stage: str, label: str, usage: dict | None = None) -> None:
+    """Write the live stage and spend so the desk can show a moving clock."""
+    if connect is None or not run_id or not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        with connect() as conn:
+            cur = conn.cursor()
+            if usage:
+                cur.execute(
+                    """
+                    UPDATE podcast_runs
+                       SET stage = %s,
+                           error = %s,
+                           cost_usd_total = %s,
+                           cost_usd_by_stage = %s::jsonb,
+                           llm_input_tokens = %s,
+                           llm_output_tokens = %s,
+                           x_search_calls = %s
+                     WHERE id = %s AND status = 'running'
+                    """,
+                    (
+                        (stage or "")[:80],
+                        (label or "")[:500] or None,
+                        usage.get("cost_usd_total"),
+                        json.dumps(usage.get("cost_usd_by_stage") or {}),
+                        usage.get("llm_input_tokens"),
+                        usage.get("llm_output_tokens"),
+                        usage.get("x_search_calls"),
+                        run_id,
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE podcast_runs
+                       SET stage = %s,
+                           error = %s
+                     WHERE id = %s AND status = 'running'
+                    """,
+                    ((stage or "")[:80], (label or "")[:500] or None, run_id),
+                )
+            conn.commit()
+    except Exception as exc:
+        print(f"[sogd] progress skipped: {exc!s:.160}", flush=True)
+
+
 def _finish_run(cur, run_id, result: dict, *, started_at, finished_at, status: str):
     usage = result.get("usage") or {}
     cur.execute(
@@ -1580,6 +1626,12 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
         if retry_running:
             abandon_running(connect, ctx["episode_date"])
         run_id = None if dry_run else begin_run(connect, ctx["episode_date"])
+
+        def _relay(stage_name, label, usage=None):
+            touch_run(connect, run_id, stage_name, label, usage if isinstance(usage, dict) else None)
+            if on_progress:
+                on_progress(stage_name, label, usage)
+
         result = run_daily_episode(
             ctx["episode_date"],
             force=force,
@@ -1593,8 +1645,8 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
             publish_local=ctx["publish_local"],
             now=ctx["now"],
             pronunciation=ctx["pronunciation"],
-            on_progress=on_progress,
-            **{k: v for k, v in kwargs.items() if k != "voice"},
+            on_progress=_relay,
+            **{k: v for k, v in kwargs.items() if k not in ("voice", "on_progress")},
         )
         if run_id is not None:
             result["run_id"] = run_id

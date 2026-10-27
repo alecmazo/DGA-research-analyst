@@ -363,6 +363,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **SOGD daily** | **`ui781-20261026-sogd-daily`** | Systems Over Goals Daily scouts at 6:35 AM Pacific and the feed stays quiet until 7:00 AM Pacific. One episode per date. xAI voice defaults to kepler. A $40 monthly cap stops the run before publish. Spotify and Apple stay off. |
 | **Studio cast** | **`ui782-20261026-studio-cast`** | The podcast studio is script, cast, then record. The leaderboard is gone. DGA HiTech and the disclaimer speak with Grok voices. Kimi, Rock, and Claudia each pick a Grok voice. OpenAI voices are out of the studio. |
 | **SOGD facts** | **`ui783-20261026-sogd-facts`** | SUP_20261026_e6a72d82. Generate today’s episode keeps systems commentary, treats a decimal or a dotted name as one sentence, and rewrites a harsh fact-check once from the sources. A dead running row can be started again. |
+| **SOGD clock** | **`ui784-20261026-sogd-clock`** | SUP_20261027_5f543b54. A Daily run shows the stage and the time it has been working. The page keeps refreshing until the run finishes. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -563,4 +564,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-26 · Agent: Cursor · Built: `ui783-20261026-sogd-facts` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui33-podcast-shows-20261026` · Next: `ui784-YYYYMMDD-slug`*
+*Last updated: 2026-10-26 · Agent: Cursor · Built: `ui784-20261026-sogd-clock` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui33-podcast-shows-20261026` · Next: `ui785-YYYYMMDD-slug`*

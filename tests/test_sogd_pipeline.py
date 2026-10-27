@@ -300,6 +300,54 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertTrue(date_guard(fresh, lock_held=True)["ok"])
         self.assertTrue(date_guard({"status": "failed"})["ok"])
 
+    def test_running_row_records_elapsed_stage(self):
+        from podcast_sogd import touch_run
+        seen = {}
+
+        class Cur:
+            def execute(self, sql, params):
+                seen["sql"] = sql
+                seen["params"] = params
+            def fetchone(self):
+                return None
+
+        class Conn:
+            def cursor(self):
+                return Cur()
+            def commit(self):
+                seen["committed"] = True
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+
+        previous = os.environ.get("DATABASE_URL")
+        os.environ["DATABASE_URL"] = "postgres://example"
+
+        def restore():
+            if previous is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = previous
+
+        self.addCleanup(restore)
+        touch_run(lambda: Conn(), 9, "script", "section by section", {
+            "cost_usd_total": 0.42,
+            "cost_usd_by_stage": {"scout": 0.3},
+            "llm_input_tokens": 10,
+            "llm_output_tokens": 4,
+            "x_search_calls": 1,
+        })
+        self.assertIn("status = 'running'", seen["sql"])
+        self.assertEqual(seen["params"][0], "script")
+        self.assertEqual(seen["params"][1], "section by section")
+        self.assertEqual(seen["params"][2], 0.42)
+        self.assertTrue(seen["committed"])
+        page = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
+        self.assertIn("Searching", page)
+        self.assertIn("<th>Time</th>", page)
+        self.assertIn("setInterval", page)
+
     def test_disclosure_and_existing_disclaimer(self):
         from podcast_engine import DEFAULT_DISCLAIMER_INTRO, DEFAULT_DISCLAIMER_OUTRO
         from podcast_sogd import DISCLOSURE, ensure_disclosure, script_text
