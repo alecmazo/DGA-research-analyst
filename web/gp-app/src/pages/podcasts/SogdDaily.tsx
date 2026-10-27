@@ -50,11 +50,18 @@ type Playable = {
   chapters?: { title: string; startTime: number; url?: string }[] | null
 }
 
-function EpisodeCard({ ep }: { ep: Playable }) {
+function EpisodeCard({ ep, onErase }: { ep: Playable; onErase?: (guid: string) => void }) {
+  const guid = ep.episode_guid || ''
   return (
     <article className={styles.sogdEpisode}>
       {ep.title && <h3 className={styles.sogdEpisodeTitle}>{ep.title}</h3>}
-      <ChapterPlayer src={ep.audio_url} chapters={ep.chapters} voiceUsed={ep.voice_used} className={styles.sogdAudio} />
+      <ChapterPlayer
+        src={ep.audio_url}
+        chapters={ep.chapters}
+        voiceUsed={ep.voice_used}
+        className={styles.sogdAudio}
+        onErase={guid && onErase ? () => onErase(guid) : undefined}
+      />
       {ep.show_notes && <NoteBody text={ep.show_notes} />}
     </article>
   )
@@ -114,7 +121,13 @@ function formatElapsed(seconds: number | null): string {
   return m ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`
 }
 
-export function SogdDaily({ episodes }: { episodes: Playable[] }) {
+export function SogdDaily({
+  episodes,
+  onErase,
+}: {
+  episodes: Playable[]
+  onErase?: (guid: string) => void
+}) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [status, setStatus] = useState<DailyStatus | null>(null)
   const [providers, setProviders] = useState<ProviderVoices[]>([])
@@ -363,7 +376,7 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
         </table>
       )}
       {episodes.map((ep) => (
-        <EpisodeCard key={ep.episode_guid || ep.title || ep.audio_url} ep={ep} />
+        <EpisodeCard key={ep.episode_guid || ep.title || ep.audio_url} ep={ep} onErase={onErase} />
       ))}
     </div>
   )

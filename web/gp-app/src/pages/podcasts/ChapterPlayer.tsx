@@ -10,6 +10,7 @@ type Props = {
   className?: string
   onLoadedMetadata?: () => void
   voiceUsed?: string | null
+  onErase?: () => void
 }
 
 export function ChapterPlayer({
@@ -19,6 +20,7 @@ export function ChapterPlayer({
   className,
   onLoadedMetadata,
   voiceUsed,
+  onErase,
 }: Props) {
   const localRef = useRef<HTMLAudioElement | null>(null)
   const ref = audioRef || localRef
@@ -54,15 +56,26 @@ export function ChapterPlayer({
   return (
     <div>
       {voiceUsed ? <p className={styles.pcDesc}>Voice: {voiceUsed}</p> : null}
-      <audio
-        ref={ref}
-        className={className}
-        controls
-        preload="metadata"
-        src={src}
-        style={{ width: '100%' }}
-        onLoadedMetadata={onLoadedMetadata}
-      />
+      <div className={styles.audioRow}>
+        <audio
+          ref={ref}
+          className={className}
+          controls
+          preload="metadata"
+          src={src}
+          onLoadedMetadata={onLoadedMetadata}
+        />
+        {onErase && (
+          <details className={styles.audioMenu}>
+            <summary aria-label="Episode menu">⋮</summary>
+            <div className={styles.audioMenuList} role="menu" aria-label="Episode menu">
+              <button type="button" role="menuitem" onClick={() => onErase()}>
+                Erase episode
+              </button>
+            </div>
+          </details>
+        )}
+      </div>
       {rows.length > 0 && (
         <>
           <div className={styles.chapterNav}>

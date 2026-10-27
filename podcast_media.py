@@ -32,6 +32,11 @@ class MediaStore:
     def dropbox_path(self, key: str) -> str | None:
         return None
 
+    def delete(self, key: str) -> None:
+        path = self.local_path(key)
+        if path is not None and path.is_file():
+            path.unlink()
+
 
 def _safe_key(key: str) -> str:
     key = (key or "").replace("\\", "/").lstrip("/")
@@ -170,6 +175,12 @@ class S3CompatibleStore(MediaStore):
 
     def local_path(self, key: str) -> Path | None:
         return None
+
+    def delete(self, key: str) -> None:
+        if not self.bucket:
+            return
+        key = _safe_key(key)
+        self._client().delete_object(Bucket=self.bucket, Key=key)
 
 
 def _default_media_root() -> Path:

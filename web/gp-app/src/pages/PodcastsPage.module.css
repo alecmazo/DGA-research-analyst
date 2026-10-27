@@ -977,6 +977,90 @@
   margin-top: 4px;
 }
 
+.audioRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audioRow audio {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.audioMenu {
+  position: relative;
+  flex: none;
+}
+
+.audioMenu summary {
+  list-style: none;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: #0b6f8a;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.audioMenu summary::-webkit-details-marker {
+  display: none;
+}
+
+.audioMenuList {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 8;
+  min-width: 168px;
+  background: #fff;
+  border: 1px solid #d5e8ef;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(10, 22, 40, 0.12);
+  padding: 4px;
+}
+
+.audioMenuList button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #9b1c1c;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.audioMenuList button:hover {
+  background: #fff5f5;
+}
+
+.dropZone {
+  margin-top: 12px;
+  border: 1.5px dashed #7eb8c9;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  color: #0b6f8a;
+  background: #f7fcfe;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.dropZoneOn {
+  background: #e7f6fb;
+  border-color: #0b6f8a;
+}
+
 .sogdEpisode {
   margin-top: 14px;
 }

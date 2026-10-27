@@ -105,9 +105,14 @@ export function PodcastsPage() {
     title: string
     meta: string
     src: string
+    episodeGuid?: string
+    show?: string
     chapters?: { title: string; startTime: number }[]
     voiceUsed?: string
   } | null>(null)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [dropOver, setDropOver] = useState(false)
+  const uploadInput = useRef<HTMLInputElement>(null)
   const [rate, setRate] = useState(() => {
     try {
       return parseFloat(localStorage.getItem('dga_podcast_rate') || '1') || 1
@@ -439,6 +444,8 @@ export function PodcastsPage() {
       src: audioUrl
         ? `${audioUrl}${audioUrl.includes('?') ? '&' : '?'}t=${Date.now()}`
         : `/api/podcast/${encodeURIComponent(ticker)}/audio.mp3?format=${encodeURIComponent(fmt)}&t=${Date.now()}`,
+      episodeGuid: status?.episode_guid || listed?.episode_guid || '',
+      show: status?.show || listed?.show || showId,
       chapters: status?.chapters || listed?.chapters || [],
       voiceUsed: status?.voice_used || listed?.voice_used || '',
     })
@@ -553,6 +560,40 @@ export function PodcastsPage() {
       }
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Share failed')
+    }
+  }
+
+  const eraseEpisode = async (show: string, guid: string) => {
+    if (!guid) return
+    if (!window.confirm('Erase this episode? It leaves the feed.')) return
+    try {
+      await api(
+        `/api/podcast/${encodeURIComponent(show)}/episodes/${encodeURIComponent(guid)}`,
+        { method: 'DELETE' },
+      )
+      setPlayer(null)
+      setSavedAudioKey('')
+      void refreshLists()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Erase failed')
+    }
+  }
+
+  const uploadEpisode = async (file: File) => {
+    setUploadBusy(true)
+    setErr(null)
+    try {
+      const body = new FormData()
+      body.append('file', file)
+      await api(`/api/podcast/${encodeURIComponent(showId)}/episodes/upload`, {
+        method: 'POST',
+        body,
+      })
+      void refreshLists()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploadBusy(false)
     }
   }
 
@@ -802,11 +843,52 @@ export function PodcastsPage() {
             </Button>
           </div>
           <p className={styles.pcDesc}>Spotify off. Apple off.</p>
+          <div
+            className={dropOver ? `${styles.dropZone} ${styles.dropZoneOn}` : styles.dropZone}
+            role="button"
+            tabIndex={0}
+            aria-label="Drop an MP3 to add an episode"
+            onClick={() => uploadInput.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                uploadInput.current?.click()
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDropOver(true)
+            }}
+            onDragLeave={() => setDropOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDropOver(false)
+              const file = e.dataTransfer.files?.[0]
+              if (file) void uploadEpisode(file)
+            }}
+          >
+            {uploadBusy ? 'Adding the episode…' : 'Drop an MP3 to add an episode'}
+            <input
+              ref={uploadInput}
+              type="file"
+              accept="audio/mpeg,.mp3"
+              hidden
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void uploadEpisode(file)
+                e.target.value = ''
+              }}
+            />
+          </div>
         </div>
 
         {showId === 'systems-over-goals' && (
           <div className={styles.pcSection}>
-            <SogdDaily episodes={showEpisodes} />
+            <SogdDaily
+              episodes={showEpisodes}
+              onErase={(guid) => void eraseEpisode(showId, guid)}
+            />
           </div>
         )}
 
@@ -1187,7 +1269,7 @@ export function PodcastsPage() {
                     key={key}
                     value={key}
                   >
-                    {displayTicker(e.ticker, e.title)}
+                    {e.format === 'manual' && e.title ? e.title : displayTicker(e.ticker, e.title)}
                     {e.duration_sec ? ` · ${Math.round(e.duration_sec)}s` : ''}
                     {e.cost_usd != null ? ` · $${Number(e.cost_usd).toFixed(2)}` : ''}
                     {' · '}
@@ -1230,6 +1312,11 @@ export function PodcastsPage() {
                 src={player.src}
                 chapters={player.chapters}
                 voiceUsed={player.voiceUsed}
+                onErase={
+                  player.episodeGuid
+                    ? () => void eraseEpisode(player.show || showId, player.episodeGuid || '')
+                    : undefined
+                }
                 onLoadedMetadata={() => {
                   if (audioRef.current) audioRef.current.playbackRate = rate
                 }}

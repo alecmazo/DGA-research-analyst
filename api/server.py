@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui789-20261027-research-menus"
+WEB_BUILD_VERSION = "ui790-20261027-episode-file"
 
 
 @app.get("/api/build")
@@ -39429,6 +39429,47 @@ def podcast_chapters(show: str, guid: str):
         media_type=CHAPTERS_MEDIA_TYPE,
         headers={"Cache-Control": "public, max-age=600"},
     )
+
+
+@app.post("/api/podcast/{show}/episodes/upload")
+def podcast_upload_episode(show: str, file: UploadFile = File(...)):
+    """Publish an MP3 dropped on the studio. Auth stays on the GP session."""
+    from podcast_library import MAX_UPLOAD_BYTES, UploadRejected, upload_episode
+    from podcast_media import get_media_store
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return JSONResponse({"ok": False, "error": "DB unavailable"}, status_code=503)
+    try:
+        data = file.file.read(MAX_UPLOAD_BYTES + 1)
+        return upload_episode(
+            show,
+            data,
+            file.filename or "episode.mp3",
+            connect=_fund_conn,
+            store=get_media_store(),
+        )
+    except LookupError:
+        raise HTTPException(404, "unknown show")
+    except UploadRejected as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:
+        print(f"[podcast] upload failed: {exc!s:.200}", flush=True)
+        return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=500)
+
+
+@app.delete("/api/podcast/{show}/episodes/{guid}")
+def podcast_erase_episode(show: str, guid: str):
+    """Remove one episode from the feed and delete its audio."""
+    from podcast_library import erase_episode
+    from podcast_media import get_media_store
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        return JSONResponse({"ok": False, "error": "DB unavailable"}, status_code=503)
+    try:
+        return erase_episode(show, guid, connect=_fund_conn, store=get_media_store())
+    except LookupError:
+        raise HTTPException(404, "not found")
+    except Exception as exc:
+        print(f"[podcast] erase failed: {exc!s:.200}", flush=True)
+        return JSONResponse({"ok": False, "error": str(exc)[:200]}, status_code=500)
 
 
 @app.get("/api/public/podcast/media/{show}/{guid}.mp3")
