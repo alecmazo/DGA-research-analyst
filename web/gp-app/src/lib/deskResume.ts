@@ -1,8 +1,41 @@
 /** Pickup for a desk local run that a reload interrupted. */
 
-export const RECENT_LOCAL_MS = 6 * 60 * 60 * 1000
+export const RESUME_HOUR_CHOICES = [1, 6, 12, 24, 48, 168] as const
+export const DEFAULT_RESUME_HOURS = 24
+export const RESUME_HOURS_KEY = 'dga.local.resumeHours'
 export const DESK_RUN_MEMORY_MS = 8 * 60 * 60 * 1000
 export const DESK_RUN_KEY = 'dga.local.deskRun'
+
+export function resumeWindowMs(hours: number): number {
+  const picked = (RESUME_HOUR_CHOICES as readonly number[]).includes(hours) ? hours : DEFAULT_RESUME_HOURS
+  return picked * 60 * 60 * 1000
+}
+
+export function resumeWindowLabel(hours: number): string {
+  const picked = (RESUME_HOUR_CHOICES as readonly number[]).includes(hours) ? hours : DEFAULT_RESUME_HOURS
+  if (picked === 1) return '1 hour'
+  if (picked === 168) return '7 days'
+  return `${picked} hours`
+}
+
+export function readResumeHours(storage: Pick<Storage, 'getItem'>): number {
+  try {
+    const raw = Number(storage.getItem(RESUME_HOURS_KEY))
+    if ((RESUME_HOUR_CHOICES as readonly number[]).includes(raw)) return raw
+  } catch {
+    /* A blocked store keeps the 24 hour cutoff. */
+  }
+  return DEFAULT_RESUME_HOURS
+}
+
+export function writeResumeHours(hours: number, storage: Pick<Storage, 'setItem'>) {
+  const picked = (RESUME_HOUR_CHOICES as readonly number[]).includes(hours) ? hours : DEFAULT_RESUME_HOURS
+  try {
+    storage.setItem(RESUME_HOURS_KEY, String(picked))
+  } catch {
+    /* Private mode can refuse the write. The menu still applies this run. */
+  }
+}
 
 export type DeskStep = { tk: string; models: string[] }
 
@@ -16,12 +49,16 @@ type LocalRow = {
 
 type DeskMemory = { startedAt?: number; done?: string[] }
 
-export function recentLocalNote(iso: string | null | undefined, now: number): boolean {
+export function recentLocalNote(
+  iso: string | null | undefined,
+  now: number,
+  windowMs: number = resumeWindowMs(DEFAULT_RESUME_HOURS),
+): boolean {
   if (!iso) return false
   const stamp = Date.parse(iso)
   if (!Number.isFinite(stamp)) return false
   const age = now - stamp
-  return age >= -5 * 60 * 1000 && age <= RECENT_LOCAL_MS
+  return age >= -5 * 60 * 1000 && age <= windowMs
 }
 
 function sameModel(stored: string | undefined, wanted: string): boolean {
@@ -49,6 +86,7 @@ export function pendingQueue(
   savedRows: LocalRow[] | null | undefined,
   memory: Set<string>,
   now: number,
+  windowMs: number = resumeWindowMs(DEFAULT_RESUME_HOURS),
 ): { queue: DeskStep[]; skipped: number } {
   const viewsByTicker = new Map<string, LocalView[]>()
   const recentBare = new Set<string>()
@@ -59,7 +97,7 @@ export function pendingQueue(
     if (views.length) {
       const prior = viewsByTicker.get(tk) || []
       viewsByTicker.set(tk, prior.concat(views))
-    } else if (recentLocalNote(row.generated_at, now)) {
+    } else if (recentLocalNote(row.generated_at, now, windowMs)) {
       recentBare.add(tk)
     }
   }
@@ -71,7 +109,7 @@ export function pendingQueue(
       if (memory.has(`${tk}|${model}`)) return false
       if (!views.length && recentBare.has(tk)) return false
       return !views.some(
-        (view) => sameModel(view.model, model) && recentLocalNote(view.generated_at, now),
+        (view) => sameModel(view.model, model) && recentLocalNote(view.generated_at, now, windowMs),
       )
     })
     skipped += models.length - pending.length

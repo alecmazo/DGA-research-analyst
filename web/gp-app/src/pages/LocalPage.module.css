@@ -260,6 +260,19 @@
   min-width: 220px;
 }
 
+.cutoff {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.row .cutoff select {
+  min-width: 8.5rem;
+  width: auto;
+}
+
 .card textarea {
   width: 100%;
   resize: vertical;

@@ -10,7 +10,8 @@ def test_desk_batch_is_one_company_then_the_next():
     assert "Run desk reports" in page
     assert "Resume desk reports" in page
     assert "Stop after this company" in page
-    assert "last 6 hours" in page
+    assert "Resume cutoff" in page
+    assert "DEFAULT_RESUME_HOURS" in page
     batch = page.split("const runTickerQueue", 1)[1].split("const runDeskReports", 1)[0]
     assert "await writeLocalNote" in batch
     assert "stopDesk.current" in batch
@@ -33,9 +34,10 @@ def test_desk_batch_is_one_company_then_the_next():
     assert "openReportWindow" not in resume
 
 
-def test_resume_skips_notes_from_the_last_six_hours():
+def test_resume_skips_notes_from_the_chosen_window():
     src = (ROOT / "web/gp-app/src/lib/deskResume.ts").read_text(encoding="utf-8")
-    assert "6 * 60 * 60 * 1000" in src
+    assert "DEFAULT_RESUME_HOURS = 24" in src
+    assert "RESUME_HOUR_CHOICES = [1, 6, 12, 24, 48, 168]" in src
     assert "8 * 60 * 60 * 1000" in src
     assert "dga.local.deskRun" in src
     script = ROOT / "web/gp-app/src/lib/deskResume.check.mjs"

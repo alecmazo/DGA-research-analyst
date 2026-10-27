@@ -19,10 +19,16 @@ import { LocalDcf } from '@/components/local/LocalDcf'
 import { LocalModelPick, useLocalModelChoice } from '@/components/local/LocalModelPick'
 import {
   clearDeskMemory,
+  DEFAULT_RESUME_HOURS,
   deskTickers,
   pendingQueue,
   readDeskMemory,
+  readResumeHours,
   rememberDeskSave,
+  RESUME_HOUR_CHOICES,
+  resumeWindowLabel,
+  resumeWindowMs,
+  writeResumeHours,
 } from '@/lib/deskResume'
 import { relativeTime } from '@/lib/format'
 import { renderMd } from '@/lib/md'
@@ -69,6 +75,7 @@ export function LocalPage() {
   const [running, setRunning] = useState(false)
   const [batching, setBatching] = useState(false)
   const [stopping, setStopping] = useState(false)
+  const [resumeHours, setResumeHours] = useState(DEFAULT_RESUME_HOURS)
   const stopDesk = useRef(false)
   const [progress, setProgress] = useState('')
   const [runErr, setRunErr] = useState<string | null>(null)
@@ -94,6 +101,15 @@ export function LocalPage() {
   const askModel = useLocalModelChoice(LOCAL_PICK_KEYS.ask)
   const bookModel = useLocalModelChoice(LOCAL_PICK_KEYS.portfolio)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    setResumeHours(readResumeHours(window.localStorage))
+  }, [])
+
+  const chooseResumeHours = (hours: number) => {
+    setResumeHours(hours)
+    writeResumeHours(hours, window.localStorage)
+  }
 
   const loadStatus = useCallback(() => {
     void Promise.all([
@@ -367,21 +383,23 @@ export function LocalPage() {
         return
       }
       const now = Date.now()
+      const windowLabel = resumeWindowLabel(resumeHours)
       const { queue, skipped } = pendingQueue(
         tickers,
         models,
         Array.isArray(local) ? local : [],
         readDeskMemory(now, window.localStorage),
         now,
+        resumeWindowMs(resumeHours),
       )
       if (!queue.length) {
-        setProgress('Every desk company already has a local note from the last 6 hours.')
+        setProgress(`Every desk company already has a local note from the last ${windowLabel}.`)
         return
       }
       const modelNames = models.map((model) => shortModelLabel(model)).join(', ')
       const noteWord = skipped === 1 ? 'note' : 'notes'
       const go = window.confirm(
-        `Resume ${modelNames} on ${queue.length} desk companies. ${skipped} local ${noteWord} from the last 6 hours will be skipped. Each remaining company finishes before the next starts.`,
+        `Resume ${modelNames} on ${queue.length} desk companies. ${skipped} local ${noteWord} from the last ${windowLabel} will be skipped. Each remaining company finishes before the next starts.`,
       )
       if (!go) {
         setProgress('')
@@ -593,6 +611,21 @@ export function LocalPage() {
           >
             {stopping ? 'Stopping…' : batching ? 'Stop after this company' : 'Run desk reports'}
           </Button>
+          <label className={styles.cutoff}>
+            <span>Cutoff</span>
+            <select
+              aria-label="Resume cutoff"
+              value={resumeHours}
+              disabled={running || stopping}
+              onChange={(e) => chooseResumeHours(Number(e.target.value))}
+            >
+              {RESUME_HOUR_CHOICES.map((hours) => (
+                <option key={hours} value={hours}>
+                  {resumeWindowLabel(hours)}
+                </option>
+              ))}
+            </select>
+          </label>
           <Button
             size="sm"
             disabled={!online || running || stopping}
@@ -603,7 +636,7 @@ export function LocalPage() {
         </div>
         <p className={styles.meta}>
           Run desk reports uses the companies on the desk saved-reports list, one company at a time.
-          Resume desk reports skips a local note written in the last 6 hours and continues with the rest.
+          Resume desk reports skips a local note newer than the cutoff and continues with the rest.
         </p>
         {progress && <p className={styles.meta}>{progress}</p>}
         {runErr && <p className={styles.warn}>{runErr}</p>}
