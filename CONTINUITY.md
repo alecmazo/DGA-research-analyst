@@ -366,6 +366,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **SOGD clock** | **`ui784-20261026-sogd-clock`** | SUP_20261027_5f543b54. A Daily run shows the stage and the time it has been working. The page keeps refreshing until the run finishes. |
 | **Resume cutoff** | **`ui785-20261026-resume-cutoff`** | On this Mac, Resume desk reports skips a local note newer than the cutoff. The cutoff menu defaults to 24 hours. Run desk reports still starts from the first company. |
 | **SOGD pilot** | **`ui786-20261027-sogd-pilot`** | Systems Over Goals Daily is a news show. The Oct 27 pilot is episode 1 once its audio file is imported. Spotify and Apple stay off, and the feed says so. The daily script opens with good morning and saves the AI disclosure for the close. |
+| **SOGD chapters** | **`ui787-20261027-sogd-chapters`** | The daily opening changes with the date. Voice rotation stays off until the checkbox is on. Each episode lists its topics, and those topics skip ahead in the player and in the feed. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -566,4 +567,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-27 · Agent: Cursor · Built: `ui786-20261027-sogd-pilot` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui33-podcast-shows-20261026` · Next: `ui787-YYYYMMDD-slug`*
+*Last updated: 2026-10-27 · Agent: Cursor · Built: `ui787-20261027-sogd-chapters` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui33-podcast-shows-20261026` · Next: `ui788-YYYYMMDD-slug`*

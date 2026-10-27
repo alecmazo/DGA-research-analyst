@@ -176,6 +176,68 @@ class SogdPilotTests(unittest.TestCase):
         daily = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
         self.assertIn("show_notes", daily)
 
+    def test_varied_intros_and_optional_voice_rotation(self):
+        from datetime import date
+        from podcast_sogd import (
+            SOGD_STYLE,
+            intro_for_date,
+            voice_for_day,
+        )
+
+        first = intro_for_date(date(2026, 10, 27))
+        second = intro_for_date(date(2026, 10, 28))
+        self.assertNotEqual(first, second)
+        self.assertEqual(first, intro_for_date(date(2026, 10, 27)))
+        self.assertIn(first, SOGD_STYLE["intros"])
+        self.assertGreaterEqual(len(SOGD_STYLE["intros"]), 4)
+        self.assertFalse(SOGD_STYLE["voice_rotation"])
+        saved = {"provider": "xai", "voice": "kepler", "speed": 1.0}
+        held = voice_for_day(saved, date(2026, 10, 27), rotate=False)
+        self.assertEqual(held["voice"], "kepler")
+        spun = voice_for_day({**saved, "rotate": True}, date(2026, 10, 27))
+        other = voice_for_day({**saved, "rotate": True}, date(2026, 10, 28))
+        self.assertIn(spun["voice"], SOGD_STYLE["voice_pool"])
+        self.assertNotEqual(spun["voice"], other["voice"])
+        source = (ROOT / "podcast_sogd.py").read_text(encoding="utf-8")
+        self.assertIn("intro_for_date", source)
+        page = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
+        self.assertIn("Rotate the voice", page)
+
+    def test_chapters_skip_by_topic(self):
+        from podcast_feed import render_show_feed
+        from podcast_sogd import (
+            PILOT_GUID,
+            PILOT_SHOW_NOTES,
+            chapters_document,
+            pilot_episode,
+            resolve_chapters,
+        )
+
+        chapters = resolve_chapters(PILOT_SHOW_NOTES, 1430, None)
+        titles = [row["title"] for row in chapters]
+        self.assertEqual(chapters[0]["startTime"], 0)
+        self.assertIn("Iran: deal or strike", titles)
+        self.assertIn("Israel votes", titles)
+        self.assertIn("The Fed, one week out", titles)
+        self.assertIn("Anthropic IPO", titles)
+        self.assertIn("Ebola", titles)
+        self.assertIn("Oleshky ceasefire", titles)
+        self.assertLess(chapters[-1]["startTime"], 1430)
+        self.assertEqual(chapters_document(chapters)["version"], "1.2.0")
+        xml = render_show_feed(
+            "systems-over-goals",
+            [pilot_episode()],
+            request_base="https://portfolio.dgacapital.com",
+            media_base="https://cdn.example/audio",
+            feed_base="https://portfolio.dgacapital.com",
+        )
+        self.assertIn("podcast:chapters", xml)
+        self.assertIn(f"/api/podcast/systems-over-goals/{PILOT_GUID}/chapters.json", xml)
+        server = (ROOT / "api/server.py").read_text(encoding="utf-8")
+        self.assertIn('"/chapters.json"', server)
+        page = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
+        self.assertIn("Skip to", page)
+
 
 if __name__ == "__main__":
     unittest.main()

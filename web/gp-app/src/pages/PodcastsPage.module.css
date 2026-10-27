@@ -993,6 +993,22 @@
   margin: 8px 0 0;
 }
 
+.sogdChapters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sogdChapter {
+  border: 1px solid #c7e8f3;
+  background: #f3fbfe;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .stepHead {
   display: flex;
   gap: 12px;

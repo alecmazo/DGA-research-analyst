@@ -116,6 +116,11 @@ def episode_byte_size(episode: dict) -> int:
     return 0
 
 
+def chapters_url(show_id: str, guid: str, *, feed_base: str, request_base: str) -> str:
+    origin = (feed_base or request_base or "").rstrip("/")
+    return f"{origin}/api/podcast/{show_id}/{quote(guid, safe='')}/chapters.json"
+
+
 def enclosure_url(show_id: str, guid: str, *, media_base: str, request_base: str) -> str:
     key = f"{show_id}/{quote(guid, safe='')}.mp3"
     base = (media_base or "").rstrip("/")
@@ -258,6 +263,14 @@ def render_show_feed(
             f"      <itunes:episode>{episode_no}</itunes:episode>\n" if episode_no else ""
         )
         episode_type = ep.get("episode_type") or "full"
+        chapter_rows = ep.get("chapters") or []
+        chapters_tag = ""
+        if chapter_rows and guid:
+            ch = chapters_url(sid, guid, feed_base=feed_base, request_base=request_base)
+            chapters_tag = (
+                f'      <podcast:chapters url="{_xml_escape(ch)}" '
+                'type="application/json+chapters"/>\n'
+            )
         items.append(
             "    <item>\n"
             f"      <title>{_xml_escape(title)}</title>\n"
@@ -270,6 +283,7 @@ def render_show_feed(
             f'      <enclosure url="{_xml_escape(enc)}" '
             f'type="audio/mpeg" length="{length}"/>\n'
             f"{transcript_tag}"
+            f"{chapters_tag}"
             f"      <itunes:duration>{duration}</itunes:duration>\n"
             f"{episode_tag}"
             f"      <itunes:author>{_xml_escape(author)}</itunes:author>\n"

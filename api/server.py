@@ -1499,6 +1499,7 @@ async def auth_middleware(request: Request, call_next):
             or path.endswith("/audio.mp3")
             or path == "/api/podcast/rss.xml"
             or (path.startswith("/api/podcast/") and path.endswith("/rss.xml"))
+            or (path.startswith("/api/podcast/") and path.endswith("/chapters.json"))
             or path.startswith("/api/public/podcast/media/")
             or path.startswith("/listen/")):
         return await call_next(request)
@@ -8987,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui786-20261027-sogd-pilot"
+WEB_BUILD_VERSION = "ui787-20261027-sogd-chapters"
 
 
 @app.get("/api/build")
@@ -39317,6 +39318,7 @@ def _podcast_episode_rows(show_id: str) -> list[dict]:
     except Exception as e:
         print(f"⚠️ rss feed query failed: {e!s:.200}", flush=True)
         return []
+    from podcast_sogd import resolve_chapters
     rows = []
     for r in fetched:
         tk = r.get("ticker") or ""
@@ -39325,6 +39327,8 @@ def _podcast_episode_rows(show_id: str) -> list[dict]:
         token, _exp = _make_share_token(tk, fmt, ttl_seconds=5 * 365 * 86400)
         notes = (r.get("show_notes") or "").strip()
         short = (r.get("summary") or "").strip()
+        script = r.get("script_json")
+        stored_chapters = script.get("chapters") if isinstance(script, dict) else None
         rows.append({
             "episode_guid": r.get("episode_guid"),
             "show": r.get("show") or show_id,
@@ -39335,6 +39339,7 @@ def _podcast_episode_rows(show_id: str) -> list[dict]:
             "summary": short or notes or _episode_summary(r.get("script_json")) or title,
             "show_notes": notes,
             "episode_number": r.get("episode_number"),
+            "chapters": resolve_chapters(notes, r.get("duration_sec"), stored_chapters),
             "status": r.get("status"),
             "transcript_url": (
                 f"/api/public/podcast/media/{show_id}/{_quote(r.get('episode_guid') or '', safe='')}.transcript.txt"
@@ -39389,6 +39394,46 @@ def podcast_rss_feed(request: Request):
 def podcast_show_rss(show: str, request: Request):
     """Public RSS for one show. Unknown shows are 404."""
     return _podcast_feed_response(show, request)
+
+
+@app.get("/api/podcast/{show}/{guid}/chapters.json")
+def podcast_chapters(show: str, guid: str):
+    """Public chapter file so a player can skip to a topic."""
+    from podcast_shows import known_show
+    from podcast_sogd import chapters_document, resolve_chapters
+    if not known_show(show) or "/" in guid or ".." in guid or not guid:
+        raise HTTPException(404, "not found")
+    notes = ""
+    duration = 0
+    stored = None
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            _ensure_podcast_table()
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT show_notes, duration_sec, script_json
+                      FROM analyst_podcast_episodes
+                     WHERE show = %s AND episode_guid = %s
+                    """,
+                    (show, guid),
+                )
+                row = cur.fetchone()
+            if row:
+                notes = row.get("show_notes") or ""
+                duration = row.get("duration_sec") or 0
+                script = row.get("script_json")
+                if isinstance(script, dict):
+                    stored = script.get("chapters")
+        except Exception as exc:
+            print(f"⚠️ chapter query failed: {exc!s:.160}", flush=True)
+    chapters = resolve_chapters(notes, duration, stored)
+    if not chapters:
+        raise HTTPException(404, "not found")
+    return JSONResponse(
+        chapters_document(chapters),
+        headers={"Cache-Control": "public, max-age=600"},
+    )
 
 
 @app.get("/api/public/podcast/media/{show}/{guid}.mp3")
@@ -39869,6 +39914,7 @@ class PodcastVoiceIn(BaseModel):
     provider: str = "xai"
     voice: str = "kepler"
     speed: float | None = 1.0
+    rotate: bool = False
 
 
 class PodcastPreviewIn(BaseModel):
@@ -39993,8 +40039,13 @@ def podcast_daily_status(show: str, request: Request):
     """Last runs, month-to-date spend, and the voice the next episode will use."""
     _claims_or_401(request)
     _known_podcast_show(show)
-    from podcast_sogd import SHOW_ID, auto_publish_default, cost_cap_usd, default_voice, normalize_voice
+    from podcast_sogd import (
+        SHOW_ID, auto_publish_default, cost_cap_usd, default_voice, normalize_voice, voice_for_day,
+    )
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _Zone
     voice = normalize_voice(_kv_get(_podcast_voice_key(show)) or default_voice(show), show)
+    voice_today = voice_for_day(voice, _dt.now(_Zone("America/Los_Angeles")).date())
     settings = _kv_get(_podcast_settings_key(show)) or {}
     if not isinstance(settings, dict):
         settings = {}
@@ -40002,6 +40053,7 @@ def podcast_daily_status(show: str, request: Request):
         "ok": True,
         "show": show,
         "voice": voice,
+        "voice_today": voice_today.get("voice"),
         "auto_publish": bool(settings["auto_publish"]) if "auto_publish" in settings else auto_publish_default(),
         "cost_cap_usd": float(settings["cost_cap_usd"]) if settings.get("cost_cap_usd") is not None else cost_cap_usd(),
         "month_spend_usd": 0.0,
@@ -40138,7 +40190,8 @@ def podcast_list(show: str | None = None):
             listed = """episode_guid, show, ticker, format, episode_title,
                               duration_sec, published_at, tts_model, cost_usd,
                               audio_dropbox_path, media_key, byte_size, status,
-                              show_notes, episode_number"""
+                              show_notes, episode_number,
+                              script_json->'chapters' AS chapters"""
             if show:
                 cur.execute(
                     f"""SELECT {listed}
@@ -40155,6 +40208,7 @@ def podcast_list(show: str | None = None):
                         ORDER BY published_at DESC"""
                 )
             rows = cur.fetchall()
+        from podcast_sogd import resolve_chapters
         episodes = []
         for r in rows:
             sid = r.get("show") or ALIAS_SHOW
@@ -40180,6 +40234,9 @@ def podcast_list(show: str | None = None):
                 "byte_size":    r.get("byte_size"),
                 "show_notes":   r.get("show_notes") or "",
                 "episode_number": r.get("episode_number"),
+                "chapters":     resolve_chapters(
+                    r.get("show_notes") or "", r.get("duration_sec"), r.get("chapters"),
+                ),
             })
         return {
             "ok": True,
