@@ -977,6 +977,22 @@
   margin-top: 4px;
 }
 
+.sogdEpisode {
+  margin-top: 14px;
+}
+
+.sogdEpisodeTitle {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.sogdNotes {
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 8px 0 0;
+}
+
 .stepHead {
   display: flex;
   gap: 12px;

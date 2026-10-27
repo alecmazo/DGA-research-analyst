@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from podcast_shows import ALIAS_SHOW, show_config
+from podcast_shows import ALIAS_SHOW, directories_blocked, show_config
 
 ARTWORK_MIN_PX = 1400
 ARTWORK_MAX_PX = 3000
@@ -66,16 +66,31 @@ def _explicit(value) -> str:
 
 
 def _itunes_duration(seconds) -> str:
+    """Whole seconds. Apple accepts that form, so 1430 stays 1430 in the feed."""
     try:
         duration = max(0, int(float(seconds or 0)))
     except (TypeError, ValueError):
         duration = 0
-    h = duration // 3600
-    m = (duration % 3600) // 60
-    s = duration % 60
-    if h:
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
+    return str(duration)
+
+
+def _item_bodies(episode: dict) -> tuple[str, str]:
+    """Short description, then show notes for content:encoded.
+
+    A row that only has one text keeps today's description on both tags.
+    """
+    summary = (
+        episode.get("summary")
+        or episode.get("description")
+        or episode.get("title")
+        or episode.get("episode_title")
+        or ""
+    )
+    notes = (episode.get("show_notes") or "").strip()
+    if notes and notes != (summary or "").strip():
+        return (summary or "").strip(), notes
+    desc = _item_description(episode)
+    return desc, desc
 
 
 def episode_byte_size(episode: dict) -> int:
@@ -224,7 +239,7 @@ def render_show_feed(
             ep.get("ticker") or "", ep.get("format")
         )
         title = ep.get("title") or ep.get("episode_title") or guid
-        desc = _item_description(ep)
+        desc, notes = _item_bodies(ep)
         pub = _rfc2822(ep.get("published_at") or ep.get("generated_at"))
         duration = _itunes_duration(ep.get("duration_sec"))
         enc = enclosure_url(sid, guid, media_base=media_base, request_base=request_base)
@@ -234,11 +249,20 @@ def render_show_feed(
             f'      <podcast:transcript url="{_xml_escape(transcript)}" type="text/plain"/>\n'
             if transcript else ""
         )
+        episode_no = ep.get("episode_number")
+        try:
+            episode_no = int(episode_no) if episode_no not in (None, "") else None
+        except (TypeError, ValueError):
+            episode_no = None
+        episode_tag = (
+            f"      <itunes:episode>{episode_no}</itunes:episode>\n" if episode_no else ""
+        )
+        episode_type = ep.get("episode_type") or "full"
         items.append(
             "    <item>\n"
             f"      <title>{_xml_escape(title)}</title>\n"
             f"      <description><![CDATA[{_cdata(desc)}]]></description>\n"
-            f"      <content:encoded><![CDATA[{_cdata(desc)}]]></content:encoded>\n"
+            f"      <content:encoded><![CDATA[{_cdata(notes)}]]></content:encoded>\n"
             f"      <itunes:summary><![CDATA[{_cdata(desc)}]]></itunes:summary>\n"
             f"      <pubDate>{pub}</pubDate>\n"
             f'      <guid isPermaLink="false">{_xml_escape(guid)}</guid>\n'
@@ -247,13 +271,15 @@ def render_show_feed(
             f'type="audio/mpeg" length="{length}"/>\n'
             f"{transcript_tag}"
             f"      <itunes:duration>{duration}</itunes:duration>\n"
+            f"{episode_tag}"
             f"      <itunes:author>{_xml_escape(author)}</itunes:author>\n"
             f"      <itunes:explicit>{explicit}</itunes:explicit>\n"
-            "      <itunes:episodeType>full</itunes:episodeType>\n"
+            f"      <itunes:episodeType>{_xml_escape(episode_type)}</itunes:episodeType>\n"
             "    </item>"
         )
 
     channel_link = (feed_base or request_base or "").rstrip("/") or feed_url
+    block_tag = "    <itunes:block>Yes</itunes:block>\n" if directories_blocked(cfg) else ""
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<rss version="2.0"\n'
@@ -274,6 +300,7 @@ def render_show_feed(
         "    </itunes:owner>\n"
         f"    <itunes:explicit>{explicit}</itunes:explicit>\n"
         f"    <itunes:type>{_xml_escape(cfg.get('type') or 'episodic')}</itunes:type>\n"
+        f"{block_tag}"
         f'    <itunes:category text="{_xml_escape(cfg.get("category") or "Business")}">\n'
         f'      <itunes:category text="{_xml_escape(cfg.get("subcategory") or "Investing")}"/>\n'
         "    </itunes:category>\n"

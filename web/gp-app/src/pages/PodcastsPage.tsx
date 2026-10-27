@@ -793,6 +793,7 @@ export function PodcastsPage() {
               {feedCopied ? 'Copied' : 'Copy feed'}
             </Button>
           </div>
+          <p className={styles.pcDesc}>Spotify off. Apple off.</p>
         </div>
 
         {showId === 'systems-over-goals' && (

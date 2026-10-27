@@ -48,7 +48,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", default="", help="YYYY-MM-DD in America/Los_Angeles")
     parser.add_argument("--force", action="store_true", help="Replace today's episode")
     parser.add_argument("--dry-run", action="store_true", help="Plan only. No Grok, no speech, no publish")
+    parser.add_argument("--import-pilot", action="store_true", help="Store the Oct 27 pilot MP3 as episode 1")
+    parser.add_argument("--pilot-file", default="", help="Path to the pilot MP3")
     args = parser.parse_args(argv)
+    if args.import_pilot:
+        from podcast_sogd import import_sogd_pilot
+        connect = _connect if os.environ.get("DATABASE_URL") else None
+        result = import_sogd_pilot(path=args.pilot_file or None, connect=connect)
+        print(json.dumps({
+            "ok": result.get("ok"),
+            "status": result.get("status"),
+            "episode_guid": result.get("episode_guid"),
+            "byte_size": result.get("byte_size"),
+            "md5": result.get("md5"),
+            "path": result.get("path"),
+        }, indent=2))
+        return 0 if result.get("ok") else 1
     if args.date:
         day = date.fromisoformat(args.date)
     else:

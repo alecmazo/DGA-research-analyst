@@ -4,7 +4,8 @@ One dict is the source for feed metadata. `podcast:guid` is a UUIDv5 of the
 canonical feed URL (podcastindex namespace) and is not overridable, so a
 host change cannot mint a second show identity.
 
-Directory flags stay off until Alec turns them on. The feed is still served.
+Directory flags stay off until Alec turns them on. While every directory
+flag is off, the feed carries itunes:block. The feed is still served.
 """
 from __future__ import annotations
 
@@ -73,11 +74,12 @@ SHOWS: dict[str, dict] = {
         "systems-over-goals",
         title="Systems Over Goals Daily",
         description=(
-            "Systems Over Goals Daily. One 20–30 minute episode each day. "
-            "Informational only; not investment advice."
+            "A daily morning news podcast. Five stories, taken slowly: "
+            "what happened, who says what, and who wins if you believe it. "
+            "AI-narrated. Not investment advice. © DGA Capital."
         ),
-        category="Business",
-        subcategory="Management",
+        category="News",
+        subcategory="Daily News",
     ),
 }
 
@@ -135,3 +137,11 @@ def show_config(show_id: str | None) -> dict | None:
 def known_show(show_id: str | None) -> bool:
     sid = ALIAS_SHOW if not show_id else show_id
     return sid in SHOWS
+
+
+def directories_blocked(cfg: dict | None) -> bool:
+    """True when Spotify and Apple are both off. The feed then says so."""
+    dirs = (cfg or {}).get("directories") or {}
+    if not dirs:
+        return False
+    return not any(bool((row or {}).get("enabled")) for row in dirs.values())

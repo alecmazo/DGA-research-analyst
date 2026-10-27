@@ -126,7 +126,7 @@ class PodcastFeedTests(unittest.TestCase):
             "en-us",
         ):
             self.assertIn(needle, alias)
-        self.assertNotIn("itunes:block", alias)
+        self.assertIn("<itunes:block>Yes</itunes:block>", alias)
         self.assertIn(stable_podcast_guid("dga-hitech"), alias)
         self.assertEqual(
             stable_podcast_guid("dga-hitech"),

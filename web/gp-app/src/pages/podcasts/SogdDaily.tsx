@@ -36,6 +36,24 @@ type Playable = {
   audio_url?: string | null
   episode_guid?: string | null
   generated_at?: string | null
+  show_notes?: string | null
+}
+
+function NoteBody({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s)]+)/g)
+  return (
+    <p className={styles.sogdNotes}>
+      {parts.map((part, i) =>
+        part.startsWith('http') ? (
+          <a key={i} href={part} target="_blank" rel="noopener noreferrer">
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </p>
+  )
 }
 
 const SAMPLE = 'This episode is AI-generated and AI-narrated. Here is the voice for Systems Over Goals Daily.'
@@ -286,9 +304,15 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
           </tbody>
         </table>
       )}
-      {episodes[0]?.audio_url && (
-        <audio className={styles.sogdAudio} controls src={episodes[0].audio_url || undefined} />
-      )}
+      {episodes.map((ep) => (
+        <article key={ep.episode_guid || ep.title || ep.audio_url} className={styles.sogdEpisode}>
+          {ep.title && <h3 className={styles.sogdEpisodeTitle}>{ep.title}</h3>}
+          {ep.audio_url && (
+            <audio className={styles.sogdAudio} controls src={ep.audio_url} />
+          )}
+          {ep.show_notes && <NoteBody text={ep.show_notes} />}
+        </article>
+      ))}
     </div>
   )
 }

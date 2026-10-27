@@ -8987,7 +8987,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui785-20261026-resume-cutoff"
+WEB_BUILD_VERSION = "ui786-20261027-sogd-pilot"
 
 
 @app.get("/api/build")
@@ -39302,7 +39302,7 @@ def _podcast_episode_rows(show_id: str) -> list[dict]:
                 SELECT episode_guid, show, ticker, format, episode_title,
                        published_at, duration_sec, byte_size, media_key,
                        script_json, audio_local_path, audio_dropbox_path,
-                       status, show_notes,
+                       status, show_notes, summary, episode_number,
                        (transcript IS NOT NULL AND transcript <> '') AS has_transcript
                   FROM analyst_podcast_episodes
                  WHERE show = %s
@@ -39323,6 +39323,8 @@ def _podcast_episode_rows(show_id: str) -> list[dict]:
         fmt = r.get("format") or "debate"
         title = _clean_display_title(r.get("episode_title"), tk)
         token, _exp = _make_share_token(tk, fmt, ttl_seconds=5 * 365 * 86400)
+        notes = (r.get("show_notes") or "").strip()
+        short = (r.get("summary") or "").strip()
         rows.append({
             "episode_guid": r.get("episode_guid"),
             "show": r.get("show") or show_id,
@@ -39330,7 +39332,9 @@ def _podcast_episode_rows(show_id: str) -> list[dict]:
             "format": fmt,
             "title": title,
             "episode_title": title,
-            "summary": r.get("show_notes") or _episode_summary(r.get("script_json")) or title,
+            "summary": short or notes or _episode_summary(r.get("script_json")) or title,
+            "show_notes": notes,
+            "episode_number": r.get("episode_number"),
             "status": r.get("status"),
             "transcript_url": (
                 f"/api/public/podcast/media/{show_id}/{_quote(r.get('episode_guid') or '', safe='')}.transcript.txt"
@@ -40131,11 +40135,13 @@ def podcast_list(show: str | None = None):
         _ensure_podcast_table()
         with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
             visible = "(status IS NULL OR status = 'published') AND (published_at IS NULL OR published_at <= NOW())"
+            listed = """episode_guid, show, ticker, format, episode_title,
+                              duration_sec, published_at, tts_model, cost_usd,
+                              audio_dropbox_path, media_key, byte_size, status,
+                              show_notes, episode_number"""
             if show:
                 cur.execute(
-                    f"""SELECT episode_guid, show, ticker, format, episode_title,
-                              duration_sec, published_at, tts_model, cost_usd,
-                              audio_dropbox_path, media_key, byte_size, status
+                    f"""SELECT {listed}
                          FROM analyst_podcast_episodes
                         WHERE show = %s AND {visible}
                         ORDER BY published_at DESC""",
@@ -40143,9 +40149,7 @@ def podcast_list(show: str | None = None):
                 )
             else:
                 cur.execute(
-                    f"""SELECT episode_guid, show, ticker, format, episode_title,
-                              duration_sec, published_at, tts_model, cost_usd,
-                              audio_dropbox_path, media_key, byte_size, status
+                    f"""SELECT {listed}
                          FROM analyst_podcast_episodes
                         WHERE {visible}
                         ORDER BY published_at DESC"""
@@ -40174,6 +40178,8 @@ def podcast_list(show: str | None = None):
                 "audio_url":    audio_url,
                 "dropbox_path": r["audio_dropbox_path"],
                 "byte_size":    r.get("byte_size"),
+                "show_notes":   r.get("show_notes") or "",
+                "episode_number": r.get("episode_number"),
             })
         return {
             "ok": True,

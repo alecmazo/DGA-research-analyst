@@ -222,7 +222,8 @@ it in about 60 lines — just ask.
 
 Feeds are already served. Spotify and Apple stay disabled in
 `podcast_shows.py` (`directories.*.enabled` is false) until Alec says go.
-Do not submit a show, and do not add `<itunes:block>`, before that.
+While those flags are off, the feed includes `<itunes:block>Yes</itunes:block>`.
+Do not submit a show before that.
 
 1. Validate the feed (Podbase / Cast Feed Validator / podba.se).
 2. **Spotify:** go to creators.spotify.com, choose "Add an existing podcast" / "Find an existing show" via RSS, paste `/api/podcast/<show>/rss.xml`, verify with the code emailed to the owner email (alecmazo1@gmail.com), then pick category/language and submit.

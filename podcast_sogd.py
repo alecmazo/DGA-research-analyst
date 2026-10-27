@@ -6,6 +6,7 @@ Network calls are lazy so tests can pass the stage functions in.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import time
 import urllib.request
 from copy import deepcopy
 from datetime import date, datetime, time as dt_time, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 SHOW_ID = "systems-over-goals"
@@ -36,6 +38,111 @@ BANNED_RE = re.compile(
     r"scott\s+adams|dilbert|dogbert|pointy[\s-]*haired",
     re.IGNORECASE,
 )
+
+# One style record for the writer prompt and the render targets.
+SOGD_STYLE = {
+    "stories_min": 4,
+    "stories_max": 5,
+    "word_min": 3700,
+    "word_max": 4400,
+    "voice": "kepler",
+    "text_normalization": True,
+    "pause": "[pause]",
+    "long_pause": "[long-pause]",
+    "breath_max": 2,
+    "speed_min": 0.96,
+    "speed_max": 1.02,
+    "opening_speed": 0.97,
+    "gap_within_story": (0.45, 1.1),
+    "gap_recap": (1.0, 1.5),
+    "gap_between_stories": (1.6, 2.2),
+    "gap_preview": (1.2, 1.6),
+    "pad_sec": 1.5,
+    "highpass_hz": 70,
+    "lufs": -16,
+    "peak_dbtp": -1.5,
+    "bitrate_kbps": 96,
+    "channels": 1,
+    "max_bytes": 25 * 1024 * 1024,
+    "publish_local": "07:00",
+    "prompt": "",
+}
+
+
+def style_prompt() -> str:
+    """Writer instructions. Render numbers come from SOGD_STYLE."""
+    s = SOGD_STYLE
+    within = s["gap_within_story"]
+    recap = s["gap_recap"]
+    between = s["gap_between_stories"]
+    preview = s["gap_preview"]
+    return (
+        "Morning-news feel. Topic pool: politics, Trump, markets and finance, AI, "
+        "science, health and cancer research, world developments, war. "
+        "Pick the most important real stories of the day from X trends and reliable outlets. "
+        "Verify facts and dates, cite every claim, never invent facts. "
+        f"{s['stories_min']}-{s['stories_max']} stories, gone into deeply, each drawing on 2-3 or more sources. "
+        "No rapid-fire headline lists. "
+        "Per story: what happened, then who says what, then the other side, then "
+        "follow the money: who wins if you believe this, then so why does this matter to you, "
+        "then a short recap, then what to watch next. "
+        "Plain conversational language: short and varied sentences, contractions, "
+        "concrete examples, rhetorical questions, signposting, the occasional casual aside. "
+        "No academic jargon. "
+        "Opening: Good morning, the date, the show name Systems Over Goals Daily, "
+        "a loose two-sentence how this works, then a topic preview with one short paragraph per story. "
+        "No AI disclosure at the top. "
+        "Close: a short zoom-out on the day's pattern. "
+        "The AI-narration disclosure and the not-investment-advice line go only at the close. "
+        "Never name Scott Adams or Dilbert. "
+        f"Length about {s['word_min']}-{s['word_max']} words. "
+        f"Voice {s['voice']}, text normalization {'on' if s['text_normalization'] else 'off'}. "
+        f"Use {s['pause']} and {s['long_pause']} freely. Put {s['long_pause']} before each new story. "
+        f"Use [breath] at most {s['breath_max']} times, only at a natural inhale after a long sentence. "
+        "Never mid-phrase, never right after a pause. "
+        "Use <slow>, <emphasis>, and <soft> sparingly. No cough or sneeze. "
+        f"Per-section speed {s['speed_min']}-{s['speed_max']} (opening {s['opening_speed']}). "
+        "Render paragraph by paragraph, then join with silence: "
+        f"{within[0]}-{within[1]} seconds within a story, "
+        f"{recap[0]}-{recap[1]} seconds around recaps, "
+        f"{between[0]}-{between[1]} seconds between stories, "
+        f"{preview[0]}-{preview[1]} seconds between topic-preview items. "
+        f"{s['pad_sec']} seconds of pad at the start and end. "
+        f"Master: highpass {s['highpass_hz']} Hz, then gain, then a light peak limiter, "
+        f"targeting {s['lufs']} LUFS integrated, peak <= {s['peak_dbtp']} dBTP, no heavy compression. "
+        f"Output {s['bitrate_kbps']} kbps mono MP3, under 25 MB. "
+        f"Publish at {s['publish_local']} America/Los_Angeles, never earlier."
+    )
+
+
+SOGD_STYLE["prompt"] = style_prompt()
+SOGD_STYLE_GUIDE = SOGD_STYLE
+
+PILOT_GUID = "11546341-0cb4-5cda-8267-26668ac6a3cc"
+PILOT_BYTE_SIZE = 17158220
+PILOT_MD5 = "82c27994586aba9c07fc543caa282a08"
+PILOT_DURATION_SEC = 1430
+PILOT_EPISODE_NUMBER = 1
+PILOT_TITLE = "Systems Over Goals Daily — Oct 27, 2026: Iran's deal-or-strike moment (Pilot)"
+PILOT_DESCRIPTION = (
+    "Five stories, taken slowly: Trump's deal-or-strike decision on Iran, Israel's election, "
+    "the Fed meeting a week before the midterms, Anthropic's IPO filing, and the Ebola outbreak "
+    "plus new US travel rules. AI-narrated. Not investment advice. © DGA Capital."
+)
+PILOT_SHOW_NOTES = """AI-narrated. Five stories, each looked at from several sources. Sources below.
+
+1. **Iran: deal or strike** — Japan Times/Bloomberg (https://www.japantimes.co.jp/news/2026/10/26/world/trump-iran-deal/), Al Jazeera (https://www.aljazeera.com/news/2026/10/27/irans-calculations-as-us-escalation-looms-trust-midterms-hormuz), CNBC (https://www.cnbc.com/2026/10/26/us-iran-war-hormuz.html), Anadolu morning briefing (https://www.aa.com.tr/en/world/morning-briefing-oct-27-2026/4101934), CNBC markets live (https://www.cnbc.com/2026/10/26/stock-market-today-live-updates.html), X: https://x.com/i/trending/2114808772992593941
+2. **Israel votes** — Israel National News final polls (https://www.israelnationalnews.com/news/435074), CNN live (https://www.cnn.com/2026/10/27/world/live-news/israel-elections-live-results-latest-votes-intl), Jerusalem Post (https://www.jpost.com/israel-election-2026/article-912743), BBC (https://www.bbc.com/news), NYT (https://www.nytimes.com/2026/10/26/world/middleeast/netanyahu-iran-israel-election.html), Guardian (https://www.theguardian.com/world/2026/oct/26/netanyahu-reportedly-pressured-israel-military-attack-iran-runup-to-election), Axios (https://www.axios.com/2026/10/18/trump-endorses-netanyahu-israel-election-iran), Times of Israel (https://www.timesofisrael.com/liveblog_entry/we-have-to-finish-the-job-trump-doubles-down-on-netanyahu-endorsement-after-pm-reportedly-asked-for-another-expression-of-support/), X: https://x.com/i/trending/2114986755707249073
+3. **The Fed, one week out** — CNBC Fed survey (https://www.cnbc.com/2026/10/27/federal-reserve-rate-hike-timing-expectations.html), CNBC Morning Squawk (https://www.cnbc.com/2026/10/27/tech-rally-fed-decision.html), Kiplinger live (https://www.kiplinger.com/investing/live/fed-meeting-updates-and-commentary-october-2026), WSJ week ahead (https://www.wsj.com/livecoverage/stock-market-today-dow-sp-500-nasdaq-10-27-2026/card/fed-meeting-more-tech-earnings-what-to-watch-this-week-ltvx7PE4Rg1OTiuEpCkx)
+4. **Anthropic IPO** — Anthropic (https://www.anthropic.com/news/s1-sec), TechCrunch (https://techcrunch.com/2026/10/26/anthropic-officially-files-for-its-public-debut/), AP (https://apnews.com/article/anthropic-ipo-shares-public-ca2f4c282bef3201a392e59e3df2300c), WSJ (https://www.wsj.com/livecoverage/stock-market-today-dow-sp-500-nasdaq-10-26-2026/card/QRAF03nzBzqhOLglAJbQ), CNBC live (https://www.cnbc.com/2026/10/26/stock-market-today-live-updates.html)
+5. **Ebola** — ECDC (https://www.ecdc.europa.eu/en/ebola-disease-multi-country-outbreak-2026), CDC (https://www.cdc.gov/ebola/situation-summary/returning-travelers.html), AP (https://apnews.com/article/uganda-ebola-quarantine-congo-border-controls-outbreak-86561d00f73410febe41e44041105a86), Daily Monitor (https://www.monitor.co.ug/uganda/news/national/uganda-imposes-mandatory-21-day-drc-quarantine-as-regional-ebola-threat-expands-5645034), Uganda Media Centre (https://www.mediacentre.go.ug/press-room/health-minister-updates-public-on-progress-in-national-ebola-preparedness-and-response-efforts), X: https://x.com/i/trending/2114779246501433625
+- **Wrap: Oleshky ceasefire** — White House (https://www.whitehouse.gov/briefings-statements/2026/10/first-lady-melania-trump-secures-ceasefire-between-russia-and-ukraine-localized-to-oleshky/), Kyiv Independent (https://kyivindependent.com/local-ceasefire-in-besieged-oleshky-begins-ukrainian-russian-officials-say/), DW, AP
+
+Not investment advice. © DGA Capital.
+"""
+PILOT_DATE = date(2026, 10, 27)
+PILOT_PUBLISHED_AT = datetime(2026, 10, 27, 14, 0, tzinfo=timezone.utc)
+PILOT_FILENAME = "systems-over-goals-daily_pilot_2026-10-27_v4_kepler.mp3"
 
 PRICING = {
     "grok_input_usd_per_mtok": 2.0,
@@ -61,6 +168,8 @@ SCHEMA_STATEMENTS = (
     "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS status TEXT",
     "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS transcript TEXT",
     "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS show_notes TEXT",
+    "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS summary TEXT",
+    "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS episode_number INTEGER",
     """
     CREATE UNIQUE INDEX IF NOT EXISTS analyst_podcast_episodes_show_date
         ON analyst_podcast_episodes (show, episode_date)
@@ -105,13 +214,13 @@ class CostCapHit(RuntimeError):
 
 def word_bounds() -> tuple[int, int]:
     try:
-        lo = int(os.environ.get("SOGD_WORD_MIN") or 3800)
+        lo = int(os.environ.get("SOGD_WORD_MIN") or SOGD_STYLE["word_min"])
     except ValueError:
-        lo = 3800
+        lo = int(SOGD_STYLE["word_min"])
     try:
-        hi = int(os.environ.get("SOGD_WORD_MAX") or 4300)
+        hi = int(os.environ.get("SOGD_WORD_MAX") or SOGD_STYLE["word_max"])
     except ValueError:
-        hi = 4300
+        hi = int(SOGD_STYLE["word_max"])
     if hi < lo:
         hi = lo
     return lo, hi
@@ -119,7 +228,7 @@ def word_bounds() -> tuple[int, int]:
 
 def schedule_clocks() -> tuple[str, str]:
     start = (os.environ.get("SOGD_START_LOCAL") or "06:35").strip() or "06:35"
-    publish = (os.environ.get("SOGD_PUBLISH_LOCAL") or "07:00").strip() or "07:00"
+    publish = (os.environ.get("SOGD_PUBLISH_LOCAL") or SOGD_STYLE["publish_local"]).strip() or "07:00"
     return start, publish
 
 
@@ -452,16 +561,31 @@ def trim_section_words(section: dict, extra: int) -> dict:
 
 
 def ensure_disclosure(script: dict) -> dict:
+    """Keep the AI line on the close. The cold open stays a good morning."""
     script = deepcopy(script)
-    for sec in script.get("sections") or []:
+    sections = script.setdefault("sections", [])
+    for sec in sections:
         if sec.get("id") != "cold_open":
             continue
-        turns = sec.setdefault("turns", [])
-        if not turns:
-            turns.append({"speaker": "kimi", "intensity": "normal", "text": DISCLOSURE})
-        elif DISCLOSURE not in (turns[0].get("text") or ""):
-            turns[0]["text"] = f"{DISCLOSURE} {turns[0]['text']}".strip()
+        turns = sec.get("turns") or []
+        if turns:
+            text = turns[0].get("text") or ""
+            if text.startswith(DISCLOSURE):
+                rest = text[len(DISCLOSURE):].lstrip(" .")
+                if rest:
+                    turns[0]["text"] = rest
         break
+    if not sections:
+        sections.append({
+            "id": "close",
+            "turns": [{"speaker": "kimi", "intensity": "normal", "text": DISCLOSURE}],
+        })
+        return script
+    if DISCLOSURE in script_text(script):
+        return script
+    last = sections[-1]
+    turns = last.setdefault("turns", [])
+    turns.append({"speaker": "kimi", "intensity": "normal", "text": DISCLOSURE})
     return script
 
 
@@ -725,11 +849,11 @@ def _assemble(episode_date: date, lead: str, sections: list[dict]) -> dict:
 def live_writer(stories: list[dict], lenses, episode_date: date, *, word_min: int, word_max: int) -> dict:
     text, usage = _call_grok(
         "Return JSON only: {\"sections\":[{\"id\":\"\",\"text\":\"\"}]}. "
-        f"Sections in order: cold_open, story_1..story_N, systems_takeaway. "
+        "Sections in order: cold_open, story_1..story_N, close. "
         f"Total between {word_min} and {word_max} words. "
         "Every number, date, quote, and who-did-what must come from the stories. "
         "Do not invent those. "
-        f"The cold open starts with: {DISCLOSURE} "
+        + SOGD_STYLE["prompt"] + " "
         + LENS_GUARD,
         json.dumps({"date": episode_date.isoformat(), "stories": stories, "lens": lenses}),
     )
@@ -869,7 +993,7 @@ def live_repair_script(script, dropped, stories, episode_date: date) -> dict:
         "Rewrite the script without the dropped sentences. "
         "Replace the lost length with incentive and systems analysis grounded in the sources. "
         "Do not add a number, date, quote, or who-did-what that is not in the sources. "
-        f"The cold open starts with: {DISCLOSURE} "
+        + SOGD_STYLE["prompt"] + " "
         + LENS_GUARD,
         json.dumps({
             "sections": sections,
@@ -891,20 +1015,56 @@ def live_repair_script(script, dropped, stories, episode_date: date) -> dict:
     return {"script": rebuilt, "usage": usage}
 
 
+def master_sogd_mp3(path: Path) -> bool:
+    """Highpass, then a light peak limiter, then 96 kbps mono. HiTech loudnorm stays put."""
+    import shutil
+    import subprocess
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or not path.is_file():
+        return False
+    style = SOGD_STYLE
+    limit = 10 ** (float(style["peak_dbtp"]) / 20)
+    af = (
+        f"highpass=f={int(style['highpass_hz'])},"
+        f"alimiter=limit={limit:.4f}:level=false:asc=true"
+    )
+    dest = path.with_suffix(".master.mp3")
+    cmd = [
+        ffmpeg, "-y", "-hide_banner", "-i", str(path),
+        "-af", af,
+        "-ac", str(int(style["channels"])),
+        "-ar", "44100",
+        "-codec:a", "libmp3lame",
+        "-b:a", f"{int(style['bitrate_kbps'])}k",
+        str(dest),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError):
+        return False
+    if not dest.is_file() or dest.stat().st_size <= 0:
+        return False
+    if dest.stat().st_size > int(style["max_bytes"]):
+        dest.unlink(missing_ok=True)
+        return False
+    dest.replace(path)
+    return True
+
+
 def _synthesize_engine(script, voice, pronunciation, on_progress) -> dict:
     import tempfile
-    from pathlib import Path
     from podcast_engine import synthesize_episode
     out = Path(tempfile.mkdtemp(prefix="sogd-")) / "episode.mp3"
     syn = synthesize_episode(
         script,
         out_path=out,
         tts_provider=voice.get("provider"),
-        voice_override=voice.get("voice"),
+        voice_override=voice.get("voice") or SOGD_STYLE["voice"],
         speed_override=voice.get("speed") or 1.0,
         pronunciation=pronunciation,
         on_progress=(lambda *args: on_progress("tts", args[-1] if args else "")) if on_progress else None,
     )
+    master_sogd_mp3(out)
     return {
         "bytes": out.read_bytes(),
         "duration_sec": syn.get("duration_sec"),
@@ -1035,7 +1195,11 @@ def run_daily_episode(
         progress("scout", "x_search plus RSS")
         scouted = scout(episode_date) if scout else live_scout(episode_date)
         charge("scout", (scouted or {}).get("usage") or {})
-        ranked = rank_stories((scouted or {}).get("stories") or [])
+        ranked = rank_stories(
+            (scouted or {}).get("stories") or [],
+            limit_min=int(SOGD_STYLE["stories_min"]),
+            limit_max=int(SOGD_STYLE["stories_max"]),
+        )
         if not ranked["ok"]:
             raise RuntimeError(ranked["error"])
         stories = ranked["stories"]
@@ -1685,3 +1849,152 @@ def release_ready(episode_date: date, connect, *, now: datetime | None = None, m
 def blocking_row(ctx: dict) -> dict | None:
     """The row plan_tick should see: today's episode, or the latest run marker."""
     return ctx.get("existing")
+
+
+def pilot_audio_path(path: Path | str | None = None) -> Path:
+    if path:
+        return Path(path)
+    env = (os.environ.get("SOGD_PILOT_MP3") or "").strip()
+    if env:
+        return Path(env)
+    return Path.home() / "Desktop" / PILOT_FILENAME
+
+
+def pilot_episode() -> dict:
+    """Feed row for episode 1. The guid does not change between imports."""
+    return {
+        "episode_guid": PILOT_GUID,
+        "show": SHOW_ID,
+        "title": PILOT_TITLE,
+        "episode_title": PILOT_TITLE,
+        "summary": PILOT_DESCRIPTION,
+        "show_notes": PILOT_SHOW_NOTES,
+        "published_at": PILOT_PUBLISHED_AT,
+        "duration_sec": PILOT_DURATION_SEC,
+        "byte_size": PILOT_BYTE_SIZE,
+        "episode_number": PILOT_EPISODE_NUMBER,
+        "episode_type": "full",
+        "status": "published",
+        "explicit": False,
+    }
+
+
+def _pilot_matches(data: bytes) -> bool:
+    return len(data) == int(PILOT_BYTE_SIZE) and hashlib.md5(data).hexdigest() == PILOT_MD5
+
+
+def import_sogd_pilot(*, path: Path | str | None = None, connect=None, store=None) -> dict:
+    """Store the pilot MP3 and upsert episode 1. A missing file writes nothing.
+
+    The episode guid is fixed. Running this again keeps that guid.
+    An Oct 27 row with a different guid is replaced only after the file checks out.
+    """
+    guid = PILOT_GUID
+    audio_path = pilot_audio_path(path)
+    if not audio_path.is_file():
+        return {"ok": False, "status": "missing", "episode_guid": guid, "path": str(audio_path)}
+    data = audio_path.read_bytes()
+    digest = hashlib.md5(data).hexdigest()
+    if not _pilot_matches(data):
+        return {
+            "ok": False,
+            "status": "mismatch",
+            "episode_guid": guid,
+            "byte_size": len(data),
+            "md5": digest,
+        }
+    if store is None:
+        from podcast_media import get_media_store
+        store = get_media_store()
+    media_key = f"{SHOW_ID}/{guid}.mp3"
+    store.put(media_key, data)
+    local = store.local_path(media_key)
+    result = {
+        "ok": True,
+        "status": "stored",
+        "episode_guid": guid,
+        "show": SHOW_ID,
+        "title": PILOT_TITLE,
+        "summary": PILOT_DESCRIPTION,
+        "show_notes": PILOT_SHOW_NOTES,
+        "byte_size": PILOT_BYTE_SIZE,
+        "duration_sec": PILOT_DURATION_SEC,
+        "episode_number": PILOT_EPISODE_NUMBER,
+        "episode_date": PILOT_DATE.isoformat(),
+        "published_at": PILOT_PUBLISHED_AT,
+        "media_key": media_key,
+        "audio_local_path": str(local) if local is not None else "",
+        "audio_dropbox_path": store.dropbox_path(media_key) or "",
+        "tts_model": "xai",
+        "voice_map": {"kimi": SOGD_STYLE["voice"]},
+        "transcript": "",
+        "script": {},
+    }
+    if connect is None:
+        return result
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS summary TEXT")
+        cur.execute(
+            "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS episode_number INTEGER"
+        )
+        cur.execute(
+            """
+            DELETE FROM analyst_podcast_episodes
+             WHERE show = %s AND episode_date = %s AND episode_guid <> %s
+            """,
+            (SHOW_ID, result["episode_date"], guid),
+        )
+        cur.execute(
+            """
+            INSERT INTO analyst_podcast_episodes (
+                episode_guid, show, ticker, format, episode_title, script_json,
+                media_key, byte_size, duration_sec, audio_local_path,
+                audio_dropbox_path, tts_model, voice_map, published_at, cost_usd,
+                episode_date, status, transcript, show_notes, summary, episode_number
+            )
+            VALUES (
+                %s, %s, 'SOGD', 'sogd', %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s::jsonb,
+                %s, %s, %s, 'published', %s, %s, %s, %s
+            )
+            ON CONFLICT (episode_guid) DO UPDATE SET
+                episode_title = EXCLUDED.episode_title,
+                media_key = EXCLUDED.media_key,
+                byte_size = EXCLUDED.byte_size,
+                duration_sec = EXCLUDED.duration_sec,
+                audio_local_path = EXCLUDED.audio_local_path,
+                audio_dropbox_path = EXCLUDED.audio_dropbox_path,
+                tts_model = EXCLUDED.tts_model,
+                voice_map = EXCLUDED.voice_map,
+                published_at = EXCLUDED.published_at,
+                episode_date = EXCLUDED.episode_date,
+                status = EXCLUDED.status,
+                transcript = EXCLUDED.transcript,
+                show_notes = EXCLUDED.show_notes,
+                summary = EXCLUDED.summary,
+                episode_number = EXCLUDED.episode_number
+            """,
+            (
+                guid,
+                SHOW_ID,
+                PILOT_TITLE,
+                json.dumps({}),
+                media_key,
+                PILOT_BYTE_SIZE,
+                PILOT_DURATION_SEC,
+                result["audio_local_path"],
+                result["audio_dropbox_path"],
+                "xai",
+                json.dumps(result["voice_map"]),
+                PILOT_PUBLISHED_AT,
+                None,
+                PILOT_DATE,
+                "",
+                PILOT_SHOW_NOTES,
+                PILOT_DESCRIPTION,
+                PILOT_EPISODE_NUMBER,
+            ),
+        )
+        conn.commit()
+    result["status"] = "published"
+    return result
