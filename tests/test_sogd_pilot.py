@@ -177,66 +177,168 @@ class SogdPilotTests(unittest.TestCase):
         self.assertIn("show_notes", daily)
 
     def test_varied_intros_and_optional_voice_rotation(self):
-        from datetime import date
+        from datetime import date, timedelta
         from podcast_sogd import (
             SOGD_STYLE,
-            intro_for_date,
+            _script_payload,
+            intro_prompt,
+            intro_style_for_date,
             voice_for_day,
         )
+        from tests.test_sogd_pipeline import _audio, _script, _stories
 
-        first = intro_for_date(date(2026, 10, 27))
-        second = intro_for_date(date(2026, 10, 28))
-        self.assertNotEqual(first, second)
-        self.assertEqual(first, intro_for_date(date(2026, 10, 27)))
-        self.assertIn(first, SOGD_STYLE["intros"])
-        self.assertGreaterEqual(len(SOGD_STYLE["intros"]), 4)
-        self.assertFalse(SOGD_STYLE["voice_rotation"])
-        saved = {"provider": "xai", "voice": "kepler", "speed": 1.0}
-        held = voice_for_day(saved, date(2026, 10, 27), rotate=False)
-        self.assertEqual(held["voice"], "kepler")
-        spun = voice_for_day({**saved, "rotate": True}, date(2026, 10, 27))
-        other = voice_for_day({**saved, "rotate": True}, date(2026, 10, 28))
+        ids = [row["id"] for row in SOGD_STYLE["intros"]]
+        self.assertEqual(ids, ["classic", "cold_open", "question", "preview"])
+        self.assertEqual(SOGD_STYLE["voice_mode"], "fixed")
+        self.assertEqual(SOGD_STYLE["voice_pool"], ("kepler", "eve", "orion", "lux"))
+        monday = date(2026, 10, 26)
+        styles = [intro_style_for_date(monday + timedelta(days=i)) for i in range(7)]
+        style_ids = [row["id"] for row in styles]
+        self.assertEqual(style_ids[0], "classic")
+        self.assertTrue(all(a != b for a, b in zip(style_ids, style_ids[1:])))
+        self.assertLessEqual(sum(1 for row in styles if row["explain_show"]), 2)
+        self.assertEqual(intro_style_for_date(monday)["id"], intro_style_for_date(monday)["id"])
+        skipped = intro_style_for_date(monday, recent=["classic"])
+        self.assertNotEqual(skipped["id"], "classic")
+        brief = intro_prompt(date(2026, 10, 27), ["classic", "question"])
+        self.assertIn("Last intros: classic, question", brief)
+        self.assertIn("Today's intro style is", brief)
+
+        saved = {"provider": "xai", "voice": "ara", "speed": 1.0, "voice_mode": "fixed"}
+        held = voice_for_day(saved, date(2026, 10, 27), mode="fixed")
+        self.assertEqual(held["voice"], "ara")
+        spun = voice_for_day({**saved, "voice_mode": "rotate"}, date(2026, 10, 27))
+        again = voice_for_day({**saved, "voice_mode": "rotate"}, date(2026, 10, 27))
+        other = voice_for_day({**saved, "voice_mode": "rotate"}, date(2026, 10, 28))
+        self.assertEqual(spun["voice"], again["voice"])
         self.assertIn(spun["voice"], SOGD_STYLE["voice_pool"])
         self.assertNotEqual(spun["voice"], other["voice"])
-        source = (ROOT / "podcast_sogd.py").read_text(encoding="utf-8")
-        self.assertIn("intro_for_date", source)
+        override = voice_for_day(
+            {**saved, "voice_mode": "rotate", "voice_override": "lux"},
+            date(2026, 10, 27),
+        )
+        self.assertEqual(override["voice"], "lux")
+
+        def keep(claims, stories, provider):
+            return {"verdicts": {claim["id"]: {"keep": True} for claim in claims}, "usage": {}}
+
+        from podcast_sogd import run_daily_episode
+        common = dict(
+            existing=None,
+            month_spend=0,
+            cost_cap=40,
+            scout=lambda day: {"stories": _stories(), "usage": {}},
+            lens=lambda stories: {"notes": [], "usage": {}},
+            writer=lambda stories, notes: {"script": _script(), "usage": {}},
+            fact_checker=keep,
+            ollama_ok=False,
+            synthesize=_audio,
+        )
+        monday_run = run_daily_episode(monday, **common)
+        tuesday_run = run_daily_episode(monday + timedelta(days=1), **common)
+        self.assertTrue(monday_run["ok"], monday_run.get("error"))
+        self.assertEqual(monday_run["intro_style"], "classic")
+        self.assertNotEqual(monday_run["intro_style"], tuesday_run["intro_style"])
+        self.assertEqual(_script_payload(monday_run)["intro_style"], "classic")
+
         page = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
-        self.assertIn("Rotate the voice", page)
+        self.assertIn("Voice mode", page)
+        self.assertIn("ChapterPlayer", page)
 
     def test_chapters_skip_by_topic(self):
-        from podcast_feed import render_show_feed
+        from podcast_feed import CHAPTERS_MEDIA_TYPE, render_show_feed
         from podcast_sogd import (
             PILOT_GUID,
-            PILOT_SHOW_NOTES,
             chapters_document,
+            chapters_from_row,
+            chapters_public_body,
+            chapter_notes_prefix,
             pilot_episode,
-            resolve_chapters,
         )
 
-        chapters = resolve_chapters(PILOT_SHOW_NOTES, 1430, None)
-        titles = [row["title"] for row in chapters]
-        self.assertEqual(chapters[0]["startTime"], 0)
-        self.assertIn("Iran: deal or strike", titles)
-        self.assertIn("Israel votes", titles)
-        self.assertIn("The Fed, one week out", titles)
-        self.assertIn("Anthropic IPO", titles)
-        self.assertIn("Ebola", titles)
-        self.assertIn("Oleshky ceasefire", titles)
-        self.assertLess(chapters[-1]["startTime"], 1430)
-        self.assertEqual(chapters_document(chapters)["version"], "1.2.0")
+        episode = pilot_episode()
+        chapters = episode["chapters"]
+        starts = [row["startTime"] for row in chapters]
+        self.assertEqual(starts[0], 0)
+        self.assertTrue(all(isinstance(start, float) and start == start for start in starts))
+        self.assertTrue(all(b > a for a, b in zip(starts, starts[1:])))
+        self.assertTrue(all(start < 1430 for start in starts))
+        self.assertTrue(all(row["title"] for row in chapters))
+        prefix = chapter_notes_prefix(chapters)
+        self.assertEqual(
+            prefix,
+            "\n".join([
+                "00:00 Intro & today's five stories",
+                "01:43 1. Iran: deal or strike",
+                "07:09 2. Israel votes",
+                "11:11 3. The Fed, one week out",
+                "14:51 4. Anthropic goes public",
+                "18:35 5. Ebola and your next flight",
+                "22:11 Wrap: Oleshky ceasefire & close",
+            ]),
+        )
+        document = chapters_document(chapters)
+        self.assertEqual(document["version"], "1.2.0")
+        self.assertEqual(CHAPTERS_MEDIA_TYPE, "application/json+chapters")
+        self.assertTrue(all(isinstance(row["startTime"], float) and row["title"] for row in document["chapters"]))
+        self.assertEqual(chapters_public_body(chapters), document)
+        self.assertIsNone(chapters_public_body(None))
+        self.assertIsNone(chapters_public_body([]))
+        self.assertEqual(chapters_from_row({"show_notes": "1. **Nope**", "duration_sec": 30}), [])
+
         xml = render_show_feed(
             "systems-over-goals",
-            [pilot_episode()],
+            [episode],
             request_base="https://portfolio.dgacapital.com",
             media_base="https://cdn.example/audio",
             feed_base="https://portfolio.dgacapital.com",
         )
-        self.assertIn("podcast:chapters", xml)
-        self.assertIn(f"/api/podcast/systems-over-goals/{PILOT_GUID}/chapters.json", xml)
+        chapter_url = (
+            "https://portfolio.dgacapital.com/api/podcast/systems-over-goals/"
+            f"episodes/{PILOT_GUID}/chapters.json"
+        )
+        self.assertIn(f'<podcast:chapters url="{chapter_url}" type="application/json+chapters"/>', xml)
+        self.assertGreaterEqual(xml.count("00:00 Intro & today's five stories"), 2)
+        self.assertIn(prefix, xml)
+        bare = dict(episode)
+        bare["chapters"] = []
+        quiet = render_show_feed(
+            "systems-over-goals",
+            [bare],
+            request_base="https://portfolio.dgacapital.com",
+            media_base="https://cdn.example/audio",
+            feed_base="https://portfolio.dgacapital.com",
+        )
+        self.assertNotIn("podcast:chapters", quiet)
+        hitech = render_show_feed(
+            "dga-hitech",
+            [{
+                "episode_guid": "no-chapters",
+                "title": "HiTech",
+                "summary": "No chapters here",
+                "byte_size": 1200,
+                "duration_sec": 40,
+            }],
+            request_base="https://portfolio.dgacapital.com",
+            media_base="https://cdn.example/audio",
+            feed_base="https://portfolio.dgacapital.com",
+        )
+        self.assertNotIn("podcast:chapters", hitech)
         server = (ROOT / "api/server.py").read_text(encoding="utf-8")
-        self.assertIn('"/chapters.json"', server)
-        page = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
-        self.assertIn("Skip to", page)
+        self.assertIn('"/api/podcast/{show}/episodes/{guid}/chapters.json"', server)
+        self.assertIn("CHAPTERS_MEDIA_TYPE", server)
+        self.assertIn('raise HTTPException(404, "not found")', server)
+        player = (ROOT / "web/gp-app/src/pages/podcasts/ChapterPlayer.tsx").read_text(encoding="utf-8")
+        hitech_page = (ROOT / "web/gp-app/src/pages/PodcastsPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("Skip to", player)
+        self.assertIn("Previous chapter", player)
+        self.assertIn("Next chapter", player)
+        self.assertIn("chapterOn", player)
+        self.assertIn("ChapterPlayer", hitech_page)
+        import inspect
+        import podcast_sogd as sogd
+        self.assertNotIn("write_chapter_id3", inspect.getsource(sogd.import_sogd_pilot))
+        self.assertNotIn("master_sogd_mp3", inspect.getsource(sogd.import_sogd_pilot))
 
 
 if __name__ == "__main__":

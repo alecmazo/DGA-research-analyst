@@ -46,14 +46,29 @@ SOGD_STYLE = {
     "word_min": 3700,
     "word_max": 4400,
     "voice": "kepler",
-    "voice_rotation": False,
-    "voice_pool": ("kepler", "ara", "rex", "eve", "sal"),
+    "voice_mode": "fixed",
+    "voice_pool": ("kepler", "eve", "orion", "lux"),
     "intros": (
-        "Start with Good morning and the weekday, then the date and the show name, then two fresh sentences on how a story is told here, then one short paragraph per story.",
-        "Start with one plain sentence on what kind of morning it is, then Good morning, the date, the show name, two sentences on how this works, then the topic preview.",
-        "Start with a short question about the day, answer it in one line, then Good morning, the date, the show name, two sentences on how this works, then the topic preview.",
-        "Start by naming the lead story in a single clause, then Good morning, the date, the show name, two sentences on how this works, then the topic preview.",
-        "Start with the date said out loud, then Good morning and the show name, then two sentences on how this works that do not repeat a previous episode, then the topic preview.",
+        {
+            "id": "classic",
+            "explain_show": True,
+            "text": 'Start with "Good morning", the date, the show name Systems Over Goals Daily, a short how-this-works, then the topic preview.',
+        },
+        {
+            "id": "cold_open",
+            "explain_show": False,
+            "text": "Start straight on the biggest story with a hook line, then the show name and a quick preview. No explanation of the show.",
+        },
+        {
+            "id": "question",
+            "explain_show": False,
+            "text": "Open with a question the listener cares about, tied to the top story. Then the show name and a short preview. No explanation of the show.",
+        },
+        {
+            "id": "preview",
+            "explain_show": False,
+            "text": "Say the show name and the date, then go straight into the topics. No explanation of the show.",
+        },
     ),
     "text_normalization": True,
     "pause": "[pause]",
@@ -98,15 +113,20 @@ def style_prompt() -> str:
         "Plain conversational language: short and varied sentences, contractions, "
         "concrete examples, rhetorical questions, signposting, the occasional casual aside. "
         "No academic jargon. "
-        "Opening: Good morning, the date, the show name Systems Over Goals Daily, "
-        "a loose two-sentence how this works, then a topic preview with one short paragraph per story. "
-        "The opening shape changes with the date. Use the opening shape named for today. "
+        "Opening styles, one per day, never the same wording two days in a row: "
+        "classic (Good morning, the date, the show name Systems Over Goals Daily, a short how this works, then the topic preview), "
+        "cold open (the biggest story first, no explanation of the show), "
+        "question (a question tied to the top story), "
+        "or a quick preview (show name and date, then the topics). "
+        "Explain the show on at most two days a week. Use the intro style named for today. "
         "No AI disclosure at the top. "
-        "Close: a short zoom-out on the day's pattern. "
+        "Close: a short zoom-out on the day's pattern. Vary the sign-off wording. "
         "The AI-narration disclosure and the not-investment-advice line go only at the close. "
         "Never name Scott Adams or Dilbert. "
         f"Length about {s['word_min']}-{s['word_max']} words. "
-        f"Voice {s['voice']}, text normalization {'on' if s['text_normalization'] else 'off'}. "
+        f"Voice {s['voice']} when voice mode is fixed. "
+        f"Rotate uses {', '.join(s['voice_pool'])}, the same voice for a given date. "
+        f"Text normalization {'on' if s['text_normalization'] else 'off'}. "
         f"Use {s['pause']} and {s['long_pause']} freely. Put {s['long_pause']} before each new story. "
         f"Use [breath] at most {s['breath_max']} times, only at a natural inhale after a long sentence. "
         "Never mid-phrase, never right after a pause. "
@@ -153,6 +173,16 @@ Not investment advice. © DGA Capital.
 PILOT_DATE = date(2026, 10, 27)
 PILOT_PUBLISHED_AT = datetime(2026, 10, 27, 14, 0, tzinfo=timezone.utc)
 PILOT_FILENAME = "systems-over-goals-daily_pilot_2026-10-27_v4_kepler.mp3"
+# v4 assembly timeline. Clock labels truncate the float; they do not round.
+PILOT_CHAPTERS = (
+    {"title": "Intro & today's five stories", "start_seconds": 0},
+    {"title": "1. Iran: deal or strike", "start_seconds": 103.1},
+    {"title": "2. Israel votes", "start_seconds": 429.6},
+    {"title": "3. The Fed, one week out", "start_seconds": 671.6},
+    {"title": "4. Anthropic goes public", "start_seconds": 891.8},
+    {"title": "5. Ebola and your next flight", "start_seconds": 1115.4},
+    {"title": "Wrap: Oleshky ceasefire & close", "start_seconds": 1331.2},
+)
 
 PRICING = {
     "grok_input_usd_per_mtok": 2.0,
@@ -180,6 +210,7 @@ SCHEMA_STATEMENTS = (
     "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS show_notes TEXT",
     "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS summary TEXT",
     "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS episode_number INTEGER",
+    "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS chapters_json TEXT",
     """
     CREATE UNIQUE INDEX IF NOT EXISTS analyst_podcast_episodes_show_date
         ON analyst_podcast_episodes (show, episode_date)
@@ -291,24 +322,111 @@ def normalize_voice(raw, show_id: str = SHOW_ID) -> dict:
         speed = float(base["speed"])
     speed = max(0.7, min(1.5, speed))
     out = {"provider": provider, "voice": voice, "speed": speed}
-    if "rotate" in raw:
-        out["rotate"] = bool(raw.get("rotate"))
+    mode = str(raw.get("voice_mode") or "").strip().lower()
+    if mode in ("fixed", "rotate"):
+        out["voice_mode"] = mode
+    elif raw.get("rotate") is True:
+        out["voice_mode"] = "rotate"
+    manual = raw.get("voice_override")
+    if manual:
+        name = str(manual).strip().lower()
+        if name:
+            out["voice_override"] = name
     return out
 
 
-def intro_for_date(episode_date: date | datetime) -> str:
-    """One opening shape per date. The next day uses a different shape."""
-    day = episode_date.date() if isinstance(episode_date, datetime) else episode_date
-    intros = SOGD_STYLE["intros"]
-    return intros[day.toordinal() % len(intros)]
+_INTRO_EPOCH = date(2024, 1, 1)
 
 
-def voice_for_day(saved, episode_date: date | datetime, *, rotate: bool | None = None) -> dict:
-    """Keep the saved voice unless rotation is on. Rotation is off unless asked."""
+def _as_day(episode_date: date | datetime) -> date:
+    return episode_date.date() if isinstance(episode_date, datetime) else episode_date
+
+
+def _intro_id(item) -> str:
+    if isinstance(item, dict):
+        return str(item.get("id") or item.get("intro_style") or "")
+    return str(item or "")
+
+
+def _pick_intro(day: date, yesterday_id: str | None) -> dict:
+    """Classic on Monday and Thursday. Any other day skips yesterday's style."""
+    styles = list(SOGD_STYLE["intros"])
+    by_id = {row["id"]: row for row in styles}
+    yesterday_id = yesterday_id or ""
+    if day.weekday() in (0, 3) and yesterday_id != "classic":
+        return by_id["classic"]
+    pool = [row for row in styles if not row.get("explain_show") and row["id"] != yesterday_id]
+    if not pool:
+        pool = [row for row in styles if row["id"] != yesterday_id] or styles
+    return pool[day.toordinal() % len(pool)]
+
+
+def intro_style_for_date(episode_date: date | datetime, recent=None) -> dict:
+    """The opening for this date. A non-empty recent list's first item is yesterday."""
+    day = _as_day(episode_date)
+    if recent:
+        return _pick_intro(day, _intro_id(recent[0]))
+    prev = ""
+    chosen = _pick_intro(day, "")
+    cursor = _INTRO_EPOCH if day >= _INTRO_EPOCH else day - timedelta(days=21)
+    while cursor <= day:
+        chosen = _pick_intro(cursor, prev)
+        prev = chosen["id"]
+        cursor += timedelta(days=1)
+    return chosen
+
+
+def intro_for_date(episode_date: date | datetime, recent=None) -> str:
+    """Instruction text for today's opening. The next day uses different wording."""
+    return intro_style_for_date(episode_date, recent)["text"]
+
+
+def intro_prompt(episode_date: date | datetime, recent=None) -> str:
+    """What the writer sees: today's style, plus the last openings to avoid."""
+    style = intro_style_for_date(episode_date, recent)
+    last = []
+    for item in list(recent or [])[:7]:
+        label = _intro_id(item)
+        if label:
+            last.append(label)
+    shown = ", ".join(last) if last else "none"
+    explain = (
+        "Explain how the show works in a sentence or two."
+        if style.get("explain_show")
+        else "Do not explain how the show works."
+    )
+    return (
+        f"Today's intro style is {style['id']}. {style['text']} {explain} "
+        f"Last intros: {shown}. Never reuse yesterday's opening wording. "
+        "Vary the sign-off wording. The disclosure and the disclaimer stay at the close."
+    )
+
+
+def voice_for_day(
+    saved,
+    episode_date: date | datetime,
+    *,
+    mode: str | None = None,
+    override: str | None = None,
+    rotate: bool | None = None,
+) -> dict:
+    """Fixed uses the dropdown voice. Rotate is stable for the date. A manual voice wins."""
     voice = normalize_voice(saved)
-    day = episode_date.date() if isinstance(episode_date, datetime) else episode_date
-    enabled = bool(voice.get("rotate")) if rotate is None else bool(rotate)
-    if not enabled:
+    day = _as_day(episode_date)
+    manual = override if override not in (None, "") else voice.get("voice_override")
+    if manual:
+        from podcast_tts import XAI_VOICES
+        name = str(manual).strip().lower()
+        if name in XAI_VOICES:
+            picked = dict(voice)
+            picked["voice"] = name
+            return picked
+    picked_mode = mode
+    if picked_mode is None and rotate is not None:
+        picked_mode = "rotate" if rotate else "fixed"
+    if picked_mode is None:
+        picked_mode = voice.get("voice_mode") or ("rotate" if voice.get("rotate") else "fixed")
+    if str(picked_mode).lower() != "rotate":
         return voice
     from podcast_tts import XAI_VOICES
     pool = [name for name in SOGD_STYLE["voice_pool"] if name in XAI_VOICES]
@@ -316,8 +434,20 @@ def voice_for_day(saved, episode_date: date | datetime, *, rotate: bool | None =
         return voice
     picked = dict(voice)
     picked["voice"] = pool[day.toordinal() % len(pool)]
-    picked["rotate"] = True
+    picked["voice_mode"] = "rotate"
     return picked
+
+
+def voice_used(raw) -> str:
+    """The voice stored on an episode. The player shows this name."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return ""
+    if isinstance(raw, dict):
+        return str(raw.get("kimi") or raw.get("voice") or "").strip()
+    return ""
 
 
 def llm_cost(input_tokens: int = 0, output_tokens: int = 0, x_search_calls: int = 0) -> float:
@@ -724,27 +854,8 @@ def show_notes(stories: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def titles_from_notes(notes: str) -> list[str]:
-    """Topic titles from show notes. The player and the chapter file share this list."""
-    found = []
-    for match in re.finditer(r"\*\*([^*]+)\*\*", notes or ""):
-        title = re.sub(r"^Wrap:\s*", "", match.group(1).strip())
-        if title:
-            found.append(title)
-    if not found:
-        for line in (notes or "").splitlines():
-            parsed = re.match(r"-\s+(.+?)\s+\(https?://", line.strip())
-            if parsed:
-                found.append(parsed.group(1).strip())
-    if not found:
-        return []
-    if found[0].lower() != "opening":
-        found.insert(0, "Opening")
-    return found
-
-
 def chapter_list(titles: list[str], duration_sec, urls: list[str] | None = None) -> list[dict]:
-    """Even slices across the episode. The first chapter always starts at 0."""
+    """Even slices when a render has no measured times. The first chapter starts at 0."""
     clean = [title.strip() for title in titles if (title or "").strip()]
     if not clean:
         return []
@@ -756,7 +867,7 @@ def chapter_list(titles: list[str], duration_sec, urls: list[str] | None = None)
     chapters = []
     for index, title in enumerate(clean):
         start = 0.0 if index == 0 or duration <= 0 else round(duration * index / count, 3)
-        row = {"startTime": start, "title": title}
+        row = {"title": title, "start_seconds": start, "startTime": start}
         url = (urls[index] if urls and index < len(urls) else "") or ""
         if url:
             row["url"] = url
@@ -764,7 +875,77 @@ def chapter_list(titles: list[str], duration_sec, urls: list[str] | None = None)
     return chapters
 
 
+def _chapter_start(item: dict) -> float:
+    raw = item.get("start_seconds")
+    if raw is None:
+        raw = item.get("startTime")
+    try:
+        return float(raw or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def coerce_chapter_list(stored):
+    """A stored chapter list, from chapters_json or script metadata."""
+    if stored is None:
+        return None
+    if isinstance(stored, str):
+        text = stored.strip()
+        if not text:
+            return None
+        try:
+            stored = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+    if isinstance(stored, dict):
+        stored = stored.get("chapters")
+    return stored if isinstance(stored, list) else None
+
+
+def resolve_chapters(notes: str, duration_sec, stored=None) -> list[dict]:
+    """Use stored times. An episode with no chapter list stays empty."""
+    del notes  # titles come from the stored rows, not from show-note headings
+    rows_in = coerce_chapter_list(stored)
+    if not rows_in:
+        return []
+    rows = []
+    for item in rows_in:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        start = _chapter_start(item)
+        row = {"title": title, "start_seconds": start, "startTime": start}
+        if item.get("url"):
+            row["url"] = str(item["url"])
+        if item.get("endTime") is not None:
+            try:
+                row["endTime"] = float(item["endTime"])
+            except (TypeError, ValueError):
+                pass
+        rows.append(row)
+    if not rows:
+        return []
+    rows.sort(key=lambda row: row["startTime"])
+    rows[0]["startTime"] = 0.0
+    rows[0]["start_seconds"] = 0.0
+    try:
+        duration = float(duration_sec or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    cleaned = [rows[0]]
+    for row in rows[1:]:
+        if row["startTime"] <= cleaned[-1]["startTime"]:
+            continue
+        if duration and row["startTime"] >= duration:
+            continue
+        cleaned.append(row)
+    return cleaned
+
+
 def chapters_from_stories(stories: list[dict], duration_sec) -> list[dict]:
+    """Fallback marks when the assembler did not time the sections."""
     titles = ["Opening"]
     urls = [""]
     for story in stories or []:
@@ -772,38 +953,176 @@ def chapters_from_stories(stories: list[dict], duration_sec) -> list[dict]:
         urls.append((story.get("url") or "").strip())
     titles.append("Close")
     urls.append("")
-    return chapter_list(titles, duration_sec, urls)
+    return resolve_chapters("", duration_sec, chapter_list(titles, duration_sec, urls))
 
 
-def resolve_chapters(notes: str, duration_sec, stored=None) -> list[dict]:
-    """Stored chapter times win. Otherwise the titles come from the show notes."""
-    if isinstance(stored, list) and stored:
-        rows = []
-        for item in stored:
-            if not isinstance(item, dict) or item.get("title") in (None, ""):
-                continue
-            try:
-                start = float(item.get("startTime") or 0)
-            except (TypeError, ValueError):
-                start = 0.0
-            row = {"startTime": start, "title": str(item.get("title"))}
-            if item.get("url"):
-                row["url"] = str(item["url"])
-            rows.append(row)
-        if rows:
-            rows[0]["startTime"] = 0.0
-            return rows
-    return chapter_list(titles_from_notes(notes), duration_sec)
+def chapters_from_section_starts(stories: list[dict], starts, duration_sec) -> list[dict]:
+    """First speech of each section, already shifted by the intro pad."""
+    rows = []
+    for mark in starts or []:
+        if not isinstance(mark, dict):
+            continue
+        sid = str(mark.get("id") or "")
+        title = sid.replace("_", " ").strip() or "Chapter"
+        if sid in ("", "cold_open"):
+            title = "Intro"
+        elif sid == "close":
+            title = "Close"
+        else:
+            matched = re.match(r"story_(\d+)", sid)
+            if matched:
+                index = int(matched.group(1)) - 1
+                if 0 <= index < len(stories or []):
+                    title = (stories[index].get("title") or title).strip()
+        try:
+            start = float(mark.get("start_seconds") if mark.get("start_seconds") is not None else mark.get("startTime") or 0)
+        except (TypeError, ValueError):
+            start = 0.0
+        rows.append({"title": title, "start_seconds": start})
+    return resolve_chapters("", duration_sec, rows)
+
+
+def chapter_clock(seconds: float) -> str:
+    """MM:SS, or H:MM:SS past an hour. Fractional seconds are truncated."""
+    try:
+        total = int(float(seconds))
+    except (TypeError, ValueError):
+        total = 0
+    if total < 0:
+        total = 0
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def chapter_notes_prefix(chapters: list[dict] | None) -> str:
+    lines = []
+    for item in chapters or []:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        lines.append(f"{chapter_clock(_chapter_start(item))} {title}")
+    return "\n".join(lines)
+
+
+def with_chapter_prefix(text: str, chapters: list[dict] | None) -> str:
+    prefix = chapter_notes_prefix(chapters)
+    body = text or ""
+    if not prefix:
+        return body
+    if body.startswith(prefix):
+        return body
+    if not body.strip():
+        return prefix
+    return prefix + "\n\n" + body
 
 
 def chapters_document(chapters: list[dict]) -> dict:
-    return {"version": "1.2.0", "chapters": chapters}
+    rows = []
+    for item in chapters or []:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        row = {"startTime": _chapter_start(item), "title": title}
+        if item.get("url"):
+            row["url"] = str(item["url"])
+        if item.get("endTime") is not None:
+            try:
+                row["endTime"] = float(item["endTime"])
+            except (TypeError, ValueError):
+                pass
+        rows.append(row)
+    return {"version": "1.2.0", "chapters": rows}
+
+
+def chapters_public_body(stored):
+    """Podcasting 2.0 body, or None when the episode has no chapters."""
+    chapters = resolve_chapters("", 0, stored)
+    if not chapters:
+        return None
+    return chapters_document(chapters)
+
+
+def chapters_from_row(row: dict | None) -> list[dict]:
+    row = row or {}
+    stored = coerce_chapter_list(row.get("chapters_json"))
+    if not stored:
+        stored = coerce_chapter_list(row.get("chapters"))
+    if not stored:
+        script = row.get("script_json")
+        if isinstance(script, str):
+            try:
+                script = json.loads(script)
+            except json.JSONDecodeError:
+                script = None
+        if isinstance(script, dict):
+            stored = coerce_chapter_list(script.get("chapters"))
+    return resolve_chapters(row.get("show_notes") or "", row.get("duration_sec"), stored)
+
+
+def write_chapter_id3(path: Path, chapters: list[dict]) -> bool:
+    """ID3 chapters on a new render. A missing library leaves the file alone."""
+    try:
+        from mutagen.id3 import ID3, ID3NoHeaderError, CHAP, CTOC, TIT2, Encoding
+    except ImportError:
+        return False
+    try:
+        from mutagen.id3 import CTOCFlags
+        flags = CTOCFlags.TOP_LEVEL | CTOCFlags.ORDERED
+    except ImportError:
+        flags = 3
+    rows = [item for item in (chapters or []) if str(item.get("title") or "").strip()]
+    if not rows or not path.is_file():
+        return False
+    try:
+        try:
+            tags = ID3(path)
+        except ID3NoHeaderError:
+            tags = ID3()
+        tags.delall("CHAP")
+        tags.delall("CTOC")
+        element_ids = []
+        for index, item in enumerate(rows):
+            element_id = f"ch{index}"
+            element_ids.append(element_id)
+            start_ms = int(_chapter_start(item) * 1000)
+            end_ms = start_ms
+            if item.get("endTime") is not None:
+                try:
+                    end_ms = int(float(item["endTime"]) * 1000)
+                except (TypeError, ValueError):
+                    end_ms = start_ms
+            tags.add(CHAP(
+                encoding=Encoding.UTF8,
+                element_id=element_id,
+                start_time=start_ms,
+                end_time=end_ms,
+                start_offset=0,
+                end_offset=0,
+                sub_frames=[TIT2(encoding=Encoding.UTF8, text=str(item["title"]))],
+            ))
+        tags.add(CTOC(
+            encoding=Encoding.UTF8,
+            element_id="toc",
+            flags=flags,
+            child_element_ids=element_ids,
+            sub_frames=[TIT2(encoding=Encoding.UTF8, text="Chapters")],
+        ))
+        tags.save(path)
+        return True
+    except Exception as exc:
+        print(f"[sogd] chapter tags skipped: {exc!s:.160}", flush=True)
+        return False
 
 
 def _script_payload(result: dict) -> dict:
     payload = dict(result.get("script") or {})
     if result.get("chapters"):
         payload["chapters"] = result["chapters"]
+    if result.get("intro_style"):
+        payload["intro_style"] = result["intro_style"]
     return payload
 
 
@@ -966,14 +1285,14 @@ def _assemble(episode_date: date, lead: str, sections: list[dict]) -> dict:
     }
 
 
-def live_writer(stories: list[dict], lenses, episode_date: date, *, word_min: int, word_max: int) -> dict:
+def live_writer(stories: list[dict], lenses, episode_date: date, *, word_min: int, word_max: int, recent_intros=None) -> dict:
     text, usage = _call_grok(
         "Return JSON only: {\"sections\":[{\"id\":\"\",\"text\":\"\"}]}. "
         "Sections in order: cold_open, story_1..story_N, close. "
         f"Total between {word_min} and {word_max} words. "
         "Every number, date, quote, and who-did-what must come from the stories. "
         "Do not invent those. "
-        + f"Today's opening shape: {intro_for_date(episode_date)} "
+        + intro_prompt(episode_date, recent_intros) + " "
         + SOGD_STYLE["prompt"] + " "
         + LENS_GUARD,
         json.dumps({"date": episode_date.isoformat(), "stories": stories, "lens": lenses}),
@@ -1104,7 +1423,7 @@ def live_ollama_verdicts(claims, stories) -> dict:
     return _chunked_verdicts(claims, stories, ask)
 
 
-def live_repair_script(script, dropped, stories, episode_date: date) -> dict:
+def live_repair_script(script, dropped, stories, episode_date: date, recent_intros=None) -> dict:
     """One rewrite when the checker rejects too much of the episode."""
     sections = []
     for sec in (script or {}).get("sections") or []:
@@ -1114,7 +1433,7 @@ def live_repair_script(script, dropped, stories, episode_date: date) -> dict:
         "Rewrite the script without the dropped sentences. "
         "Replace the lost length with incentive and systems analysis grounded in the sources. "
         "Do not add a number, date, quote, or who-did-what that is not in the sources. "
-        + f"Today's opening shape: {intro_for_date(episode_date)} "
+        + intro_prompt(episode_date, recent_intros) + " "
         + SOGD_STYLE["prompt"] + " "
         + LENS_GUARD,
         json.dumps({
@@ -1193,6 +1512,7 @@ def _synthesize_engine(script, voice, pronunciation, on_progress) -> dict:
         "tts_chars": int(syn.get("tts_chars") or 0),
         "tts_model": syn.get("tts_model"),
         "voice_map": syn.get("voice_map") or {},
+        "section_starts": syn.get("section_starts") or [],
         "path": str(out),
     }
 
@@ -1224,6 +1544,7 @@ def run_daily_episode(
     repair=None,
     word_min: int | None = None,
     word_max: int | None = None,
+    recent_intros=None,
 ) -> dict:
     """Run every stage. Injected callables keep the tests off the network."""
     if isinstance(episode_date, datetime):
@@ -1334,11 +1655,13 @@ def run_daily_episode(
 
         before("script")
         progress("script", "section by section")
+        style = intro_style_for_date(episode_date, recent_intros)
+        result["intro_style"] = style["id"]
         if writer:
             written = writer(stories, (lensed or {}).get("notes"))
         else:
             written = live_writer(stories, (lensed or {}).get("notes"), episode_date,
-                                  word_min=word_min, word_max=word_max)
+                                  word_min=word_min, word_max=word_max, recent_intros=recent_intros)
         charge("script", (written or {}).get("usage") or {})
         script = (written or {}).get("script") or written
         from podcast_engine import _word_count, validate_script
@@ -1399,7 +1722,9 @@ def run_daily_episode(
             if repair:
                 repaired = repair(script, applied["dropped"], stories)
             else:
-                repaired = live_repair_script(script, applied["dropped"], stories, episode_date)
+                repaired = live_repair_script(
+                    script, applied["dropped"], stories, episode_date, recent_intros=recent_intros,
+                )
             charge("fact_check", repaired.get("usage") if isinstance(repaired, dict) else {})
             rewritten = repaired.get("script") if isinstance(repaired, dict) else None
             if rewritten:
@@ -1467,7 +1792,18 @@ def run_daily_episode(
         result["duration_sec"] = (audio or {}).get("duration_sec")
         result["tts_model"] = (audio or {}).get("tts_model") or voice["provider"]
         result["voice_map"] = (audio or {}).get("voice_map") or {"kimi": voice["voice"]}
-        result["chapters"] = chapters_from_stories(stories, result.get("duration_sec") or 0)
+        starts = (audio or {}).get("section_starts") or []
+        if starts:
+            result["chapters"] = chapters_from_section_starts(stories, starts, result.get("duration_sec") or 0)
+        else:
+            result["chapters"] = chapters_from_stories(stories, result.get("duration_sec") or 0)
+        audio_path = (audio or {}).get("path")
+        if audio_path and result.get("chapters"):
+            if write_chapter_id3(Path(audio_path), result["chapters"]):
+                try:
+                    result["audio_bytes"] = Path(audio_path).read_bytes()
+                except OSError:
+                    pass
 
         decision = publish_decision(clock, publish_at, auto_publish=auto_publish)
         result["status"] = decision["status"]
@@ -1538,6 +1874,7 @@ def load_run_context(episode_date: date | None, connect) -> dict:
         "pronunciation": pronunciation_map(),
         "start_local": start_local,
         "publish_local": publish_local,
+        "recent_intros": [],
     }
     if connect is None or not os.environ.get("DATABASE_URL"):
         return ctx
@@ -1595,6 +1932,22 @@ def load_run_context(episode_date: date | None, connect) -> dict:
                 (SHOW_ID,),
             )
             ctx["month_spend"] = float(_cell(cur.fetchone()) or 0)
+            cur.execute(
+                """
+                SELECT script_json->>'intro_style' AS intro_style
+                  FROM analyst_podcast_episodes
+                 WHERE show = %s
+                   AND episode_date IS NOT NULL
+                   AND episode_date < %s
+                   AND COALESCE(script_json->>'intro_style', '') <> ''
+                 ORDER BY episode_date DESC
+                 LIMIT 7
+                """,
+                (SHOW_ID, day),
+            )
+            ctx["recent_intros"] = [
+                row.get("intro_style") for row in (cur.fetchall() or []) if row.get("intro_style")
+            ]
             conn.rollback()
     except Exception as exc:
         print(f"[sogd] context skipped: {exc!s:.180}", flush=True)
@@ -1819,15 +2172,18 @@ def _put_media(result: dict) -> None:
 def _insert_sogd_episode(cur, result: dict) -> None:
     published = result.get("published_at")
     cur.execute(
+        "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS chapters_json TEXT"
+    )
+    cur.execute(
         """
         INSERT INTO analyst_podcast_episodes (
             episode_guid, show, ticker, format, episode_title, script_json,
             media_key, byte_size, duration_sec, audio_local_path,
             audio_dropbox_path, tts_model, voice_map, published_at, cost_usd,
-            episode_date, status, transcript, show_notes
+            episode_date, status, transcript, show_notes, chapters_json
         )
         VALUES (%s, %s, 'SOGD', 'sogd', %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s::jsonb,
-                %s, %s, %s, %s, %s, %s)
+                %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (episode_guid) DO NOTHING
         """,
         (
@@ -1848,6 +2204,7 @@ def _insert_sogd_episode(cur, result: dict) -> None:
             result.get("status"),
             result.get("transcript"),
             result.get("show_notes"),
+            json.dumps(result.get("chapters") or []),
         ),
     )
     cur.execute(
@@ -1919,6 +2276,10 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
             if on_progress:
                 on_progress(stage_name, label, usage)
 
+        extras = {k: v for k, v in kwargs.items() if k not in ("voice", "on_progress", "recent_intros")}
+        recent = kwargs.get("recent_intros")
+        if recent is None:
+            recent = ctx.get("recent_intros") or None
         result = run_daily_episode(
             ctx["episode_date"],
             force=force,
@@ -1933,7 +2294,8 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
             now=ctx["now"],
             pronunciation=ctx["pronunciation"],
             on_progress=_relay,
-            **{k: v for k, v in kwargs.items() if k not in ("voice", "on_progress")},
+            recent_intros=recent,
+            **extras,
         )
         if run_id is not None:
             result["run_id"] = run_id
@@ -1999,7 +2361,7 @@ def pilot_episode() -> dict:
         "episode_type": "full",
         "status": "published",
         "explicit": False,
-        "chapters": resolve_chapters(PILOT_SHOW_NOTES, PILOT_DURATION_SEC),
+        "chapters": resolve_chapters("", PILOT_DURATION_SEC, list(PILOT_CHAPTERS)),
     }
 
 
@@ -2063,6 +2425,9 @@ def import_sogd_pilot(*, path: Path | str | None = None, connect=None, store=Non
             "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS episode_number INTEGER"
         )
         cur.execute(
+            "ALTER TABLE analyst_podcast_episodes ADD COLUMN IF NOT EXISTS chapters_json TEXT"
+        )
+        cur.execute(
             """
             DELETE FROM analyst_podcast_episodes
              WHERE show = %s AND episode_date = %s AND episode_guid <> %s
@@ -2075,14 +2440,16 @@ def import_sogd_pilot(*, path: Path | str | None = None, connect=None, store=Non
                 episode_guid, show, ticker, format, episode_title, script_json,
                 media_key, byte_size, duration_sec, audio_local_path,
                 audio_dropbox_path, tts_model, voice_map, published_at, cost_usd,
-                episode_date, status, transcript, show_notes, summary, episode_number
+                episode_date, status, transcript, show_notes, summary, episode_number,
+                chapters_json
             )
             VALUES (
                 %s, %s, 'SOGD', 'sogd', %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s::jsonb,
-                %s, %s, %s, 'published', %s, %s, %s, %s
+                %s, %s, %s, 'published', %s, %s, %s, %s, %s
             )
             ON CONFLICT (episode_guid) DO UPDATE SET
                 episode_title = EXCLUDED.episode_title,
+                script_json = EXCLUDED.script_json,
                 media_key = EXCLUDED.media_key,
                 byte_size = EXCLUDED.byte_size,
                 duration_sec = EXCLUDED.duration_sec,
@@ -2096,13 +2463,14 @@ def import_sogd_pilot(*, path: Path | str | None = None, connect=None, store=Non
                 transcript = EXCLUDED.transcript,
                 show_notes = EXCLUDED.show_notes,
                 summary = EXCLUDED.summary,
-                episode_number = EXCLUDED.episode_number
+                episode_number = EXCLUDED.episode_number,
+                chapters_json = EXCLUDED.chapters_json
             """,
             (
                 guid,
                 SHOW_ID,
                 PILOT_TITLE,
-                json.dumps({"chapters": resolve_chapters(PILOT_SHOW_NOTES, PILOT_DURATION_SEC)}),
+                json.dumps({"chapters": resolve_chapters("", PILOT_DURATION_SEC, list(PILOT_CHAPTERS))}),
                 media_key,
                 PILOT_BYTE_SIZE,
                 PILOT_DURATION_SEC,
@@ -2117,6 +2485,7 @@ def import_sogd_pilot(*, path: Path | str | None = None, connect=None, store=Non
                 PILOT_SHOW_NOTES,
                 PILOT_DESCRIPTION,
                 PILOT_EPISODE_NUMBER,
+                json.dumps(resolve_chapters("", PILOT_DURATION_SEC, list(PILOT_CHAPTERS))),
             ),
         )
         conn.commit()

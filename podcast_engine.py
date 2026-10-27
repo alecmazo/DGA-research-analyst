@@ -2017,6 +2017,9 @@ def synthesize_episode(
     # Synthesize each turn → AudioSegment
     segs: list[AudioSegment] = []
     prev_section: str | None = None
+    body_cursor = 0
+    section_starts: list[dict] = []
+    seen_sections: set[str] = set()
     for i, (sid, turn) in enumerate(flat, start=1):
         sp = (turn.get("speaker") or "kimi").lower()
         if sp == "opus":
@@ -2048,8 +2051,17 @@ def synthesize_episode(
                 # natural mid-section "let that land" feel
                 if _r.random() < 0.16:
                     gap += 160
-            segs.append(AudioSegment.silent(duration=max(80, gap)))
+            gap_ms = max(80, gap)
+            segs.append(AudioSegment.silent(duration=gap_ms))
+            body_cursor += gap_ms
+        if sid not in seen_sections:
+            section_starts.append({
+                "id": sid,
+                "start_seconds": round(body_cursor / 1000.0, 3),
+            })
+            seen_sections.add(sid)
         segs.append(seg)
+        body_cursor += len(seg)
         prev_section = sid
 
     if on_progress:
@@ -2111,6 +2123,13 @@ def synthesize_episode(
     # Layout:
     #   [intro music] → 350ms gap → [disclaimer] → 500ms gap → [body]
     #               → 400ms gap → [disclaimer outro] → 350ms gap → [outro music]
+    lead_ms = len(intro)
+    if disc_intro_seg is not None:
+        lead_ms += 350 + len(disc_intro_seg)
+    lead_ms += 500
+    lead_sec = lead_ms / 1000.0
+    for row in section_starts:
+        row["start_seconds"] = round(lead_sec + float(row["start_seconds"]), 3)
     parts = [intro]
     if disc_intro_seg is not None:
         parts += [AudioSegment.silent(duration=350), disc_intro_seg]
@@ -2155,6 +2174,7 @@ def synthesize_episode(
         },
         "tts_model":     tts_provider or tts_model,
         "tts_chars":     int(getattr(provider, "chars_used", 0) or 0),
+        "section_starts": section_starts,
         "disclaimer": {
             "intro_used":   disc_intro_seg is not None,
             "outro_used":   disc_outro_seg is not None,

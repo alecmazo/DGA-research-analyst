@@ -14,6 +14,7 @@ from podcast_shows import ALIAS_SHOW, directories_blocked, show_config
 
 ARTWORK_MIN_PX = 1400
 ARTWORK_MAX_PX = 3000
+CHAPTERS_MEDIA_TYPE = "application/json+chapters"
 
 
 class UnknownShow(LookupError):
@@ -118,7 +119,7 @@ def episode_byte_size(episode: dict) -> int:
 
 def chapters_url(show_id: str, guid: str, *, feed_base: str, request_base: str) -> str:
     origin = (feed_base or request_base or "").rstrip("/")
-    return f"{origin}/api/podcast/{show_id}/{quote(guid, safe='')}/chapters.json"
+    return f"{origin}/api/podcast/{show_id}/episodes/{quote(guid, safe='')}/chapters.json"
 
 
 def enclosure_url(show_id: str, guid: str, *, media_base: str, request_base: str) -> str:
@@ -245,6 +246,11 @@ def render_show_feed(
         )
         title = ep.get("title") or ep.get("episode_title") or guid
         desc, notes = _item_bodies(ep)
+        chapter_rows = ep.get("chapters") or []
+        if chapter_rows:
+            from podcast_sogd import with_chapter_prefix
+            desc = with_chapter_prefix(desc, chapter_rows)
+            notes = with_chapter_prefix(notes, chapter_rows)
         pub = _rfc2822(ep.get("published_at") or ep.get("generated_at"))
         duration = _itunes_duration(ep.get("duration_sec"))
         enc = enclosure_url(sid, guid, media_base=media_base, request_base=request_base)
@@ -263,13 +269,12 @@ def render_show_feed(
             f"      <itunes:episode>{episode_no}</itunes:episode>\n" if episode_no else ""
         )
         episode_type = ep.get("episode_type") or "full"
-        chapter_rows = ep.get("chapters") or []
         chapters_tag = ""
         if chapter_rows and guid:
             ch = chapters_url(sid, guid, feed_base=feed_base, request_base=request_base)
             chapters_tag = (
                 f'      <podcast:chapters url="{_xml_escape(ch)}" '
-                'type="application/json+chapters"/>\n'
+                f'type="{CHAPTERS_MEDIA_TYPE}"/>\n'
             )
         items.append(
             "    <item>\n"

@@ -48,6 +48,9 @@ export type PodcastEpisode = {
   cost_usd?: number
   audio_url?: string
   dropbox_path?: string
+  show_notes?: string
+  voice_used?: string
+  chapters?: { title: string; startTime: number; url?: string }[]
 }
 
 export type ScriptTurn = {

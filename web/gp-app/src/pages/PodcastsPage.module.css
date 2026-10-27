@@ -1009,6 +1009,32 @@
   cursor: pointer;
 }
 
+.chapterOn {
+  background: #0b6f8a;
+  color: #fff;
+  border-color: #0b6f8a;
+}
+
+.chapterNav {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chapterNav button {
+  border: 1px solid #c7e8f3;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chapterNav button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .stepHead {
   display: flex;
   gap: 12px;

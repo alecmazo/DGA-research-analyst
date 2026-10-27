@@ -5,6 +5,7 @@ import { Empty, Spinner } from '@/components/ui/Empty'
 import { api, apiBlob } from '@/lib/api'
 import { useAnalysisScene } from '@/hooks/useAnalysisScene'
 import { ScriptRender } from './podcasts/ScriptRender'
+import { ChapterPlayer } from './podcasts/ChapterPlayer'
 import { SogdDaily } from './podcasts/SogdDaily'
 import {
   FORMAT_OPTIONS,
@@ -104,6 +105,8 @@ export function PodcastsPage() {
     title: string
     meta: string
     src: string
+    chapters?: { title: string; startTime: number }[]
+    voiceUsed?: string
   } | null>(null)
   const [rate, setRate] = useState(() => {
     try {
@@ -424,6 +427,9 @@ export function PodcastsPage() {
     if (status?.duration_sec) parts.push(`${Math.round(status.duration_sec)}s`)
     if (status?.cost_usd != null) parts.push(`$${Number(status.cost_usd).toFixed(3)}`)
     if (status?.dropbox_path) parts.push('Dropbox ✓')
+    const listed = episodes.find(
+      (item) => item.ticker === ticker && (item.format || 'debate') === fmt,
+    )
     const audioUrl = status?.audio_url
     setPlayer({
       ticker,
@@ -433,6 +439,8 @@ export function PodcastsPage() {
       src: audioUrl
         ? `${audioUrl}${audioUrl.includes('?') ? '&' : '?'}t=${Date.now()}`
         : `/api/podcast/${encodeURIComponent(ticker)}/audio.mp3?format=${encodeURIComponent(fmt)}&t=${Date.now()}`,
+      chapters: status?.chapters || listed?.chapters || [],
+      voiceUsed: status?.voice_used || listed?.voice_used || '',
     })
   }
 
@@ -1217,12 +1225,11 @@ export function PodcastsPage() {
                   Delete
                 </button>
               </div>
-              <audio
-                ref={audioRef}
-                controls
-                preload="metadata"
+              <ChapterPlayer
+                audioRef={audioRef}
                 src={player.src}
-                style={{ width: '100%' }}
+                chapters={player.chapters}
+                voiceUsed={player.voiceUsed}
                 onLoadedMetadata={() => {
                   if (audioRef.current) audioRef.current.playbackRate = rate
                 }}

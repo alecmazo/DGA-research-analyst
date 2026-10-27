@@ -2,8 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import styles from '../PodcastsPage.module.css'
+import { ChapterPlayer } from './ChapterPlayer'
 
-type VoiceSetting = { provider: string; voice: string; speed?: number; rotate?: boolean }
+type VoiceSetting = {
+  provider: string
+  voice: string
+  speed?: number
+  voice_mode?: string
+  voice_override?: string
+  rotate?: boolean
+}
 type ProviderVoices = { provider: string; voices: string[]; configured?: boolean }
 type DailyRun = {
   id: number
@@ -32,43 +40,21 @@ type DailyStatus = {
   error?: string
 }
 
-type Chapter = { title: string; startTime: number; url?: string }
 type Playable = {
   title?: string | null
   audio_url?: string | null
   episode_guid?: string | null
   generated_at?: string | null
   show_notes?: string | null
-  chapters?: Chapter[] | null
+  voice_used?: string | null
+  chapters?: { title: string; startTime: number; url?: string }[] | null
 }
 
 function EpisodeCard({ ep }: { ep: Playable }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const skip = (start: number) => {
-    const el = audioRef.current
-    if (!el) return
-    el.currentTime = start
-    void el.play()
-  }
   return (
     <article className={styles.sogdEpisode}>
       {ep.title && <h3 className={styles.sogdEpisodeTitle}>{ep.title}</h3>}
-      {ep.audio_url && <audio ref={audioRef} className={styles.sogdAudio} controls src={ep.audio_url} />}
-      {!!ep.chapters?.length && (
-        <div className={styles.sogdChapters}>
-          {ep.chapters.map((chapter) => (
-            <button
-              key={`${chapter.startTime}-${chapter.title}`}
-              type="button"
-              className={styles.sogdChapter}
-              aria-label={`Skip to ${chapter.title}`}
-              onClick={() => skip(chapter.startTime)}
-            >
-              {chapter.title}
-            </button>
-          ))}
-        </div>
-      )}
+      <ChapterPlayer src={ep.audio_url} chapters={ep.chapters} voiceUsed={ep.voice_used} className={styles.sogdAudio} />
       {ep.show_notes && <NoteBody text={ep.show_notes} />}
     </article>
   )
@@ -133,7 +119,8 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
   const [status, setStatus] = useState<DailyStatus | null>(null)
   const [providers, setProviders] = useState<ProviderVoices[]>([])
   const [voice, setVoice] = useState('kepler')
-  const [rotate, setRotate] = useState(false)
+  const [voiceMode, setVoiceMode] = useState<'fixed' | 'rotate'>('fixed')
+  const [holdVoice, setHoldVoice] = useState(false)
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
   const [now, setNow] = useState(() => Date.now())
@@ -149,7 +136,9 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
     const names = xai?.voices || []
     const saved = daily.voice?.provider === 'xai' ? daily.voice.voice : 'kepler'
     setVoice(names.length && saved && !names.includes(saved) ? names[0] : saved || 'kepler')
-    setRotate(!!daily.voice?.rotate)
+    const mode = daily.voice?.voice_mode || (daily.voice?.rotate ? 'rotate' : 'fixed')
+    setVoiceMode(mode === 'rotate' ? 'rotate' : 'fixed')
+    setHoldVoice(!!daily.voice?.voice_override)
   }, [])
 
   useEffect(() => {
@@ -185,7 +174,13 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
     try {
       await api('/api/podcast/systems-over-goals/voice', {
         method: 'PUT',
-        body: JSON.stringify({ provider: 'xai', voice, speed: 1, rotate }),
+        body: JSON.stringify({
+          provider: 'xai',
+          voice,
+          speed: 1,
+          voice_mode: voiceMode,
+          voice_override: voiceMode === 'rotate' && holdVoice ? voice : '',
+        }),
       })
       setNote('Voice saved. The next episode uses it.')
       await load()
@@ -289,14 +284,28 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
           </select>
         </label>
         <label className={styles.field}>
-          <span>Rotate the voice</span>
-          <input
-            type="checkbox"
-            checked={rotate}
-            aria-label="Rotate the voice"
-            onChange={(e) => setRotate(e.target.checked)}
-          />
+          <span>Voice mode</span>
+          <select
+            className={styles.select}
+            aria-label="Voice mode"
+            value={voiceMode}
+            onChange={(e) => setVoiceMode(e.target.value === 'rotate' ? 'rotate' : 'fixed')}
+          >
+            <option value="fixed">Fixed</option>
+            <option value="rotate">Rotate</option>
+          </select>
         </label>
+        {voiceMode === 'rotate' && (
+          <label className={styles.field}>
+            <span>Use the dropdown voice today</span>
+            <input
+              type="checkbox"
+              checked={holdVoice}
+              aria-label="Use the dropdown voice today"
+              onChange={(e) => setHoldVoice(e.target.checked)}
+            />
+          </label>
+        )}
         <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => void preview()}>
           {busy === 'preview' ? 'Playing…' : 'Preview'}
         </Button>
@@ -313,7 +322,7 @@ export function SogdDaily({ episodes }: { episodes: Playable[] }) {
         )}
       </div>
       <audio ref={audioRef} className={styles.sogdAudio} controls />
-      {rotate && status?.voice_today && (
+      {voiceMode === 'rotate' && status?.voice_today && (
         <p className={styles.pcDesc}>Today’s voice is {status.voice_today}.</p>
       )}
       {note && <p className={styles.pcDesc}>{note}</p>}
