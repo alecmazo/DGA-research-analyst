@@ -155,6 +155,24 @@ class PodcastLibraryTests(unittest.TestCase):
             )
         self.assertEqual(store.deleted, [])
 
+    def test_phone_follows_the_desk_and_hitech_opens_quietly(self):
+        phone = (ROOT / "mobile/src/screens/PodcastScreen.js").read_text(encoding="utf-8")
+        engine = (ROOT / "podcast_engine.py").read_text(encoding="utf-8")
+        self.assertNotIn("screenCacheFresh", phone)
+        self.assertIn("setInterval", phone)
+        self.assertIn("8000", phone)
+        self.assertIn("useAppResume", phone)
+        self.assertIn("intro_v4_soft.mp3", engine)
+        self.assertIn("DISCLAIMER_SPEED = 1.45", engine)
+        self.assertIn("HITECH_INTRO_EXTRA_DB = -10.0", engine)
+        self.assertTrue((ROOT / "podcast/stings/intro_v4_soft.mp3").is_file())
+        self.assertTrue((ROOT / "branding/sogd-cover.jpg").is_file())
+        from podcast_feed import _image_info
+        info = _image_info((ROOT / "branding/sogd-cover.jpg").read_bytes())
+        self.assertIsNotNone(info)
+        w, h, rgb = info
+        self.assertEqual((w, h, rgb), (1400, 1400, True))
+
     def test_studio_exposes_the_menu_and_the_drop_target(self):
         player = (ROOT / "web/gp-app/src/pages/podcasts/ChapterPlayer.tsx").read_text(encoding="utf-8")
         page = (ROOT / "web/gp-app/src/pages/PodcastsPage.tsx").read_text(encoding="utf-8")

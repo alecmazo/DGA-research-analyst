@@ -47,16 +47,16 @@ CURSE_WHITELIST = {
 MAX_CURSES_PER_EPISODE = 10  # ui132: bumped from 5 — user wanted more punch
 
 # Intensity → playback speed (used by v1 TTS layer)
-INTENSITY_SPEED = {"calm": 0.95, "normal": 1.0, "heated": 1.10}
+INTENSITY_SPEED = {"calm": 0.94, "normal": 0.98, "heated": 1.02}
 
 # Per-speaker baseline speed offset (multiplied with INTENSITY_SPEED).
 # Lets us brighten/calm individual voices without changing intensity logic.
 #   • Kimi (leo) gets a small lift so the host stays forward.
 SPEAKER_SPEED_OFFSET = {
-    "kimi":    1.06,   # host/narrator
-    "opus":    1.06,   # legacy alias
-    "rock":    1.00,
-    "claudia": 1.00,
+    "kimi":    1.00,   # host/narrator, same pace as the conversation
+    "opus":    1.00,   # legacy alias
+    "rock":    0.98,
+    "claudia": 0.97,
 }
 # Studio clamp. The product of these stays inside the xAI 0.7–1.5 range.
 SPEED_MIN, SPEED_MAX = 0.85, 1.20
@@ -591,8 +591,10 @@ def _system_prompt(format: str = "debate") -> str:
 def _system_prompt_common() -> str:
     """Shared base — cast, tone, cursing, factual guardrails, per-turn rules.
     Format-specific STRUCTURE + OUTPUT shape are appended by _format_addendum()."""
-    return """You are the producer-writer for the DGA HiTech Podcast — a fast-paced \
-investment show. Each episode covers ONE public company unless told otherwise.
+    return """You are the producer-writer for the DGA HiTech Podcast — a personable \
+investment conversation. It should sound like people talking, with the \
+same unhurried cadence as a morning show: room to breathe, then the point. \
+Each episode covers ONE public company unless told otherwise.
 
 CAST (the three speakers, never invent a fourth):
   • Kimi    — HOST / NARRATOR. MALE. Sharp, even-keeled, calls bullshit on either side. \
@@ -614,16 +616,20 @@ occasionally for emphasis on real risk. Speaks American English. \
 Powered by Claude (her research report is the source).
 
 TONE & HUMAN FEEL
-  • Animal Spirits pacing — vary turn lengths constantly. Some long pitches, \
-some 4-word reactions ("That's nuts." / "Show me the cash flow."). \
-Mix it up — never two consecutive turns of similar length.
+  • Cadence is the show. Vary turn lengths. A short reaction, then a slower \
+explanation. Never two turns at the same clip. Write for the ear: \
+contractions, a beat between thoughts, sentences a person would actually say.
+  • Leave audible room. When a point lands, end the turn. Do not rush the \
+next sentence onto the same line. Some turns are a long pitch. Some are \
+four words ("That's nuts." / "Show me the cash flow.").
   • Real human filler is encouraged, sparingly — sprinkle in things like \
 "um", "uh", "y'know", "I mean", "look,", "honestly,", "right,", "hmm". \
 Use these for naturalness, NOT in every turn — maybe 1 in 4. \
 Especially good when a speaker is thinking mid-sentence or pivoting.
   • Interruptions render as a single line ending in em-dash: \
 "Hold on — that math doesn't —" then the other speaker cuts in on the next turn.
-  • Heated mid-episode (valuation + catalysts), calmer at intro + verdict.
+  • The middle can be sharper, but it stays a conversation. Nobody shouts \
+the whole round. The open and the verdict are the calmest.
   • Cursing is allowed and ENCOURAGED for punch — up to 10 instances per \
 episode, only from {damn, damned, hell, shit, shitty, fuck, fucking, \
 fucked, bullshit}. Don't be precious about it — when Rock or Claudia \
@@ -1690,10 +1696,11 @@ from pathlib import Path
 TTS_MODEL_DEFAULT = OPENAI_MODEL_DEFAULT  # gpt-4o-mini-tts; tts-1-hd still accepted
 TTS_FORMAT        = "mp3"
 
-# Pacing (milliseconds)
-GAP_INTRA_SECTION = 220
-GAP_BETWEEN_SECTIONS = 520
-GAP_BEFORE_VERDICT = 850
+# Pacing (milliseconds). Close to a spoken morning show: a breath inside
+# a section, a longer beat between sections, and a pause before the verdict.
+GAP_INTRA_SECTION = 480
+GAP_BETWEEN_SECTIONS = 1100
+GAP_BEFORE_VERDICT = 1400
 
 # Music sting paths (generated on first use, then cached)
 _STING_DIR = Path(__file__).parent / "podcast" / "stings"
@@ -1703,6 +1710,10 @@ _STING_DIR = Path(__file__).parent / "podcast" / "stings"
 # of overpowering it.
 INTRO_STING_PATH = _STING_DIR / "intro_v3_walkbass_5s.mp3"
 OUTRO_STING_PATH = _STING_DIR / "outro_v3_walkbass_5s.mp3"
+# HiTech open: a short, quiet chord. No walking bass.
+HITECH_INTRO_STING_PATH = _STING_DIR / "intro_v4_soft.mp3"
+# Extra drop after the shared music offset, so the lead-in stays under the voice.
+HITECH_INTRO_EXTRA_DB = -10.0
 
 # Music gain offset applied AFTER normalization, so the stings sit
 # perceptually quieter than the dialogue. -7 dB ≈ half the loudness
@@ -1803,6 +1814,27 @@ def _ensure_stings() -> tuple[Path, Path]:
     return INTRO_STING_PATH, OUTRO_STING_PATH
 
 
+def _ensure_hitech_intro() -> Path:
+    """Quiet HiTech lead-in. The committed file is used when it is present."""
+    _STING_DIR.mkdir(parents=True, exist_ok=True)
+    if HITECH_INTRO_STING_PATH.exists():
+        return HITECH_INTRO_STING_PATH
+    from pydub import AudioSegment
+    from pydub.generators import Sine
+
+    def _tone(freq: float, ms: int, gain_db: float) -> AudioSegment:
+        tone = Sine(freq).to_audio_segment(duration=ms)
+        return tone.apply_gain(gain_db).fade_in(min(80, ms // 4)).fade_out(ms // 2)
+
+    intro = AudioSegment.silent(duration=3200)
+    intro = intro.overlay(_tone(392, 2800, -18), position=0)
+    intro = intro.overlay(_tone(494, 2200, -22), position=450)
+    intro = intro.overlay(_tone(587, 1600, -26), position=1000)
+    intro = intro.fade_in(500).fade_out(900)
+    intro.export(HITECH_INTRO_STING_PATH, format="mp3", bitrate="128k")
+    return HITECH_INTRO_STING_PATH
+
+
 def _tts_turn(client, speaker: str, text: str, intensity: str,
               model: str = TTS_MODEL_DEFAULT, *,
               provider_name: str | None = None,
@@ -1875,6 +1907,8 @@ DEFAULT_DISCLAIMER_OUTRO = (
     "investment decisions. Thanks for listening."
 )
 DEFAULT_DISCLAIMER_VOICE = "sal"   # Grok voice, distinct from the default cast
+# Faster than the conversation so the episode itself is the change in pace.
+DISCLAIMER_SPEED = 1.45
 
 # EBU R128 target for spoken-word podcasts. Tests assert this exact string.
 LOUDNORM_FILTER = "loudnorm=I=-16:TP=-1.5:LRA=11"
@@ -2005,7 +2039,12 @@ def synthesize_episode(
         try: on_progress("start", 0, total, "Generating intro music…")
         except Exception: pass
 
-    intro_path, outro_path = _ensure_stings()
+    is_sogd = (script.get("format") or "") == "sogd"
+    if is_sogd:
+        intro_path, outro_path = _ensure_stings()
+    else:
+        intro_path = _ensure_hitech_intro()
+        _, outro_path = _ensure_stings()
     intro = AudioSegment.from_file(intro_path, format="mp3")
     outro = AudioSegment.from_file(outro_path, format="mp3")
     # ui135: level-match stings to dialogue. We first equalize the music
@@ -2080,7 +2119,8 @@ def synthesize_episode(
     body_dbfs  = body.dBFS  if body.dBFS  != float("-inf") else -16.0
     intro_dbfs = intro.dBFS if intro.dBFS != float("-inf") else -16.0
     outro_dbfs = outro.dBFS if outro.dBFS != float("-inf") else -16.0
-    intro = intro.apply_gain((body_dbfs - intro_dbfs) + MUSIC_GAIN_OFFSET_DB)
+    intro_offset = MUSIC_GAIN_OFFSET_DB if is_sogd else (MUSIC_GAIN_OFFSET_DB + HITECH_INTRO_EXTRA_DB)
+    intro = intro.apply_gain((body_dbfs - intro_dbfs) + intro_offset)
     outro = outro.apply_gain((body_dbfs - outro_dbfs) + MUSIC_GAIN_OFFSET_DB)
 
     # Compliance disclaimer (intro + outro) — synth in the neutral
@@ -2100,14 +2140,15 @@ def synthesize_episode(
             if voice.lower() not in allowed and allowed:
                 voice = allowed[0]
             spoken = text.strip()
+            pace = (speed_override or 1.0) if is_sogd else DISCLAIMER_SPEED
             if pronunciation:
                 try:
-                    mp3 = provider.synthesize(spoken, voice, speed_override or 1.0, replacements=pronunciation)
+                    mp3 = provider.synthesize(spoken, voice, pace, replacements=pronunciation)
                 except TypeError:
                     from podcast_tts import apply_pronunciation
-                    mp3 = provider.synthesize(apply_pronunciation(spoken, pronunciation), voice, speed_override or 1.0)
+                    mp3 = provider.synthesize(apply_pronunciation(spoken, pronunciation), voice, pace)
             else:
-                mp3 = provider.synthesize(spoken, voice, speed_override or 1.0)
+                mp3 = provider.synthesize(spoken, voice, pace)
             seg = AudioSegment.from_file(io.BytesIO(mp3), format="mp3")
             # Match dialogue loudness then sit a hair below
             dsf = seg.dBFS if seg.dBFS != float("-inf") else -16.0
@@ -2121,19 +2162,21 @@ def synthesize_episode(
     disc_outro_seg = _synth_disclaimer(disclaimer_outro)
 
     # Layout:
-    #   [intro music] → 350ms gap → [disclaimer] → 500ms gap → [body]
+    #   [intro music] → 350ms gap → [disclaimer] → gap → [body]
     #               → 400ms gap → [disclaimer outro] → 350ms gap → [outro music]
+    # HiTech leaves a little more air after the fast disclaimer.
+    body_gap = 500 if is_sogd else 750
     lead_ms = len(intro)
     if disc_intro_seg is not None:
         lead_ms += 350 + len(disc_intro_seg)
-    lead_ms += 500
+    lead_ms += body_gap
     lead_sec = lead_ms / 1000.0
     for row in section_starts:
         row["start_seconds"] = round(lead_sec + float(row["start_seconds"]), 3)
     parts = [intro]
     if disc_intro_seg is not None:
         parts += [AudioSegment.silent(duration=350), disc_intro_seg]
-    parts += [AudioSegment.silent(duration=500), body]
+    parts += [AudioSegment.silent(duration=body_gap), body]
     if disc_outro_seg is not None:
         parts += [AudioSegment.silent(duration=400), disc_outro_seg]
     parts += [AudioSegment.silent(duration=350), outro]

@@ -10,13 +10,15 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, RefreshControl, Platform, Share, Alert,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { api } from '../api/client';
-import { readScreenCache, writeScreenCache, screenCacheFresh } from '../api/screenCache';
+import { readScreenCache, writeScreenCache } from '../api/screenCache';
+import { useAppResume } from '../hooks/useAppResume';
 import { spacing, radius, shadow, fontSize, letterSpacing, Card, haptics, useTheme } from '../design';
 
 function fmtAgo(iso) {
@@ -139,6 +141,7 @@ const FORMAT_LABEL = {
   roundup: 'Roundup',
   portfolio_roundup: 'Portfolio',
   sogd: 'Daily',
+  manual: 'Uploaded',
 };
 
 function fmtDuration(sec) {
@@ -211,6 +214,7 @@ export default function PodcastScreen() {
   const [lastErr,  setLastErr]  = useState(null);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showId, setShowId] = useState('dga-hitech');
+  const [listReady, setListReady] = useState(false);
 
   // A Daily episode is always ticker SOGD / format sogd. The guid is the
   // only thing that separates Monday from Tuesday.
@@ -285,19 +289,19 @@ export default function PodcastScreen() {
       });
   }, []);
 
-  const loadEpisodes = useCallback(async (force = false) => {
+  const loadEpisodes = useCallback(async () => {
     try {
       setError(null);
       const cached = await readScreenCache('podcasts');
       if (Array.isArray(cached) && cached.length) {
-        setEpisodes(cached);
+        setEpisodes((cur) => (cur.length ? cur : cached));
         setLoading(false);
-        if (!force && screenCacheFresh('podcasts', 120_000)) return;
       }
       const data = await api.listPodcastEpisodes();
       const eps = data.episodes || [];
       setEpisodes(eps);
       writeScreenCache('podcasts', eps);
+      setListReady(true);
     } catch (e) {
       setError(e?.message || 'Failed to load episodes');
     } finally {
@@ -306,9 +310,25 @@ export default function PodcastScreen() {
     }
   }, []);
 
-  useEffect(() => {
+  // The desk can upload or erase while this screen is open. Refresh on
+  // focus, when the app comes back, and every few seconds in between.
+  useFocusEffect(useCallback(() => {
     loadEpisodes();
-  }, [loadEpisodes]);
+    const id = setInterval(() => { loadEpisodes(); }, 8000);
+    return () => clearInterval(id);
+  }, [loadEpisodes]));
+
+  useAppResume(() => { loadEpisodes(); }, { minBackgroundMs: 400 });
+
+  useEffect(() => {
+    if (!listReady || !selectedKey) return;
+    if (episodes.some((ep) => epKey(ep) === selectedKey)) return;
+    try {
+      if (player && typeof player.pause === 'function') player.pause();
+    } catch {}
+    setSelectedKey(null);
+    setAudioUrl(null);
+  }, [episodes, selectedKey, listReady, player]);
 
   const handleSelect = useCallback(async (ep) => {
     const key = epKey(ep);
@@ -424,9 +444,12 @@ export default function PodcastScreen() {
     const isActive = key === selectedKey;
     const daily = isDaily(item);
     const fmt = item.format || 'debate';
+    const uploaded = fmt === 'manual';
     const headline = daily
       ? (item.title || 'Systems Over Goals Daily')
-      : shortTicker(item.ticker);
+      : uploaded
+        ? (item.title || 'Uploaded episode')
+        : shortTicker(item.ticker);
     const detail = daily
       ? null
       : cleanTitle(item.title, item.ticker, item.format);
@@ -490,8 +513,8 @@ export default function PodcastScreen() {
         <Card style={s.playerCard}>
           <Text style={s.playerShow}>{playing ? showTitle(playing) : ''}</Text>
           <Text style={playing && isDaily(playing) ? s.playerDaily : s.playerTicker} numberOfLines={2}>
-            {playing && isDaily(playing)
-              ? (playing.title || 'Systems Over Goals Daily')
+            {playing && (isDaily(playing) || playing.format === 'manual')
+              ? (playing.title || (isDaily(playing) ? 'Systems Over Goals Daily' : 'Uploaded episode'))
               : shortTicker(playing?.ticker || '')}
           </Text>
           <Text style={s.playerTitle} numberOfLines={2}>

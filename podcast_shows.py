@@ -4,8 +4,10 @@ One dict is the source for feed metadata. `podcast:guid` is a UUIDv5 of the
 canonical feed URL (podcastindex namespace) and is not overridable, so a
 host change cannot mint a second show identity.
 
-Directory flags stay off until Alec turns them on. While every directory
-flag is off, the feed carries itunes:block. The feed is still served.
+HiTech stays out of the directories until Alec turns those flags on.
+Systems Over Goals Daily is on for Spotify, Apple, and YouTube. While
+every directory flag is off, the feed carries itunes:block. The feed
+is still served.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ CANONICAL_FEED_ORIGIN = "https://portfolio.dgacapital.com"
 ALIAS_SHOW = "dga-hitech"
 
 OWNER_EMAIL = "alecmazo1@gmail.com"
+SOGD_ARTWORK_URL = "https://portfolio.dgacapital.com/branding/sogd-cover.jpg"
 
 
 def canonical_feed_url(show_id: str) -> str:
@@ -81,6 +84,12 @@ SHOWS: dict[str, dict] = {
         category="News",
         subcategory="Daily News",
     ),
+}
+SHOWS["systems-over-goals"]["artwork_url"] = SOGD_ARTWORK_URL
+SHOWS["systems-over-goals"]["directories"] = {
+    "spotify": {"enabled": True},
+    "apple": {"enabled": True},
+    "youtube": {"enabled": True},
 }
 
 # Existing Railway env names keep working for the HiTech show.

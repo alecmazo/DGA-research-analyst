@@ -842,7 +842,11 @@ export function PodcastsPage() {
               {feedCopied ? 'Copied' : 'Copy feed'}
             </Button>
           </div>
-          <p className={styles.pcDesc}>Spotify off. Apple off.</p>
+          <p className={styles.pcDesc}>
+            {showId === 'systems-over-goals'
+              ? 'Ready for Spotify, Apple, and YouTube.'
+              : 'Spotify off. Apple off.'}
+          </p>
           <div
             className={dropOver ? `${styles.dropZone} ${styles.dropZoneOn}` : styles.dropZone}
             role="button"
