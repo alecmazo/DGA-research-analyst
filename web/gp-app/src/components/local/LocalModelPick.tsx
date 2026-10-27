@@ -158,27 +158,33 @@ export function LocalModelPick({
       </div>
     )
   }
+  const selected = choices.filter((m) => picked.includes(m)).map((m) => shortModelLabel(m))
+  const summary = !selected.length
+    ? 'Choose'
+    : selected.length === 1
+      ? selected[0]
+      : selected.length === choices.length
+        ? 'All'
+        : `${selected[0]} + ${selected.length - 1}`
   return (
-    <div className={styles.wrap}>
+    <div className={styles.menuField}>
       <span className={styles.lbl}>{label}</span>
-      <div className={styles.chips} role="group" aria-label={label}>
-        {choices.map((m) => {
-          const on = picked.includes(m)
-          return (
-            <button
-              key={m}
-              type="button"
-              className={`${styles.chip} ${on ? styles.chipOn : ''}`}
-              aria-pressed={on}
-              title={m}
-              disabled={disabled}
-              onClick={() => onToggle(m)}
-            >
+      <details className={styles.menu}>
+        <summary aria-label={label}>{summary}</summary>
+        <div className={styles.menuList} role="group" aria-label={label}>
+          {choices.map((m) => (
+            <label key={m} title={m}>
+              <input
+                type="checkbox"
+                checked={picked.includes(m)}
+                disabled={disabled}
+                onChange={() => onToggle(m)}
+              />
               {shortModelLabel(m)}
-            </button>
-          )
-        })}
-      </div>
+            </label>
+          ))}
+        </div>
+      </details>
     </div>
   )
 }

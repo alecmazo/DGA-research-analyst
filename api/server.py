@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui788-20261027-sogd-skip"
+WEB_BUILD_VERSION = "ui789-20261027-research-menus"
 
 
 @app.get("/api/build")

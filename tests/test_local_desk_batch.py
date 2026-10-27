@@ -9,7 +9,12 @@ def test_desk_batch_is_one_company_then_the_next():
     page = (ROOT / "web/gp-app/src/pages/LocalPage.tsx").read_text(encoding="utf-8")
     assert "Run desk reports" in page
     assert "Resume desk reports" in page
+    assert "Run local analysis" in page
+    assert 'aria-label="Research runs"' in page
     assert "Stop after this company" in page
+    pick = (ROOT / "web/gp-app/src/components/local/LocalModelPick.tsx").read_text(encoding="utf-8")
+    assert 'type="checkbox"' in pick
+    assert "aria-pressed" not in pick
     assert "Resume cutoff" in page
     assert "DEFAULT_RESUME_HOURS" in page
     batch = page.split("const runTickerQueue", 1)[1].split("const runDeskReports", 1)[0]

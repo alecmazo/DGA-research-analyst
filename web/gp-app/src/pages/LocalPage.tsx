@@ -76,6 +76,7 @@ export function LocalPage() {
   const [batching, setBatching] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [resumeHours, setResumeHours] = useState(DEFAULT_RESUME_HOURS)
+  const [runOpen, setRunOpen] = useState(false)
   const stopDesk = useRef(false)
   const [progress, setProgress] = useState('')
   const [runErr, setRunErr] = useState<string | null>(null)
@@ -586,31 +587,21 @@ export function LocalPage() {
 
       <section className={`${styles.card} ${styles.tight}`}>
         <h2>Research</h2>
-        <LocalModelPick
-          label="Models"
-          multiple
-          choices={researchModels.choices}
-          picked={researchModels.picked}
-          disabled={running}
-          onToggle={researchModels.toggle}
-        />
         <div className={styles.row}>
+          <LocalModelPick
+            label="Models"
+            multiple
+            choices={researchModels.choices}
+            picked={researchModels.picked}
+            disabled={running}
+            onToggle={researchModels.toggle}
+          />
           <input
             value={ticker}
             onChange={(e) => setTicker(e.target.value.toUpperCase())}
             aria-label="Ticker"
             disabled={running}
           />
-          <Button size="sm" variant="primary" disabled={running || !online} onClick={() => void runResearch()}>
-            {running && !batching ? 'Running…' : 'Run local analysis'}
-          </Button>
-          <Button
-            size="sm"
-            disabled={(!online && !batching) || (running && !batching) || stopping}
-            onClick={() => (batching ? requestStop() : void runDeskReports())}
-          >
-            {stopping ? 'Stopping…' : batching ? 'Stop after this company' : 'Run desk reports'}
-          </Button>
           <label className={styles.cutoff}>
             <span>Cutoff</span>
             <select
@@ -626,13 +617,54 @@ export function LocalPage() {
               ))}
             </select>
           </label>
-          <Button
-            size="sm"
-            disabled={!online || running || stopping}
-            onClick={() => void resumeDeskReports()}
-          >
-            Resume desk reports
-          </Button>
+          {batching ? (
+            <Button size="sm" disabled={stopping} onClick={() => requestStop()}>
+              {stopping ? 'Stopping…' : 'Stop after this company'}
+            </Button>
+          ) : (
+            <details
+              className={styles.runMenu}
+              open={runOpen}
+              onToggle={(e) => setRunOpen((e.currentTarget as HTMLDetailsElement).open)}
+            >
+              <summary>Run</summary>
+              <div className={styles.runList} role="menu" aria-label="Research runs">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={running || !online}
+                  onClick={() => {
+                    setRunOpen(false)
+                    void runResearch()
+                  }}
+                >
+                  {running ? 'Running…' : 'Run local analysis'}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!online || running || stopping}
+                  onClick={() => {
+                    setRunOpen(false)
+                    void runDeskReports()
+                  }}
+                >
+                  Run desk reports
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!online || running || stopping}
+                  onClick={() => {
+                    setRunOpen(false)
+                    void resumeDeskReports()
+                  }}
+                >
+                  Resume desk reports
+                </button>
+              </div>
+            </details>
+          )}
         </div>
         <p className={styles.meta}>
           Run desk reports uses the companies on the desk saved-reports list, one company at a time.
