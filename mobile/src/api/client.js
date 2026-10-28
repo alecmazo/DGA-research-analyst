@@ -248,6 +248,25 @@ export const api = {
     return r.json();
   },
 
+  // Remove one episode from the feed and delete its audio. GP session only.
+  erasePodcastEpisode: async (show, guid) => {
+    const r = await v2Fetch(
+      `/api/podcast/${encodeURIComponent(show)}/episodes/${encodeURIComponent(guid)}`,
+      { method: 'DELETE' },
+    );
+    if (r.status === 401) throw new Error('Sign in again with your email and password.');
+    if (r.status === 403) throw new Error('Only a GP account can erase an episode.');
+    if (!r.ok) {
+      let detail = '';
+      try {
+        const body = await r.json();
+        detail = body.detail || body.error || '';
+      } catch { /* keep the status */ }
+      throw new Error(detail || `Erase failed (${r.status})`);
+    }
+    return r.json();
+  },
+
   // ---------- 🤖 AI Analyst (agentic) ----------
   // Claude runs a tool-use loop over platform data (quotes, saved reports,
   // SEC financials, news, YTD) and answers with cited numbers. GP-only —

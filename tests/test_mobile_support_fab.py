@@ -74,7 +74,7 @@ def test_ota_cold_start_never_reloads():
     settings = (ROOT / "mobile" / "src" / "screens" / "SettingsScreen.js").read_text(
         encoding="utf-8"
     )
-    assert "APP_BUILD = 'mobile-ui33-podcast-shows-20261026'" in settings
+    assert "APP_BUILD = 'mobile-ui35-podcast-erase-20261028'" in settings
 
 
 def test_gp_tabs_split_markets_and_watchlist():

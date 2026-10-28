@@ -5,10 +5,11 @@
  * morning episode. Each row plays its own public MP3 (`audio_url`),
  * because every Daily episode shares the ticker SOGD.
  */
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, RefreshControl, Platform, Share, Alert,
+  Animated, PanResponder,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +17,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { api } from '../api/client';
+import { api, getV2User } from '../api/client';
 import { readScreenCache, writeScreenCache } from '../api/screenCache';
 import { useAppResume } from '../hooks/useAppResume';
 import { spacing, radius, shadow, fontSize, letterSpacing, Card, haptics, useTheme } from '../design';
@@ -197,6 +198,70 @@ function cleanTitle(title, ticker, format) {
   return t;
 }
 
+const ERASE_W = 96;
+
+function SwipeEraseRow({ enabled, onErase, actionStyle, actionTextStyle, children }) {
+  const tx = useRef(new Animated.Value(0)).current;
+  const open = useRef(false);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+
+  const snap = (to) => {
+    open.current = to < 0;
+    Animated.spring(tx, {
+      toValue: to,
+      useNativeDriver: true,
+      speed: 24,
+      bounciness: 0,
+    }).start();
+  };
+
+  const claimSwipe = (_, g) => (
+    enabledRef.current
+    && g.dx < -8
+    && Math.abs(g.dx) > 14
+    && Math.abs(g.dx) > Math.abs(g.dy) * 1.4
+  );
+  const pan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponderCapture: claimSwipe,
+    onMoveShouldSetPanResponder: claimSwipe,
+    onPanResponderMove: (_, g) => {
+      if (!enabledRef.current) return;
+      const base = open.current ? -ERASE_W : 0;
+      tx.setValue(Math.max(-ERASE_W - 16, Math.min(0, base + g.dx)));
+    },
+    onPanResponderRelease: (_, g) => {
+      const base = open.current ? -ERASE_W : 0;
+      const next = base + g.dx;
+      if (g.vx < -0.55 || next < -ERASE_W * 0.45) snap(-ERASE_W);
+      else snap(0);
+    },
+    onPanResponderTerminate: () => snap(0),
+  })).current;
+
+  return (
+    <View style={{ overflow: 'hidden' }}>
+      {enabled ? (
+        <TouchableOpacity
+          onPress={() => { snap(0); onErase(); }}
+          style={actionStyle}
+          accessibilityRole="button"
+          accessibilityLabel="Erase episode"
+        >
+          <MaterialCommunityIcons name="trash-can-outline" size={18} color="#ffffff" />
+          <Text style={actionTextStyle}>Erase</Text>
+        </TouchableOpacity>
+      ) : null}
+      <Animated.View
+        style={{ transform: [{ translateX: tx }] }}
+        {...(enabled ? pan.panHandlers : {})}
+      >
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function PodcastScreen() {
   const insets = useSafeAreaInsets();
   const { theme: t } = useTheme();
@@ -215,6 +280,8 @@ export default function PodcastScreen() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showId, setShowId] = useState('dga-hitech');
   const [listReady, setListReady] = useState(false);
+  const [canErase, setCanErase] = useState(false);
+  const erasedRef = useRef(new Set());
 
   // A Daily episode is always ticker SOGD / format sogd. The guid is the
   // only thing that separates Monday from Tuesday.
@@ -246,6 +313,12 @@ export default function PodcastScreen() {
         if (SHOWS.some((show) => show.id === v)) setShowId(v);
       })
       .catch(() => {});
+    getV2User()
+      .then((user) => {
+        const role = user?.role;
+        setCanErase(role === 'gp' || role === 'admin');
+      })
+      .catch(() => setCanErase(false));
   }, []);
 
   // ── Apply rate to player whenever it changes (or audio reloads) ──
@@ -294,11 +367,14 @@ export default function PodcastScreen() {
       setError(null);
       const cached = await readScreenCache('podcasts');
       if (Array.isArray(cached) && cached.length) {
-        setEpisodes((cur) => (cur.length ? cur : cached));
+        const kept = cached.filter((ep) => !erasedRef.current.has(ep.episode_guid));
+        setEpisodes((cur) => (cur.length ? cur : kept));
         setLoading(false);
       }
       const data = await api.listPodcastEpisodes();
-      const eps = data.episodes || [];
+      const eps = (data.episodes || []).filter(
+        (ep) => !erasedRef.current.has(ep.episode_guid),
+      );
       setEpisodes(eps);
       writeScreenCache('podcasts', eps);
       setListReady(true);
@@ -363,6 +439,49 @@ export default function PodcastScreen() {
       setLastErr(`play: ${e?.message || e}`);
     }
   }, [selectedKey, player, status, episodes]);
+
+  const runErase = useCallback(async (ep) => {
+    const guid = ep?.episode_guid;
+    if (!guid) return;
+    erasedRef.current.add(guid);
+    setEpisodes((prev) => {
+      const next = prev.filter((row) => row.episode_guid !== guid);
+      writeScreenCache('podcasts', next);
+      return next;
+    });
+    if (epKey(ep) === selectedKey) {
+      try {
+        if (player && typeof player.pause === 'function') player.pause();
+      } catch {}
+      setSelectedKey(null);
+      setAudioUrl(null);
+    }
+    try {
+      await api.erasePodcastEpisode(showOf(ep), guid);
+    } catch (e) {
+      erasedRef.current.delete(guid);
+      Alert.alert('Erase failed', String(e?.message || e));
+      loadEpisodes();
+    }
+  }, [player, selectedKey, loadEpisodes]);
+
+  const confirmErase = useCallback((ep) => {
+    if (!ep?.episode_guid) {
+      Alert.alert('Cannot erase', 'Pull to refresh, then try this episode again.');
+      return;
+    }
+    const name = isDaily(ep)
+      ? (ep.title || 'Systems Over Goals Daily')
+      : (shortTicker(ep.ticker) || ep.title || 'This episode');
+    Alert.alert(
+      'Erase episode',
+      `Erase ${name}? It leaves the feed and the audio is deleted.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        { text: 'Erase', style: 'destructive', onPress: () => { void runErase(ep); } },
+      ],
+    );
+  }, [runErase]);
 
   const handleSeek = useCallback((deltaSec) => {
     try { haptics.light(); } catch {}
@@ -453,7 +572,7 @@ export default function PodcastScreen() {
     const detail = daily
       ? null
       : cleanTitle(item.title, item.ticker, item.format);
-    return (
+    const row = (
       <TouchableOpacity
         onPress={() => handleSelect(item)}
         activeOpacity={0.7}
@@ -484,6 +603,16 @@ export default function PodcastScreen() {
         </View>
       </TouchableOpacity>
     );
+    return (
+      <SwipeEraseRow
+        enabled={canErase && !!item.episode_guid}
+        onErase={() => confirmErase(item)}
+        actionStyle={s.eraseAction}
+        actionTextStyle={s.eraseActionTxt}
+      >
+        {row}
+      </SwipeEraseRow>
+    );
   };
 
   return (
@@ -507,6 +636,9 @@ export default function PodcastScreen() {
             );
           })}
         </View>
+        {canErase ? (
+          <Text style={s.eraseHint}>Swipe an episode left to erase it.</Text>
+        ) : null}
       </View>
 
       {selectedKey ? (
@@ -656,6 +788,28 @@ function makeStyles(t) {
   showBtnOn: { backgroundColor: t.chromeNavy },
   showBtnTxt: { color: t.textSecondary, fontSize: fontSize.small, fontWeight: '700' },
   showBtnTxtOn: { color: t.onChrome },
+  eraseHint: {
+    color: t.textSecondary,
+    fontSize: fontSize.caption,
+    marginTop: spacing.sm,
+  },
+  eraseAction: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: ERASE_W,
+    backgroundColor: t.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  eraseActionTxt: {
+    color: '#ffffff',
+    fontSize: fontSize.caption,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
   playerShow: {
     color: '#84CCE3',
     fontSize: 11,
