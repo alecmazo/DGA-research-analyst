@@ -2049,6 +2049,59 @@ def apply_loudnorm(src: Path, dst: Path, *, title: str = "", artist: str = "") -
     return dst.is_file() and dst.stat().st_size > 0
 
 
+def show_assembly(fmt: str | None) -> dict:
+    """How a show opens and closes. One record, read by the shared assembler.
+
+    Systems Over Goals Daily starts on the host, like the v4 pilot: no intro
+    sting, no intro disclaimer, no music bed. The spoken disclaimer stays at
+    the close. DGA HiTech keeps the sting and both disclaimers.
+    """
+    if (fmt or "").lower() == "sogd":
+        return {
+            "format": "sogd",
+            "intro_sting": False,
+            "outro_sting": False,
+            "intro_disclaimer": False,
+            "outro_disclaimer": True,
+            "open_on_voice": True,
+        }
+    return {
+        "format": (fmt or "debate").lower(),
+        "intro_sting": True,
+        "outro_sting": True,
+        "intro_disclaimer": True,
+        "outro_disclaimer": True,
+        "open_on_voice": False,
+    }
+
+
+def assembly_timeline(fmt: str | None) -> list[str]:
+    """Part order for one show. The first SOGD part is the host."""
+    asm = show_assembly(fmt)
+    parts: list[str] = []
+    if asm["intro_sting"]:
+        parts.append("intro_sting")
+    if asm["intro_disclaimer"]:
+        parts.append("intro_disclaimer")
+    parts.append("voice")
+    if asm["outro_disclaimer"]:
+        parts.append("outro_disclaimer")
+    if asm["outro_sting"]:
+        parts.append("outro_sting")
+    return parts
+
+
+def assembly_lead_ms(asm: dict, *, intro_ms: int = 0, disc_intro_ms: int = 0, body_gap_ms: int = 0) -> int:
+    """Silence and bumper before the host. SOGD is 0, so chapter 1 starts at 0."""
+    if asm.get("open_on_voice"):
+        return 0
+    lead = int(intro_ms) if asm.get("intro_sting") else 0
+    if asm.get("intro_disclaimer") and disc_intro_ms:
+        lead += 350 + int(disc_intro_ms)
+    lead += int(body_gap_ms)
+    return lead
+
+
 def synthesize_episode(
     script: dict[str, Any],
     *,
@@ -2101,14 +2154,21 @@ def synthesize_episode(
         try: on_progress("start", 0, total, "Generating intro music…")
         except Exception: pass
 
-    is_sogd = (script.get("format") or "") == "sogd"
-    if is_sogd:
-        intro_path, outro_path = _ensure_stings()
-    else:
-        intro_path = _ensure_hitech_intro()
-        _, outro_path = _ensure_stings()
-    intro = AudioSegment.from_file(intro_path, format="mp3")
-    outro = AudioSegment.from_file(outro_path, format="mp3")
+    fmt_name = (script.get("format") or "debate").lower()
+    asm = show_assembly(fmt_name)
+    is_sogd = asm["format"] == "sogd"
+    intro = None
+    outro = None
+    if asm["intro_sting"] or asm["outro_sting"]:
+        if is_sogd:
+            intro_path, outro_path = _ensure_stings()
+        else:
+            intro_path = _ensure_hitech_intro()
+            _, outro_path = _ensure_stings()
+        if asm["intro_sting"]:
+            intro = AudioSegment.from_file(intro_path, format="mp3")
+        if asm["outro_sting"]:
+            outro = AudioSegment.from_file(outro_path, format="mp3")
     # ui135: level-match stings to dialogue. We first equalize the music
     # to the dialogue's perceived loudness (so episodes don't ship with
     # one being noticeably louder than the other), THEN apply a fixed
@@ -2180,11 +2240,13 @@ def synthesize_episode(
     # (closer to 0 = louder); we shift the music to match the body's dBFS then
     # apply the offset.
     body_dbfs  = body.dBFS  if body.dBFS  != float("-inf") else -16.0
-    intro_dbfs = intro.dBFS if intro.dBFS != float("-inf") else -16.0
-    outro_dbfs = outro.dBFS if outro.dBFS != float("-inf") else -16.0
-    intro_offset = MUSIC_GAIN_OFFSET_DB if is_sogd else (MUSIC_GAIN_OFFSET_DB + HITECH_INTRO_EXTRA_DB)
-    intro = intro.apply_gain((body_dbfs - intro_dbfs) + intro_offset)
-    outro = outro.apply_gain((body_dbfs - outro_dbfs) + MUSIC_GAIN_OFFSET_DB)
+    if intro is not None:
+        intro_dbfs = intro.dBFS if intro.dBFS != float("-inf") else -16.0
+        intro_offset = MUSIC_GAIN_OFFSET_DB if is_sogd else (MUSIC_GAIN_OFFSET_DB + HITECH_INTRO_EXTRA_DB)
+        intro = intro.apply_gain((body_dbfs - intro_dbfs) + intro_offset)
+    if outro is not None:
+        outro_dbfs = outro.dBFS if outro.dBFS != float("-inf") else -16.0
+        outro = outro.apply_gain((body_dbfs - outro_dbfs) + MUSIC_GAIN_OFFSET_DB)
 
     # Compliance disclaimer (intro + outro) — synth in the neutral
     # disclaimer voice, normalize to body loudness, drop a touch below
@@ -2229,29 +2291,35 @@ def synthesize_episode(
             print(f"⚠️ disclaimer TTS failed: {_e!s:.150}", flush=True)
             return None
 
-    disc_intro_seg = _synth_disclaimer(disclaimer_intro)
-    disc_outro_seg = _synth_disclaimer(disclaimer_outro)
+    disc_intro_seg = _synth_disclaimer(disclaimer_intro) if asm["intro_disclaimer"] else None
+    disc_outro_seg = _synth_disclaimer(disclaimer_outro) if asm["outro_disclaimer"] else None
 
-    # Layout:
-    #   [intro music] → 350ms gap → [disclaimer] → gap → [body]
-    #               → 400ms gap → [disclaimer outro] → 350ms gap → [outro music]
-    # HiTech leaves a little more air after the fast disclaimer.
-    body_gap = 500 if is_sogd else 750
-    lead_ms = len(intro)
-    if disc_intro_seg is not None:
-        lead_ms += 350 + len(disc_intro_seg)
-    lead_ms += body_gap
+    # HiTech: [intro music] → 350ms → [disclaimer] → gap → [body]
+    #          → 400ms → [disclaimer outro] → 350ms → [outro music]
+    # SOGD: the host is first. No sting, no intro disclaimer. The spoken
+    # disclaimer is only after the episode. Chapter times are not shifted.
+    body_gap = 0 if asm["open_on_voice"] else (500 if is_sogd else 750)
+    lead_ms = assembly_lead_ms(
+        asm,
+        intro_ms=len(intro) if intro is not None else 0,
+        disc_intro_ms=len(disc_intro_seg) if disc_intro_seg is not None else 0,
+        body_gap_ms=body_gap,
+    )
     lead_sec = lead_ms / 1000.0
     for row in section_starts:
         row["start_seconds"] = round(lead_sec + float(row["start_seconds"]), 3)
-    parts = [intro]
-    if disc_intro_seg is not None:
-        parts += [AudioSegment.silent(duration=350), disc_intro_seg]
-    parts += [AudioSegment.silent(duration=body_gap), body]
+    if asm["open_on_voice"]:
+        parts = [body]
+    else:
+        parts = [intro]
+        if disc_intro_seg is not None:
+            parts += [AudioSegment.silent(duration=350), disc_intro_seg]
+        parts += [AudioSegment.silent(duration=body_gap), body]
     if disc_outro_seg is not None:
         parts += [AudioSegment.silent(duration=400), disc_outro_seg]
-    parts += [AudioSegment.silent(duration=350), outro]
-    full = sum(parts[1:], parts[0])
+    if outro is not None:
+        parts += [AudioSegment.silent(duration=350), outro]
+    full = parts[0] if len(parts) == 1 else sum(parts[1:], parts[0])
     # Final mastering normalize — gentle (headroom 1.0 dB) so the level-match
     # we just did isn't undone by an aggressive normalize on the full mix.
     full = full.normalize(headroom=1.0)
@@ -2293,8 +2361,8 @@ def synthesize_episode(
             "intro_used":   disc_intro_seg is not None,
             "outro_used":   disc_outro_seg is not None,
             "voice":        disclaimer_voice,
-            "intro_text":   disclaimer_intro or "",
-            "outro_text":   disclaimer_outro or "",
+            "intro_text":   (disclaimer_intro or "") if disc_intro_seg is not None else "",
+            "outro_text":   (disclaimer_outro or "") if disc_outro_seg is not None else "",
         },
     }
 

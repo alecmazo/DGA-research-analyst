@@ -333,6 +333,41 @@ class SogdResumeTests(unittest.TestCase):
         engine = (ROOT / "podcast_sogd.py").read_text(encoding="utf-8")
         self.assertIn("COALESCE(status, '') <> 'failed'", engine)
 
+    def test_sogd_opens_on_the_host_and_hitech_keeps_the_bumper(self):
+        from podcast_engine import (
+            DEFAULT_DISCLAIMER_INTRO,
+            DEFAULT_DISCLAIMER_OUTRO,
+            assembly_lead_ms,
+            assembly_timeline,
+            show_assembly,
+        )
+        from podcast_sogd import SOGD_STYLE, plan_tts_chunks, writer_instructions
+        sogd = assembly_timeline("sogd")
+        hitech = assembly_timeline("debate")
+        self.assertEqual(sogd[0], "voice")
+        self.assertNotIn("intro_sting", sogd)
+        self.assertNotIn("intro_disclaimer", sogd)
+        self.assertNotIn("outro_sting", sogd)
+        self.assertIn("outro_disclaimer", sogd)
+        self.assertEqual(hitech[0], "intro_sting")
+        self.assertIn("intro_disclaimer", hitech)
+        self.assertIn("outro_sting", hitech)
+        self.assertTrue(show_assembly("sogd")["open_on_voice"])
+        self.assertFalse(show_assembly("debate")["open_on_voice"])
+        self.assertEqual(assembly_lead_ms(show_assembly("sogd"), intro_ms=5000, disc_intro_ms=8000, body_gap_ms=500), 0)
+        hitech_lead = assembly_lead_ms(show_assembly("debate"), intro_ms=3200, disc_intro_ms=4000, body_gap_ms=750)
+        self.assertEqual(hitech_lead, 3200 + 350 + 4000 + 750)
+        script = _style_script(20)
+        chunks = plan_tts_chunks(script, {"voice": "kepler", "speed": 1.0}, {})
+        spoken = [row["text"] for row in chunks]
+        self.assertNotIn(DEFAULT_DISCLAIMER_INTRO, spoken)
+        self.assertIn(DEFAULT_DISCLAIMER_OUTRO, spoken)
+        self.assertEqual(SOGD_STYLE["opening_speed"], 0.97)
+        self.assertEqual(SOGD_STYLE["voice"], "kepler")
+        prompt = writer_instructions(date(2026, 10, 28), None, 3700, 4400)
+        self.assertIn("person talking to a friend", prompt)
+        self.assertIn("Do not wrap the opening in <slow>", prompt)
+
     def test_trim_keeps_pause_tags(self):
         from podcast_sogd import trim_section_words
         section = {
