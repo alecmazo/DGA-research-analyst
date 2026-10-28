@@ -120,6 +120,9 @@ def style_prompt() -> str:
         "or a quick preview (show name and date, then the topics). "
         "Explain the show on at most two days a week. Use the intro style named for today. "
         "No AI disclosure at the top. "
+        "The cold open is a person talking to a friend: short sentences, contractions, "
+        "a couple of [pause] tags where you would actually breathe. "
+        "Do not wrap the opening in <slow> or <soft>. Do not stack tags on the first line. "
         "Close: a short zoom-out on the day's pattern. Vary the sign-off wording. "
         "The AI-narration disclosure and the not-investment-advice line go only at the close. "
         "Never name Scott Adams or Dilbert. "
@@ -158,10 +161,11 @@ def pilot_shape_example() -> str:
     return (
         "Shape example from the approved Oct 27 v4 pilot. Match this cadence and these tags. "
         "Do not reuse its facts, names, numbers, or dates.\n"
-        "COLD OPEN: Good morning. [pause] It's Tuesday, October twenty-seventh, and you're "
-        "listening to Systems Over Goals Daily. A short how-this-works only on the days the "
-        "intro style asks for it, then one short preview line per story, then into the first story. "
-        "No AI disclosure here.\n"
+        "COLD OPEN, spoken at the normal voice speed, not slowed down and not wrapped in <slow>: "
+        "Good morning. [pause] It's Tuesday, and you're listening to Systems Over Goals Daily. "
+        "So, here's the deal with this show. Most news gives you twenty headlines in twenty minutes, "
+        "right? [pause] I know I can't. Then one short preview line per story. "
+        "No disclaimer and no music before this. No AI disclosure here.\n"
         "STORY: [long-pause] Story one. [pause] What happened, with two or three named sources. "
         "[pause] Who says what. [pause] Now the other side. [pause] Follow the money. Who wins if "
         "you believe this? [pause] So why does this matter to you? [pause] Quick recap before we "
@@ -862,8 +866,11 @@ def reconcile_saved_script(script: dict) -> dict:
 
 
 def plan_tts_chunks(script: dict, voice: dict | None, pronunciation: dict | None) -> list[dict]:
-    """The paid TTS calls for this script, in order, including the two disclaimers."""
-    from podcast_engine import DEFAULT_DISCLAIMER_INTRO, DEFAULT_DISCLAIMER_OUTRO, tts_chunk_key
+    """Paid TTS calls for this script. The intro disclaimer is not one of them.
+
+    The close still gets the spoken outro disclaimer. The host opens the file.
+    """
+    from podcast_engine import DEFAULT_DISCLAIMER_OUTRO, show_assembly, tts_chunk_key
     voice_name = ((voice or {}).get("voice") or SOGD_STYLE["voice"]).lower()
     speed = float((voice or {}).get("speed") or 1.0)
     rows = []
@@ -883,8 +890,9 @@ def plan_tts_chunks(script: dict, voice: dict | None, pronunciation: dict | None
     for sec in (script or {}).get("sections") or []:
         for turn in sec.get("turns") or []:
             add(turn.get("text") or "", "turn")
-    add(DEFAULT_DISCLAIMER_INTRO, "disclaimer")
-    add(DEFAULT_DISCLAIMER_OUTRO, "disclaimer")
+    asm = show_assembly((script or {}).get("format") or "sogd")
+    if asm["outro_disclaimer"]:
+        add(DEFAULT_DISCLAIMER_OUTRO, "disclaimer")
     return rows
 
 
