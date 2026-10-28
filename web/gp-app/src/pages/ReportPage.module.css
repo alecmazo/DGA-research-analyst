@@ -232,6 +232,42 @@
   color: #fff;
 }
 
+.timelineHint {
+  font-size: 11px;
+  color: var(--text-tertiary, #64748b);
+  margin: -2px 0 8px;
+}
+
+.versionMenu {
+  position: fixed;
+  z-index: 40;
+  min-width: 148px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+}
+
+.versionMenuItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: #b91c1c;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.versionMenuItem:hover {
+  background: #fef2f2;
+}
+
 .actions {
   display: flex;
   gap: 8px;

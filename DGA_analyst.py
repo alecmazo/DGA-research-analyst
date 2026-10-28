@@ -13445,6 +13445,47 @@ def _dropbox_purge_xlsx_copies(dbx, dest: str, canonical_name: str) -> list[str]
     return removed
 
 
+def report_artifact_names(ticker: str, provider: str) -> list[str]:
+    """Files that belong to one engine's current report, not its older snapshots."""
+    tk = (ticker or "").strip().upper()
+    prov = (provider or "grok").lower().strip()
+    suffix = "" if prov == "grok" else f"_{prov}"
+    names = [
+        f"{tk}_DGA_Report{suffix}.md",
+        f"{tk}_DGA_Report{suffix}.docx",
+    ]
+    if prov == "grok":
+        names.append(f"{tk}_DGA_Presentation.pptx")
+    elif prov == "local":
+        names.append(f"{tk}_DGA_Presentation_local.pptx")
+    return names
+
+
+def remove_from_dropbox(file_names: list[str]) -> dict:
+    """Delete the named report files from their Dropbox folders.
+
+    A missing file is success. Other engines' files are not touched because
+    the caller passes only this version's names.
+    """
+    dbx = _dropbox_client()
+    if dbx is None:
+        return {"ok": False, "skipped": True, "removed": [], "errors": []}
+    removed: list[str] = []
+    errors: list[str] = []
+    for name in file_names:
+        dest = _dropbox_dest_for(name)
+        try:
+            dbx.files_delete_v2(dest)
+            removed.append(name)
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc).lower()
+            if "not_found" in msg or "not found" in msg:
+                continue
+            print(f"[dropbox] delete {name}: {exc!s:.160}", flush=True)
+            errors.append(f"{name}: {exc}")
+    return {"ok": not errors, "removed": removed, "errors": errors}
+
+
 def push_to_dropbox(file_paths: list[Path | str], *, dest_subfolder: str | None = None) -> dict:
     """Upload files to the Dropbox 'DGA Research Reports' folder.
 

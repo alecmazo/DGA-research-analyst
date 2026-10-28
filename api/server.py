@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui796-20261028-rerun-swipe"
+WEB_BUILD_VERSION = "ui797-20261028-delete-version"
 
 
 @app.get("/api/build")
@@ -11403,6 +11403,206 @@ def report_version_get(ticker: str, version_id: str, request: Request = None):
         "upside_pct": float(r[7]) if r[7] is not None else None,
         "delta_to_next": dtn,
         "is_current": False,
+    }
+
+
+_VERSION_CLEAR_COLUMNS = {
+    "grok": (
+        "report_md", "rating", "price_target", "upside_pct", "report_date",
+        "gamma_url",
+    ),
+    "claude": (
+        "report_md_claude", "claude_generated_at", "claude_rating",
+        "claude_price_target", "claude_upside_pct", "claude_report_date",
+    ),
+    "kimi": (
+        "report_md_kimi", "kimi_generated_at", "kimi_rating",
+        "kimi_price_target", "kimi_upside_pct", "kimi_report_date",
+    ),
+    "deepseek": (
+        "report_md_deepseek", "deepseek_generated_at", "deepseek_rating",
+        "deepseek_price_target", "deepseek_upside_pct", "deepseek_report_date",
+    ),
+    "local": (
+        "report_md_local", "local_generated_at", "local_rating",
+        "local_price_target", "local_upside_pct", "local_report_date",
+        "local_gamma_url",
+    ),
+}
+
+
+def _drop_provider_delta(existing, provider: str) -> dict:
+    """Remove one engine from the per-provider delta map. Other engines stay."""
+    import json as _json
+    if isinstance(existing, str):
+        try:
+            existing = _json.loads(existing)
+        except Exception:
+            return {}
+    if not isinstance(existing, dict):
+        return {}
+    if "rating" in existing or "price_target" in existing or "rating_changed" in existing:
+        return {} if provider == "grok" else {"grok": existing}
+    out = dict(existing)
+    out.pop(provider, None)
+    return out
+
+
+def _forget_report_memory(ticker: str, provider: str, names: list[str]) -> None:
+    """Drop in-process copies of this report so a refresh cannot revive it."""
+    prefix = tuple(names)
+    for key in list(_summary_cache):
+        if key.startswith(prefix):
+            _summary_cache.pop(key, None)
+    _ticker_meta_cache.pop(ticker, None)
+    _REPORTS_LIST_CACHE["rows"] = None
+    _REPORTS_LIST_CACHE["ts"] = 0.0
+    try:
+        with _jobs_lock:
+            for job in list(_jobs.values()):
+                if (job.get("ticker") or "").upper() != ticker:
+                    continue
+                if (job.get("llm_provider") or "grok").lower() != provider:
+                    continue
+                result = job.get("result")
+                if isinstance(result, dict):
+                    result.pop("report_md", None)
+                    result.pop("markdown", None)
+                    result.pop("user_msg", None)
+    except Exception:
+        pass
+
+
+def _unlink_report_files(names: list[str]) -> list[str]:
+    removed: list[str] = []
+    roots = [analyst.STOCKS_FOLDER, analyst.STOCKS_FOLDER / "archive"]
+    for name in names:
+        for root in roots:
+            path = root / name
+            if not path.exists():
+                continue
+            try:
+                path.unlink()
+                removed.append(str(path.relative_to(analyst.STOCKS_FOLDER)))
+            except OSError as exc:
+                print(f"[report-delete] unlink {path.name}: {exc!s:.120}", flush=True)
+    return removed
+
+
+@app.delete("/api/report/{ticker}/version/{version_id}")
+def delete_report_version(
+    ticker: str,
+    version_id: str,
+    request: Request,
+    provider: str = "grok",
+):
+    """Erase one thesis-timeline snapshot.
+
+    An older chip is one row in analyst_report_versions. The current chip is
+    that engine's live note: its database columns, local files, Dropbox
+    copies, and the in-memory report cache. Other versions stay.
+    """
+    _require_fund_token(request)
+    ticker = (ticker or "").strip().upper()
+    provider = (provider or "grok").lower().strip()
+    if provider == "volume":
+        provider = "kimi"
+    if provider not in _VERSION_CLEAR_COLUMNS:
+        raise HTTPException(status_code=400, detail="Unknown engine")
+    if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
+        raise HTTPException(status_code=503, detail="DB unavailable")
+
+    if str(version_id) != "current":
+        try:
+            vid = int(version_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid version id")
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM analyst_report_versions
+                 WHERE id=%s AND ticker=%s AND provider=%s
+                """,
+                (vid, ticker, provider),
+            )
+            removed_rows = cur.rowcount
+            if removed_rows:
+                cur.execute(
+                    """
+                    UPDATE analyst_reports
+                       SET version_count = GREATEST(1, COALESCE(version_count, 1) - 1)
+                     WHERE ticker=%s
+                    """,
+                    (ticker,),
+                )
+            conn.commit()
+        if not removed_rows:
+            raise HTTPException(status_code=404, detail="Version not found")
+        _REPORTS_LIST_CACHE["rows"] = None
+        _REPORTS_LIST_CACHE["ts"] = 0.0
+        return {
+            "ok": True,
+            "ticker": ticker,
+            "provider": provider,
+            "version_id": vid,
+            "scope": "version",
+        }
+
+    cols = _VERSION_CLEAR_COLUMNS[provider]
+    md_col = cols[0]
+    assignments = ", ".join(f"{col} = NULL" for col in cols)
+    if provider == "grok":
+        assignments += ", has_docx = FALSE, has_pptx = FALSE"
+    names = analyst.report_artifact_names(ticker, provider)
+    with _fund_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {md_col}, delta_from_prior FROM analyst_reports WHERE ticker=%s",
+            (ticker,),
+        )
+        row = cur.fetchone()
+        had_md = bool(row and row[0] and len(str(row[0]).strip()) > 200)
+        if had_md:
+            import json as _json
+            delta = _drop_provider_delta(row[1], provider)
+            cur.execute(
+                f"""
+                UPDATE analyst_reports
+                   SET {assignments},
+                       delta_from_prior = %s::jsonb,
+                       version_count = GREATEST(1, COALESCE(version_count, 1) - 1)
+                 WHERE ticker=%s
+                """,
+                (_json.dumps(delta), ticker),
+            )
+        conn.commit()
+    cleared_files = _unlink_report_files(names)
+    cache_names = [
+        f"{ticker}_user_msg.txt",
+        f"{ticker}_market_snapshot.json",
+    ]
+    cleared_files.extend(_unlink_report_files(cache_names))
+    if provider == "grok":
+        try:
+            idx = analyst._load_gamma_index()
+            if ticker in idx:
+                idx.pop(ticker, None)
+                analyst._save_gamma_index(idx)
+                cleared_files.append("_gamma_index.json")
+        except Exception as exc:
+            print(f"[report-delete] gamma index {ticker}: {exc!s:.120}", flush=True)
+    dropbox = analyst.remove_from_dropbox(names)
+    _forget_report_memory(ticker, provider, names)
+    if not had_md and not cleared_files and not dropbox.get("removed"):
+        raise HTTPException(status_code=404, detail=f"No {provider} report found for {ticker}")
+    return {
+        "ok": True,
+        "ticker": ticker,
+        "provider": provider,
+        "version_id": "current",
+        "scope": "current",
+        "cleared_files": cleared_files,
+        "dropbox_removed": dropbox.get("removed") or [],
+        "dropbox_errors": dropbox.get("errors") or [],
     }
 
 

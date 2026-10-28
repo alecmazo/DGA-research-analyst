@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { SupportFab } from '@/components/support/SupportFab'
 import {
@@ -70,6 +70,12 @@ export function ReportPage() {
   const [excelBusy, setExcelBusy] = useState(false)
   const [docBusy, setDocBusy] = useState(false)
   const [pptBusy, setPptBusy] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string | number } | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const canDelete = (() => {
+    const role = getCachedUser()?.role
+    return role === 'gp' || role === 'admin'
+  })()
 
   useEffect(() => {
     if (isolated || provider !== 'local' || !ticker) return
@@ -129,6 +135,17 @@ export function ReportPage() {
     }
   }, [ticker, provider, localModelQuery])
 
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [menu])
+
   const loadVersion = async (id: string | number) => {
     if (!ticker) return
     setHistBusy(true)
@@ -163,6 +180,101 @@ export function ReportPage() {
       setErr(e instanceof Error ? e.message : 'Could not load version')
     } finally {
       setHistBusy(false)
+    }
+  }
+
+  const openVersionMenu = (event: MouseEvent, id: string | number) => {
+    if (!canDelete) return
+    event.preventDefault()
+    event.stopPropagation()
+    setMenu({ x: event.clientX, y: event.clientY, id })
+  }
+
+  const deleteVersion = async (id: string | number) => {
+    if (!ticker || deleting) return
+    setMenu(null)
+    const ok = window.confirm(
+      id === 'current'
+        ? `Delete the current ${ticker} report? It is removed from the desk, Dropbox, and the database. Older versions stay.`
+        : `Delete this older ${ticker} version? It is removed from the database. The current report stays.`,
+    )
+    if (!ok) return
+    setDeleting(true)
+    setErr(null)
+    try {
+      await api(
+        `/api/report/${encodeURIComponent(ticker)}/version/${encodeURIComponent(String(id))}?provider=${encodeURIComponent(provider)}`,
+        { method: 'DELETE' },
+      )
+      const h = await api<ReportHistory>(
+        `/api/report/${encodeURIComponent(ticker)}/history?provider=${encodeURIComponent(provider)}`,
+      ).catch(() => null)
+      setHistory(h)
+      const showArchived = async (snap: ReportHistoryVersion | undefined) => {
+        if (!snap) {
+          setViewId('current')
+          setViewMd(null)
+          setViewSnap(null)
+          setData(null)
+          setErr('This version was deleted.')
+          return
+        }
+        const v = await api<{
+          report_md?: string
+          rating?: string | null
+          price_target?: number | null
+          upside_pct?: number | null
+          generated_at?: string | null
+          id?: number
+        }>(
+          `/api/report/${encodeURIComponent(ticker)}/version/${encodeURIComponent(String(snap.id))}`,
+        )
+        setViewId(snap.id)
+        setViewMd(v.report_md || '')
+        setViewSnap({
+          id: v.id ?? snap.id,
+          rating: v.rating,
+          price_target: v.price_target,
+          upside_pct: v.upside_pct,
+          generated_at: v.generated_at,
+          is_current: false,
+        })
+      }
+      if (String(id) === 'current') {
+        try {
+          const modelBit = localModelQuery
+            ? `&model=${encodeURIComponent(localModelQuery)}`
+            : ''
+          const r = await api<ReportDetail>(
+            `/api/report/${encodeURIComponent(ticker)}?provider=${encodeURIComponent(provider)}&as_stored=1${modelBit}`,
+          )
+          const same = (r.provider || provider).toLowerCase() === provider
+            && !String(r.note || '').toLowerCase().includes('not found')
+          if (same && reportMarkdown(r)) {
+            setData(r)
+            setViewId('current')
+            setViewMd(null)
+            setViewSnap(h?.current || null)
+          } else {
+            setData(r)
+            await showArchived(h?.versions?.[0])
+          }
+        } catch {
+          await showArchived(h?.versions?.[0])
+        }
+      } else if (String(viewId) === String(id)) {
+        if (h?.current) {
+          setViewId('current')
+          setViewMd(null)
+          setViewSnap(h.current)
+        } else {
+          await showArchived(h?.versions?.[0])
+        }
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not delete this version')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -545,13 +657,18 @@ export function ReportPage() {
             Thesis timeline · {(history?.current ? 1 : 0) + versions.length} snapshot
             {(history?.current ? 1 : 0) + versions.length === 1 ? '' : 's'}
             {histBusy ? ' · loading…' : ''}
+            {deleting ? ' · deleting…' : ''}
           </div>
+          {canDelete ? (
+            <div className={styles.timelineHint}>Right-click a version to delete it.</div>
+          ) : null}
           <div className={styles.timelineChips}>
             {history?.current && (
               <button
                 type="button"
                 className={`${styles.histChip} ${viewId === 'current' ? styles.histChipOn : ''}`}
                 onClick={() => void loadVersion('current')}
+                onContextMenu={(event) => openVersionMenu(event, 'current')}
               >
                 Current
                 {history.current.generated_at
@@ -569,6 +686,7 @@ export function ReportPage() {
                 type="button"
                 className={`${styles.histChip} ${viewId === v.id ? styles.histChipOn : ''}`}
                 onClick={() => void loadVersion(v.id)}
+                onContextMenu={(event) => openVersionMenu(event, v.id)}
               >
                 {v.generated_at ? relativeTime(v.generated_at) : `#${v.id}`}
                 {v.rating ? ` · ${v.rating}` : ''}
@@ -576,6 +694,23 @@ export function ReportPage() {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {menu && (
+        <div
+          className={styles.versionMenu}
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            className={styles.versionMenuItem}
+            onClick={() => void deleteVersion(menu.id)}
+          >
+            Delete report
+          </button>
         </div>
       )}
 
