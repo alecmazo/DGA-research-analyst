@@ -349,24 +349,69 @@ class SogdResumeTests(unittest.TestCase):
         self.assertNotIn("intro_disclaimer", sogd)
         self.assertNotIn("outro_sting", sogd)
         self.assertIn("outro_disclaimer", sogd)
-        self.assertEqual(hitech[0], "intro_sting")
-        self.assertIn("intro_disclaimer", hitech)
-        self.assertIn("outro_sting", hitech)
+        self.assertEqual(hitech[0], "intro_disclaimer")
+        self.assertNotIn("intro_sting", hitech)
+        self.assertNotIn("outro_sting", hitech)
+        self.assertIn("voice", hitech)
         self.assertTrue(show_assembly("sogd")["open_on_voice"])
         self.assertFalse(show_assembly("debate")["open_on_voice"])
+        self.assertFalse(show_assembly("debate")["intro_sting"])
+        self.assertFalse(show_assembly("debate")["outro_sting"])
         self.assertEqual(assembly_lead_ms(show_assembly("sogd"), intro_ms=5000, disc_intro_ms=8000, body_gap_ms=500), 0)
         hitech_lead = assembly_lead_ms(show_assembly("debate"), intro_ms=3200, disc_intro_ms=4000, body_gap_ms=750)
-        self.assertEqual(hitech_lead, 3200 + 350 + 4000 + 750)
+        self.assertEqual(hitech_lead, 4000 + 750)
         script = _style_script(20)
         chunks = plan_tts_chunks(script, {"voice": "kepler", "speed": 1.0}, {})
         spoken = [row["text"] for row in chunks]
         self.assertNotIn(DEFAULT_DISCLAIMER_INTRO, spoken)
         self.assertIn(DEFAULT_DISCLAIMER_OUTRO, spoken)
+        disc = [row for row in chunks if row["kind"] == "disclaimer"]
+        self.assertEqual(len(disc), 1)
+        self.assertGreater(disc[0]["speed"], 1.0)
         self.assertEqual(SOGD_STYLE["opening_speed"], 0.97)
         self.assertEqual(SOGD_STYLE["voice"], "kepler")
         prompt = writer_instructions(date(2026, 10, 28), None, 3700, 4400)
         self.assertIn("person talking to a friend", prompt)
         self.assertIn("Do not wrap the opening in <slow>", prompt)
+
+    def test_hitech_disclaimer_is_shorter_and_faster(self):
+        import re
+        from podcast_engine import (
+            DEFAULT_DISCLAIMER_INTRO,
+            DEFAULT_DISCLAIMER_OUTRO,
+            DISCLAIMER_SPEED,
+            _system_prompt_common,
+            human_delivery_rules,
+        )
+        old_intro = (
+            "This podcast is for informational and educational purposes only. "
+            "It is not investment advice, an offer to sell, or a solicitation to buy "
+            "any security. DGA Capital is an exempt reporting adviser in California. "
+            "Holdings, opinions, and price targets discussed may change without notice. "
+            "Past performance is not indicative of future results."
+        )
+        old_outro = (
+            "Reminder: this episode is for informational purposes only and is not "
+            "investment advice. Consult your own financial advisor before making any "
+            "investment decisions. Thanks for listening."
+        )
+
+        def words(text: str) -> int:
+            return len(re.findall(r"\b[\w']+\b", text))
+
+        self.assertLessEqual(words(DEFAULT_DISCLAIMER_INTRO), int(words(old_intro) * 0.55))
+        self.assertLessEqual(words(DEFAULT_DISCLAIMER_OUTRO), int(words(old_outro) * 0.55))
+        spoken = (DEFAULT_DISCLAIMER_INTRO + " " + DEFAULT_DISCLAIMER_OUTRO).lower()
+        for point in ("not investment advice", "ai-generated", "may hold positions", "your own research"):
+            self.assertIn(point, spoken)
+        self.assertGreaterEqual(DISCLAIMER_SPEED, 1.15)
+        self.assertLessEqual(DISCLAIMER_SPEED, 1.2)
+        self.assertGreater(DISCLAIMER_SPEED, 1.0)
+        rules = human_delivery_rules()
+        prompt = _system_prompt_common()
+        self.assertIn(rules, prompt)
+        self.assertIn("Do not wrap the opening in <slow>", prompt)
+        self.assertIn("[pause]", prompt)
 
     def test_trim_keeps_pause_tags(self):
         from podcast_sogd import trim_section_words

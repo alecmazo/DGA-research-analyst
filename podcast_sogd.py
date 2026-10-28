@@ -95,6 +95,7 @@ SOGD_STYLE = {
 
 def style_prompt() -> str:
     """Writer instructions. Render numbers come from SOGD_STYLE."""
+    from podcast_engine import human_delivery_rules
     s = SOGD_STYLE
     within = s["gap_within_story"]
     recap = s["gap_recap"]
@@ -110,9 +111,8 @@ def style_prompt() -> str:
         "Per story: what happened, then who says what, then the other side, then "
         "follow the money: who wins if you believe this, then so why does this matter to you, "
         "then a short recap, then what to watch next. "
-        "Plain conversational language: short and varied sentences, contractions, "
-        "concrete examples, rhetorical questions, signposting, the occasional casual aside. "
-        "No academic jargon. "
+        + human_delivery_rules() + " "
+        "Concrete examples, rhetorical questions, and signposting. "
         "Opening styles, one per day, never the same wording two days in a row: "
         "classic (Good morning, the date, the show name Systems Over Goals Daily, a short how this works, then the topic preview), "
         "cold open (the biggest story first, no explanation of the show), "
@@ -120,9 +120,6 @@ def style_prompt() -> str:
         "or a quick preview (show name and date, then the topics). "
         "Explain the show on at most two days a week. Use the intro style named for today. "
         "No AI disclosure at the top. "
-        "The cold open is a person talking to a friend: short sentences, contractions, "
-        "a couple of [pause] tags where you would actually breathe. "
-        "Do not wrap the opening in <slow> or <soft>. Do not stack tags on the first line. "
         "Close: a short zoom-out on the day's pattern. Vary the sign-off wording. "
         "The AI-narration disclosure and the not-investment-advice line go only at the close. "
         "Never name Scott Adams or Dilbert. "
@@ -870,20 +867,21 @@ def plan_tts_chunks(script: dict, voice: dict | None, pronunciation: dict | None
 
     The close still gets the spoken outro disclaimer. The host opens the file.
     """
-    from podcast_engine import DEFAULT_DISCLAIMER_OUTRO, show_assembly, tts_chunk_key
+    from podcast_engine import DEFAULT_DISCLAIMER_OUTRO, DISCLAIMER_SPEED, show_assembly, tts_chunk_key
     voice_name = ((voice or {}).get("voice") or SOGD_STYLE["voice"]).lower()
     speed = float((voice or {}).get("speed") or 1.0)
     rows = []
 
-    def add(text: str, kind: str):
+    def add(text: str, kind: str, pace: float | None = None):
         spoken = (text or "").strip()
         if not spoken:
             return
+        used = speed if pace is None else pace
         rows.append({
-            "id": tts_chunk_key(spoken, voice_name, speed, pronunciation or {}),
+            "id": tts_chunk_key(spoken, voice_name, used, pronunciation or {}),
             "text": spoken,
             "voice": voice_name,
-            "speed": speed,
+            "speed": used,
             "kind": kind,
         })
 
@@ -892,7 +890,7 @@ def plan_tts_chunks(script: dict, voice: dict | None, pronunciation: dict | None
             add(turn.get("text") or "", "turn")
     asm = show_assembly((script or {}).get("format") or "sogd")
     if asm["outro_disclaimer"]:
-        add(DEFAULT_DISCLAIMER_OUTRO, "disclaimer")
+        add(DEFAULT_DISCLAIMER_OUTRO, "disclaimer", DISCLAIMER_SPEED)
     return rows
 
 
