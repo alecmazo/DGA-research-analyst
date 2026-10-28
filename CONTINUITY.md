@@ -377,6 +377,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Fresh rerun** | **`ui795-20261028-fresh-rerun`** | A rerun uses the desk's live last, the newest headline, and a newer EDGAR quarter. The prior report body is not copied into the new note. Settings shows the app build and the Railway commit on separate lines. |
 | **Rerun and swipe** | **`ui796-20261028-rerun-swipe`** | Both of the above ship together. A quick left swipe on the phone opens erase without a second button press. |
 | **Delete version** | **`ui797-20261028-delete-version`** | Right-click a thesis-timeline version to delete that snapshot from the desk, Dropbox, and the database. Other versions stay. |
+| **Chart type** | **`ui798-20261028-chart-type`** | SUP_20261028_14339c34. The Financials chart cards under the TTM snapshot use larger type, and a year hover lists every number in that column. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -577,4 +578,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-28 · Agent: Cursor · Built: `ui797-20261028-delete-version` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui798-YYYYMMDD-slug`*
+*Last updated: 2026-10-28 · Agent: Cursor · Built: `ui798-20261028-chart-type` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui799-YYYYMMDD-slug`*

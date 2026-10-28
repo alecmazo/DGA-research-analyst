@@ -481,25 +481,25 @@
 /* Fundamentals multi-chart grid (pre-React parity) */
 .chartGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 8px;
-  margin-top: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
 }
 
 .chartCard {
   position: relative;
   border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border-radius: 8px;
+  padding: 12px 14px 10px;
   background: var(--bg-elevated, var(--bg-surface));
   min-height: 0;
 }
 
 .chartTitle {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
-  margin: 0 0 4px;
+  margin: 0 0 6px;
 }
 
 .chartLegend {
@@ -512,8 +512,9 @@
 .chartLegItem {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
@@ -552,13 +553,18 @@
   pointer-events: none;
   background: rgba(15, 23, 42, 0.94);
   color: #fff;
-  font-size: 11.5px;
-  line-height: 1.35;
-  padding: 7px 10px;
-  border-radius: 7px;
+  font-size: 14px;
+  line-height: 1.45;
+  padding: 8px 12px;
+  border-radius: 8px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
-  white-space: nowrap;
-  max-width: min(280px, calc(100vw - 16px));
+  white-space: normal;
+  max-width: min(360px, calc(100vw - 16px));
+}
+
+.chartTipYear {
+  font-weight: 800;
+  margin-bottom: 2px;
 }
 
 /* Series / tables */

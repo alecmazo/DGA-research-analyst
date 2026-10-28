@@ -75,21 +75,43 @@ function rangeOf(
   return { lo, hi }
 }
 
+function yearLines(cfg: ChartCfg, i: number): string[] {
+  const fmtL = cfg.fmtL || ((v: number) => `$${gfMoney(v)}`)
+  const fmtR = cfg.fmtR || pctF
+  const lines = [cfg.labels[i] || '—']
+  for (const s of cfg.series) {
+    const v = s.values[i]
+    if (v == null || !Number.isFinite(v)) continue
+    const axis = s.axis || 'L'
+    const hollow = Array.isArray(s.hollow) ? !!s.hollow[i] : !!s.hollow
+    let name = s.name
+    if (hollow) name = `${name} Forecast`
+    else if (v < 0 && s.nameNeg) name = s.nameNeg
+    lines.push(`${name}: ${axis === 'R' ? fmtR(v) : fmtL(v)}`)
+  }
+  return lines
+}
+
 function ChartCard({ cfg }: { cfg: ChartCfg }) {
-  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(
+  const [hoverI, setHoverI] = useState<number | null>(null)
+  const [tip, setTip] = useState<{ lines: string[]; x: number; y: number } | null>(
     null,
   )
-  const showTip = useCallback((text: string, e: { clientX: number; clientY: number }) => {
-    setTip({ text, x: e.clientX, y: e.clientY })
+  const showYear = useCallback((i: number, e: { clientX: number; clientY: number }) => {
+    setHoverI(i)
+    setTip({ lines: yearLines(cfg, i), x: e.clientX, y: e.clientY })
+  }, [cfg])
+  const hideTip = useCallback(() => {
+    setHoverI(null)
+    setTip(null)
   }, [])
-  const hideTip = useCallback(() => setTip(null), [])
-  const W = 560
-  const H = 148
-  const padL = 52
+  const W = 480
+  const H = 196
+  const padL = 72
   const hasR = cfg.series.some((s) => s.axis === 'R')
-  const padR = hasR ? 48 : 10
-  const padT = 6
-  const padB = 24
+  const padR = hasR ? 58 : 12
+  const padT = 8
+  const padB = 32
   const n = cfg.labels.length
   const plotW = W - padL - padR
   const plotH = H - padT - padB
@@ -128,7 +150,6 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
     )
     const fmtL = cfg.fmtL || ((v: number) => `$${gfMoney(v)}`)
     const fmtR = cfg.fmtR || pctF
-    const fmtVal = (v: number, a: 'L' | 'R') => (a === 'R' ? fmtR(v) : fmtL(v))
 
     const grid: ReactNode[] = []
     for (let i = 0; i <= 4; i++) {
@@ -149,7 +170,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
           x={padL - 6}
           y={y + 4}
           textAnchor="end"
-          fontSize={11}
+          fontSize={15}
           fill="var(--text-secondary,#64748b)"
         >
           {fmtL(v)}
@@ -163,7 +184,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
             key={`tr${i}`}
             x={W - padR + 6}
             y={yr + 4}
-            fontSize={11}
+            fontSize={15}
             fill="var(--text-secondary,#64748b)"
           >
             {fmtR(vr)}
@@ -196,11 +217,9 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
           padL + slotW * i + slotW / 2 - (barSeries.length * bw) / 2 + si * bw
         const y = yOf(v, a)
         const col = s.color
-        const nm = s.name
         const barY = Math.min(y, y0)
         const barH = Math.max(1, Math.abs(y0 - y))
         const isHollow = Array.isArray(s.hollow) ? !!s.hollow[i] : !!s.hollow
-        const tipName = isHollow ? `${nm} Forecast` : nm
         bars.push(
           <rect
             key={`b${si}-${i}`}
@@ -212,14 +231,6 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
             stroke={isHollow ? col : undefined}
             strokeWidth={isHollow ? 1.25 : undefined}
             rx={1}
-            style={{ cursor: 'pointer' }}
-            onMouseEnter={(e) =>
-              showTip(`${cfg.labels[i]} · ${tipName}: ${fmtVal(v, a)}`, e)
-            }
-            onMouseMove={(e) =>
-              showTip(`${cfg.labels[i]} · ${tipName}: ${fmtVal(v, a)}`, e)
-            }
-            onMouseLeave={hideTip}
           />,
         )
       })
@@ -241,18 +252,10 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
               key={`d${si}-${i}`}
               cx={x}
               cy={y}
-              r={3}
+              r={3.5}
               fill={s.color}
               stroke="#fff"
               strokeWidth={1}
-              style={{ cursor: 'pointer' }}
-              onMouseEnter={(e) =>
-                showTip(`${cfg.labels[i]} · ${s.name}: ${fmtVal(v, a)}`, e)
-              }
-              onMouseMove={(e) =>
-                showTip(`${cfg.labels[i]} · ${s.name}: ${fmtVal(v, a)}`, e)
-              }
-              onMouseLeave={hideTip}
             />,
           )
         })
@@ -278,7 +281,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
           x={padL + slotW * i + slotW / 2}
           y={H - 10}
           textAnchor="middle"
-          fontSize={11}
+          fontSize={14}
           fill="var(--text-secondary,#64748b)"
         >
           {lb}
@@ -294,7 +297,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
         {xLabels}
       </>
     )
-  }, [cfg, n, hasR, padR, plotH, plotW, showTip, hideTip])
+  }, [cfg, n, hasR, padR, plotH, plotW])
 
   if (!n) {
     return (
@@ -337,10 +340,28 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
       <div className={styles.chartSvgWrap}>
         <svg viewBox={`0 0 ${W} ${H}`} className={styles.chartSvg}>
           {chart}
+          {cfg.labels.map((_, i) => (
+            <rect
+              key={`hit${i}`}
+              x={padL + (plotW / n) * i}
+              y={padT}
+              width={plotW / n}
+              height={plotH}
+              fill={hoverI === i ? 'rgba(14,165,233,0.10)' : 'transparent'}
+              style={{ cursor: 'pointer' }}
+              onMouseEnter={(e) => showYear(i, e)}
+              onMouseMove={(e) => showYear(i, e)}
+              onMouseLeave={hideTip}
+            />
+          ))}
         </svg>
         {tip && (
-          <HoverTip x={tip.x} y={tip.y} className={styles.chartTip}>
-            {tip.text}
+          <HoverTip x={tip.x} y={tip.y} className={styles.chartTip} wrap>
+            {tip.lines.map((line, i) => (
+              <div key={i} className={i === 0 ? styles.chartTipYear : undefined}>
+                {line}
+              </div>
+            ))}
           </HoverTip>
         )}
       </div>
