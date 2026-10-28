@@ -5,10 +5,11 @@
  * morning episode. Each row plays its own public MP3 (`audio_url`),
  * because every Daily episode shares the ticker SOGD.
  */
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, RefreshControl, Platform, Share, Alert,
+  Animated, PanResponder, useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +17,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { api } from '../api/client';
+import { api, getV2User } from '../api/client';
 import { readScreenCache, writeScreenCache } from '../api/screenCache';
 import { useAppResume } from '../hooks/useAppResume';
 import { spacing, radius, shadow, fontSize, letterSpacing, Card, haptics, useTheme } from '../design';
@@ -197,6 +198,113 @@ function cleanTitle(title, ticker, format) {
   return t;
 }
 
+const ERASE_W = 112;
+
+function SwipeEraseRow({ enabled, onErase, actionStyle, actionTextStyle, children }) {
+  const { width } = useWindowDimensions();
+  const tx = useRef(new Animated.Value(0)).current;
+  const open = useRef(false);
+  const dragging = useRef(false);
+  const settling = useRef(false);
+  const enabledRef = useRef(enabled);
+  const onEraseRef = useRef(onErase);
+  const offRef = useRef(360);
+  enabledRef.current = enabled;
+  onEraseRef.current = onErase;
+  offRef.current = Math.max(width, 320);
+
+  const snap = (to) => {
+    open.current = to < 0;
+    Animated.timing(tx, {
+      toValue: to,
+      duration: 140,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const endDrag = () => {
+    if (!dragging.current) return;
+    dragging.current = false;
+  };
+
+  const commit = () => {
+    open.current = true;
+    const restore = () => snap(0);
+    Animated.timing(tx, {
+      toValue: -offRef.current,
+      duration: 120,
+      useNativeDriver: true,
+    }).start(() => onEraseRef.current?.(restore));
+  };
+
+  const settle = (g) => {
+    if (settling.current) return;
+    settling.current = true;
+    endDrag();
+    const base = open.current ? -ERASE_W : 0;
+    const next = Math.max(-offRef.current, Math.min(0, base + (g?.dx || 0)));
+    const flung = (g?.vx || 0) < -0.25;
+    if (flung || next < -56) commit();
+    else if (next < -24) snap(-ERASE_W);
+    else snap(0);
+    setTimeout(() => { settling.current = false; }, 220);
+  };
+
+  // A fast flick was losing the responder to the list, which snapped the row
+  // shut. Once this row has the touch, the list cannot take it back.
+  const claimSwipe = (_, g) => (
+    enabledRef.current
+    && g.dx < -6
+    && Math.abs(g.dx) > 8
+    && Math.abs(g.dx) > Math.abs(g.dy)
+  );
+  const pan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponderCapture: claimSwipe,
+    onMoveShouldSetPanResponder: claimSwipe,
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
+    onPanResponderGrant: () => {
+      dragging.current = true;
+    },
+    onPanResponderMove: (_, g) => {
+      if (!enabledRef.current) return;
+      const base = open.current ? -ERASE_W : 0;
+      tx.setValue(Math.max(-offRef.current, Math.min(0, base + g.dx)));
+    },
+    onPanResponderRelease: (_, g) => settle(g),
+    onPanResponderTerminate: () => {
+      if (settling.current) return;
+      tx.stopAnimation((value) => {
+        if (settling.current) return;
+        const base = open.current ? -ERASE_W : 0;
+        settle({ dx: value - base, vx: value < -56 ? -1 : 0 });
+      });
+    },
+  })).current;
+
+  return (
+    <View style={{ overflow: 'hidden' }}>
+      {enabled ? (
+        <TouchableOpacity
+          onPress={() => onErase(() => snap(0))}
+          style={actionStyle}
+          accessibilityRole="button"
+          accessibilityLabel="Erase episode"
+        >
+          <MaterialCommunityIcons name="trash-can-outline" size={22} color="#ffffff" />
+          <Text style={actionTextStyle}>Erase</Text>
+        </TouchableOpacity>
+      ) : null}
+      <Animated.View
+        style={{ transform: [{ translateX: tx }] }}
+        {...(enabled ? pan.panHandlers : {})}
+      >
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function PodcastScreen() {
   const insets = useSafeAreaInsets();
   const { theme: t } = useTheme();
@@ -215,6 +323,8 @@ export default function PodcastScreen() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showId, setShowId] = useState('dga-hitech');
   const [listReady, setListReady] = useState(false);
+  const [canErase, setCanErase] = useState(false);
+  const erasedRef = useRef(new Set());
 
   // A Daily episode is always ticker SOGD / format sogd. The guid is the
   // only thing that separates Monday from Tuesday.
@@ -246,6 +356,12 @@ export default function PodcastScreen() {
         if (SHOWS.some((show) => show.id === v)) setShowId(v);
       })
       .catch(() => {});
+    getV2User()
+      .then((user) => {
+        const role = user?.role;
+        setCanErase(role === 'gp' || role === 'admin');
+      })
+      .catch(() => setCanErase(false));
   }, []);
 
   // ── Apply rate to player whenever it changes (or audio reloads) ──
@@ -294,11 +410,14 @@ export default function PodcastScreen() {
       setError(null);
       const cached = await readScreenCache('podcasts');
       if (Array.isArray(cached) && cached.length) {
-        setEpisodes((cur) => (cur.length ? cur : cached));
+        const kept = cached.filter((ep) => !erasedRef.current.has(ep.episode_guid));
+        setEpisodes((cur) => (cur.length ? cur : kept));
         setLoading(false);
       }
       const data = await api.listPodcastEpisodes();
-      const eps = data.episodes || [];
+      const eps = (data.episodes || []).filter(
+        (ep) => !erasedRef.current.has(ep.episode_guid),
+      );
       setEpisodes(eps);
       writeScreenCache('podcasts', eps);
       setListReady(true);
@@ -363,6 +482,51 @@ export default function PodcastScreen() {
       setLastErr(`play: ${e?.message || e}`);
     }
   }, [selectedKey, player, status, episodes]);
+
+  const runErase = useCallback(async (ep) => {
+    const guid = ep?.episode_guid;
+    if (!guid) return;
+    erasedRef.current.add(guid);
+    setEpisodes((prev) => {
+      const next = prev.filter((row) => row.episode_guid !== guid);
+      writeScreenCache('podcasts', next);
+      return next;
+    });
+    if (epKey(ep) === selectedKey) {
+      try {
+        if (player && typeof player.pause === 'function') player.pause();
+      } catch {}
+      setSelectedKey(null);
+      setAudioUrl(null);
+    }
+    try {
+      await api.erasePodcastEpisode(showOf(ep), guid);
+    } catch (e) {
+      erasedRef.current.delete(guid);
+      Alert.alert('Erase failed', String(e?.message || e));
+      loadEpisodes();
+    }
+  }, [player, selectedKey, loadEpisodes]);
+
+  const confirmErase = useCallback((ep, restore) => {
+    if (!ep?.episode_guid) {
+      Alert.alert('Cannot erase', 'Pull to refresh, then try this episode again.');
+      restore?.();
+      return;
+    }
+    const name = isDaily(ep)
+      ? (ep.title || 'Systems Over Goals Daily')
+      : (shortTicker(ep.ticker) || ep.title || 'This episode');
+    Alert.alert(
+      'Erase episode',
+      `Erase ${name}? It leaves the feed and the audio is deleted.`,
+      [
+        { text: 'Keep', style: 'cancel', onPress: () => restore?.() },
+        { text: 'Erase', style: 'destructive', onPress: () => { void runErase(ep); } },
+      ],
+      { cancelable: true, onDismiss: () => restore?.() },
+    );
+  }, [runErase]);
 
   const handleSeek = useCallback((deltaSec) => {
     try { haptics.light(); } catch {}
@@ -453,7 +617,7 @@ export default function PodcastScreen() {
     const detail = daily
       ? null
       : cleanTitle(item.title, item.ticker, item.format);
-    return (
+    const row = (
       <TouchableOpacity
         onPress={() => handleSelect(item)}
         activeOpacity={0.7}
@@ -484,6 +648,16 @@ export default function PodcastScreen() {
         </View>
       </TouchableOpacity>
     );
+    return (
+      <SwipeEraseRow
+        enabled={canErase && !!item.episode_guid}
+        onErase={(restore) => confirmErase(item, restore)}
+        actionStyle={s.eraseAction}
+        actionTextStyle={s.eraseActionTxt}
+      >
+        {row}
+      </SwipeEraseRow>
+    );
   };
 
   return (
@@ -507,6 +681,9 @@ export default function PodcastScreen() {
             );
           })}
         </View>
+        {canErase ? (
+          <Text style={s.eraseHint}>Swipe an episode left to erase it. A quick swipe asks before it deletes.</Text>
+        ) : null}
       </View>
 
       {selectedKey ? (
@@ -614,6 +791,7 @@ export default function PodcastScreen() {
           data={visible}
           keyExtractor={(item) => epKey(item)}
           renderItem={renderEpisode}
+          directionalLockEnabled
           contentContainerStyle={{ paddingBottom: 120 }}
           refreshControl={
             <RefreshControl
@@ -656,6 +834,28 @@ function makeStyles(t) {
   showBtnOn: { backgroundColor: t.chromeNavy },
   showBtnTxt: { color: t.textSecondary, fontSize: fontSize.small, fontWeight: '700' },
   showBtnTxtOn: { color: t.onChrome },
+  eraseHint: {
+    color: t.textSecondary,
+    fontSize: fontSize.caption,
+    marginTop: spacing.sm,
+  },
+  eraseAction: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: ERASE_W,
+    backgroundColor: t.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  eraseActionTxt: {
+    color: '#ffffff',
+    fontSize: fontSize.caption,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
   playerShow: {
     color: '#84CCE3',
     fontSize: 11,

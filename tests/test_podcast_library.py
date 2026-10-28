@@ -198,6 +198,15 @@ class PodcastLibraryTests(unittest.TestCase):
         self.assertIsNotNone(info)
         w, h, rgb = info
         self.assertEqual((w, h, rgb), (1400, 1400, True))
+        self.assertIn("Swipe an episode left to erase it.", phone)
+        self.assertIn("onPanResponderTerminationRequest: () => false", phone)
+        self.assertIn("onShouldBlockNativeResponder: () => true", phone)
+        self.assertIn("vx", phone)
+        self.assertNotIn("onPanResponderTerminate: () => snap(0)", phone)
+        self.assertIn("erasePodcastEpisode", phone)
+        self.assertIn("role === 'gp' || role === 'admin'", phone)
+        client = (ROOT / "mobile/src/api/client.js").read_text(encoding="utf-8")
+        self.assertIn("erasePodcastEpisode", client)
 
     def test_studio_exposes_the_menu_and_the_drop_target(self):
         player = (ROOT / "web/gp-app/src/pages/podcasts/ChapterPlayer.tsx").read_text(encoding="utf-8")
@@ -209,6 +218,8 @@ class PodcastLibraryTests(unittest.TestCase):
         self.assertIn("/episodes/upload", page)
         self.assertIn('"/api/podcast/{show}/episodes/upload"', server)
         self.assertIn('"/api/podcast/{show}/episodes/{guid}"', server)
+        erase = server.split("def podcast_erase_episode")[1].split("\n@app.")[0]
+        self.assertIn("_require_fund_token(request)", erase)
 
 
 if __name__ == "__main__":

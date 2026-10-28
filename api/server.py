@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui795-20261028-fresh-rerun"
+WEB_BUILD_VERSION = "ui796-20261028-rerun-swipe"
 
 
 @app.get("/api/build")
@@ -39490,8 +39490,9 @@ def podcast_upload_episode(show: str, file: UploadFile = File(...)):
 
 
 @app.delete("/api/podcast/{show}/episodes/{guid}")
-def podcast_erase_episode(show: str, guid: str):
-    """Remove one episode from the feed and delete its audio."""
+def podcast_erase_episode(show: str, guid: str, request: Request):
+    """Remove one episode from the feed and delete its audio. GP only."""
+    _require_fund_token(request)
     from podcast_library import erase_episode
     from podcast_media import get_media_store
     if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
