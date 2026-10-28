@@ -46,7 +46,9 @@ def _connect():
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Systems Over Goals Daily")
     parser.add_argument("--date", default="", help="YYYY-MM-DD in America/Los_Angeles")
-    parser.add_argument("--force", action="store_true", help="Replace today's episode")
+    parser.add_argument("--force", action="store_true", help="Replace today's episode. Requires --yes")
+    parser.add_argument("--yes", action="store_true", help="Confirm --force and discard saved stages")
+    parser.add_argument("--resume", action="store_true", help="Continue the saved stages for this date")
     parser.add_argument("--dry-run", action="store_true", help="Plan only. No Grok, no speech, no publish")
     parser.add_argument("--import-pilot", action="store_true", help="Store the Oct 27 pilot MP3 as episode 1")
     parser.add_argument("--pilot-file", default="", help="Path to the pilot MP3")
@@ -70,7 +72,13 @@ def main(argv: list[str] | None = None) -> int:
         day = datetime.now(ZoneInfo("America/Los_Angeles")).date()
     from podcast_engine import generate_sogd_episode
     connect = _connect if os.environ.get("DATABASE_URL") else None
-    result = generate_sogd_episode(day, force=args.force, dry_run=args.dry_run, connect=connect)
+    result = generate_sogd_episode(
+        day,
+        force=args.force,
+        confirm="replace" if args.force and args.yes else None,
+        dry_run=args.dry_run,
+        connect=connect,
+    )
     summary = {
         "ok": result.get("ok"),
         "status": result.get("status"),

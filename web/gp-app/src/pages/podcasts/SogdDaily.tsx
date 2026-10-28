@@ -38,6 +38,14 @@ type DailyStatus = {
   runs: DailyRun[]
   today: TodayEpisode | null
   error?: string
+  run_state?: {
+    stage_done?: string | null
+    attempts?: number | null
+    last_error?: string | null
+    next_retry_at?: string | null
+    status?: string | null
+    stages?: { id: string; done: boolean }[]
+  } | null
 }
 
 type Playable = {
@@ -96,9 +104,18 @@ function stageLabel(stage: string | null | undefined): string {
     case 'scout': return 'Searching'
     case 'lens': return 'Reading the stories'
     case 'script': return 'Writing'
+    case 'tts':
+    case 'tts_chunks': return 'Recording'
+    case 'rank': return 'Choosing stories'
+    case 'factcheck':
     case 'fact_check': return 'Checking facts'
-    case 'tts': return 'Recording'
-    default: return 'Working'
+    case 'assemble': return 'Assembling'
+    case 'master': return 'Mastering'
+    case 'upload': return 'Uploading'
+    case 'publish': return 'Publishing'
+    case 'notify': return 'Notifying'
+    case 'failed_needs_attention': return 'Needs attention'
+    default: return stage ? stage.replaceAll('_', ' ') : 'Working'
   }
 }
 
@@ -236,7 +253,7 @@ export function SogdDaily({
     try {
       await api('/api/podcast/systems-over-goals/generate-daily', {
         method: 'POST',
-        body: JSON.stringify({ force: blocked }),
+        body: JSON.stringify({ force: blocked, confirm: blocked ? 'replace' : undefined }),
       })
       setNote('Generation started. This page will show the run when it finishes.')
       window.setTimeout(() => void load().catch(() => undefined), 4000)
@@ -343,6 +360,25 @@ export function SogdDaily({
         <p className={styles.pcDesc}>
           {stageLabel(live.stage)} · {formatElapsed(runSeconds(live, now))}
         </p>
+      )}
+      {status?.run_state && (
+        <div className={styles.pcDesc}>
+          <div>
+            Stage {status.run_state.stage_done || 'not started'}
+            {status.run_state.attempts ? ` · attempt ${status.run_state.attempts}` : ''}
+            {status.run_state.next_retry_at ? ` · next retry ${status.run_state.next_retry_at}` : ''}
+          </div>
+          {!!status.run_state.stages?.length && (
+            <div>
+              {status.run_state.stages.map((item) => (
+                <span key={item.id}>
+                  {item.done ? '✓' : '·'} {stageLabel(item.id)}{' '}
+                </span>
+              ))}
+            </div>
+          )}
+          {status.run_state.last_error && <div>{status.run_state.last_error}</div>}
+        </div>
       )}
       {status?.today?.episode_title && (
         <p className={styles.pcDesc}>
