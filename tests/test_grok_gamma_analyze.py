@@ -167,3 +167,71 @@ def test_analyze_does_not_blame_gamma_for_llm_timeout():
     gamma = src.split("def _gamma_generate")[1].split("def analyze_ticker")[0]
     assert '"folderIds": [GAMMA_FOLDER_ID] if GAMMA_FOLDER_ID else None' not in gamma
     assert 'payload["folderIds"]' in gamma
+
+
+def test_headlines_sort_newest_first():
+    import DGA_analyst as analyst
+    rows = [
+        {"title": "MGM announces a merger", "published_at": "2026-09-24"},
+        {"title": "MGM reports quarterly results", "published_at": "2026-10-28"},
+        {"title": "MGM conference", "published_at": None},
+    ]
+    rows.sort(key=analyst._catalyst_headline_rank, reverse=True)
+    assert rows[0]["published_at"] == "2026-10-28"
+    assert rows[1]["published_at"] == "2026-09-24"
+    assert rows[2]["published_at"] is None
+    same_day = [
+        {"title": "MGM to acquire a resort", "published_at": "2026-10-28"},
+        {"title": "MGM traffic update", "published_at": "2026-10-28"},
+    ]
+    same_day.sort(key=analyst._catalyst_headline_rank, reverse=True)
+    assert "acqui" in same_day[0]["title"]
+
+
+def test_rerun_does_not_copy_the_prior_report_body():
+    import DGA_analyst as analyst
+    block = analyst.format_prior_thesis_block({
+        "provider": "grok",
+        "generated_hint": "2026-09-24",
+        "rating": "Hold",
+        "price_target": 40.0,
+        "upside_pct": 5.0,
+        "thesis": "Casinos are steady.",
+        "report_excerpt": "Current Price: $28.10\n[HIGH] 2026-09-24 — old news",
+    })
+    assert "Prior report excerpt" not in block
+    assert "2026-09-24 — old news" not in block
+    assert "$28.10" not in block
+    assert "CURRENT_PRICE" in block
+    assert "FREE CATALYST HEADLINES" in block
+
+
+def test_cover_price_is_replaced_with_the_live_last():
+    import DGA_analyst as analyst
+    src = (
+        "| **Current Price:** $28.10 (as of 2026-09-24) | 52-Week Range: $22–$45 |\n"
+        "| **12-Month Price Target:** $40.00 | Implied Return: +42.3% |\n"
+    )
+    out = analyst.stamp_live_cover_price(src, 33.5, "2026-10-28")
+    assert "$33.50" in out
+    assert "as of 2026-10-28" in out
+    assert "$28.10" not in out
+    assert "+19.4%" in out
+
+
+def test_newer_edgar_period_forces_a_filing_pull():
+    import DGA_analyst as analyst
+    assert analyst.edgar_period_is_newer("2026-06-30", "2026-09-30")
+    assert not analyst.edgar_period_is_newer("2026-09-30", "2026-09-30")
+    assert not analyst.edgar_period_is_newer("2026-09-30", None)
+    src = (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
+    impl = src.split("def _analyze_ticker_impl")[1].split("def run_portfolio_summary")[0]
+    assert "latest_edgar_period" in impl
+    assert "cached user_msg is stale" in impl
+    assert "stamp_live_cover_price" in impl
+    snap = src.split("def fetch_market_snapshot")[1].split("def _attach_pct_change")[0]
+    assert "_yahoo_chart_quote" in snap
+    assert "get_quotes" not in snap
+    server = (ROOT / "api/server.py").read_text(encoding="utf-8")
+    assert '"commit_message"' in server
+    assert "RAILWAY_GIT_COMMIT_MESSAGE" in server

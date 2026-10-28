@@ -2012,13 +2012,110 @@ def build_munger_system_appendix() -> str:
 # Primary:  yfinance fast_info — reliably exposes last_price + previous_close
 # Fallback: Yahoo Finance chart API via raw requests
 # ============================================================================
+def stamp_live_cover_price(report_text: str, price, as_of: str | None = None) -> str:
+    """Force the cover Current Price to the live last from this run.
+
+    The model was copying the prior report's price into the new cover. The
+    saved summary then kept that stale print after a rerun.
+    """
+    if not report_text or price is None:
+        return report_text or ""
+    try:
+        px = float(price)
+    except (TypeError, ValueError):
+        return report_text
+    if px <= 0:
+        return report_text
+    shown = f"${px:,.2f}"
+    date = str(as_of or "")[:10]
+    price_re = re.compile(
+        r"((?:\*\*)?Current Price:(?:\*\*)?\s*)\$[0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?"
+        r"(\s*\(as of [^)]*\))?",
+        re.IGNORECASE,
+    )
+
+    def _price(m):
+        tail = f" (as of {date})" if date else (m.group(2) or "")
+        return f"{m.group(1)}{shown}{tail}"
+
+    new, n = price_re.subn(_price, report_text, count=1)
+    if not n:
+        return report_text
+    pt = re.search(
+        r"12-Month Price Target:\*\*\s*\$([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)",
+        new[:5000],
+        re.IGNORECASE,
+    )
+    if pt:
+        try:
+            target = float(pt.group(1).replace(",", ""))
+            up = (target - px) / px * 100.0
+        except (TypeError, ValueError, ZeroDivisionError):
+            up = None
+        if up is not None:
+            ret_re = re.compile(r"(Implied Return:\s*)([+-]?\d+(?:\.\d+)?\s*%)", re.IGNORECASE)
+            new, _ = ret_re.subn(lambda m: f"{m.group(1)}{up:+.1f}%", new, count=1)
+    return new
+
+
+def edgar_period_is_newer(stored_end: str | None, edgar_end: str | None) -> bool:
+    """True when EDGAR's latest 10-Q/10-K period is after the stored quarter."""
+    edgar = str(edgar_end or "")[:10]
+    stored = str(stored_end or "")[:10]
+    if len(edgar) < 10:
+        return False
+    if len(stored) < 10:
+        return True
+    return edgar > stored
+
+
+def latest_edgar_period(ticker: str) -> str | None:
+    """Period end of the newest 10-Q or 10-K on EDGAR submissions, or None."""
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        return None
+    try:
+        import sec_edgar_xbrl as sx
+        sx._ensure_ticker_map(get_sec_user_agent())
+        cik = sx._TICKER_CACHE.get(tk)
+    except Exception as exc:
+        print(f"   ⚠️  EDGAR ticker map failed for {tk}: {exc!s:.120}", flush=True)
+        return None
+    if not isinstance(cik, str) or not cik:
+        return None
+    try:
+        import requests
+        r = requests.get(
+            f"https://data.sec.gov/submissions/CIK{cik}.json",
+            headers={"User-Agent": get_sec_user_agent()},
+            timeout=8,
+        )
+        if r.status_code != 200:
+            print(f"   ⚠️  EDGAR submissions {tk}: HTTP {r.status_code}", flush=True)
+            return None
+        recent = ((r.json().get("filings") or {}).get("recent") or {})
+        forms = recent.get("form") or []
+        dates = recent.get("reportDate") or []
+        best = ""
+        for form, date in zip(forms, dates):
+            if form not in ("10-Q", "10-K", "10-Q/A", "10-K/A"):
+                continue
+            day = str(date or "")[:10]
+            if len(day) == 10 and day > best:
+                best = day
+        return best or None
+    except Exception as exc:
+        print(f"   ⚠️  EDGAR submissions failed for {tk}: {exc!s:.120}", flush=True)
+        return None
+
+
 def fetch_market_snapshot(ticker: str) -> dict:
     """Best-effort current price + previous close + pct_change + market data.
 
-    Uses yfinance fast_info as the primary source (reliable previous_close =
-    prior trading day's close), adds enterprise_value + 52-week range from
-    yfinance .info, and falls back to the Yahoo chart JSON endpoint when
-    yfinance is absent.
+    The desk quote (Yahoo chart) is the price of record. yfinance fast_info
+    on Railway has returned a last that was not the session print, and a
+    successful stale last used to skip the chart entirely. yfinance still
+    fills market cap, enterprise value, and the 52-week range.
 
     Returns:
         {
@@ -2036,7 +2133,13 @@ def fetch_market_snapshot(ticker: str) -> dict:
            "market_cap": None, "year_high": None, "year_low": None,
            "enterprise_value": None, "source": ""}
 
-    # ── Primary: yfinance fast_info ──────────────────────────────────────────
+    # ── Price of record: the same Yahoo chart last the desk shows ───────────
+    # Call the chart directly. The watchlist quote fanout cancels after ~1.5s
+    # so a board can return; that wall was dropping the live last and leaving
+    # yfinance's fast_info print, which is the stale price that stuck on a rerun.
+    _apply_desk_quote(out, ticker)
+
+    # ── yfinance: market cap and range. Do not replace a desk price. ────────
     try:
         import yfinance as yf  # type: ignore
         t   = yf.Ticker(ticker)
@@ -2046,10 +2149,10 @@ def fetch_market_snapshot(ticker: str) -> dict:
         mcap  = getattr(fi, "market_cap", None)
         yh    = getattr(fi, "year_high", None)
         yl    = getattr(fi, "year_low", None)
-        if price and float(price) > 0:
+        if out["price"] is None and price and float(price) > 0:
             out["price"] = float(price)
             out["source"] = "Yahoo Finance (fast_info)"
-        if prev and float(prev) > 0:
+        if out["previous_close"] is None and prev and float(prev) > 0:
             out["previous_close"] = float(prev)
         if mcap:
             out["market_cap"] = float(mcap)
@@ -2086,27 +2189,30 @@ def fetch_market_snapshot(ticker: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         print(f"   ⚠️  yfinance fast_info failed for {ticker}: {exc}")
 
-    # ── Fallback: session-aware Yahoo chart (shared with watchlist) ───────────
-    # CRITICAL (SUP_20260727): never use closes[-2] blindly when previousClose
-    # is missing. If the last daily bar is still Friday and the market is open
-    # Monday, closes[-2] is *Thursday* and day-% vs live price is multi-day
-    # wrong (e.g. TSLA −3.4% vs true ≈ −1.3%). Delegate to market_data.
-    try:
-        import market_data as _md  # type: ignore
-        mq = (_md.get_quotes([ticker]) or {}).get(ticker.upper()) or {}
-        if mq.get("price") is not None and out["price"] is None:
-            out["price"] = float(mq["price"])
-        if mq.get("prev_close") is not None and out["previous_close"] is None:
-            out["previous_close"] = float(mq["prev_close"])
-        if mq.get("pct_change") is not None and out.get("pct_change") is None:
-            out["pct_change"] = float(mq["pct_change"])
-        if mq and not out["source"]:
-            out["source"] = mq.get("source") or "yahoo-chart"
-    except Exception as exc:  # noqa: BLE001
-        print(f"   ⚠️  Market snapshot chart fallback failed for {ticker}: {exc}")
+    # Chart already ran above. Retry once only when that attempt left no price
+    # (a transient Yahoo miss). The watchlist fanout is a different function
+    # and its short wall was returning before this chart did.
+    if out["price"] is None:
+        _apply_desk_quote(out, ticker)
 
     _attach_pct_change(out)
     return out
+
+
+def _apply_desk_quote(out: dict, ticker: str) -> None:
+    """Fill price and prior close from the desk chart. Never raises."""
+    try:
+        import market_data as _md  # type: ignore
+        mq = _md._yahoo_chart_quote((ticker or "").strip().upper()) or {}
+        if mq.get("price") is not None and float(mq["price"]) > 0 and out.get("price") is None:
+            out["price"] = float(mq["price"])
+            out["source"] = mq.get("source") or "yahoo-chart"
+        if mq.get("prev_close") is not None and float(mq["prev_close"]) > 0 and out.get("previous_close") is None:
+            out["previous_close"] = float(mq["prev_close"])
+        if mq.get("pct_change") is not None and out.get("pct_change") is None:
+            out["pct_change"] = float(mq["pct_change"])
+    except Exception as exc:  # noqa: BLE001
+        print(f"   ⚠️  Desk quote failed for {ticker}: {exc!s:.120}", flush=True)
 
 
 def _attach_pct_change(snapshot: dict) -> None:
@@ -2528,17 +2634,22 @@ def free_ticker_catalyst_headlines(
         "Yahoo Finance",
     )
 
-    def _rank(it: dict) -> tuple:
-        title_l = (it.get("title") or "").lower()
-        ma = 1 if any(w in title_l for w in (
-            "acqui", "merger", "takeover", "buyout", "definitive agreement",
-            "to buy", "to acquire", "deal to",
-        )) else 0
-        dated = 1 if it.get("published_at") else 0
-        return (-ma, -dated, it.get("published_at") or "", it.get("title") or "")
-
-    raw.sort(key=_rank)
+    raw.sort(key=_catalyst_headline_rank, reverse=True)
     return raw[:limit]
+
+
+def _catalyst_headline_rank(it: dict) -> tuple:
+    """Newest headline first. A deal wins only against another item on the same day.
+
+    The old key put any M&A title above a newer earnings print, so Section 2
+    opened on a September item while a later October headline sat further down.
+    """
+    title_l = (it.get("title") or "").lower()
+    ma = 1 if any(w in title_l for w in (
+        "acqui", "merger", "takeover", "buyout", "definitive agreement",
+        "to buy", "to acquire", "deal to",
+    )) else 0
+    return (it.get("published_at") or "0000-00-00", ma, it.get("title") or "")
 
 
 def format_catalyst_headlines_block(ticker: str, items: list[dict], *, days: int = 90) -> str:
@@ -9622,38 +9733,39 @@ def format_prior_thesis_block(prior: dict) -> str:
     up = prior.get("upside_pct")
     up_s = f"{up:+.1f}%" if isinstance(up, (int, float)) else (str(up) if up else "—")
     thesis = (prior.get("thesis") or "").strip() or "(No dedicated thesis paragraph found — use rating/target and excerpt.)"
-    excerpt = (prior.get("report_excerpt") or "").strip()
-    # Cap excerpt to keep prompt lean
-    if len(excerpt) > 3500:
-        excerpt = excerpt[:3500] + "\n…[truncated]"
     return (
-        "=== PRIOR DGA REPORT (same ticker — previous Analyze run) ===\n"
+        "=== PRIOR DGA THESIS (same ticker — previous Analyze run) ===\n"
         f"Provider: {(prior.get('provider') or 'grok').upper()}\n"
         f"As-of (file): {prior.get('generated_hint') or 'unknown'}\n"
         f"Prior rating: {prior.get('rating') or '—'}\n"
         f"Prior 12-mo price target: {pt_s}\n"
         f"Prior upside (implied): {up_s}\n"
-        f"Prior thesis excerpt:\n{thesis}\n\n"
-        f"Prior report excerpt (for continuity only — do not copy wholesale):\n"
-        f"{excerpt}\n"
-        "=== END PRIOR DGA REPORT ===\n\n"
+        f"Prior thesis excerpt:\n{thesis}\n"
+        "=== END PRIOR DGA THESIS ===\n\n"
         "=== THESIS CONTINUITY REQUIREMENT (NON-NEGOTIABLE) ===\n"
         "Include a short section titled exactly:\n"
         "## Thesis Continuity vs Prior DGA Report\n"
         "Place it after the Investment Thesis / Executive Summary and before valuation detail.\n"
+        "The prior report body is not attached. Do not copy its price, its news dates, "
+        "or its quarterly figures. Those belong to the old run.\n"
         "Rules:\n"
-        "1. If the investment thesis and rating *direction* are materially unchanged "
+        "1. Cover Current Price is the CURRENT_PRICE in this user message, dated DATE. "
+        "Never reprint the prior run's market price.\n"
+        "2. Section 2 uses only FREE CATALYST HEADLINES, newest date first. "
+        "Do not revive a headline from the prior run that is not in that block.\n"
+        "3. Key Metrics use VERIFIED FINANCIAL DATA from this run, even when that "
+        "quarter is newer than the prior report.\n"
+        "4. If the investment thesis and rating *direction* are materially unchanged "
         "(same Buy/Hold/Sell family; no major catalyst/risk flip), open with:\n"
         "   **Thesis status: CONSISTENT**\n"
         "   Then 2–4 sentences: what is unchanged, what new facts reinforce it, "
         "and that the outlook still holds.\n"
-        "2. If rating direction, price target (>~8% move), risk skew, or key catalysts "
+        "5. If rating direction, price target (>~8% move), risk skew, or key catalysts "
         "changed materially, open with:\n"
         "   **Thesis status: UPDATED**\n"
         "   Then bullets with old → new (rating, target, risks/catalysts) and *why*.\n"
-        "3. Use ONLY the PRIOR DGA REPORT block above — never invent a prior view.\n"
-        "4. Keep the section tight (≤180 words). Numbers from VERIFIED FINANCIAL DATA "
-        "and the prior block only.\n"
+        "6. Use ONLY the PRIOR DGA THESIS block above — never invent a prior view.\n"
+        "7. Keep the section tight (≤180 words).\n"
     )
 
 
@@ -10140,6 +10252,21 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             return low.count("| n/a |") >= 3 and "bn" not in low and "$" not in low[:2000]
         return False
 
+    if reuse_user_msg and _cached_um_path.exists():
+        # A Compare run seconds after Grok may reuse that gather. A later
+        # rerun must not keep the price and the quarter from the first run.
+        try:
+            _cache_age = time.time() - _cached_um_path.stat().st_mtime
+        except Exception:
+            _cache_age = 10**9
+        if _cache_age > 30 * 60:
+            print(
+                f"   ♻️❌ {ticker}: cached user_msg is stale "
+                f"({int(_cache_age // 60)}m) — gathering fresh SEC and price",
+                flush=True,
+            )
+            reuse_user_msg = False
+
     if reuse_user_msg and _cached_um_path.exists() and audit_path.exists():
         try:
             with open(audit_path) as fh:
@@ -10179,8 +10306,24 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                     "Banks: Revenue = total interest income + noninterest income from "
                     "the verified block — never fee-only contract revenue.\n"
                 )
-            mkt = (json.loads(_cached_mkt_path.read_text())
-                   if _cached_mkt_path.exists() else fetch_market_snapshot(ticker))
+            if _cached_mkt_path.exists():
+                mkt = json.loads(_cached_mkt_path.read_text())
+                if not isinstance(mkt, dict):
+                    mkt = {}
+                # Financials can stay cached for a Compare that starts right
+                # after Grok. The last print cannot. The saved snapshot is
+                # what made a second engine reprint the first run's price.
+                _live_px_now = {}
+                _apply_desk_quote(_live_px_now, ticker)
+                if _live_px_now.get("price"):
+                    mkt["price"] = _live_px_now["price"]
+                    if _live_px_now.get("previous_close"):
+                        mkt["previous_close"] = _live_px_now["previous_close"]
+                    if _live_px_now.get("pct_change") is not None:
+                        mkt["pct_change"] = _live_px_now["pct_change"]
+                    mkt["source"] = _live_px_now.get("source") or "yahoo-chart"
+            else:
+                mkt = fetch_market_snapshot(ticker)
             if audit_path.exists():
                 with open(audit_path) as fh:
                     data = json.load(fh)
@@ -10406,6 +10549,25 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
 
         # 2) Live SEC Excel pull — same budget for every engine (Grok was at
         # 35s and got rate-limited empty; DeepSeek at 45s succeeded).
+        if _store_ok:
+            _stored_end = ""
+            try:
+                _qc0 = ((_db_data or {}).get("quarterly") or {}).get("current") or {}
+                _stored_end = str(_qc0.get("end") or "")[:10]
+                if not _stored_end:
+                    _anns0 = (_db_data or {}).get("annuals") or []
+                    _stored_end = str((_anns0[0] if _anns0 else {}).get("end") or "")[:10]
+            except Exception:
+                _stored_end = ""
+            _edgar_end = latest_edgar_period(ticker)
+            if edgar_period_is_newer(_stored_end, _edgar_end):
+                print(
+                    f"   🌐 {ticker}: EDGAR period {_edgar_end} is newer than "
+                    f"stored {_stored_end or '—'} — pulling the filing",
+                    flush=True,
+                )
+                _store_ok = False
+                _need_sec = True
         if _store_ok:
             data = _db_data
             try:
@@ -10870,6 +11032,25 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     except Exception as _pe:
         print(f"   ⚠️  Prior thesis inject failed: {_pe!s:.120}", flush=True)
 
+    _live_px = (mkt or {}).get("price")
+    _live_day = datetime.now().strftime("%Y-%m-%d")
+    if _live_px:
+        user_msg = re.sub(
+            r"(?m)^(CURRENT_PRICE:\s*).*$",
+            lambda _m: f"{_m.group(1)}{_live_px}",
+            user_msg,
+            count=1,
+        )
+    user_msg = user_msg.rstrip() + (
+        "\n\n=== THIS RUN (overrides the prior report) ===\n"
+        f"DATE: {_live_day}\n"
+        f"CURRENT_PRICE: {_live_px}\n"
+        "Cover Current Price must be this CURRENT_PRICE as of DATE. "
+        "Section 2 dates must come from FREE CATALYST HEADLINES, newest first. "
+        "Key Metrics must come from VERIFIED FINANCIAL DATA in this message. "
+        "Do not copy a price, a news date, or a quarter from the prior run.\n"
+    )
+
     if prepare_only:
         out = {
             "ok": True,
@@ -11046,6 +11227,12 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
             raise
         except Exception as _re:
             print(f"   ⚠️  no-search retry failed ({_re!s:.120}); keeping first draft")
+
+    # The cover price is the live last from this run, not a number the model
+    # copied out of the previous report.
+    if isinstance(report_text, str) and report_text:
+        _asof = datetime.now().strftime("%Y-%m-%d")
+        report_text = stamp_live_cover_price(report_text, (mkt or {}).get("price"), _asof)
 
     # Save markdown — suffixed for non-Grok providers so they don't overwrite.
     md_path = STOCKS_FOLDER / f"{ticker}_DGA_Report{_suffix}.md"

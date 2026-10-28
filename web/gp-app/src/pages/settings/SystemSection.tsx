@@ -391,6 +391,7 @@ function DemoCard() {
 function SystemInfoCard() {
   const [build, setBuild] = useState('—')
   const [commit, setCommit] = useState('—')
+  const [deploy, setDeploy] = useState('—')
   const [backend, setBackend] = useState('—')
   const [db, setDb] = useState('—')
   const [badge, setBadge] = useState('—')
@@ -401,9 +402,14 @@ function SystemInfoCard() {
   useEffect(() => {
     ;(async () => {
       try {
-        const j = await api<{ build?: string; commit_sha?: string }>('/api/build')
+        const j = await api<{
+          build?: string
+          commit_sha?: string
+          commit_message?: string
+        }>('/api/build')
         setBuild(j.build || '—')
-        setCommit(String(j.commit_sha || j.build || '—').slice(0, 12))
+        setCommit(j.commit_sha ? String(j.commit_sha).slice(0, 12) : '—')
+        setDeploy(j.commit_message || '—')
         setBackend('✓ reachable')
         setBadge('OK')
       } catch {
@@ -469,7 +475,10 @@ function SystemInfoCard() {
     <CollapsibleCard title="🖥 System info" badge={badge} defaultOpen>
       <div className={styles.mono}>
         <div>
-          Build: <strong>{build}</strong>
+          App build: <strong>{build}</strong>
+        </div>
+        <div>
+          Railway deploy: <strong>{deploy}</strong>
         </div>
         <div>
           Commit: <strong>{commit}</strong>

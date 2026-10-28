@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui793-20261028-sogd-resume"
+WEB_BUILD_VERSION = "ui795-20261028-fresh-rerun"
 
 
 @app.get("/api/build")
@@ -9000,7 +9000,22 @@ async def build_version():
     it forces a `location.reload(true)` with a cache-bust query param so even
     home-screen PWAs see the latest UI without manual cache clearing.
     """
-    return {"build": WEB_BUILD_VERSION}
+    commit_sha = (
+        os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("RAILWAY_GIT_COMMIT")
+        or ""
+    ).strip()
+    commit_message = (os.environ.get("RAILWAY_GIT_COMMIT_MESSAGE") or "").strip()
+    if not commit_sha or not commit_message:
+        git_sha, _git_branch, git_msg = _continuity_git()
+        commit_sha = commit_sha or git_sha
+        commit_message = commit_message or git_msg
+    return {
+        "build": WEB_BUILD_VERSION,
+        "commit_sha": commit_sha,
+        "commit_message": commit_message,
+        "deployment_id": (os.environ.get("RAILWAY_DEPLOYMENT_ID") or "").strip(),
+    }
 
 
 def _repo_root() -> "Path":
