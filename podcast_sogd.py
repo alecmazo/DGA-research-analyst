@@ -141,12 +141,68 @@ def style_prompt() -> str:
         f"Master: highpass {s['highpass_hz']} Hz, then gain, then a light peak limiter, "
         f"targeting {s['lufs']} LUFS integrated, peak <= {s['peak_dbtp']} dBTP, no heavy compression. "
         f"Output {s['bitrate_kbps']} kbps mono MP3, under 25 MB. "
-        f"Publish at {s['publish_local']} America/Los_Angeles, never earlier."
+        f"Publish at {s['publish_local']} America/Los_Angeles, never earlier. "
+        "Each story must say, in this order, what happened, who says what, the other side, "
+        "follow the money: who wins if you believe this, so why does this matter to you, "
+        "a short recap, and what to watch next. "
+        "Use at least two sources for each story when they are in the packet. Do not invent a URL. "
+        "Four or five stories, never more than six, and never a headline list. "
+        "The opening has no AI disclosure. The disclosure and the not-investment-advice line "
+        "are spoken only in the close. "
+        + pilot_shape_example()
+    )
+
+
+def pilot_shape_example() -> str:
+    """Cadence from the Oct 27 v4 pilot. Facts in it are not today's news."""
+    return (
+        "Shape example from the approved Oct 27 v4 pilot. Match this cadence and these tags. "
+        "Do not reuse its facts, names, numbers, or dates.\n"
+        "COLD OPEN: Good morning. [pause] It's Tuesday, October twenty-seventh, and you're "
+        "listening to Systems Over Goals Daily. A short how-this-works only on the days the "
+        "intro style asks for it, then one short preview line per story, then into the first story. "
+        "No AI disclosure here.\n"
+        "STORY: [long-pause] Story one. [pause] What happened, with two or three named sources. "
+        "[pause] Who says what. [pause] Now the other side. [pause] Follow the money. Who wins if "
+        "you believe this? [pause] So why does this matter to you? [pause] Quick recap before we "
+        "move on. What to watch next.\n"
+        "CLOSE: [long-pause] Zoom out on the day's pattern. Then, and only then: this episode was "
+        "AI-narrated, and nothing here is investment advice."
     )
 
 
 SOGD_STYLE["prompt"] = style_prompt()
 SOGD_STYLE_GUIDE = SOGD_STYLE
+
+# Writer section ids. validate_script reads these. `close` is the sign-off.
+# `systems_takeaway` remains a legacy alias so an older saved script still plays.
+SOGD_FIXED_SECTIONS = ("cold_open",)
+SOGD_CLOSE_IDS = ("close", "systems_takeaway")
+SOGD_STORY_MAX = 6
+RUN_STAGES = (
+    "scout",
+    "rank",
+    "script",
+    "factcheck",
+    "tts_chunks",
+    "assemble",
+    "master",
+    "upload",
+    "publish",
+    "notify",
+)
+_STAGE_INDEX = {name: index for index, name in enumerate(RUN_STAGES)}
+MAX_ATTEMPTS = 5
+RETRY_BACKOFF_MIN = (2, 5, 10, 20, 40)
+LEASE_STALE_SEC = 10 * 60
+WINDOW_END_LOCAL = "12:00"
+ALERT_LOCAL = "07:30"
+FORCE_CONFIRM = "replace"
+_DISCLOSURE_RE = re.compile(
+    r"ai[-\s]?narrat|ai[-\s]?generat|narrated by an ai|this episode is ai",
+    re.IGNORECASE,
+)
+_TAG_RE = re.compile(r"\[[^\[\]]+\]|</?(?:slow|soft|emphasis)>", re.IGNORECASE)
 
 PILOT_GUID = "11546341-0cb4-5cda-8267-26668ac6a3cc"
 PILOT_BYTE_SIZE = 17158220
@@ -237,6 +293,24 @@ SCHEMA_STATEMENTS = (
     """
     CREATE INDEX IF NOT EXISTS podcast_runs_show_started
         ON podcast_runs (show, started_at DESC)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS podcast_run_state (
+        show            TEXT NOT NULL,
+        episode_date    DATE NOT NULL,
+        stage_done      TEXT,
+        artifacts       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        attempts        INTEGER NOT NULL DEFAULT 0,
+        last_error      TEXT,
+        next_retry_at   TIMESTAMPTZ,
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        heartbeat_at    TIMESTAMPTZ,
+        status          TEXT,
+        lease_owner     TEXT,
+        notified_guid   TEXT,
+        alerted_on      DATE,
+        PRIMARY KEY (show, episode_date)
+    )
     """,
 )
 
@@ -539,9 +613,24 @@ def plan_tick(
         if started is not None and age < 3 * 3600:
             return {"action": "sleep", "sleep_sec": 60, "reason": "in_progress"}
 
-    # Missing, failed, or a stale run: catch up only after the start clock.
+    attempts = int((episode or {}).get("attempts") or 0)
+    if status == "failed_needs_attention" or attempts >= 5:
+        return {
+            "action": "sleep",
+            "sleep_sec": _secs_until(next_start, local),
+            "reason": "needs_attention" if status == "failed_needs_attention" else "attempts",
+        }
+    if status == "failed":
+        retry_at = _as_local((episode or {}).get("next_retry_at"), tz)
+        if retry_at is not None and local < retry_at:
+            return {"action": "sleep", "sleep_sec": _secs_until(retry_at, local), "reason": "backoff"}
+
+    # Missing, failed, or a stale run: catch up only after the start clock, and not after noon.
     if local < start_at:
         return {"action": "sleep", "sleep_sec": _secs_until(start_at, local), "reason": "before_start"}
+    end_at = clock_on(local.date(), "12:00", tz)
+    if local >= end_at:
+        return {"action": "sleep", "sleep_sec": _secs_until(next_start, local), "reason": "after_window"}
     return {"action": "generate", "sleep_sec": 0, "reason": "due"}
 
 
@@ -574,6 +663,8 @@ def date_guard(existing: dict | None, *, force: bool = False, now: datetime | No
     status = (existing.get("status") or "published").strip().lower()
     if force:
         return {"ok": True, "replaced": True}
+    if status == "failed_needs_attention":
+        return {"ok": False, "reason": "needs_attention"}
     if status in ("failed", "cost_cap_hit"):
         return {"ok": True, "retry": status == "failed"}
     if status == "running":
@@ -668,6 +759,235 @@ def guard_script(script: dict) -> dict:
     return {"ok": not hits, "hits": hits}
 
 
+def writer_section_line() -> str:
+    """The section ids the daily writer is told to emit."""
+    return "Sections in order: cold_open, story_1..story_N, close."
+
+
+def writer_instructions(episode_date: date, recent_intros, word_min: int, word_max: int) -> str:
+    """The one system prompt for the daily writer, the expander, and the repair."""
+    return (
+        "Return JSON only: {\"sections\":[{\"id\":\"\",\"text\":\"\"}]}. "
+        + writer_section_line() + " "
+        f"Total between {word_min} and {word_max} words. "
+        "Every number, date, quote, and who-did-what must come from the stories you were given. "
+        "Do not invent those. When a story lists two or more sources, cite at least two of them. "
+        "Do not invent a URL. "
+        + intro_prompt(episode_date, recent_intros) + " "
+        + style_prompt() + " "
+        + LENS_GUARD
+    )
+
+
+def opening_has_disclosure(section: dict) -> bool:
+    text = _section_text(section)
+    if DISCLOSURE.lower() in text.lower():
+        return True
+    return bool(_DISCLOSURE_RE.search(text))
+
+
+def story_missing_beats(section: dict) -> list[str]:
+    text = _section_text(section).lower()
+    missing = []
+    if "why does this matter" not in text and "why this matters" not in text:
+        missing.append("why it matters")
+    if "recap" not in text:
+        missing.append("recap")
+    return missing
+
+
+def stage_reached(stage_done: str | None, target: str) -> bool:
+    if not stage_done:
+        return False
+    return _STAGE_INDEX.get(stage_done, -1) >= _STAGE_INDEX.get(target, 99)
+
+
+def retry_backoff(attempt: int, jitter_seconds: float = 0) -> timedelta | None:
+    """Wait after failure number `attempt`. The fifth failure does not schedule another run."""
+    if attempt < 1 or attempt >= MAX_ATTEMPTS:
+        return None
+    minutes = RETRY_BACKOFF_MIN[attempt - 1]
+    return timedelta(minutes=minutes, seconds=max(0.0, float(jitter_seconds)))
+
+
+def episode_lock_key(show: str, episode_date) -> int:
+    day = episode_date.date() if isinstance(episode_date, datetime) else episode_date
+    raw = hashlib.sha256(f"{show}:{day.isoformat()}".encode("utf-8")).digest()
+    return int.from_bytes(raw[:8], "big") & 0x7FFFFFFFFFFFFFFF
+
+
+def lease_is_stale(heartbeat_at, now: datetime, stale_after: int = LEASE_STALE_SEC) -> bool:
+    beat = _as_local(heartbeat_at, timezone.utc)
+    if beat is None:
+        return True
+    clock = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    return (clock - beat).total_seconds() >= stale_after
+
+
+def claim_run(state: dict | None, *, lock_acquired: bool, now: datetime) -> dict:
+    """One run per date. A fresh heartbeat keeps the lease. A stale one can be taken."""
+    if not lock_acquired:
+        return {"ok": False, "status": "locked", "error": "another worker holds this date"}
+    status = ((state or {}).get("status") or "").strip().lower()
+    if status == "running" and not lease_is_stale((state or {}).get("heartbeat_at"), now):
+        return {"ok": False, "status": "locked", "error": "this date already has a live run"}
+    takeover = status == "running" and lease_is_stale((state or {}).get("heartbeat_at"), now)
+    return {"ok": True, "takeover": takeover}
+
+
+class NeedsAttention(RuntimeError):
+    """A failure that will fail the same way if we run it again."""
+
+
+def failure_is_retryable(status: str, error: str = "") -> bool:
+    if status in ("failed_needs_attention", "cost_cap_hit", "needs_confirm"):
+        return False
+    text = (error or "").lower()
+    if "script invalid" in text or "likeness guard" in text or "word count" in text:
+        return False
+    return status == "failed"
+
+
+def reconcile_saved_script(script: dict) -> dict:
+    """Apply a validation fix to a frozen script. Do not call the writer again."""
+    script = ensure_disclosure(deepcopy(script or {}))
+    sections = script.get("sections") or []
+    ids = [sec.get("id") for sec in sections]
+    if "close" not in ids and "systems_takeaway" in ids:
+        for sec in sections:
+            if sec.get("id") == "systems_takeaway":
+                sec["id"] = "close"
+                break
+    return script
+
+
+def plan_tts_chunks(script: dict, voice: dict | None, pronunciation: dict | None) -> list[dict]:
+    """The paid TTS calls for this script, in order, including the two disclaimers."""
+    from podcast_engine import DEFAULT_DISCLAIMER_INTRO, DEFAULT_DISCLAIMER_OUTRO, tts_chunk_key
+    voice_name = ((voice or {}).get("voice") or SOGD_STYLE["voice"]).lower()
+    speed = float((voice or {}).get("speed") or 1.0)
+    rows = []
+
+    def add(text: str, kind: str):
+        spoken = (text or "").strip()
+        if not spoken:
+            return
+        rows.append({
+            "id": tts_chunk_key(spoken, voice_name, speed, pronunciation or {}),
+            "text": spoken,
+            "voice": voice_name,
+            "speed": speed,
+            "kind": kind,
+        })
+
+    for sec in (script or {}).get("sections") or []:
+        for turn in sec.get("turns") or []:
+            add(turn.get("text") or "", "turn")
+    add(DEFAULT_DISCLAIMER_INTRO, "disclaimer")
+    add(DEFAULT_DISCLAIMER_OUTRO, "disclaimer")
+    return rows
+
+
+def notify_delivery(guid: str, already: str | None) -> dict:
+    """The phone polls while Podcasts is open. Record one delivery per guid."""
+    if already and already == guid:
+        return {"ok": True, "skipped": True, "episode_guid": guid}
+    return {"ok": True, "delivered": True, "episode_guid": guid}
+
+
+def late_alert_due(now: datetime, episode: dict | None, *, alerted: bool = False,
+                   alert_local: str = ALERT_LOCAL, tz=LA) -> bool:
+    if alerted:
+        return False
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    local = now.astimezone(tz)
+    if local < clock_on(local.date(), alert_local, tz):
+        return False
+    status = ((episode or {}).get("status") or "").strip().lower()
+    return status != "published"
+
+
+def cleanup_partials(states: list[dict], files: list[dict], *, today: date, keep_days: int = 3) -> dict:
+    """Drop abandoned run state and files. Keep anything already published."""
+    cutoff = today - timedelta(days=keep_days)
+    drop_states = []
+    keep_keys = set()
+    for state in states or []:
+        day = state.get("episode_date")
+        if isinstance(day, datetime):
+            day = day.date()
+        elif isinstance(day, str):
+            day = date.fromisoformat(day[:10])
+        status = (state.get("status") or "").strip().lower()
+        published = status in ("published", "ready_pending") or stage_reached(state.get("stage_done"), "publish")
+        for key in state.get("chunk_keys") or []:
+            if published or (day is not None and day >= cutoff):
+                keep_keys.add(key)
+        if published or day is None or day >= cutoff:
+            continue
+        drop_states.append(state.get("episode_date"))
+    drop_files = []
+    for item in files or []:
+        key = item.get("key") or ""
+        kind = (item.get("kind") or "").lower()
+        if kind in ("wav", "temp") or key.endswith(".wav"):
+            drop_files.append(key)
+            continue
+        if kind == "chunk" and key not in keep_keys:
+            drop_files.append(key)
+    return {"states": drop_states, "files": drop_files}
+
+
+def _call_with_retry(fn, *, attempts: int = 4, sleep=None):
+    """At most four tries. Only 429 and 5xx are retried."""
+    delay = 0.4
+    last = None
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:
+            last = exc
+            text = str(exc)
+            retryable = any(code in text for code in ("429", "500", "502", "503", "504"))
+            if not retryable or attempt == attempts - 1:
+                raise
+            if sleep:
+                sleep(delay)
+            delay *= 2
+    raise last
+
+
+def build_sogd_alert(episode_date, stage: str, error: str) -> dict:
+    """Email Alec when 7:30 AM Pacific has passed with nothing published."""
+    subject = f"SOGD {episode_date} was not published by 7:30 AM PT"
+    body = (
+        f"Systems Over Goals Daily for {episode_date} is not on the feed.\n"
+        f"Stage: {stage or 'unknown'}\n"
+        f"Error: {error or 'none recorded'}\n"
+    )
+    return {
+        "to": "alecmazo1@gmail.com",
+        "subject": subject,
+        "body": body,
+    }
+
+
+def send_sogd_alert(episode_date, stage: str, error: str, *, send=None) -> dict:
+    note = build_sogd_alert(episode_date, stage, error)
+    if send is not None:
+        return send(note)
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg["To"] = note["to"]
+    msg["Subject"] = note["subject"]
+    sender = (os.environ.get("RESEND_FROM") or os.environ.get("GMAIL_USER") or "reports@dgacapital.com")
+    msg["From"] = sender
+    msg.set_content(note["body"])
+    import DGA_analyst as analyst
+    return analyst.send_portfolio_email(msg)
+
+
 def _section_text(section: dict) -> str:
     return " ".join((turn.get("text") or "") for turn in section.get("turns") or [])
 
@@ -713,16 +1033,31 @@ def enforce_word_budget(
 
 
 def trim_section_words(section: dict, extra: int) -> dict:
+    """Cut words from the end of the story body. Keep speech tags and the closing beats."""
     section = deepcopy(section)
     remaining = max(0, int(extra))
     for turn in reversed(section.get("turns") or []):
         if remaining <= 0:
             break
-        tokens = re.findall(r"\b[\w']+\b", turn.get("text") or "")
-        if len(tokens) <= 1:
+        text = turn.get("text") or ""
+        lowered = text.lower()
+        protect = len(text)
+        for phrase in ("why does this matter", "why this matters", "recap", "what to watch"):
+            found = lowered.find(phrase)
+            if found >= 0:
+                protect = min(protect, found)
+        head, tail = text[:protect], text[protect:]
+        spans = list(re.finditer(r"\b[\w']+\b", head))
+        if len(spans) <= 1:
             continue
-        cut = min(remaining, len(tokens) - 1)
-        turn["text"] = " ".join(tokens[: len(tokens) - cut])
+        cut = min(remaining, len(spans) - 1)
+        keep_until = spans[len(spans) - cut - 1].end()
+        dropped = head[keep_until:]
+        tags = " ".join(_TAG_RE.findall(dropped))
+        kept = head[:keep_until].rstrip()
+        if tags:
+            kept = f"{kept} {tags}"
+        turn["text"] = (kept + tail).strip()
         remaining -= cut
     return section
 
@@ -1228,15 +1563,19 @@ def ollama_reachable() -> bool:
 
 def _call_grok(system: str, user: str, *, live_search: bool = False, search_from_date: str | None = None) -> tuple[str, dict]:
     import DGA_analyst as ca
-    events: list[dict] = []
-    text = ca.call_grok(
-        system,
-        user,
-        live_search=live_search,
-        search_from_date=search_from_date,
-        usage_capture=events.append,
-    )
-    return text or "", _sum_usage(events)
+
+    def once():
+        events: list[dict] = []
+        text = ca.call_grok(
+            system,
+            user,
+            live_search=live_search,
+            search_from_date=search_from_date,
+            usage_capture=events.append,
+        )
+        return text or "", _sum_usage(events)
+
+    return _call_with_retry(once, sleep=time.sleep)
 
 
 def live_scout(episode_date: date) -> dict:
@@ -1287,14 +1626,7 @@ def _assemble(episode_date: date, lead: str, sections: list[dict]) -> dict:
 
 def live_writer(stories: list[dict], lenses, episode_date: date, *, word_min: int, word_max: int, recent_intros=None) -> dict:
     text, usage = _call_grok(
-        "Return JSON only: {\"sections\":[{\"id\":\"\",\"text\":\"\"}]}. "
-        "Sections in order: cold_open, story_1..story_N, close. "
-        f"Total between {word_min} and {word_max} words. "
-        "Every number, date, quote, and who-did-what must come from the stories. "
-        "Do not invent those. "
-        + intro_prompt(episode_date, recent_intros) + " "
-        + SOGD_STYLE["prompt"] + " "
-        + LENS_GUARD,
+        writer_instructions(episode_date, recent_intros, word_min, word_max),
         json.dumps({"date": episode_date.isoformat(), "stories": stories, "lens": lenses}),
     )
     data = _json_obj(text)
@@ -1303,10 +1635,12 @@ def live_writer(stories: list[dict], lenses, episode_date: date, *, word_min: in
     return {"script": script, "usage": usage}
 
 
-def live_expand(section: dict, need: int) -> dict:
+def live_expand(section: dict, need: int, episode_date: date | None = None, recent_intros=None) -> dict:
+    day = episode_date or date.today()
+    lo, hi = word_bounds()
     text, usage = _call_grok(
-        "Return JSON only: {\"text\":\"\"}. Keep the same facts. Add about "
-        f"{need} words. " + LENS_GUARD,
+        writer_instructions(day, recent_intros, lo, hi)
+        + f" Return JSON only: {{\"text\":\"\"}}. Keep the same facts and the recap. Add about {need} words.",
         _section_text(section),
     )
     data = _json_obj(text)
@@ -1429,13 +1763,10 @@ def live_repair_script(script, dropped, stories, episode_date: date, recent_intr
     for sec in (script or {}).get("sections") or []:
         sections.append({"id": sec.get("id"), "text": _section_text(sec)})
     text, usage = _call_grok(
-        "Return JSON only: {\"sections\":[{\"id\":\"\",\"text\":\"\"}]}. "
-        "Rewrite the script without the dropped sentences. "
-        "Replace the lost length with incentive and systems analysis grounded in the sources. "
-        "Do not add a number, date, quote, or who-did-what that is not in the sources. "
-        + intro_prompt(episode_date, recent_intros) + " "
-        + SOGD_STYLE["prompt"] + " "
-        + LENS_GUARD,
+        writer_instructions(episode_date, recent_intros, *word_bounds())
+        + " Rewrite the script without the dropped sentences. "
+        "Replace the lost length with analysis grounded in the sources. "
+        "Do not add a number, date, quote, or who-did-what that is not in the sources.",
         json.dumps({
             "sections": sections,
             "dropped": [claim.get("text") for claim in (dropped or [])],
@@ -1492,7 +1823,7 @@ def master_sogd_mp3(path: Path) -> bool:
     return True
 
 
-def _synthesize_engine(script, voice, pronunciation, on_progress) -> dict:
+def _synthesize_engine(script, voice, pronunciation, on_progress, chunk_cache=None) -> dict:
     import tempfile
     from podcast_engine import synthesize_episode
     out = Path(tempfile.mkdtemp(prefix="sogd-")) / "episode.mp3"
@@ -1503,6 +1834,7 @@ def _synthesize_engine(script, voice, pronunciation, on_progress) -> dict:
         voice_override=voice.get("voice") or SOGD_STYLE["voice"],
         speed_override=voice.get("speed") or 1.0,
         pronunciation=pronunciation,
+        chunk_cache=chunk_cache,
         on_progress=(lambda *args: on_progress("tts", args[-1] if args else "")) if on_progress else None,
     )
     master_sogd_mp3(out)
@@ -1545,6 +1877,9 @@ def run_daily_episode(
     word_min: int | None = None,
     word_max: int | None = None,
     recent_intros=None,
+    resume: dict | None = None,
+    on_checkpoint=None,
+    on_artifacts=None,
 ) -> dict:
     """Run every stage. Injected callables keep the tests off the network."""
     if isinstance(episode_date, datetime):
@@ -1616,6 +1951,13 @@ def run_daily_episode(
         "log": log,
         "voice": voice,
     }
+    saved = {}
+    done = ""
+    chunk_cache = {}
+
+    def _public():
+        return {"stage_done": done, "chunks": {}}
+
     try:
         guard = date_guard(existing, force=force, now=clock)
         if not guard["ok"]:
@@ -1634,67 +1976,136 @@ def run_daily_episode(
             )
             return result
 
-        before("scout")
-        progress("scout", "x_search plus RSS")
-        scouted = scout(episode_date) if scout else live_scout(episode_date)
-        charge("scout", (scouted or {}).get("usage") or {})
-        ranked = rank_stories(
-            (scouted or {}).get("stories") or [],
-            limit_min=int(SOGD_STYLE["stories_min"]),
-            limit_max=int(SOGD_STYLE["stories_max"]),
-        )
-        if not ranked["ok"]:
-            raise RuntimeError(ranked["error"])
-        stories = ranked["stories"]
-        result["stories"] = stories
+        saved = dict((resume or {}).get("artifacts") or {})
+        done = (resume or {}).get("stage_done") or ""
+        chunk_cache = dict((resume or {}).get("chunk_audio") or {})
+        for key, row in list((saved.get("chunks") or {}).items()):
+            if isinstance(row, (bytes, bytearray)):
+                chunk_cache.setdefault(key, bytes(row))
+        result["stages"] = []
 
-        before("lens")
-        progress("lens", f"{len(stories)} stories")
-        lensed = lens(stories) if lens else live_lens(stories)
-        charge("lens", (lensed or {}).get("usage") or {})
+        def _public():
+            public = {key: value for key, value in saved.items() if key != "audio_bytes"}
+            public["chunks"] = {
+                key: {"id": key, "nbytes": len(audio) if isinstance(audio, (bytes, bytearray)) else 0}
+                for key, audio in chunk_cache.items()
+            }
+            public["stage_done"] = done
+            return public
 
-        before("script")
-        progress("script", "section by section")
-        style = intro_style_for_date(episode_date, recent_intros)
-        result["intro_style"] = style["id"]
-        if writer:
-            written = writer(stories, (lensed or {}).get("notes"))
+        def checkpoint(stage_name, **fields):
+            nonlocal done
+            saved.update(fields)
+            done = stage_name
+            saved["stage_done"] = stage_name
+            public = _public()
+            result["stage_done"] = stage_name
+            result["artifacts"] = public
+            result["chunk_audio"] = chunk_cache
+            if stage_name not in result["stages"]:
+                result["stages"].append(stage_name)
+            if on_checkpoint:
+                on_checkpoint(stage_name, public)
+            if on_artifacts:
+                on_artifacts(public)
+
+        if stage_reached(done, "rank") and saved.get("stories"):
+            stories = saved["stories"]
+            result["stories"] = stories
         else:
-            written = live_writer(stories, (lensed or {}).get("notes"), episode_date,
-                                  word_min=word_min, word_max=word_max, recent_intros=recent_intros)
-        charge("script", (written or {}).get("usage") or {})
-        script = (written or {}).get("script") or written
+            before("scout")
+            progress("scout", "x_search plus RSS")
+            scouted = scout(episode_date) if scout else live_scout(episode_date)
+            charge("scout", (scouted or {}).get("usage") or {})
+            checkpoint("scout", scout_stories=(scouted or {}).get("stories") or [])
+            ranked = rank_stories(
+                (scouted or {}).get("stories") or [],
+                limit_min=int(SOGD_STYLE["stories_min"]),
+                limit_max=int(SOGD_STYLE["stories_max"]),
+            )
+            if not ranked["ok"]:
+                raise RuntimeError(ranked["error"])
+            stories = ranked["stories"]
+            result["stories"] = stories
+            checkpoint("rank", stories=stories)
+
         from podcast_engine import _word_count, validate_script
         regen_usage: list[dict] = []
 
         def _regen(section, need):
             if regenerate_section:
                 return regenerate_section(section, need)
-            updated = live_expand(section, need)
+            updated = live_expand(section, need, episode_date, recent_intros)
             if updated.get("_usage"):
                 regen_usage.append(updated["_usage"])
             return updated
 
-        budget = enforce_word_budget(
-            script,
-            word_count=_word_count,
-            regenerate_section=_regen,
-            trim_section=trim_section or trim_section_words,
-            word_min=word_min,
-            word_max=word_max,
-        )
-        for extra in regen_usage:
-            charge("script", extra)
-        if not budget["ok"]:
-            raise RuntimeError(f"word count {budget['words']} outside {word_min}-{word_max}")
-        script = ensure_disclosure(budget["script"])
-        guarded = guard_script(script)
-        if not guarded["ok"]:
-            raise RuntimeError("likeness guard rejected: " + ", ".join(guarded["hits"]))
-        validation = validate_script(script)
-        if not validation["ok"]:
-            raise RuntimeError("script invalid: " + "; ".join(validation["errors"]))
+        if stage_reached(done, "script") and saved.get("script"):
+            script = reconcile_saved_script(saved["script"])
+            guarded = guard_script(script)
+            if not guarded["ok"]:
+                raise NeedsAttention("likeness guard rejected: " + ", ".join(guarded["hits"]))
+            validation = validate_script(script)
+            if not validation["ok"]:
+                raise NeedsAttention("script invalid: " + "; ".join(validation["errors"]))
+            result["script"] = script
+            result["words"] = saved.get("words")
+            result["title"] = saved.get("title") or script.get("episode_title")
+            result["show_notes"] = saved.get("show_notes") or ""
+            result["transcript"] = saved.get("transcript") or script_text(script)
+            result["intro_style"] = saved.get("intro_style")
+            saved["script"] = script
+        else:
+            before("lens")
+            progress("lens", f"{len(stories)} stories")
+            lensed = lens(stories) if lens else live_lens(stories)
+            charge("lens", (lensed or {}).get("usage") or {})
 
+            before("script")
+            progress("script", "section by section")
+            style = intro_style_for_date(episode_date, recent_intros)
+            result["intro_style"] = style["id"]
+            if writer:
+                written = writer(stories, (lensed or {}).get("notes"))
+            else:
+                written = live_writer(stories, (lensed or {}).get("notes"), episode_date,
+                                      word_min=word_min, word_max=word_max, recent_intros=recent_intros)
+            charge("script", (written or {}).get("usage") or {})
+            script = (written or {}).get("script") or written
+            budget = enforce_word_budget(
+                script,
+                word_count=_word_count,
+                regenerate_section=_regen,
+                trim_section=trim_section or trim_section_words,
+                word_min=word_min,
+                word_max=word_max,
+            )
+            for extra in regen_usage:
+                charge("script", extra)
+            if not budget["ok"]:
+                raise NeedsAttention(f"word count {budget['words']} outside {word_min}-{word_max}")
+            script = ensure_disclosure(budget["script"])
+            guarded = guard_script(script)
+            if not guarded["ok"]:
+                raise NeedsAttention("likeness guard rejected: " + ", ".join(guarded["hits"]))
+            validation = validate_script(script)
+            if not validation["ok"]:
+                raise NeedsAttention("script invalid: " + "; ".join(validation["errors"]))
+            result["words"] = budget["words"]
+            result["script"] = script
+            result["title"] = script.get("episode_title") or episode_title(episode_date, stories[0]["title"])
+            result["show_notes"] = show_notes(stories)
+            result["transcript"] = script_text(script)
+            checkpoint(
+                "script",
+                script=script,
+                stories=stories,
+                words=result["words"],
+                title=result["title"],
+                show_notes=result["show_notes"],
+                transcript=result["transcript"],
+                intro_style=result["intro_style"],
+            )
         def _judge(script_now):
             claims_now = extract_claims(script_now)
             provider_name_now = pick_fact_checker(bool(ollama_ok))
@@ -1712,12 +2123,22 @@ def run_daily_episode(
             charge("fact_check", checked_now.get("usage") if isinstance(checked_now, dict) else {})
             return apply_fact_check(script_now, claims_now, verdicts_now), checked_now, provider_name_now
 
-        before("fact_check")
-        progress("fact_check", "claims against sources")
-        if ollama_ok is None and fact_checker is None:
-            ollama_ok = ollama_reachable()
-        applied, checked, provider_name = _judge(script)
-        if not applied["ok"]:
+        if stage_reached(done, "factcheck") and saved.get("script"):
+            script = saved["script"]
+            result["script"] = script
+            result["words"] = saved.get("words") or result.get("words")
+            result["title"] = saved.get("title") or result.get("title")
+            result["show_notes"] = saved.get("show_notes") or result.get("show_notes") or ""
+            result["transcript"] = saved.get("transcript") or script_text(script)
+            result["dropped"] = saved.get("dropped") or []
+            applied = {"ok": True, "dropped": result["dropped"], "script": script}
+        else:
+            before("fact_check")
+            progress("fact_check", "claims against sources")
+            if ollama_ok is None and fact_checker is None:
+                ollama_ok = ollama_reachable()
+            applied, checked, provider_name = _judge(script)
+        if not stage_reached(done, "factcheck") and not applied["ok"]:
             progress("fact_check", "rewriting unsupported lines")
             if repair:
                 repaired = repair(script, applied["dropped"], stories)
@@ -1747,78 +2168,154 @@ def run_daily_episode(
                 raise RuntimeError(f"word count {budget['words']} outside {word_min}-{word_max}")
             script = ensure_disclosure(budget["script"])
             applied, checked, provider_name = _judge(script)
-        result["dropped"] = applied["dropped"]
-        result["fact_checker"] = (checked or {}).get("provider") if isinstance(checked, dict) else provider_name
-        if not applied["ok"]:
-            raise RuntimeError(
-                f"fact-check dropped {applied['drop_ratio']:.0%} of claims"
+        if not stage_reached(done, "factcheck"):
+            result["dropped"] = applied["dropped"]
+            result["fact_checker"] = (checked or {}).get("provider") if isinstance(checked, dict) else provider_name
+            if not applied["ok"]:
+                raise RuntimeError(
+                    f"fact-check dropped {applied['drop_ratio']:.0%} of claims"
+                )
+            script = ensure_disclosure(applied["script"])
+            spent = len(regen_usage)
+            budget = enforce_word_budget(
+                script,
+                word_count=_word_count,
+                regenerate_section=_regen,
+                trim_section=trim_section or trim_section_words,
+                word_min=word_min,
+                word_max=word_max,
             )
-        script = ensure_disclosure(applied["script"])
-        spent = len(regen_usage)
-        budget = enforce_word_budget(
-            script,
-            word_count=_word_count,
-            regenerate_section=_regen,
-            trim_section=trim_section or trim_section_words,
-            word_min=word_min,
-            word_max=word_max,
-        )
-        for extra in regen_usage[spent:]:
-            charge("script", extra)
-        if not budget["ok"]:
-            raise RuntimeError(f"word count {budget['words']} outside {word_min}-{word_max} after fact-check")
-        script = budget["script"]
-        guarded = guard_script(script)
-        if not guarded["ok"]:
-            raise RuntimeError("likeness guard rejected: " + ", ".join(guarded["hits"]))
-        result["words"] = budget["words"]
-        result["script"] = script
-        result["title"] = script.get("episode_title") or episode_title(episode_date, stories[0]["title"])
-        result["show_notes"] = show_notes(stories)
-        result["transcript"] = script_text(script)
+            for extra in regen_usage[spent:]:
+                charge("script", extra)
+            if not budget["ok"]:
+                raise NeedsAttention(f"word count {budget['words']} outside {word_min}-{word_max} after fact-check")
+            script = budget["script"]
+            guarded = guard_script(script)
+            if not guarded["ok"]:
+                raise NeedsAttention("likeness guard rejected: " + ", ".join(guarded["hits"]))
+            result["words"] = budget["words"]
+            result["script"] = script
+            result["title"] = script.get("episode_title") or episode_title(episode_date, stories[0]["title"])
+            result["show_notes"] = show_notes(stories)
+            result["transcript"] = script_text(script)
+            checkpoint(
+                "factcheck",
+                script=script,
+                stories=stories,
+                words=result["words"],
+                title=result["title"],
+                show_notes=result["show_notes"],
+                transcript=result["transcript"],
+                dropped=result.get("dropped") or [],
+                intro_style=result.get("intro_style"),
+            )
 
-        before("tts")
-        progress("tts", voice["provider"] + "/" + voice["voice"])
-        if synthesize:
-            audio = synthesize(script, voice, pronunciation)
+        def _speak(script_now, voice_now, pronunciation_now, chunk_cache=None):
+            return synthesize(script_now, voice_now, pronunciation_now)
+
+        import inspect
+        if stage_reached(done, "master") and (saved.get("audio_bytes") or result.get("audio_bytes")):
+            audio_bytes = saved.get("audio_bytes") or result.get("audio_bytes") or b""
+            result["audio_bytes"] = audio_bytes
+            result["duration_sec"] = saved.get("duration_sec")
+            result["tts_model"] = saved.get("tts_model") or voice["provider"]
+            result["voice_map"] = saved.get("voice_map") or {"kimi": voice["voice"]}
+            result["chapters"] = saved.get("chapters") or []
         else:
-            audio = _synthesize_engine(script, voice, pronunciation, on_progress)
-        chars = int((audio or {}).get("tts_chars") or 0) or len(result["transcript"])
-        charge("tts", {"cost_usd": tts_cost(chars, voice["provider"]), "tts_chars": chars})
-        audio_bytes = (audio or {}).get("bytes") or b""
-        if not audio_bytes:
-            raise RuntimeError("TTS returned no audio")
-        result["audio_bytes"] = audio_bytes
-        result["duration_sec"] = (audio or {}).get("duration_sec")
-        result["tts_model"] = (audio or {}).get("tts_model") or voice["provider"]
-        result["voice_map"] = (audio or {}).get("voice_map") or {"kimi": voice["voice"]}
-        starts = (audio or {}).get("section_starts") or []
-        if starts:
-            result["chapters"] = chapters_from_section_starts(stories, starts, result.get("duration_sec") or 0)
-        else:
-            result["chapters"] = chapters_from_stories(stories, result.get("duration_sec") or 0)
-        audio_path = (audio or {}).get("path")
-        if audio_path and result.get("chapters"):
-            if write_chapter_id3(Path(audio_path), result["chapters"]):
+            before("tts")
+            progress("tts", voice["provider"] + "/" + voice["voice"])
+            if synthesize:
                 try:
-                    result["audio_bytes"] = Path(audio_path).read_bytes()
-                except OSError:
-                    pass
+                    params = inspect.signature(synthesize).parameters
+                except (TypeError, ValueError):
+                    params = {}
+                accepts_cache = "chunk_cache" in params or any(
+                    item.kind == inspect.Parameter.VAR_KEYWORD for item in params.values()
+                )
+                if accepts_cache:
+                    audio = synthesize(script, voice, pronunciation, chunk_cache=chunk_cache)
+                else:
+                    audio = _speak(script, voice, pronunciation)
+            else:
+                audio = _synthesize_engine(script, voice, pronunciation, on_progress, chunk_cache)
+            chars = int((audio or {}).get("tts_chars") or 0) or len(result.get("transcript") or "")
+            charge("tts", {"cost_usd": tts_cost(chars, voice["provider"]), "tts_chars": chars})
+            audio_bytes = (audio or {}).get("bytes") or b""
+            if not audio_bytes:
+                raise RuntimeError("TTS returned no audio")
+            checkpoint("tts_chunks", chunks={
+                key: {"id": key, "nbytes": len(value) if isinstance(value, (bytes, bytearray)) else 0}
+                for key, value in chunk_cache.items()
+            })
+            result["audio_bytes"] = audio_bytes
+            result["duration_sec"] = (audio or {}).get("duration_sec")
+            result["tts_model"] = (audio or {}).get("tts_model") or voice["provider"]
+            result["voice_map"] = (audio or {}).get("voice_map") or {"kimi": voice["voice"]}
+            starts = (audio or {}).get("section_starts") or []
+            if starts:
+                result["chapters"] = chapters_from_section_starts(stories, starts, result.get("duration_sec") or 0)
+            else:
+                result["chapters"] = chapters_from_stories(stories, result.get("duration_sec") or 0)
+            checkpoint("assemble", duration_sec=result["duration_sec"], chapters=result["chapters"],
+                       tts_model=result["tts_model"], voice_map=result["voice_map"])
+            audio_path = (audio or {}).get("path")
+            if audio_path and result.get("chapters"):
+                if write_chapter_id3(Path(audio_path), result["chapters"]):
+                    try:
+                        result["audio_bytes"] = Path(audio_path).read_bytes()
+                    except OSError:
+                        pass
+            checkpoint("master", byte_size=len(result.get("audio_bytes") or b""))
 
+        if not stage_reached(done, "upload"):
+            progress("upload", "audio")
+            if store_put:
+                store_put(result)
+            checkpoint("upload", media_key=result.get("media_key"), episode_guid=result.get("episode_guid"))
+
+        if not result.get("episode_guid"):
+            from podcast_feed import mint_episode_guid
+            result["episode_guid"] = saved.get("episode_guid") or mint_episode_guid()
         decision = publish_decision(clock, publish_at, auto_publish=auto_publish)
         result["status"] = decision["status"]
         result["published_at"] = decision["published_at"]
         result["ok"] = True
+        checkpoint("publish", episode_guid=result["episode_guid"], status=result["status"],
+                   published_at=result["published_at"].isoformat() if hasattr(result["published_at"], "isoformat") else result["published_at"])
+        note = notify_delivery(result["episode_guid"], saved.get("notified_guid"))
+        result["notify"] = note
+        checkpoint("notify", notified_guid=result["episode_guid"], episode_guid=result["episode_guid"])
         result["stage"] = "ready"
-        if store_put:
-            store_put(result)
-        progress(result["status"], result["title"])
+        progress(result["status"], result.get("title") or "")
         return result
     except CostCapHit as exc:
-        result.update(ok=False, status="cost_cap_hit", stage=exc.stage, error=str(exc))
+        result.update(ok=False, status="cost_cap_hit", stage=exc.stage, error=str(exc), retryable=False)
+        result["stage_done"] = done
+        return result
+    except NeedsAttention as exc:
+        result.update(ok=False, status="failed_needs_attention", stage=stage, error=f"{exc!s:.400}", retryable=False)
+        try:
+            result["stage_done"] = done
+            result["artifacts"] = _public()
+            result["chunk_audio"] = chunk_cache
+        except Exception:
+            pass
+        print(f"[sogd] needs attention at {stage}: {exc!s:.300}", flush=True)
         return result
     except Exception as exc:
-        result.update(ok=False, status="failed", stage=stage, error=f"{exc!s:.400}")
+        result.update(
+            ok=False,
+            status="failed",
+            stage=stage,
+            error=f"{exc!s:.400}",
+            retryable=failure_is_retryable("failed", str(exc)),
+        )
+        try:
+            result["stage_done"] = done
+            result["artifacts"] = _public()
+            result["chunk_audio"] = chunk_cache
+        except Exception:
+            pass
         print(f"[sogd] failed at {stage}: {exc!s:.300}", flush=True)
         return result
 
@@ -1831,24 +2328,25 @@ def _cell(row):
     return row[0]
 
 
-def try_advisory_lock(cur) -> bool:
-    cur.execute("SELECT pg_try_advisory_lock(%s)", (ADVISORY_LOCK_KEY,))
+def try_advisory_lock(cur, key: int | None = None) -> bool:
+    cur.execute("SELECT pg_try_advisory_lock(%s)", (ADVISORY_LOCK_KEY if key is None else int(key),))
     return bool(_cell(cur.fetchone()))
 
 
-def with_advisory_lock(fn, connect):
+def with_advisory_lock(fn, connect, key: int | None = None):
     if connect is None:
         return fn()
+    lock_key = ADVISORY_LOCK_KEY if key is None else int(key)
     with connect() as conn:
         cur = conn.cursor()
-        if not try_advisory_lock(cur):
+        if not try_advisory_lock(cur, lock_key):
             conn.commit()
             return {"ok": False, "status": "locked", "error": "another worker holds the daily lock"}
         conn.commit()
         try:
             return fn()
         finally:
-            cur.execute("SELECT pg_advisory_unlock(%s)", (ADVISORY_LOCK_KEY,))
+            cur.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
             conn.commit()
 
 
@@ -1917,8 +2415,45 @@ def load_run_context(episode_date: date | None, connect) -> dict:
                     (SHOW_ID, day),
                 )
                 run = cur.fetchone()
-                if run and run.get("status") in ("running", "cost_cap_hit", "failed"):
+                if run and run.get("status") in ("running", "cost_cap_hit", "failed", "failed_needs_attention"):
                     ctx["existing"] = dict(run)
+            try:
+                cur.execute("SAVEPOINT sogd_run_state")
+                cur.execute(
+                    """
+                    SELECT stage_done, artifacts, attempts, last_error, next_retry_at,
+                           heartbeat_at, status, notified_guid, alerted_on
+                      FROM podcast_run_state
+                     WHERE show = %s AND episode_date = %s
+                    """,
+                    (SHOW_ID, day),
+                )
+                state_row = cur.fetchone()
+                cur.execute("RELEASE SAVEPOINT sogd_run_state")
+                if state_row:
+                    state = dict(state_row)
+                    if isinstance(state.get("artifacts"), str):
+                        try:
+                            state["artifacts"] = json.loads(state["artifacts"])
+                        except json.JSONDecodeError:
+                            state["artifacts"] = {}
+                    ctx["run_state"] = state
+                    holder = dict(ctx.get("existing") or {})
+                    if (holder.get("status") or "") not in ("published", "ready_pending"):
+                        holder.update({
+                            "status": state.get("status") or holder.get("status"),
+                            "attempts": state.get("attempts") or 0,
+                            "next_retry_at": state.get("next_retry_at"),
+                            "stage": state.get("stage_done") or holder.get("stage"),
+                            "error": state.get("last_error") or holder.get("error"),
+                            "heartbeat_at": state.get("heartbeat_at"),
+                        })
+                        ctx["existing"] = holder
+            except Exception:
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT sogd_run_state")
+                except Exception:
+                    pass
             cur.execute(
                 """
                 SELECT COALESCE(SUM(cost_usd_total), 0) AS spend
@@ -2247,12 +2782,182 @@ def _insert_sogd_episode(cur, result: dict) -> None:
     )
 
 
+def maintain_sogd(connect, now: datetime | None = None) -> dict:
+    """Alert if nothing is published by 7:30, and drop abandoned partials after 3 days."""
+    now = now or datetime.now(LA)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=LA)
+    _sweep_sogd_temp(now)
+    if connect is None or not os.environ.get("DATABASE_URL"):
+        return {"ok": True, "skipped": True}
+    try:
+        with connect() as conn:
+            cur = _dict_cursor(conn)
+            cur.execute(
+                """
+                SELECT status, stage_done, last_error, alerted_on, attempts
+                  FROM podcast_run_state
+                 WHERE show = %s AND episode_date = %s
+                """,
+                (SHOW_ID, now.date()),
+            )
+            state = cur.fetchone() or {}
+            cur.execute(
+                """
+                SELECT status FROM analyst_podcast_episodes
+                 WHERE show = %s AND episode_date = %s
+                 LIMIT 1
+                """,
+                (SHOW_ID, now.date()),
+            )
+            episode = cur.fetchone()
+            published = (episode or {}).get("status") == "published" or (state.get("status") == "published")
+            alerted_on = state.get("alerted_on")
+            if hasattr(alerted_on, "date") and not isinstance(alerted_on, date):
+                alerted_on = alerted_on.date()
+            alerted = alerted_on == now.date()
+            sent = False
+            if late_alert_due(now, {"status": "published" if published else (state.get("status") or "")}, alerted=alerted):
+                send_sogd_alert(
+                    now.date().isoformat(),
+                    state.get("stage_done") or "",
+                    state.get("last_error") or "",
+                )
+                sent = True
+                cur.execute(
+                    """
+                    INSERT INTO podcast_run_state (show, episode_date, status, alerted_on, updated_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT (show, episode_date) DO UPDATE
+                       SET alerted_on = EXCLUDED.alerted_on, updated_at = NOW()
+                    """,
+                    (SHOW_ID, now.date(), state.get("status") or "failed", now.date()),
+                )
+            cutoff = now.date() - timedelta(days=3)
+            cur.execute(
+                """
+                DELETE FROM podcast_run_state
+                 WHERE show = %s
+                   AND episode_date < %s
+                   AND COALESCE(status, '') NOT IN ('published', 'ready_pending')
+                   AND COALESCE(stage_done, '') NOT IN ('publish', 'notify')
+                """,
+                (SHOW_ID, cutoff),
+            )
+            conn.commit()
+            return {"ok": True, "alerted": sent}
+    except Exception as exc:
+        print(f"[sogd] maintenance skipped: {exc!s:.160}", flush=True)
+        return {"ok": False, "error": str(exc)[:160]}
+
+
+def _sweep_sogd_temp(now: datetime) -> None:
+    import shutil
+    import tempfile
+    root = Path(tempfile.gettempdir())
+    cutoff = now.timestamp() - 3 * 86400
+    try:
+        names = list(root.glob("sogd-*"))
+    except OSError:
+        return
+    for path in names:
+        try:
+            if path.stat().st_mtime >= cutoff:
+                continue
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+
+def touch_heartbeat(connect, episode_date: date) -> None:
+    """Keep the lease fresh while a stage is still working."""
+    if connect is None or not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        with connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE podcast_run_state
+                   SET heartbeat_at = NOW(), updated_at = NOW()
+                 WHERE show = %s AND episode_date = %s
+                """,
+                (SHOW_ID, episode_date),
+            )
+            conn.commit()
+    except Exception as exc:
+        print(f"[sogd] heartbeat skipped: {exc!s:.120}", flush=True)
+
+
+def save_run_state(connect, episode_date: date, **fields) -> None:
+    """Upsert one date. Artifacts are JSON. Audio bytes stay in the media store."""
+    if connect is None or not os.environ.get("DATABASE_URL"):
+        return
+    artifacts = fields.get("artifacts") or {}
+    if not isinstance(artifacts, str):
+        artifacts = json.dumps(artifacts, default=str)
+    try:
+        with connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO podcast_run_state (
+                    show, episode_date, stage_done, artifacts, attempts, last_error,
+                    next_retry_at, updated_at, heartbeat_at, status, lease_owner, notified_guid
+                )
+                VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, NOW(), NOW(), %s, %s, %s)
+                ON CONFLICT (show, episode_date) DO UPDATE SET
+                    stage_done = COALESCE(EXCLUDED.stage_done, podcast_run_state.stage_done),
+                    artifacts = EXCLUDED.artifacts,
+                    attempts = EXCLUDED.attempts,
+                    last_error = EXCLUDED.last_error,
+                    next_retry_at = EXCLUDED.next_retry_at,
+                    updated_at = NOW(),
+                    heartbeat_at = NOW(),
+                    status = EXCLUDED.status,
+                    lease_owner = COALESCE(EXCLUDED.lease_owner, podcast_run_state.lease_owner),
+                    notified_guid = COALESCE(EXCLUDED.notified_guid, podcast_run_state.notified_guid)
+                """,
+                (
+                    SHOW_ID,
+                    episode_date,
+                    fields.get("stage_done"),
+                    artifacts,
+                    int(fields.get("attempts") or 0),
+                    (fields.get("last_error") or None),
+                    fields.get("next_retry_at"),
+                    fields.get("status"),
+                    fields.get("lease_owner"),
+                    fields.get("notified_guid"),
+                ),
+            )
+            conn.commit()
+    except Exception as exc:
+        print(f"[sogd] state save skipped: {exc!s:.160}", flush=True)
+
+
 def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: bool = False,
-                  dry_run: bool = False, **kwargs):
-    """Scheduler, button, and CLI all enter here. The lock wraps one local date."""
+                  dry_run: bool = False, confirm: str | None = None, **kwargs):
+    """Scheduler, button, and CLI all enter here. One lock per show and date."""
+    if force and not dry_run and confirm != FORCE_CONFIRM:
+        return {
+            "ok": False,
+            "status": "needs_confirm",
+            "error": "Pass confirm=replace to discard saved stages and start again.",
+            "stage": "guard",
+            "show": SHOW_ID,
+        }
+
     def work():
-        ctx = load_run_context(episode_date, connect if os.environ.get("DATABASE_URL") else None)
-        locked = connect is not None and bool(os.environ.get("DATABASE_URL"))
+        db = connect if os.environ.get("DATABASE_URL") else None
+        ctx = load_run_context(episode_date, db)
+        state = None if force else (ctx.get("run_state") or None)
+        if force:
+            state = None
+        locked = db is not None
         guard = date_guard(ctx["existing"], force=force, now=ctx["now"], lock_held=locked and not dry_run)
         if not dry_run and not guard["ok"]:
             return {
@@ -2263,6 +2968,17 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
                 "episode_date": ctx["episode_date"].isoformat(),
                 "show": SHOW_ID,
             }
+        if not dry_run and state and (state.get("status") or "") == "running":
+            claim = claim_run(state, lock_acquired=True, now=ctx["now"])
+            if not claim["ok"]:
+                return {
+                    "ok": False,
+                    "status": "locked",
+                    "error": claim.get("error") or "lease held",
+                    "stage": "guard",
+                    "episode_date": ctx["episode_date"].isoformat(),
+                    "show": SHOW_ID,
+                }
         retry_running = (
             not dry_run
             and guard.get("retry")
@@ -2271,41 +2987,124 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
         if retry_running:
             abandon_running(connect, ctx["episode_date"])
         run_id = None if dry_run else begin_run(connect, ctx["episode_date"])
+        attempts = 0 if force else int((state or {}).get("attempts") or 0)
+        import threading
+        stop_beat = threading.Event()
+
+        def _beat():
+            while not stop_beat.wait(60):
+                touch_heartbeat(db, ctx["episode_date"])
+
+        if db is not None and not dry_run:
+            threading.Thread(target=_beat, name="sogd-heartbeat", daemon=True).start()
 
         def _relay(stage_name, label, usage=None):
             touch_run(connect, run_id, stage_name, label, usage if isinstance(usage, dict) else None)
             if on_progress:
                 on_progress(stage_name, label, usage)
 
-        extras = {k: v for k, v in kwargs.items() if k not in ("voice", "on_progress", "recent_intros")}
+        def _checkpoint(stage_name, artifacts):
+            save_run_state(
+                db,
+                ctx["episode_date"],
+                stage_done=stage_name,
+                artifacts=artifacts,
+                attempts=attempts,
+                last_error=None,
+                next_retry_at=None,
+                status="running",
+                lease_owner="sogd",
+                notified_guid=(artifacts or {}).get("notified_guid"),
+            )
+            hook = kwargs.get("on_checkpoint")
+            if hook:
+                hook(stage_name, artifacts)
+
+        extras = {
+            k: v for k, v in kwargs.items()
+            if k not in ("voice", "on_progress", "recent_intros", "resume", "on_checkpoint")
+        }
         recent = kwargs.get("recent_intros")
         if recent is None:
             recent = ctx.get("recent_intros") or None
-        result = run_daily_episode(
-            ctx["episode_date"],
-            force=force,
-            dry_run=dry_run,
-            existing=None if force or retry_running else ctx["existing"],
-            voice=kwargs.get("voice") or ctx["voice"],
-            auto_publish=ctx["auto_publish"],
-            cost_cap=ctx["cost_cap_usd"],
-            month_spend=ctx["month_spend"],
-            start_local=ctx["start_local"],
-            publish_local=ctx["publish_local"],
-            now=ctx["now"],
-            pronunciation=ctx["pronunciation"],
-            on_progress=_relay,
-            recent_intros=recent,
-            **extras,
-        )
-        if run_id is not None:
-            result["run_id"] = run_id
-        if dry_run or result.get("status") in ("skipped", "dry_run"):
-            return result
-        return persist_sogd_result(result, connect=connect if os.environ.get("DATABASE_URL") else None)
+        resume = None if force else kwargs.get("resume")
+        if resume is None and state and not force:
+            resume = {
+                "stage_done": state.get("stage_done") or "",
+                "artifacts": state.get("artifacts") or {},
+            }
+        try:
+            result = run_daily_episode(
+                ctx["episode_date"],
+                force=force,
+                dry_run=dry_run,
+                existing=None if force or retry_running else ctx["existing"],
+                voice=kwargs.get("voice") or ctx["voice"],
+                auto_publish=ctx["auto_publish"],
+                cost_cap=ctx["cost_cap_usd"],
+                month_spend=ctx["month_spend"],
+                start_local=ctx["start_local"],
+                publish_local=ctx["publish_local"],
+                now=ctx["now"],
+                pronunciation=ctx["pronunciation"],
+                on_progress=_relay,
+                recent_intros=recent,
+                resume=resume,
+                on_checkpoint=_checkpoint,
+                **extras,
+            )
+            if run_id is not None:
+                result["run_id"] = run_id
+            status = result.get("status") or "failed"
+            if not dry_run and status in ("failed", "failed_needs_attention", "cost_cap_hit"):
+                next_at = None
+                new_attempts = attempts + 1
+                if failure_is_retryable(status, result.get("error") or ""):
+                    delay = retry_backoff(new_attempts, jitter_seconds=(time.time() % 30))
+                    if delay is not None and new_attempts < MAX_ATTEMPTS:
+                        next_at = datetime.now(timezone.utc) + delay
+                    else:
+                        new_attempts = MAX_ATTEMPTS
+                else:
+                    new_attempts = max(new_attempts, MAX_ATTEMPTS)
+                result["attempts"] = new_attempts
+                result["next_retry_at"] = next_at
+                save_run_state(
+                    db,
+                    ctx["episode_date"],
+                    stage_done=result.get("stage_done"),
+                    artifacts=result.get("artifacts") or {},
+                    attempts=new_attempts,
+                    last_error=result.get("error"),
+                    next_retry_at=next_at,
+                    status=status,
+                    lease_owner="sogd",
+                    notified_guid=(result.get("artifacts") or {}).get("notified_guid"),
+                )
+            elif not dry_run and status in ("published", "ready_pending"):
+                save_run_state(
+                    db,
+                    ctx["episode_date"],
+                    stage_done=result.get("stage_done") or "notify",
+                    artifacts=result.get("artifacts") or {},
+                    attempts=attempts,
+                    last_error=None,
+                    next_retry_at=None,
+                    status=status,
+                    lease_owner="sogd",
+                    notified_guid=result.get("episode_guid"),
+                )
+            if dry_run or result.get("status") in ("skipped", "dry_run"):
+                return result
+            return persist_sogd_result(result, connect=db)
+        finally:
+            stop_beat.set()
 
     holder = connect if os.environ.get("DATABASE_URL") else None
-    return with_advisory_lock(work, holder)
+    day = episode_date or datetime.now(LA).date()
+    if isinstance(day, datetime):
+        day = day.date()
+    return with_advisory_lock(work, holder, episode_lock_key(SHOW_ID, day))
 
 
 def release_ready(episode_date: date, connect, *, now: datetime | None = None, manual: bool = False) -> dict:
@@ -2368,6 +3167,67 @@ def pilot_episode() -> dict:
 
 def _pilot_matches(data: bytes) -> bool:
     return len(data) == int(PILOT_BYTE_SIZE) and hashlib.md5(data).hexdigest() == PILOT_MD5
+
+
+def pilot_upload_override(data: bytes) -> dict | None:
+    """A dropped copy of the pilot keeps the curated guid, title, and 7:00 AM PT date."""
+    if not _pilot_matches(data or b""):
+        return None
+    return {
+        "episode_guid": PILOT_GUID,
+        "title": PILOT_TITLE,
+        "published_at": PILOT_PUBLISHED_AT,
+        "episode_date": PILOT_DATE,
+        "duration_sec": PILOT_DURATION_SEC,
+        "notes": PILOT_SHOW_NOTES,
+        "summary": PILOT_DESCRIPTION,
+    }
+
+
+def repair_pilot_metadata(cur) -> None:
+    """Put the Oct 27 title and publish time back. The row keeps its guid."""
+    from podcast_library import title_from_filename
+    dropped = title_from_filename(PILOT_FILENAME)
+    cur.execute(
+        """
+        UPDATE analyst_podcast_episodes
+           SET episode_title = %s,
+               published_at = %s,
+               episode_date = COALESCE(episode_date, %s),
+               duration_sec = CASE
+                   WHEN duration_sec IS NULL OR duration_sec < 600 THEN %s
+                   ELSE duration_sec
+               END,
+               show_notes = CASE
+                   WHEN show_notes IS NULL OR show_notes LIKE 'Uploaded from the studio%%' THEN %s
+                   ELSE show_notes
+               END,
+               summary = CASE
+                   WHEN summary IS NULL OR summary LIKE 'Uploaded from the studio%%' THEN %s
+                   ELSE summary
+               END,
+               episode_number = COALESCE(episode_number, %s),
+               status = 'published'
+         WHERE show = %s
+           AND (
+                episode_guid = %s
+                OR (byte_size = %s AND lower(episode_title) = lower(%s))
+           )
+        """,
+        (
+            PILOT_TITLE,
+            PILOT_PUBLISHED_AT,
+            PILOT_DATE,
+            PILOT_DURATION_SEC,
+            PILOT_SHOW_NOTES,
+            PILOT_DESCRIPTION,
+            PILOT_EPISODE_NUMBER,
+            SHOW_ID,
+            PILOT_GUID,
+            PILOT_BYTE_SIZE,
+            dropped,
+        ),
+    )
 
 
 def import_sogd_pilot(*, path: Path | str | None = None, connect=None, store=None) -> dict:

@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui792-20261028-failed-runs"
+WEB_BUILD_VERSION = "ui793-20261028-sogd-resume"
 
 
 @app.get("/api/build")
@@ -21738,11 +21738,13 @@ def _start_automation_schedulers() -> None:
 
 
 def _sogd_scheduler_worker() -> None:
-    """One thread. Scout around 6:35 AM Pacific, publish at 7:00, catch up after a restart."""
+    """One thread. Scout from 6:35 AM Pacific, publish at 7:00, retry until noon."""
     import time as _time
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
-    from podcast_sogd import blocking_row, execute_daily, load_run_context, plan_tick, release_ready
+    from podcast_sogd import (
+        blocking_row, execute_daily, load_run_context, maintain_sogd, plan_tick, release_ready,
+    )
     tz = ZoneInfo("America/Los_Angeles")
     while True:
         try:
@@ -21758,17 +21760,23 @@ def _sogd_scheduler_worker() -> None:
             )
             print(f"[sogd-scheduler] {decision['action']} ({decision['reason']})", flush=True)
             if decision["action"] == "generate":
-                result = execute_daily(now.date(), connect=connect)
-                status = (result or {}).get("status")
-                if status in ("failed", "cost_cap_hit"):
-                    _time.sleep(900)
-                    continue
-                if status == "locked":
-                    _time.sleep(60)
-                    continue
+                execute_daily(now.date(), connect=connect)
             elif decision["action"] == "release":
                 release_ready(now.date(), connect, now=now)
-            _time.sleep(max(5.0, min(float(decision.get("sleep_sec") or 30), 900)))
+            maintain_sogd(connect, now)
+            ctx = load_run_context(now.date(), connect)
+            decision = plan_tick(
+                _dt.now(tz),
+                blocking_row(ctx),
+                start_local=ctx["start_local"],
+                publish_local=ctx["publish_local"],
+                auto_publish=ctx["auto_publish"],
+            )
+            sleep_for = max(5.0, min(float(decision.get("sleep_sec") or 30), 900))
+            local = _dt.now(tz)
+            if local.hour < 12 and not (local.hour < 6 or (local.hour == 6 and local.minute < 35)):
+                sleep_for = min(sleep_for, 300)
+            _time.sleep(sleep_for)
         except Exception as exc:
             print(f"[sogd-scheduler] {exc!s:.200}", flush=True)
             _time.sleep(60)
@@ -30001,6 +30009,16 @@ def _ensure_podcast_episode_history(cur, conn) -> None:
                     conn.rollback()
                 except Exception:
                     pass
+        try:
+            from podcast_sogd import repair_pilot_metadata
+            repair_pilot_metadata(cur)
+            conn.commit()
+        except Exception as _e:
+            print(f"⚠️  [podcast] pilot title restore skipped: {_e!s:.160}", flush=True)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
     except Exception as _e:
         print(f"⚠️  [podcast] sogd schema skipped: {_e!s:.160}", flush=True)
 
@@ -39964,6 +39982,7 @@ class PodcastPreviewIn(BaseModel):
 
 class PodcastDailyIn(BaseModel):
     force: bool = False
+    confirm: str | None = None
 
 
 class PodcastShowSettingsIn(BaseModel):
@@ -40152,6 +40171,35 @@ def podcast_daily_status(show: str, request: Request):
                 if item.get("published_at") is not None:
                     item["published_at"] = item["published_at"].isoformat()
                 payload["today"] = item
+            try:
+                cur.execute("SAVEPOINT sogd_daily_state")
+                cur.execute(
+                    """
+                    SELECT stage_done, attempts, last_error, next_retry_at, status, heartbeat_at
+                      FROM podcast_run_state
+                     WHERE show = %s AND episode_date = (NOW() AT TIME ZONE 'America/Los_Angeles')::date
+                    """,
+                    (show,),
+                )
+                state = cur.fetchone()
+                cur.execute("RELEASE SAVEPOINT sogd_daily_state")
+            except Exception:
+                state = None
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT sogd_daily_state")
+                except Exception:
+                    pass
+            if state:
+                item = dict(state)
+                for key in ("next_retry_at", "heartbeat_at"):
+                    if item.get(key) is not None and hasattr(item[key], "isoformat"):
+                        item[key] = item[key].isoformat()
+                from podcast_sogd import RUN_STAGES, stage_reached
+                item["stages"] = [
+                    {"id": name, "done": stage_reached(item.get("stage_done"), name)}
+                    for name in RUN_STAGES
+                ]
+                payload["run_state"] = item
     except Exception as exc:
         payload["error"] = f"{exc!s:.200}"
     return payload
@@ -40190,7 +40238,7 @@ def podcast_generate_daily(show: str, body: PodcastDailyIn, request: Request):
     def _job():
         from podcast_sogd import execute_daily
         try:
-            execute_daily(force=body.force, connect=connect)
+            execute_daily(force=body.force, confirm=body.confirm, connect=connect)
         except Exception as exc:
             print(f"[sogd] manual run failed: {exc!s:.240}", flush=True)
 

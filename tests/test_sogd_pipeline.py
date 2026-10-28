@@ -52,7 +52,7 @@ def _script(words: int = 4000, tail: str = "") -> dict:
         "winner": "kimi",
         "sections": [
             {"id": "cold_open", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(first, tail)}]},
-            {"id": "story_1", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(second)}]},
+            {"id": "story_1", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(second) + " So why does this matter to you? A short recap."}]},
             {"id": "systems_takeaway", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(third)}]},
         ],
     }
@@ -217,7 +217,7 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertFalse(guard_script(script)["ok"])
         spoken = []
         result = self._run(writer=lambda stories, notes: {"script": script}, synthesize=lambda *args: spoken.append(1) or _audio(*args))
-        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["status"], "failed_needs_attention")
         self.assertIn("Scott Adams", result["error"])
         self.assertEqual(spoken, [])
 

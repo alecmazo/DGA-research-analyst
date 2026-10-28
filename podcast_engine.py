@@ -831,6 +831,22 @@ You MUST produce sections in this order (using actual section IDs as listed):
 No per-ticker verdict; the wrap delivers a synthesized portfolio-level conclusion."""
         winner_field = '  "winner": "rock" | "claudia",  // for roundup, set to whichever analyst had the better overall read across the names\n'
 
+    elif format == "sogd":
+        # The daily writer owns this prose. A sogd script must not fall
+        # through to the debate cast.
+        from podcast_sogd import style_prompt
+        structure = (
+            "STRUCTURE — Systems Over Goals Daily. One narrator, Kimi. "
+            "No Rock, no Claudia, no bull-versus-bear.\n"
+            "Sections in order: cold_open, story_1 through story_N (four or five), close.\n"
+            "The sign-off id is close. Do not emit systems_takeaway.\n"
+            "Each story covers what happened, who says what, the other side, "
+            "follow the money, why it matters, a recap, and what to watch.\n\n"
+            + style_prompt()
+        )
+        winner_field = '  "winner": "kimi",\n'
+        sections = ["cold_open", "story_1", "close"]
+
     else:
         # Fallback — should never hit
         return _format_addendum("debate")
@@ -1062,6 +1078,22 @@ def validate_script(script: dict[str, Any]) -> dict[str, Any]:
             errors.append("missing required section: close")
         if not any(str(sid or "").startswith("story_") for sid in section_ids):
             errors.append("missing story section")
+        if fmt_name == "sogd":
+            from podcast_sogd import (
+                SOGD_STORY_MAX,
+                opening_has_disclosure,
+                story_missing_beats,
+            )
+            story_ids = [sid for sid in section_ids if str(sid or "").startswith("story_")]
+            if len(story_ids) > SOGD_STORY_MAX:
+                errors.append(f"too many stories: {len(story_ids)}")
+            for sec in sections:
+                sid = str(sec.get("id") or "")
+                if sid == "cold_open" and opening_has_disclosure(sec):
+                    errors.append("AI disclosure belongs only at the close")
+                if sid.startswith("story_"):
+                    for beat in story_missing_beats(sec):
+                        errors.append(f"{sid} missing {beat}")
     elif is_multi_ticker:
         # roundup            → cold_open + per-ticker dynamics + wrap
         # portfolio_roundup  → full fixed section list (no per-ticker dynamics)
@@ -1836,12 +1868,30 @@ def _ensure_hitech_intro() -> Path:
     return HITECH_INTRO_STING_PATH
 
 
+def tts_chunk_key(text: str, voice: str, speed: float, replacements: dict | None = None) -> str:
+    """Identity of one paid TTS call. Same text, voice, speed, and replace map."""
+    import hashlib
+    payload = json.dumps(
+        {
+            "text": text or "",
+            "voice": (voice or "").lower(),
+            "speed": round(float(speed), 4),
+            "replace": replacements or {},
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _tts_turn(client, speaker: str, text: str, intensity: str,
               model: str = TTS_MODEL_DEFAULT, *,
               provider_name: str | None = None,
               voice_override: str | None = None,
               speed_override: float | None = None,
-              replacements: dict | None = None) -> bytes:
+              replacements: dict | None = None,
+              chunk_cache: dict | None = None) -> bytes:
     """Synthesize one turn through the selected TTS provider. Returns MP3 bytes.
 
     `client` is unused. Samples, auditions, and the disclaimer call the
@@ -1878,13 +1928,23 @@ def _tts_turn(client, speaker: str, text: str, intensity: str,
         intensity_mult = _RUNTIME_INTENSITY.get(intensity.lower(), 1.0)
         speaker_mult   = _RUNTIME_SPEAKER.get(sp_l, 1.0)
         speed = max(SPEED_MIN, min(SPEED_MAX, intensity_mult * speaker_mult))
+    key = tts_chunk_key(text, voice, speed, replacements)
+    if chunk_cache is not None and chunk_cache.get(key):
+        cached = chunk_cache[key]
+        return cached if isinstance(cached, (bytes, bytearray)) else b""
+
+    def _store(audio: bytes) -> bytes:
+        if chunk_cache is not None and audio:
+            chunk_cache[key] = audio
+        return audio
+
     if replacements:
         try:
-            return provider.synthesize(text, voice, speed, replacements=replacements)
+            return _store(provider.synthesize(text, voice, speed, replacements=replacements))
         except TypeError:
             from podcast_tts import apply_pronunciation
             text = apply_pronunciation(text, replacements)
-    return provider.synthesize(text, voice, speed)
+    return _store(provider.synthesize(text, voice, speed))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2002,6 +2062,7 @@ def synthesize_episode(
     voice_override: str | None = None,
     speed_override: float | None = None,
     pronunciation: dict | None = None,
+    chunk_cache: dict | None = None,
 ) -> dict[str, Any]:
     """Synthesize a full episode from a validated script. Writes MP3 to `out_path`.
 
@@ -2074,6 +2135,7 @@ def synthesize_episode(
             None, sp, text, intensity, model=tts_model,
             provider_name=tts_provider, voice_override=voice_override,
             speed_override=speed_override, replacements=pronunciation,
+            chunk_cache=chunk_cache,
         )
         seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
         # Inter-turn gap depends on whether we're crossing a section boundary
@@ -2142,14 +2204,22 @@ def synthesize_episode(
                 voice = allowed[0]
             spoken = text.strip()
             pace = (speed_override or 1.0) if is_sogd else DISCLAIMER_SPEED
-            if pronunciation:
+            disc_key = tts_chunk_key(spoken, voice, pace, pronunciation)
+            cached = (chunk_cache or {}).get(disc_key) if chunk_cache is not None else None
+            if isinstance(cached, (bytes, bytearray)) and cached:
+                mp3 = bytes(cached)
+            elif pronunciation:
                 try:
                     mp3 = provider.synthesize(spoken, voice, pace, replacements=pronunciation)
                 except TypeError:
                     from podcast_tts import apply_pronunciation
                     mp3 = provider.synthesize(apply_pronunciation(spoken, pronunciation), voice, pace)
+                if chunk_cache is not None and mp3:
+                    chunk_cache[disc_key] = mp3
             else:
                 mp3 = provider.synthesize(spoken, voice, pace)
+                if chunk_cache is not None and mp3:
+                    chunk_cache[disc_key] = mp3
             seg = AudioSegment.from_file(io.BytesIO(mp3), format="mp3")
             # Match dialogue loudness then sit a hair below
             dsf = seg.dBFS if seg.dBFS != float("-inf") else -16.0

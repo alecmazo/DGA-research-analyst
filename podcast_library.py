@@ -164,6 +164,51 @@ def erase_episode(show: str, guid: str, *, connect, store) -> dict:
     return {"ok": True, "show": show, "episode_guid": guid}
 
 
+def _row_from_cursor(cur):
+    row = cur.fetchone()
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return row
+    names = [d[0] for d in (cur.description or [])]
+    if names and not isinstance(row, dict):
+        return dict(zip(names, row))
+    return None
+
+
+def _matching_episode(connect, store, show: str, data: bytes):
+    """Same bytes as an episode already on the show. Keep that row's title, date, and guid."""
+    try:
+        with connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT episode_guid, episode_title, published_at, byte_size, media_key, duration_sec
+                  FROM analyst_podcast_episodes
+                 WHERE show = %s AND byte_size = %s
+                 ORDER BY published_at NULLS LAST
+                 LIMIT 5
+                """,
+                (show, len(data)),
+            )
+            row = _row_from_cursor(cur)
+    except Exception:
+        return None
+    if not row:
+        return None
+    getter = getattr(store, "get", None)
+    key = (row.get("media_key") or "").strip()
+    if getter and key:
+        try:
+            current = getter(key)
+        except Exception:
+            current = None
+        if current == data:
+            return row
+        return None
+    return None
+
+
 def upload_episode(show: str, data: bytes, filename: str, *, connect, store, title: str | None = None, now=None) -> dict:
     """Publish a desktop MP3 on the selected show."""
     if not known_show(show):
@@ -175,11 +220,25 @@ def upload_episode(show: str, data: bytes, filename: str, *, connect, store, tit
         raise UploadRejected("That file is too large. The limit is 80 MB.")
     if not is_mp3(blob, filename):
         raise UploadRejected("Drop an MP3 file.")
-    guid = mint_episode_guid()
-    episode_title = (title or "").strip() or title_from_filename(filename)
-    when = now or datetime.now(timezone.utc)
-    duration = mp3_duration_seconds(blob)
-    notes = "Uploaded from the studio. Not investment advice. © DGA Capital."
+    kept = _matching_episode(connect, store, show, blob)
+    if kept:
+        return {
+            "ok": True,
+            "show": show,
+            "episode_guid": kept.get("episode_guid"),
+            "title": kept.get("episode_title") or kept.get("title"),
+            "byte_size": kept.get("byte_size") or len(blob),
+            "duration_sec": kept.get("duration_sec"),
+            "kept": True,
+            "audio_url": f"/api/public/podcast/media/{show}/{kept.get('episode_guid')}.mp3",
+        }
+    from podcast_sogd import pilot_upload_override
+    override = pilot_upload_override(blob)
+    guid = (override or {}).get("episode_guid") or mint_episode_guid()
+    episode_title = (override or {}).get("title") or (title or "").strip() or title_from_filename(filename)
+    when = (override or {}).get("published_at") or now or datetime.now(timezone.utc)
+    duration = (override or {}).get("duration_sec") or mp3_duration_seconds(blob)
+    notes = (override or {}).get("notes") or "Uploaded from the studio. Not investment advice. © DGA Capital."
     media_key = f"{show}/{guid}.mp3"
     store.put(media_key, blob)
     written = store.local_path(media_key)

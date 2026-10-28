@@ -99,6 +99,32 @@ class PodcastLibraryTests(unittest.TestCase):
         self.assertGreater(insert[1][6], 0.5)
         self.assertTrue(conn.committed)
 
+    def test_upload_keeps_title_and_guid_when_the_file_matches(self):
+        guid = "11546341-0cb4-5cda-8267-26668ac6a3cc"
+        blob = _mp3()
+        store = MemStore()
+        store.files[f"systems-over-goals/{guid}.mp3"] = blob
+        store.get = lambda key: store.files.get(key)
+        conn = FakeConn({
+            "episode_guid": guid,
+            "episode_title": "Systems Over Goals Daily — Oct 27, 2026: Iran's deal-or-strike moment (Pilot)",
+            "published_at": "2026-10-27T14:00:00+00:00",
+            "byte_size": len(blob),
+            "media_key": f"systems-over-goals/{guid}.mp3",
+            "duration_sec": 1430,
+        })
+        result = lib.upload_episode(
+            "systems-over-goals",
+            blob,
+            "systems-over-goals-daily_pilot_2026-10-27_v4_kepler.mp3",
+            connect=lambda: conn,
+            store=store,
+        )
+        self.assertTrue(result["kept"])
+        self.assertEqual(result["episode_guid"], guid)
+        self.assertIn("Iran", result["title"])
+        self.assertFalse(any(op[0].startswith("INSERT") for op in conn.cur.ops))
+
     def test_upload_rejects_a_non_mp3_and_an_unknown_show(self):
         store = MemStore()
         conn = FakeConn()
