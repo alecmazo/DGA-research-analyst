@@ -170,7 +170,7 @@ def test_balance_sheet_chart_and_quarterly_statement_tabs():
     body = BODY.read_text()
     assert charts.count("name: 'Net Income'") == 1
     assert "title: 'Balance sheet'" in charts
-    assert "col(series, 'liabilities')" in charts
+    assert "col(histSeries, 'liabilities')" in charts
     assert '"liabilities": liab' in body
     assert 'total_liabilities' in body
     assert "recent quarters" in sheet
