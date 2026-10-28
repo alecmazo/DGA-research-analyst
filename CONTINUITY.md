@@ -371,6 +371,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Research menus** | **`ui789-20261027-research-menus`** | The local Research card keeps model choice in one menu and puts Run local analysis, Run desk reports, and Resume desk reports in one Run menu. |
 | **Episode file** | **`ui790-20261027-episode-file`** | SUP_20261027_05547518. Each episode player has a menu beside the volume control to erase that episode. Drop an MP3 on the studio to add one. |
 | **Show ready** | **`ui791-20261027-show-ready`** | The phone reloads the episode list while Podcasts is open. HiTech speaks at a morning-show pace, with a quiet lead-in and a faster disclaimer. Systems Over Goals Daily is ready for Spotify, Apple, and YouTube. |
+| **Failed runs** | **`ui792-20261028-failed-runs`** | SUP_20261028_ec6a058e. A Daily script that ends on close is valid. A failed run shows no cost and does not count toward the monthly cap. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -571,4 +572,4 @@ When switching machine or agent (Claude ↔ Grok):
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-27 · Agent: Cursor · Built: `ui791-20261027-show-ready` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui34-podcast-live-20261027` (Alec publishes) · Next: `ui792-YYYYMMDD-slug`*
+*Last updated: 2026-10-28 · Agent: Cursor · Built: `ui792-20261028-failed-runs` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui34-podcast-live-20261027` (Alec publishes) · Next: `ui793-YYYYMMDD-slug`*

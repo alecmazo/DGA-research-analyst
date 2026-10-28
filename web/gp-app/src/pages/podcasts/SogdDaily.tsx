@@ -368,7 +368,7 @@ export function SogdDaily({
                 <td>{run.status}</td>
                 <td>{run.status === 'running' ? stageLabel(run.stage) : run.stage}</td>
                 <td>{formatElapsed(runSeconds(run, now))}</td>
-                <td>{money(run.cost_usd_total)}</td>
+                <td>{run.status === 'failed' ? '—' : money(run.cost_usd_total)}</td>
                 <td>{run.error || ''}</td>
               </tr>
             ))}

@@ -561,11 +561,10 @@ FORMAT_SECTIONS = {
         "pm_verdict",
     ],
     # Story sections are dynamic (story_1, story_2, …). Cold open and the
-    # close are fixed. The narrator is Kimi; the daily voice setting replaces
-    # the cast map at synthesis time.
+    # close are fixed. `close` is the sign-off; `systems_takeaway` is the
+    # older name for that same section. The narrator is Kimi.
     "sogd": [
         "cold_open",
-        "systems_takeaway",
     ],
 }
 
@@ -1059,6 +1058,8 @@ def validate_script(script: dict[str, Any]) -> dict[str, Any]:
         for required in required_secs:
             if required not in section_ids:
                 errors.append(f"missing required section: {required}")
+        if fmt_name == "sogd" and "close" not in section_ids and "systems_takeaway" not in section_ids:
+            errors.append("missing required section: close")
         if not any(str(sid or "").startswith("story_") for sid in section_ids):
             errors.append("missing story section")
     elif is_multi_ticker:
@@ -1107,7 +1108,7 @@ def validate_script(script: dict[str, Any]) -> dict[str, Any]:
         "catalysts":  {"cold_open", "setup_quarter", "verdict"},
         "quick_hit":  {"cold_open", "company_one_breath", "verdict"},
         "roundup":    {"cold_open"},   # per-ticker intros are dynamic
-        "sogd":       {"cold_open", "systems_takeaway"},
+        "sogd":       {"cold_open", "systems_takeaway", "close"},
     }
     opus_only_ids = OPUS_ONLY_BY_FORMAT.get(fmt_name, OPUS_ONLY_BY_FORMAT["debate"])
 

@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui791-20261027-show-ready"
+WEB_BUILD_VERSION = "ui792-20261028-failed-runs"
 
 
 @app.get("/api/build")
@@ -40127,6 +40127,7 @@ def podcast_daily_status(show: str, request: Request):
                 SELECT COALESCE(SUM(cost_usd_total), 0) AS spend
                   FROM podcast_runs
                  WHERE show = %s
+                   AND COALESCE(status, '') <> 'failed'
                    AND started_at >= (
                         date_trunc('month', (NOW() AT TIME ZONE 'America/Los_Angeles'))
                         AT TIME ZONE 'America/Los_Angeles'

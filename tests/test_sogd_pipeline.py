@@ -506,6 +506,22 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertIn("analyst_podcast_episodes_show_date", engine)
         self.assertIn("podcast_runs", engine)
 
+    def test_close_is_a_valid_signoff_and_failures_skip_the_cap(self):
+        from podcast_engine import validate_script
+        script = _script()
+        script["sections"][2]["id"] = "close"
+        checked = validate_script(script)
+        self.assertTrue(checked["ok"], checked["errors"])
+        kept = _script()
+        self.assertTrue(validate_script(kept)["ok"])
+        server = (ROOT / "api/server.py").read_text(encoding="utf-8")
+        engine = (ROOT / "podcast_sogd.py").read_text(encoding="utf-8")
+        page = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
+        needle = "COALESCE(status, '') <> 'failed'"
+        self.assertIn(needle, server)
+        self.assertIn(needle, engine)
+        self.assertIn("run.status === 'failed' ? '—' : money(run.cost_usd_total)", page)
+
     def _run(self, **overrides):
         from podcast_sogd import run_daily_episode
 

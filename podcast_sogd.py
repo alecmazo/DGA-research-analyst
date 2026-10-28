@@ -966,7 +966,7 @@ def chapters_from_section_starts(stories: list[dict], starts, duration_sec) -> l
         title = sid.replace("_", " ").strip() or "Chapter"
         if sid in ("", "cold_open"):
             title = "Intro"
-        elif sid == "close":
+        elif sid in ("close", "systems_takeaway"):
             title = "Close"
         else:
             matched = re.match(r"story_(\d+)", sid)
@@ -1924,6 +1924,7 @@ def load_run_context(episode_date: date | None, connect) -> dict:
                 SELECT COALESCE(SUM(cost_usd_total), 0) AS spend
                   FROM podcast_runs
                  WHERE show = %s
+                   AND COALESCE(status, '') <> 'failed'
                    AND started_at >= (
                         date_trunc('month', (NOW() AT TIME ZONE 'America/Los_Angeles'))
                         AT TIME ZONE 'America/Los_Angeles'
