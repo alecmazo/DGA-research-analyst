@@ -189,7 +189,7 @@ class PodcastLibraryTests(unittest.TestCase):
         self.assertIn("8000", phone)
         self.assertIn("useAppResume", phone)
         self.assertIn("intro_v4_soft.mp3", engine)
-        self.assertIn("DISCLAIMER_SPEED = 1.45", engine)
+        self.assertIn("DISCLAIMER_SPEED = 1.18", engine)
         self.assertIn("HITECH_INTRO_EXTRA_DB = -10.0", engine)
         self.assertTrue((ROOT / "podcast/stings/intro_v4_soft.mp3").is_file())
         self.assertTrue((ROOT / "branding/sogd-cover.jpg").is_file())

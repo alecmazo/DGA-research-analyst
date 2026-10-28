@@ -670,18 +670,22 @@ COLD OPEN VARIETY — applies to every format
     • Data shock, Question, News tease, Contrarian, Cold fact, Direct quote,
       Personal beat, Sector frame.
   The host should NAME the ticker, but welcome/show-name boilerplate is OPTIONAL.
+  The open is a person talking, not a template.
 
 PER-TURN FIELDS (every turn is an object with exactly these keys):
   • "speaker"   ∈ "kimi" | "rock" | "claudia"
-  • "text"      — plain prose. No markdown / asterisks / bullets. Natural
-                  contractions. For an interruption, end the line with " —"
+  • "text"      — plain prose a person would say. [pause] and [breath] are
+                  speech tags, used rarely, never on every line. Do not wrap
+                  a cold open in <slow> or <soft>. No markdown / asterisks /
+                  bullets. Natural contractions. For an interruption, end the
+                  line with " —"
   • "intensity" ∈ "calm" | "normal" | "heated"
 
 DO NOT include any text outside the JSON. DO NOT use markdown code fences.
 DO NOT invent a fourth speaker.
 
 [FORMAT-SPECIFIC STRUCTURE + OUTPUT SHAPE FOLLOW BELOW]
-"""
+""" + "\n" + human_delivery_rules() + "\n"
 
 
 def _format_addendum(format: str) -> str:
@@ -1956,20 +1960,27 @@ def _tts_turn(client, speaker: str, text: str, intensity: str,
 # neutral "compliance announcer" — distinct from the cast (Marc/Rock/Claudia)
 # so listeners can hear it's a legal notice, not part of the show.
 DEFAULT_DISCLAIMER_INTRO = (
-    "This podcast is for informational and educational purposes only. "
-    "It is not investment advice, an offer to sell, or a solicitation to buy "
-    "any security. DGA Capital is an exempt reporting adviser in California. "
-    "Holdings, opinions, and price targets discussed may change without notice. "
-    "Past performance is not indicative of future results."
+    "This episode is AI-generated and is not investment advice. "
+    "DGA Capital may hold positions we discuss."
 )
 DEFAULT_DISCLAIMER_OUTRO = (
-    "Reminder: this episode is for informational purposes only and is not "
-    "investment advice. Consult your own financial advisor before making any "
-    "investment decisions. Thanks for listening."
+    "Not investment advice. Do your own research before you decide."
 )
 DEFAULT_DISCLAIMER_VOICE = "sal"   # Grok voice, distinct from the default cast
-# Faster than the conversation so the episode itself is the change in pace.
-DISCLAIMER_SPEED = 1.45
+# Faster than the conversation, about 1.15–1.2, so the legal line doesn't drag.
+DISCLAIMER_SPEED = 1.18
+
+
+def human_delivery_rules() -> str:
+    """Shared cadence for both shows. One place, used by both writers."""
+    return (
+        "Plain conversational language: short and varied sentences, contractions, "
+        "the occasional casual aside. No academic jargon. "
+        "Use [pause] and [breath] only where a person would actually breathe. "
+        "Do not put a tag on every sentence. Vary the pace. "
+        "The cold open sounds like a person talking to a friend. "
+        "Do not wrap the opening in <slow> or <soft>. Do not stack tags on the first line."
+    )
 
 # EBU R128 target for spoken-word podcasts. Tests assert this exact string.
 LOUDNORM_FILTER = "loudnorm=I=-16:TP=-1.5:LRA=11"
@@ -2050,28 +2061,20 @@ def apply_loudnorm(src: Path, dst: Path, *, title: str = "", artist: str = "") -
 
 
 def show_assembly(fmt: str | None) -> dict:
-    """How a show opens and closes. One record, read by the shared assembler.
+    """How a show opens and closes. Neither show uses a music sting.
 
-    Systems Over Goals Daily starts on the host, like the v4 pilot: no intro
-    sting, no intro disclaimer, no music bed. The spoken disclaimer stays at
-    the close. DGA HiTech keeps the sting and both disclaimers.
+    Systems Over Goals Daily starts on the host. The spoken disclaimer is
+    only after the episode. DGA HiTech still speaks a short disclaimer
+    before the hosts and again at the close.
     """
-    if (fmt or "").lower() == "sogd":
-        return {
-            "format": "sogd",
-            "intro_sting": False,
-            "outro_sting": False,
-            "intro_disclaimer": False,
-            "outro_disclaimer": True,
-            "open_on_voice": True,
-        }
+    sogd = (fmt or "").lower() == "sogd"
     return {
-        "format": (fmt or "debate").lower(),
-        "intro_sting": True,
-        "outro_sting": True,
-        "intro_disclaimer": True,
+        "format": "sogd" if sogd else (fmt or "debate").lower(),
+        "intro_sting": False,
+        "outro_sting": False,
+        "intro_disclaimer": not sogd,
         "outro_disclaimer": True,
-        "open_on_voice": False,
+        "open_on_voice": sogd,
     }
 
 
@@ -2092,12 +2095,16 @@ def assembly_timeline(fmt: str | None) -> list[str]:
 
 
 def assembly_lead_ms(asm: dict, *, intro_ms: int = 0, disc_intro_ms: int = 0, body_gap_ms: int = 0) -> int:
-    """Silence and bumper before the host. SOGD is 0, so chapter 1 starts at 0."""
+    """Audio before the host. No sting is counted. SOGD is 0."""
     if asm.get("open_on_voice"):
         return 0
-    lead = int(intro_ms) if asm.get("intro_sting") else 0
-    if asm.get("intro_disclaimer") and disc_intro_ms:
-        lead += 350 + int(disc_intro_ms)
+    lead = 0
+    if asm.get("intro_sting"):
+        lead += int(intro_ms)
+        if asm.get("intro_disclaimer") and disc_intro_ms:
+            lead += 350 + int(disc_intro_ms)
+    elif asm.get("intro_disclaimer") and disc_intro_ms:
+        lead += int(disc_intro_ms)
     lead += int(body_gap_ms)
     return lead
 
@@ -2265,7 +2272,7 @@ def synthesize_episode(
             if voice.lower() not in allowed and allowed:
                 voice = allowed[0]
             spoken = text.strip()
-            pace = (speed_override or 1.0) if is_sogd else DISCLAIMER_SPEED
+            pace = DISCLAIMER_SPEED
             disc_key = tts_chunk_key(spoken, voice, pace, pronunciation)
             cached = (chunk_cache or {}).get(disc_key) if chunk_cache is not None else None
             if isinstance(cached, (bytes, bytearray)) and cached:
@@ -2311,9 +2318,13 @@ def synthesize_episode(
     if asm["open_on_voice"]:
         parts = [body]
     else:
-        parts = [intro]
+        parts = []
+        if intro is not None:
+            parts.append(intro)
         if disc_intro_seg is not None:
-            parts += [AudioSegment.silent(duration=350), disc_intro_seg]
+            if intro is not None:
+                parts.append(AudioSegment.silent(duration=350))
+            parts.append(disc_intro_seg)
         parts += [AudioSegment.silent(duration=body_gap), body]
     if disc_outro_seg is not None:
         parts += [AudioSegment.silent(duration=400), disc_outro_seg]
