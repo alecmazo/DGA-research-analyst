@@ -13,6 +13,7 @@ export const LOCAL_PICK_KEYS = {
   research: 'dga.local.research.models',
   ask: 'dga.local.ask.model',
   portfolio: 'dga.local.portfolio.model',
+  book: 'dga.local.book.model',
   transcript: 'dga.local.transcript.model',
   bot: 'dga.local.bot.model',
 } as const
@@ -38,7 +39,12 @@ export function modelMark(model: string): string {
   return (raw.slice(0, 3) || 'LOC').toUpperCase()
 }
 
-export function modelPicks(key: string, allowed: string[], multiple: boolean): string[] {
+export function modelPicks(
+  key: string,
+  allowed: string[],
+  multiple: boolean,
+  prefer = '',
+): string[] {
   const list = allowed.map((m) => m.trim()).filter(Boolean)
   const fallback = list.includes(LOCAL_MODEL) ? LOCAL_MODEL : list[0]
   if (!fallback) return []
@@ -54,6 +60,15 @@ export function modelPicks(key: string, allowed: string[], multiple: boolean): s
       const names = Array.isArray(parsed) ? parsed.map((m) => String(m)) : [String(parsed)]
       return keep(names)
     }
+  } catch {
+    /* ignore */
+  }
+  if (prefer) {
+    const want = prefer.toLowerCase()
+    const hit = list.find((name) => name.toLowerCase() === want || name.toLowerCase().includes(want))
+    if (hit) return [hit]
+  }
+  try {
     const legacy = (localStorage.getItem(MODEL_KEY) || '').trim()
     if (legacy) return keep([legacy])
   } catch {

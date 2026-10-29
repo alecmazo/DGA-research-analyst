@@ -23,7 +23,7 @@ function localModelChoices(): Promise<string[]> {
   return catalogOnce
 }
 
-export function useLocalModelChoice(storageKey: string, multiple = false) {
+export function useLocalModelChoice(storageKey: string, multiple = false, prefer = '') {
   const [choices, setChoices] = useState<string[]>([])
   const [picked, setPicked] = useState<string[]>([])
 
@@ -32,12 +32,12 @@ export function useLocalModelChoice(storageKey: string, multiple = false) {
     void localModelChoices().then((list) => {
       if (!alive) return
       setChoices(list)
-      setPicked(modelPicks(storageKey, list, multiple))
+      setPicked(modelPicks(storageKey, list, multiple, prefer))
     })
     return () => {
       alive = false
     }
-  }, [storageKey, multiple])
+  }, [storageKey, multiple, prefer])
 
   const update = (next: string[]) => {
     const safe = next.length ? next : picked.length ? picked : [LOCAL_MODEL]

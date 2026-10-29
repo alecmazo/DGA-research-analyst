@@ -14,6 +14,7 @@ import {
   parseToolCall,
   shortModelLabel,
 } from '@/lib/localOllama'
+import { LocalBook } from '@/components/local/LocalBook'
 import { LocalCompare } from '@/components/local/LocalCompare'
 import { LocalDcf } from '@/components/local/LocalDcf'
 import { LocalModelPick, useLocalModelChoice } from '@/components/local/LocalModelPick'
@@ -724,6 +725,7 @@ export function LocalPage() {
         online={online}
         model={askModel.picked[0] || LOCAL_MODEL}
       />
+      <LocalBook online={online} />
       </div>
       <div className={`${styles.pair} ${styles.saved}`}>
         <Panel title="Desk saved reports" badge="frontier" flush collapsible className={styles.saved}>

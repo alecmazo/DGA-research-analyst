@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui797-20261028-delete-version"
+WEB_BUILD_VERSION = "ui798-20261029-local-book"
 
 
 @app.get("/api/build")
@@ -10552,6 +10552,86 @@ def local_compare_pack(ticker: str, request: Request):
     from api.domains.report_compare_pack import build_compare_pack, fill_missing_reports
     filled = fill_missing_reports(tk, row, analyst.STOCKS_FOLDER)
     return build_compare_pack(tk, filled)
+
+
+@app.get("/api/local/book")
+def local_book(request: Request):
+    """Saved local notes as short cards, with prices refreshed for this run.
+
+    The browser screens six cards at a time on the Mac, then writes a 10-name book.
+    Full markdown stays on the server.
+    """
+    _claims_or_401(request)
+    from api.domains.local_book import book_payload, one_card
+    views_by_ticker: list[tuple[str, dict]] = []
+    if _PSYCOPG2_OK and os.environ.get("DATABASE_URL"):
+        try:
+            _ensure_analyst_reports_table_schema()
+            with _fund_conn() as conn, conn.cursor(cursor_factory=_RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT ticker, local_generated_at, local_rating,
+                           local_price_target, local_upside_pct, local_report_date,
+                           report_md_local, local_model, local_runs, stock_style
+                      FROM analyst_reports
+                     WHERE (
+                            (report_md_local IS NOT NULL AND length(report_md_local) > 40)
+                            OR (local_runs IS NOT NULL AND local_runs <> '{}'::jsonb)
+                           )
+                       AND archived IS NOT TRUE
+                """)
+                for raw in cur.fetchall() or []:
+                    row = dict(raw)
+                    views = _local_saved_views(row)
+                    if not views:
+                        continue
+                    newest = views[0]
+                    newest["style"] = row.get("stock_style")
+                    views_by_ticker.append((str(row.get("ticker") or ""), newest))
+        except Exception as exc:
+            print(f"[local-book] list failed: {exc!s:.180}", flush=True)
+    if not views_by_ticker:
+        folder = analyst.STOCKS_FOLDER
+        if folder.exists():
+            for path in sorted(folder.glob("*_DGA_Report_local.md")):
+                tk = path.name.replace("_DGA_Report_local.md", "").upper()
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+                views_by_ticker.append((tk, {
+                    "model": "gpt-oss-20b-finance",
+                    "generated_at": datetime.utcfromtimestamp(path.stat().st_mtime).isoformat(),
+                    "report_md": text,
+                    "price_target": None,
+                    "upside_pct": None,
+                    "current_price": None,
+                    "rating": None,
+                }))
+    tickers = [tk for tk, _view in views_by_ticker if tk]
+    quotes: dict = {}
+    try:
+        quotes.update(_db_quotes(tickers) or {})
+    except Exception as exc:
+        print(f"[local-book] quotes: {exc!s:.120}", flush=True)
+    now = time.time()
+    for tk in tickers:
+        entry = _QUOTE_CACHE.get(tk) or {}
+        price = entry.get("price")
+        if price is None:
+            continue
+        stamp = float(entry.get("_ts") or 0)
+        if stamp and now - stamp > 20 * 60:
+            continue
+        quotes[tk] = {
+            "price": price,
+            "pct_change": entry.get("pct_change"),
+        }
+    cards = []
+    for tk, view in views_by_ticker:
+        card = one_card(tk, view, quotes.get(tk.upper()) or quotes.get(tk))
+        if card:
+            cards.append(card)
+    return book_payload(cards)
 
 
 @app.delete("/api/local/reports/{ticker}")
