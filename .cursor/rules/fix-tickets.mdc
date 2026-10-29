@@ -17,4 +17,6 @@ The button posts `description` and a page snapshot (`screenshot_b64`) to `POST /
 
 Read the description and look at the snapshot before editing. Fix his open reports. If a previous session already started that fix, continue it. Do not revert unrelated dirty files.
 
-Do not push or deploy unless he asks. Mark a ticket fixed only after the change is in the tree he asked to ship.
+The desk light is the red dot next to the desk title. It counts human tickets whose status is `open`, `diagnosing`, `diagnosed`, or `in_progress`. Auto Analyze logs do not light it. A ticket left at `diagnosed` still shows red.
+
+When the fix is in the tree that ships, mark that ticket `fixed` in the same session. Set `status`, `fixed_at`, and a short `fixed_summary`, and append a trail event. Do not end the session with the light still red. Do not push or deploy unless he asks. Mark a ticket fixed only after the change is in the tree he asked to ship.

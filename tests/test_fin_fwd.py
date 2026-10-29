@@ -91,6 +91,8 @@ def test_fundcharts_hollow_forecast_bars():
     assert "Next Earnings Date" in src
     assert "chartSwatchHollow" in src
     assert "fill={isHollow ? 'none' : col}" in src
+    assert "function yearLines" in src
+    assert "showYear" in src
     dash = (ROOT / "web/gp-app/src/pages/financials/CompanyDashboard.tsx").read_text(
         encoding="utf-8",
     )
