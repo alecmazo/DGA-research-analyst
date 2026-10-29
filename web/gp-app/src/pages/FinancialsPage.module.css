@@ -92,6 +92,13 @@
   border-radius: 999px;
 }
 
+.loadingNote {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-500, #64748b);
+  margin-bottom: 8px;
+}
+
 .inlineErr {
   padding: 8px 12px;
   border-radius: 8px;

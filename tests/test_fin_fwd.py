@@ -73,6 +73,43 @@ def test_fwd_scales_millions_to_dollars():
     assert abs(out["points"][0]["revenue"] - 110e9) < 1
 
 
+def test_yahoo_fwd_if_cached_does_not_hit_network():
+    import time
+    src = Path(md.__file__).read_text(encoding="utf-8")
+    fn = src.split("def yahoo_fwd_if_cached")[1].split("\ndef ")[0]
+    assert "_yahoo_fwd_raw" not in fn
+    assert "_FWD_ANN_RAW_CACHE" in fn
+    md._FWD_ANN_RAW_CACHE.pop("ZZZZ", None)
+    assert md.yahoo_fwd_if_cached("ZZZZ", last_fy=2024, last_rev=9) is None
+    md._FWD_ANN_RAW_CACHE["ZZZZ"] = (
+        time.time(),
+        {"rev": {"0y": 10.0}, "eps": {}, "next_earnings_date": "2026-08-01"},
+    )
+    try:
+        out = md.yahoo_fwd_if_cached(
+            "ZZZZ", last_fy=2024, last_rev=9, last_ni=1, last_ebitda=2, shares=1,
+        )
+        assert out is not None
+        assert out["points"]
+        assert out["next_earnings_date"] == "2026-08-01"
+    finally:
+        md._FWD_ANN_RAW_CACHE.pop("ZZZZ", None)
+
+
+def test_fin_rows_all_read_fills_annual_and_quarter_cache():
+    from api.domains import financials_series as fs
+    fs._FIN_ROWS_CACHE.clear()
+    annual = {"period_type": "annual", "fy": 2025, "period_end": "2025-09-27", "revenue": 100}
+    quarter = {"period_type": "quarter", "fy": 2026, "period_end": "2026-06-27", "revenue": 20}
+    fs._fin_rows_cache_put("AAPL", "all", [quarter, annual])
+    fs._fin_rows_cache_put("AAPL", "annual", fs._fin_dedupe_annual_rows([annual]))
+    fs._fin_rows_cache_put("AAPL", "quarter", [quarter])
+    assert fs._fin_rows_for_ticker("AAPL", "annual")[0]["revenue"] == 100
+    assert fs._fin_rows_for_ticker("AAPL", "quarter")[0]["period_type"] == "quarter"
+    fs._fin_rows_cache_drop("AAPL")
+    assert fs._fin_rows_cache_get("AAPL", "all") is None
+
+
 def test_dashboard_appends_forecast_points():
     body = (ROOT / "api/domains/_financials_body.py").read_text(encoding="utf-8")
     assert "yahoo_fwd_annuals" in body

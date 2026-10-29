@@ -1229,6 +1229,10 @@ def _store_financials_rows(ticker: str, cik, entity_name, rows: list,
             n += max(0, cur.rowcount or 0)
             _upgrade_debt_columns(cur, ticker, r, _num)
         conn.commit()
+    try:
+        _fin_series._fin_rows_cache_drop(ticker)
+    except Exception:
+        pass
     return n
 
 
@@ -1385,6 +1389,27 @@ def _fin_is_rate_limit_error(msg: str) -> bool:
                                 "throttle", "slow down"))
 
 
+def _fin_period_public(row: dict | None) -> dict | None:
+    """Newest-period card from a store row already in memory."""
+    if not row:
+        return None
+
+    def _txt(v):
+        if v is None:
+            return None
+        if hasattr(v, "isoformat"):
+            return v.isoformat()[:10]
+        return str(v)[:10]
+
+    return {
+        "period_type": row.get("period_type"),
+        "fy": row.get("fy"),
+        "fp": row.get("fp"),
+        "period_end": _txt(row.get("period_end")),
+        "filed": _txt(row.get("filed")),
+    }
+
+
 def _fin_latest_store_period(ticker: str) -> dict | None:
     """Newest quarter (else annual) already in company_financials for ticker."""
     try:
@@ -1412,11 +1437,14 @@ def _fin_latest_store_period(ticker: str) -> dict | None:
         return None
 
 
-def _fin_recent_earnings_8k(ticker: str, after_period_end: str | None = None) -> dict | None:
+def _fin_recent_earnings_8k(
+    ticker: str, after_period_end: str | None = None, *, allow_network: bool = True,
+) -> dict | None:
     """Recent Item 2.02 8-K (earnings) after our latest 10-Q period_end.
 
     Returns filing meta so the UI can show 'earnings out, 10-Q not yet in XBRL store'.
-    Does not invent financial numbers.
+    Does not invent financial numbers. Ticker GETs pass allow_network=False and
+    serve the cache only — submissions.json is not on the paint path.
     """
     tk = (ticker or "").upper().strip()
     now = time.time()
@@ -1426,6 +1454,8 @@ def _fin_recent_earnings_8k(ticker: str, after_period_end: str | None = None) ->
         ttl = _FIN_8K_TTL_S if val else _FIN_8K_NEG_TTL_S
         if now - ts < ttl:
             return val
+    if not allow_network:
+        return None
     try:
         import sec_edgar_xbrl as _edgar
         import requests as _req
@@ -3746,12 +3776,15 @@ def financials_ticker(ticker: str, request: Request, period_type: str = "all"):
     try:
         tk = ticker.upper().strip()
         rows = _fin_rows_for_ticker(tk, period_type)
-        latest = _fin_latest_store_period(tk)
-        # Best-effort: flag earnings 8-K without newer 10-Q (no extra if no rows)
+        qrow = next((r for r in rows if (r.get("period_type") or "") == "quarter"), None)
+        latest = _fin_period_public(qrow or (rows[0] if rows else None))
+        # Cache only. A live submissions.json pull (2.5s) was sitting behind
+        # the dashboard on the one worker.
         pend = None
         try:
             if latest:
-                pend = _fin_recent_earnings_8k(tk, latest.get("period_end"))
+                pend = _fin_recent_earnings_8k(
+                    tk, latest.get("period_end"), allow_network=False)
         except Exception:
             pend = None
         return {
@@ -5089,16 +5122,19 @@ def _build_peer_comps(tk: str, subject_metrics: dict, limit: int = 8) -> dict:
                 for r in (cur.fetchall() or []):
                     fin_map[r["ticker"].upper()] = r
                 cur.execute("""
-                    SELECT ticker, revenue, period_end FROM company_financials
-                     WHERE ticker = ANY(%s) AND period_type='annual'
-                     ORDER BY ticker, period_end DESC
+                    SELECT ticker, revenue
+                      FROM (
+                        SELECT ticker, revenue,
+                               row_number() OVER (
+                                 PARTITION BY ticker ORDER BY period_end DESC
+                               ) AS rn
+                          FROM company_financials
+                         WHERE ticker = ANY(%s) AND period_type='annual'
+                      ) prior
+                     WHERE rn = 2
                 """, (list(fin_map.keys()) or cand,))
-                seen_n: dict = {}
                 for r in (cur.fetchall() or []):
-                    t = r["ticker"].upper()
-                    seen_n[t] = seen_n.get(t, 0) + 1
-                    if seen_n[t] == 2:
-                        prior_map[t] = _dash_f(r.get("revenue"))
+                    prior_map[r["ticker"].upper()] = _dash_f(r.get("revenue"))
 
         # Warm free prices for peers that have SEC financials but no market_quotes
         # row — otherwise PE / EV / mkt cap render blank (MSFT ticket).
@@ -5312,13 +5348,90 @@ def financials_debt_maturities(ticker: str, request: Request):
     return payload
 
 
+def _append_fwd_points(series: list, fwd: dict | None) -> str | None:
+    """Append hollow forecast years onto a chart series. No network."""
+    if not isinstance(fwd, dict):
+        return None
+    next_earnings_date = fwd.get("next_earnings_date")
+    next_earnings_date = str(next_earnings_date)[:10] if next_earnings_date else None
+    have_fy = {str(p.get("label") or "") for p in series}
+    for p in (fwd.get("points") or []):
+        lab = p.get("label") or ""
+        if not lab or lab in have_fy:
+            continue
+        series.append({
+            "label": lab,
+            "period_end": None,
+            "forecast": True,
+            "revenue": p.get("revenue"),
+            "net_income": p.get("net_income"),
+            "ebitda": p.get("ebitda"),
+            "cash": None, "debt": None, "leases": None, "borrowings": None,
+            "ocf": None, "fcf": None, "dividends": None, "buybacks": None,
+            "sbc": None, "shares": None, "buyback_ratio_pct": None,
+            "equity": None, "assets": None, "liabilities": None,
+            "gross_margin_pct": None, "operating_margin_pct": None,
+            "net_margin_pct": None, "roic_pct": None, "wacc_pct": None,
+        })
+        have_fy.add(lab)
+    return next_earnings_date
+
+
+_FIN_FWD_INFLIGHT: set = set()
+
+
+def _schedule_dash_forecast(tk: str, pt: str, args: dict) -> None:
+    """Yahoo annual estimates off the request. Patch the dashboard cache when done."""
+    key = (tk, pt)
+    if key in _FIN_FWD_INFLIGHT:
+        return
+    _FIN_FWD_INFLIGHT.add(key)
+
+    def _run():
+        try:
+            import market_data as _md
+            fwd = _md.yahoo_fwd_annuals(
+                args.get("symbol") or tk,
+                last_fy=args.get("last_fy"),
+                last_rev=args.get("last_rev"),
+                last_ni=args.get("last_ni"),
+                last_ebitda=args.get("last_ebitda"),
+                shares=args.get("shares"),
+            ) or {}
+            hit = _FIN_DASH_CACHE.get(key)
+            if not hit or not isinstance(hit[1], dict):
+                return
+            body = dict(hit[1])
+            if (body.get("ticker") or "").upper() != tk or body.get("period_type") != pt:
+                return
+            series = [dict(p) for p in (body.get("series") or [])]
+            if not any(p.get("forecast") for p in series):
+                ned = _append_fwd_points(series, fwd)
+                body["series"] = series
+                if ned:
+                    body["next_earnings_date"] = ned
+            body["forecasts_pending"] = False
+            _FIN_DASH_CACHE[key] = (hit[0], body)
+        except Exception as _fe:
+            print(f"[fin-dash] fwd annuals {tk}: {_fe!s:.120}", flush=True)
+            hit = _FIN_DASH_CACHE.get(key)
+            if hit and isinstance(hit[1], dict):
+                body = dict(hit[1])
+                body["forecasts_pending"] = False
+                _FIN_DASH_CACHE[key] = (hit[0], body)
+        finally:
+            _FIN_FWD_INFLIGHT.discard(key)
+
+    threading.Thread(target=_run, daemon=True, name=f"fin-fwd-{tk}").start()
+
+
 @app.get("/api/financials/{ticker}/dashboard")
 def financials_dashboard(ticker: str, request: Request, period_type: str = "annual"):
     """Chart-ready company dashboard: fundamentals series, ROIC/WACC, DGA Score,
     DGA Value (mean of saved Grok/Claude targets), valuation anchors, TTM block,
-    and sector peer comps. No LLM tokens. Annual revenue card may append
-    cached Yahoo analyst estimates (6h, 1.8s timeout, fail-open) as forecast
-    years — not on the quarterly path."""
+    and sector peer comps. No LLM tokens. Annual forecast bars come from the
+    Yahoo cache when it is warm; a cold cache paints stored years and fills
+    the hollow bars off this request. Not on the quarterly path."""
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
         raise HTTPException(403, "GP only")
@@ -5441,6 +5554,8 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
         })
 
     next_earnings_date = None
+    forecasts_pending = False
+    fwd_args = None
     if pt == "annual" and series:
         try:
             import market_data as _md
@@ -5449,40 +5564,30 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
                 last_fy = int(last_row.get("fy")) if last_row.get("fy") is not None else None
             except (TypeError, ValueError):
                 last_fy = None
-            fwd = _md.yahoo_fwd_annuals(
+            fwd_args = {
+                "symbol": tk,
+                "last_fy": last_fy,
+                "last_rev": _dash_f(last_row.get("revenue")),
+                "last_ni": _dash_f(last_row.get("net_income")),
+                "last_ebitda": _dash_f(last_row.get("ebitda")),
+                "shares": (_dash_f(last_row.get("shares_outstanding"))
+                           or _dash_f(last_row.get("diluted_shares"))),
+            }
+            fwd = _md.yahoo_fwd_if_cached(
                 tk,
-                last_fy=last_fy,
-                last_rev=_dash_f(last_row.get("revenue")),
-                last_ni=_dash_f(last_row.get("net_income")),
-                last_ebitda=_dash_f(last_row.get("ebitda")),
-                shares=(_dash_f(last_row.get("shares_outstanding"))
-                        or _dash_f(last_row.get("diluted_shares"))),
-            ) or {}
-            next_earnings_date = fwd.get("next_earnings_date")
-            if next_earnings_date:
-                next_earnings_date = str(next_earnings_date)[:10]
-            have_fy = {str(p.get("label") or "") for p in series}
-            for p in (fwd.get("points") or []):
-                lab = p.get("label") or ""
-                if not lab or lab in have_fy:
-                    continue
-                series.append({
-                    "label": lab,
-                    "period_end": None,
-                    "forecast": True,
-                    "revenue": p.get("revenue"),
-                    "net_income": p.get("net_income"),
-                    "ebitda": p.get("ebitda"),
-                    "cash": None, "debt": None, "leases": None, "borrowings": None,
-                    "ocf": None, "fcf": None, "dividends": None, "buybacks": None,
-                    "sbc": None, "shares": None, "buyback_ratio_pct": None,
-                    "equity": None, "assets": None, "liabilities": None,
-                    "gross_margin_pct": None, "operating_margin_pct": None,
-                    "net_margin_pct": None, "roic_pct": None, "wacc_pct": None,
-                })
-                have_fy.add(lab)
+                last_fy=fwd_args["last_fy"],
+                last_rev=fwd_args["last_rev"],
+                last_ni=fwd_args["last_ni"],
+                last_ebitda=fwd_args["last_ebitda"],
+                shares=fwd_args["shares"],
+            )
+            if fwd is None:
+                forecasts_pending = True
+            else:
+                next_earnings_date = _append_fwd_points(series, fwd)
         except Exception as _fe:
             print(f"[fin-dash] fwd annuals {tk}: {_fe!s:.120}", flush=True)
+            forecasts_pending = False
 
     # ── DGA Score (0-100) from ANNUAL history ──────────────────────────
     def _col(rs, k):
@@ -5649,23 +5754,27 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
 
     meta = (_db_meta([tk]).get(tk) or {})
 
-    # Persist daily metric snapshots so Value Rank / DGA score evolve over time
-    # (Rating vs itself uses annual financial history; this tracks the composite
-    # ranks and DGA value as the store + reports change day to day).
-    try:
-        _vr = None
-        if isinstance(rank_cards, dict) and isinstance(rank_cards.get("value"), dict):
-            _vr = rank_cards["value"].get("rank")
-        _snapshot_ticker_metrics(tk, {
-            "dga_score": dga_score,
-            "dga_value": dga_value,
-            "dga_value_rank": _vr,
-            "price": price,
-            "value_score": value_score,
-            "report_price_target": dga_value,  # mean of saved targets
-        }, {"source": "financials_dashboard"})
-    except Exception as _se:
-        print(f"[fin-dash] metric snapshot {tk}: {_se!s:.100}", flush=True)
+    # Persist daily metric snapshots off this response. The sparkline still
+    # includes today — the row is stitched below, the upsert can land after.
+    _vr = None
+    if isinstance(rank_cards, dict) and isinstance(rank_cards.get("value"), dict):
+        _vr = rank_cards["value"].get("rank")
+    snap_metrics = {
+        "dga_score": dga_score,
+        "dga_value": dga_value,
+        "dga_value_rank": _vr,
+        "price": price,
+        "value_score": value_score,
+        "report_price_target": dga_value,  # mean of saved targets
+    }
+
+    def _snap_later(metrics=snap_metrics, sym=tk):
+        try:
+            _snapshot_ticker_metrics(sym, metrics, {"source": "financials_dashboard"})
+        except Exception as _se:
+            print(f"[fin-dash] metric snapshot {sym}: {_se!s:.100}", flush=True)
+
+    threading.Thread(target=_snap_later, daemon=True, name=f"fin-snap-{tk}").start()
     try:
         metric_history = _metric_history(tk, [
             "dga_score", "dga_value_rank", "dga_value", "price", "value_score",
@@ -5673,8 +5782,27 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
         ])
     except Exception:
         metric_history = {}
+    try:
+        from datetime import date as _date
+        _today = _date.today().isoformat()
+        for _k, _v in snap_metrics.items():
+            if _v is None:
+                continue
+            try:
+                _fv = float(_v)
+            except (TypeError, ValueError):
+                continue
+            _hist = metric_history.setdefault(_k, [])
+            if _hist and str(_hist[-1].get("as_of") or "")[:10] == _today:
+                _hist[-1] = {"as_of": _today, "value": _fv}
+            else:
+                _hist.append({"as_of": _today, "value": _fv})
+    except Exception:
+        pass
 
-    latest_period = _fin_latest_store_period(tk)
+    latest_src = (quarters_newest[0] if quarters_newest
+                  else (annuals_newest[0] if annuals_newest else None))
+    latest_period = _fin_period_public(latest_src)
     earnings_pending = None
     try:
         # Live SEC submissions.json stays off this GET (2.5s+). Serve cache only.
@@ -5692,6 +5820,7 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "sector": meta.get("sector") or peers.get("sector"),
             "industry": meta.get("industry") or peers.get("industry"),
             "period_type": pt, "series": series,
+            "forecasts_pending": forecasts_pending,
             "next_earnings_date": next_earnings_date,
             "business_summary": _company_business_summary(
                 tk, (rows[-1].get("entity_name") if rows else None) or meta.get("name") or ""),
@@ -5739,6 +5868,11 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
         _FIN_DASH_CACHE[dash_ck] = (time.time(), payload)
     except Exception:
         pass
+    if forecasts_pending and fwd_args:
+        try:
+            _schedule_dash_forecast(tk, pt, fwd_args)
+        except Exception:
+            pass
     return payload
 
 
@@ -6021,13 +6155,10 @@ def _build_fin_sheet(ticker: str) -> dict:
         return {"ok": False, "error": f"No financials stored for {tk}. Pull SEC data first."}
 
     meta = _db_meta([tk]).get(tk) or {}
-    # Prefer store, then multi-source warm (same cascade as comps)
+    # Store only. A missing quote used to run the Yahoo/yfinance cascade
+    # on this GET and pin the one worker.
     q = _db_quotes([tk]).get(tk) or {}
     price = _vl_f(q.get("price"))
-    if price is None:
-        warmed = _warm_quotes_for_comps([tk], cap=1)
-        q = warmed.get(tk) or q
-        price = _vl_f(q.get("price"))
     entity = None
     if annuals:
         entity = annuals[-1].get("entity_name")

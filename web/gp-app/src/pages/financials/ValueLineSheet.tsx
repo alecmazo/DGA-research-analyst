@@ -112,10 +112,14 @@ export function ValueLineSheet({ ticker, period, setPeriod }: Props) {
   }, [stmts?.ticker, stmtBusy])
 
   // The company dashboard is the only ticker box. A new ticker opens this sheet.
+  // Wait a beat so the dashboard read lands first and the row cache is warm.
   useEffect(() => {
     const t = ticker.trim().toUpperCase()
     if (!t) return
-    void loadSheet(t)
+    const timer = window.setTimeout(() => {
+      void loadSheet(t)
+    }, 400)
+    return () => window.clearTimeout(timer)
   }, [ticker, loadSheet])
 
   const print = () => {

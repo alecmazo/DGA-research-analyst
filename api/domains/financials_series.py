@@ -5,11 +5,21 @@ loading the full FastAPI app.
 """
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any, Callable
 
 # Late-bound DB access from server
 _fund_conn_fn: Callable | None = None
 _RealDictCursor_cls = None
+
+# One dashboard read is SELECT *. The sheet and DCF ask again for annual
+# and quarter while that request is still the only worker. Keep the slices
+# for a few seconds so those follow-up reads are free. Refresh waits 25s.
+_FIN_ROWS_CACHE: dict[tuple[str, str], tuple[float, list]] = {}
+_FIN_ROWS_TTL_S = 20
+_FIN_ROWS_CACHE_MAX = 48
+_FIN_ROWS_LOCK = threading.Lock()
 
 
 def configure(*, fund_conn, RealDictCursor) -> None:
@@ -18,27 +28,81 @@ def configure(*, fund_conn, RealDictCursor) -> None:
     _RealDictCursor_cls = RealDictCursor
 
 
+def _fin_rows_cache_get(ticker: str, period_type: str) -> list | None:
+    key = ((ticker or "").upper(), period_type or "all")
+    now = time.time()
+    with _FIN_ROWS_LOCK:
+        hit = _FIN_ROWS_CACHE.get(key)
+        if not hit:
+            return None
+        ts, rows = hit
+        if now - ts > _FIN_ROWS_TTL_S:
+            _FIN_ROWS_CACHE.pop(key, None)
+            return None
+        return list(rows)
+
+
+def _fin_rows_cache_put(ticker: str, period_type: str, rows: list) -> None:
+    key = ((ticker or "").upper(), period_type or "all")
+    now = time.time()
+    with _FIN_ROWS_LOCK:
+        _FIN_ROWS_CACHE[key] = (now, list(rows))
+        if len(_FIN_ROWS_CACHE) <= _FIN_ROWS_CACHE_MAX:
+            return
+        oldest = sorted(_FIN_ROWS_CACHE.items(), key=lambda kv: kv[1][0])
+        for old_key, _hit in oldest:
+            if len(_FIN_ROWS_CACHE) <= _FIN_ROWS_CACHE_MAX:
+                break
+            if old_key == key:
+                continue
+            _FIN_ROWS_CACHE.pop(old_key, None)
+
+
+def _fin_rows_cache_drop(ticker: str) -> None:
+    """Forget one name after a store write so a refresh is not stuck 20s."""
+    tk = (ticker or "").upper()
+    with _FIN_ROWS_LOCK:
+        for pt in ("all", "annual", "quarter"):
+            _FIN_ROWS_CACHE.pop((tk, pt), None)
+
+
 def _fin_rows_for_ticker(ticker: str, period_type: str = "all") -> list:
     """Time series for one ticker, newest first.
 
     Annual series is de-duplicated: some SEC extracts stored interim period_ends
     (Mar/Jun/Sep) as period_type=annual with empty metrics alongside the real
     year-end 10-K row — that produced double FY labels on charts (AMZN ticket).
+
+    A full ``all`` read also stores the annual and quarter slices. The sheet
+    and the DCF calculator ask for those a moment later on the same worker.
     """
+    tk = (ticker or "").upper()
+    pt = period_type or "all"
+    cached = _fin_rows_cache_get(tk, pt)
+    if cached is not None:
+        return cached
     where = "WHERE ticker=%s"
-    params = [ticker.upper()]
-    if period_type in ("annual", "quarter"):
+    params: list[Any] = [tk]
+    if pt in ("annual", "quarter"):
         where += " AND period_type=%s"
-        params.append(period_type)
+        params.append(pt)
     if _fund_conn_fn is None or _RealDictCursor_cls is None:
         raise RuntimeError("financials_series.configure() not called")
     with _fund_conn_fn() as conn, conn.cursor(cursor_factory=_RealDictCursor_cls) as cur:
         cur.execute(f"SELECT * FROM company_financials {where} "
                     f"ORDER BY period_end DESC", params)
         rows = cur.fetchall() or []
-    if period_type == "annual":
+    if pt == "annual":
         rows = _fin_dedupe_annual_rows(rows)
-    return rows
+    _fin_rows_cache_put(tk, pt, rows)
+    if pt == "all":
+        annual = _fin_dedupe_annual_rows(
+            [r for r in rows if (r.get("period_type") or "") == "annual"]
+        )
+        quarter = [r for r in rows if (r.get("period_type") or "") == "quarter"]
+        _fin_rows_cache_put(tk, "annual", annual)
+        _fin_rows_cache_put(tk, "quarter", quarter)
+    return list(rows)
 
 
 def _fin_dedupe_annual_rows(rows: list) -> list:

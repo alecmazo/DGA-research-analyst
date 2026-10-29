@@ -162,7 +162,12 @@ export function LocalDcf({ linkedTicker }: { linkedTicker?: string } = {}) {
   useEffect(() => {
     const tk = (linkedTicker || '').trim().toUpperCase()
     if (!tk) return
-    void load(tk)
+    // Let the company dashboard take the one worker first and fill the
+    // short row cache. This calculator then reads that cache.
+    const timer = window.setTimeout(() => {
+      void load(tk)
+    }, 400)
+    return () => window.clearTimeout(timer)
   }, [linkedTicker, load])
 
   const inputs = useMemo(() => inputsFromDraft(draft, terminal), [draft, terminal])

@@ -135,6 +135,7 @@ export type Dashboard = {
   business_summary?: string
   period_type?: string
   series?: DashSeriesPoint[]
+  forecasts_pending?: boolean
   next_earnings_date?: string | null
   price?: number | null
   rating?: string | null

@@ -50,7 +50,7 @@ def test_list_reports_sql_skips_valuation_json():
     assert "_quote_from_current_session" in fill
     assert "_batch_quotes_fast" not in fill
     assert "_reports_attach_store_prices(out)" in fn
-    assert 'WEB_BUILD_VERSION = "ui802-20261029-chart-row"' in src
+    assert 'WEB_BUILD_VERSION = "ui803-20261029-fin-fast"' in src
 
 
 def test_positions_use_newest_print_not_yahoo():
@@ -125,9 +125,20 @@ def test_fin_dashboard_hot_path_is_store_only():
     assert "_FIN_DASH_TTL_S = 600" in body
     dash = body.split("def financials_dashboard")[1].split("def _vl_f")[0]
     assert "_fin_recent_earnings_8k(" not in dash
+    assert "yahoo_fwd_annuals(" not in dash
+    assert "yahoo_fwd_if_cached(" in dash
+    assert "_schedule_dash_forecast(" in dash
     peers = body.split("def _build_peer_comps")[1].split("def financials_dashboard")[0]
     assert "_warm_quotes_for_comps" not in peers
     assert "_db_quotes(quote_syms)" in peers
+    assert "row_number() OVER" in peers
+    sheet = body.split("def _build_fin_sheet")[1].split("def _fin_sheet_pdf_bytes")[0]
+    assert "_warm_quotes_for_comps" not in sheet
+    tick = body.split("def financials_ticker(")[1].split("def financials_ticker_refresh")[0]
+    assert "allow_network=False" in tick
+    series = (ROOT / "api/domains/financials_series.py").read_text(encoding="utf-8")
+    assert "_FIN_ROWS_TTL_S = 20" in series
+    assert '_fin_rows_cache_put(tk, "annual"' in series
 
 
 def test_builder_page_does_not_prefetch_all_boards():
@@ -191,7 +202,7 @@ def test_mobile_home_is_cheap_bootstrap():
     assert "daily_brief" not in body.lower()
     assert "latest_scan" not in body.lower()
     src = (ROOT / "api/server.py").read_text(encoding="utf-8")
-    assert 'WEB_BUILD_VERSION = "ui802-20261029-chart-row"' in src
+    assert 'WEB_BUILD_VERSION = "ui803-20261029-fin-fast"' in src
     assert "if (not lite) and _wl_left()" in wl
 
 

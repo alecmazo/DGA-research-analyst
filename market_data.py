@@ -3436,6 +3436,48 @@ def yahoo_fwd_annuals(
         return {"points": [], "next_earnings_date": raw.get("next_earnings_date")}
 
 
+def yahoo_fwd_if_cached(
+    symbol: str,
+    *,
+    last_fy: int | None,
+    last_rev: float | None = None,
+    last_ni: float | None = None,
+    last_ebitda: float | None = None,
+    shares: float | None = None,
+) -> dict | None:
+    """Forecast years from the 6h Yahoo cache only. None when that cache is cold.
+
+    Never calls yfinance. The dashboard paints stored bars first and fills
+    hollow forecast bars after a background ``yahoo_fwd_annuals`` refresh.
+    """
+    import time as _time
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"points": [], "next_earnings_date": None, "growth": None}
+    hit = _FWD_ANN_RAW_CACHE.get(sym)
+    if not hit or _time.time() - hit[0] >= _FWD_ANN_TTL_S:
+        return None
+    raw = hit[1] if isinstance(hit[1], dict) else {}
+    try:
+        return fwd_annuals_from_estimates(
+            raw.get("rev") or {},
+            raw.get("eps") or {},
+            last_fy=last_fy,
+            last_rev=last_rev,
+            last_ni=last_ni,
+            last_ebitda=last_ebitda,
+            shares=shares,
+            next_earnings_date=raw.get("next_earnings_date"),
+        )
+    except Exception as e:
+        print(f"[market_data] fwd cache {sym}: {e!s:.120}", flush=True)
+        return {
+            "points": [],
+            "next_earnings_date": raw.get("next_earnings_date"),
+            "growth": None,
+        }
+
+
 def sort_news_newest(items: list, limit: int | None = None) -> list:
     """Order news dicts by pub_ts descending (newest first). Missing timestamps
     sort last. No network. Pass limit=None for the full ranked list."""

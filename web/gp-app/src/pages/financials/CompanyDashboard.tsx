@@ -107,11 +107,19 @@ export function CompanyDashboard({
     title: string
     key: 'total' | (typeof SCORE_ROWS)[number]['key']
   } | null>(null)
+  const loadGen = useRef(0)
+  const activeTk = useRef('')
+  const activePeriod = useRef(period)
+  const forecastTries = useRef(0)
+  activePeriod.current = period
 
   const load = useCallback(
     async (tk: string, pt: PeriodType = period) => {
       const t = tk.trim().toUpperCase()
       if (!t) return
+      const gen = ++loadGen.current
+      activeTk.current = t
+      forecastTries.current = 0
       setLoading(true)
       setErr(null)
       setRefreshMsg(null)
@@ -122,6 +130,7 @@ export function CompanyDashboard({
         const d = await api<Dashboard>(
           `/api/financials/${encodeURIComponent(t)}/dashboard?period_type=${encodeURIComponent(pt)}`,
         )
+        if (gen !== loadGen.current) return
         if (d && d.ok === false) {
           setDash(null)
           setErr(d.error || `No financials stored for ${t}`)
@@ -134,14 +143,43 @@ export function CompanyDashboard({
           /* ignore */
         }
       } catch (e) {
+        if (gen !== loadGen.current) return
         setDash(null)
         setErr(e instanceof Error ? e.message : 'Dashboard failed')
       } finally {
-        setLoading(false)
+        if (gen === loadGen.current) setLoading(false)
       }
     },
     [period, setTicker, onViewed],
   )
+
+  // Hollow forecast bars fill after Yahoo returns. One or two quiet refetches.
+  // Do not blank the dashboard that is already on screen.
+  useEffect(() => {
+    const tk = (dash?.ticker || '').toUpperCase()
+    if (period !== 'annual' || !dash?.forecasts_pending || !tk) return
+    if (forecastTries.current >= 2) return
+    const timer = window.setTimeout(() => {
+      const gen = loadGen.current
+      if (activeTk.current !== tk || activePeriod.current !== 'annual') return
+      forecastTries.current += 1
+      void (async () => {
+        try {
+          const d = await api<Dashboard>(
+            `/api/financials/${encodeURIComponent(tk)}/dashboard?period_type=annual`,
+          )
+          if (loadGen.current !== gen) return
+          if (activeTk.current !== tk || activePeriod.current !== 'annual') return
+          if (!d || d.ok === false) return
+          if ((d.ticker || '').toUpperCase() !== tk) return
+          setDash(d)
+        } catch {
+          /* keep the painted dashboard */
+        }
+      })()
+    }, 2200)
+    return () => window.clearTimeout(timer)
+  }, [dash, period])
 
   // Initial restore from localStorage or soft AAPL (once)
   useEffect(() => {
@@ -285,7 +323,10 @@ export function CompanyDashboard({
       compact
     >
       {err && <div className={styles.inlineErr}>{err}</div>}
-      {loading && <Spinner label={`Loading ${ticker || input}…`} />}
+      {loading && !dash && <Spinner label={`Loading ${ticker || input}…`} />}
+      {loading && dash && (
+        <div className={styles.loadingNote}>Loading {ticker || input}…</div>
+      )}
 
       {!loading && !dash && !err && (
         <Empty
@@ -294,7 +335,7 @@ export function CompanyDashboard({
         />
       )}
 
-      {!loading && dash && (
+      {dash && (
         <>
           <div className={styles.headGrid}>
             {/* Identity + key metrics */}
