@@ -93,6 +93,13 @@ def test_fundcharts_hollow_forecast_bars():
     assert "fill={isHollow ? 'none' : col}" in src
     assert "function yearLines" in src
     assert "showYear" in src
+    assert "fontSize={25}" in src
+    css = (ROOT / "web/gp-app/src/pages/FinancialsPage.module.css").read_text(
+        encoding="utf-8",
+    )
+    assert "minmax(min(230px, 100%), 230px)" in css
+    title = css[css.find(".chartTitle"): css.find(".chartTitle") + 180]
+    assert "font-size: 13px" in title
     dash = (ROOT / "web/gp-app/src/pages/financials/CompanyDashboard.tsx").read_text(
         encoding="utf-8",
     )

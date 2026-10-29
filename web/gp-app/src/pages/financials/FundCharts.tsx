@@ -106,12 +106,12 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
     setTip(null)
   }, [])
   const W = 480
-  const H = 196
-  const padL = 72
+  const H = 197
+  const padL = 110
   const hasR = cfg.series.some((s) => s.axis === 'R')
-  const padR = hasR ? 58 : 12
+  const padR = hasR ? 96 : 10
   const padT = 8
-  const padB = 32
+  const padB = 40
   const n = cfg.labels.length
   const plotW = W - padL - padR
   const plotH = H - padT - padB
@@ -168,9 +168,9 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
         <text
           key={`tl${i}`}
           x={padL - 6}
-          y={y + 4}
+          y={y + 9}
           textAnchor="end"
-          fontSize={15}
+          fontSize={25}
           fill="var(--text-secondary,#64748b)"
         >
           {fmtL(v)}
@@ -183,8 +183,8 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
           <text
             key={`tr${i}`}
             x={W - padR + 6}
-            y={yr + 4}
-            fontSize={15}
+            y={yr + 9}
+            fontSize={25}
             fill="var(--text-secondary,#64748b)"
           >
             {fmtR(vr)}
@@ -281,7 +281,7 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
           x={padL + slotW * i + slotW / 2}
           y={H - 10}
           textAnchor="middle"
-          fontSize={14}
+          fontSize={24}
           fill="var(--text-secondary,#64748b)"
         >
           {lb}
