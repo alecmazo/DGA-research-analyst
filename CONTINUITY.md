@@ -381,6 +381,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Book text** | **`ui799-20261029-book-text`** | Gemma writes the Local 10 book with thinking off, in three short passes. An answer left in the thinking channel is kept. A later section that fails still saves the sections already written. |
 | **Chart type** | **`ui800-20261029-chart-type`** | SUP_20261028_14339c34. The financials chart cards under the TTM snapshot use larger type. Hovering a year lists every number in that column. The ticket is marked fixed so the desk light goes green. |
 | **Chart half** | **`ui801-20261029-chart-half`** | Those chart cards are 230px wide, about half of the 460px size. Titles are 13px and the axis labels stay near 11px. Hovering a year still lists every number in that column. |
+| **Chart row** | **`ui802-20261029-chart-row`** | The seven financials chart cards fill the row: four across the top, three across the bottom. Hovering a year still lists every number in that column. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -591,4 +592,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-29 · Agent: Cursor · Built: `ui801-20261029-chart-half` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui802-YYYYMMDD-slug`*
+*Last updated: 2026-10-29 · Agent: Cursor · Built: `ui802-20261029-chart-row` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui803-YYYYMMDD-slug`*

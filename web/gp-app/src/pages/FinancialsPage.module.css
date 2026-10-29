@@ -481,23 +481,41 @@
 /* Fundamentals multi-chart grid (pre-React parity) */
 .chartGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 230px));
-  gap: 10px;
-  margin-top: 8px;
-  justify-content: start;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px;
 }
 
 .chartCard {
   position: relative;
+  grid-column: span 3;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   background: var(--bg-elevated, var(--bg-surface));
   min-height: 0;
 }
 
+.chartCard:nth-child(n + 5) {
+  grid-column: span 4;
+}
+
+@media (max-width: 860px) {
+  .chartCard,
+  .chartCard:nth-child(n + 5) {
+    grid-column: span 6;
+  }
+}
+
+@media (max-width: 560px) {
+  .chartCard,
+  .chartCard:nth-child(n + 5) {
+    grid-column: span 12;
+  }
+}
+
 .chartTitle {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0 0 6px;
@@ -514,7 +532,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -554,7 +572,7 @@
   pointer-events: none;
   background: rgba(15, 23, 42, 0.94);
   color: #fff;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
   padding: 6px 8px;
   border-radius: 6px;
