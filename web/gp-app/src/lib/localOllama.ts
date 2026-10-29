@@ -161,7 +161,8 @@ type ChatOpts = {
   user: string
   model?: string
   maxTokens?: number
-  think?: string
+  /** false turns reasoning off so the answer is the message content. */
+  think?: string | false
   numCtx?: number
   onDelta?: (chunk: string) => void
   onProgress?: (state: { textChars: number; thinkingChars: number }) => void
@@ -270,7 +271,7 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
       body: JSON.stringify({
         model: opts.model || selectedLocalModel(),
         stream: true,
-        think: opts.think || 'low',
+        think: opts.think === false ? false : (opts.think || 'low'),
         messages: [
           { role: 'system', content: opts.system || '' },
           { role: 'user', content: opts.user || '' },
@@ -329,6 +330,8 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
       if (piece) {
         text += piece
         opts.onDelta?.(piece)
+      } else if (thought) {
+        opts.onDelta?.(thought)
       }
       if (piece || thought) {
         opts.onProgress?.({ textChars: text.length, thinkingChars: thinking.length })
@@ -358,6 +361,15 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
     finish('fail', err instanceof Error ? err.message : 'failed')
     throw err
   }
+}
+
+/** The words to show. Gemma often leaves content empty, or a short apology, and writes the answer in thinking. */
+export function chatAnswer(chat: LocalChat): string {
+  const text = (chat.text || '').trim()
+  const thinking = (chat.thinking || '').trim()
+  if (text && !isModelRefusal(text)) return text
+  if (thinking && !isModelRefusal(thinking)) return thinking
+  return text || thinking
 }
 
 /** Why a one-line apology happened. Shown instead of hiding the model's reason. */

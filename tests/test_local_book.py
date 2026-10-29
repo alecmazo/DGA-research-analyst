@@ -64,5 +64,12 @@ def test_local_page_puts_the_book_under_compare():
     assert "numCtx: 8192" in book
     assert "/api/local/book" in book
     assert "Local 10" in book
+    assert "chatAnswer" in book
+    assert "modelThink" in book
+    assert "did not write the book" not in book
+    assert "The sections already written were saved." in book
+    ollama = (ROOT / "web/gp-app/src/lib/localOllama.ts").read_text(encoding="utf-8")
+    assert "export function chatAnswer" in ollama
+    assert "opts.think === false ? false" in ollama
     server = (ROOT / "api/server.py").read_text(encoding="utf-8")
     assert '@app.get("/api/local/book")' in server
