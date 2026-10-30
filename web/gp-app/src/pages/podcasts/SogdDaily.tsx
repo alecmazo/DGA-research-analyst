@@ -33,6 +33,7 @@ type DailyStatus = {
   voice: VoiceSetting
   voice_today?: string | null
   auto_publish: boolean
+  auto_daily?: boolean
   cost_cap_usd: number
   month_spend_usd: number
   runs: DailyRun[]
@@ -264,6 +265,22 @@ export function SogdDaily({
     }
   }
 
+  async function saveMode(automatic: boolean) {
+    setStatus((current) => (current ? { ...current, auto_daily: automatic } : current))
+    setNote(automatic
+      ? 'Automatic daily is on. The scout still starts at 6:35 AM Pacific.'
+      : 'Manual. Nothing is recorded until you press Generate today’s episode.')
+    try {
+      await api('/api/podcast/systems-over-goals/daily-settings', {
+        method: 'PUT',
+        body: JSON.stringify({ auto_daily: automatic }),
+      })
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : 'Could not save the mode')
+      await load()
+    }
+  }
+
   async function publish() {
     setBusy('publish')
     setNote('')
@@ -290,12 +307,29 @@ export function SogdDaily({
   return (
     <div className={styles.sogd}>
       <p className={styles.pcDesc}>
-        One episode a day. The scout starts at 6:35 AM Pacific and the feed stays
-        quiet until 7:00 AM Pacific. Directories stay off.
+        {status?.auto_daily === false
+          ? 'Manual. Press Generate today’s episode when you want one. The feed stays quiet until 7:00 AM Pacific.'
+          : 'Automatic daily. The scout starts at 6:35 AM Pacific and the feed stays quiet until 7:00 AM Pacific.'}
+        {' '}Directories stay off.
       </p>
       <div className={styles.sogdSpend}>
         This month {money(spend)} of {money(cap)}
         {status?.auto_publish ? ' · auto-publish on' : ' · auto-publish off'}
+        {status?.auto_daily === false ? ' · manual' : ' · automatic daily'}
+      </div>
+      <div className={styles.sogdRow}>
+        <label className={styles.field}>
+          <span>Daily run</span>
+          <select
+            className={styles.select}
+            aria-label="Daily run"
+            value={status?.auto_daily === false ? 'manual' : 'automatic'}
+            onChange={(e) => void saveMode(e.target.value === 'automatic')}
+          >
+            <option value="automatic">Automatic daily</option>
+            <option value="manual">Manual</option>
+          </select>
+        </label>
       </div>
       {capped && (
         <div className={styles.sogdWarn}>

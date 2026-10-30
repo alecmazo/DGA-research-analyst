@@ -360,6 +360,11 @@ def auto_publish_default() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+def auto_daily_default() -> bool:
+    """Missing setting means the morning scheduler still runs."""
+    return True
+
+
 def pronunciation_map() -> dict:
     raw = (os.environ.get("SOGD_PRONUNCIATIONS") or "").strip()
     if not raw:
@@ -578,6 +583,7 @@ def plan_tick(
     start_local: str = "06:35",
     publish_local: str = "07:00",
     auto_publish: bool = True,
+    auto_daily: bool = True,
     tz=LA,
 ) -> dict:
     """What the one scheduler thread should do on this wake."""
@@ -600,6 +606,13 @@ def plan_tick(
         if local >= due:
             return {"action": "release", "sleep_sec": 0, "reason": "publish"}
         return {"action": "sleep", "sleep_sec": _secs_until(due, local), "reason": "hold"}
+
+    if not auto_daily:
+        return {
+            "action": "sleep",
+            "sleep_sec": _secs_until(next_start, local),
+            "reason": "manual",
+        }
 
     if status in ("published", "cost_cap_hit"):
         return {
@@ -902,8 +915,8 @@ def notify_delivery(guid: str, already: str | None) -> dict:
 
 
 def late_alert_due(now: datetime, episode: dict | None, *, alerted: bool = False,
-                   alert_local: str = ALERT_LOCAL, tz=LA) -> bool:
-    if alerted:
+                   alert_local: str = ALERT_LOCAL, tz=LA, auto_daily: bool = True) -> bool:
+    if not auto_daily or alerted:
         return False
     if now.tzinfo is None:
         now = now.replace(tzinfo=tz)
@@ -2373,6 +2386,7 @@ def load_run_context(episode_date: date | None, connect) -> dict:
         "existing": None,
         "voice": default_voice(),
         "auto_publish": auto_publish_default(),
+        "auto_daily": auto_daily_default(),
         "cost_cap_usd": cost_cap_usd(),
         "month_spend": 0.0,
         "pronunciation": pronunciation_map(),
@@ -2395,6 +2409,8 @@ def load_run_context(episode_date: date | None, connect) -> dict:
             if isinstance(settings, dict):
                 if "auto_publish" in settings:
                     ctx["auto_publish"] = bool(settings.get("auto_publish"))
+                if "auto_daily" in settings:
+                    ctx["auto_daily"] = bool(settings.get("auto_daily"))
                 if settings.get("cost_cap_usd") is not None:
                     ctx["cost_cap_usd"] = float(settings["cost_cap_usd"])
             cur.execute(
@@ -2788,7 +2804,7 @@ def _insert_sogd_episode(cur, result: dict) -> None:
     )
 
 
-def maintain_sogd(connect, now: datetime | None = None) -> dict:
+def maintain_sogd(connect, now: datetime | None = None, *, auto_daily: bool = True) -> dict:
     """Alert if nothing is published by 7:30, and drop abandoned partials after 3 days."""
     now = now or datetime.now(LA)
     if now.tzinfo is None:
@@ -2823,7 +2839,12 @@ def maintain_sogd(connect, now: datetime | None = None) -> dict:
                 alerted_on = alerted_on.date()
             alerted = alerted_on == now.date()
             sent = False
-            if late_alert_due(now, {"status": "published" if published else (state.get("status") or "")}, alerted=alerted):
+            if late_alert_due(
+                now,
+                {"status": "published" if published else (state.get("status") or "")},
+                alerted=alerted,
+                auto_daily=auto_daily,
+            ):
                 send_sogd_alert(
                     now.date().isoformat(),
                     state.get("stage_done") or "",

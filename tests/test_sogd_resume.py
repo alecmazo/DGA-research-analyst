@@ -244,6 +244,7 @@ class SogdResumeTests(unittest.TestCase):
     def test_lock_backoff_cap_and_cleanup(self):
         from podcast_sogd import (
             RETRY_BACKOFF_MIN,
+            auto_daily_default,
             claim_run,
             cleanup_partials,
             failure_is_retryable,
@@ -277,7 +278,21 @@ class SogdResumeTests(unittest.TestCase):
         self.assertEqual(waiting["reason"], "backoff")
         noon = datetime(2026, 10, 28, 12, 5, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles"))
         self.assertEqual(plan_tick(noon, {"status": "failed", "attempts": 1})["reason"], "after_window")
-        self.assertTrue(late_alert_due(datetime(2026, 10, 28, 7, 31, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles")), {"status": "failed"}))
+        morning = datetime(2026, 10, 28, 6, 40, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles"))
+        self.assertEqual(plan_tick(morning, None)["action"], "generate")
+        manual = plan_tick(morning, None, auto_daily=False)
+        self.assertEqual(manual["action"], "sleep")
+        self.assertEqual(manual["reason"], "manual")
+        held = {
+            "status": "ready_pending",
+            "published_at": datetime(2026, 10, 28, 7, 0, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles")),
+        }
+        at_seven = datetime(2026, 10, 28, 7, 0, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles"))
+        self.assertEqual(plan_tick(at_seven, held, auto_daily=False)["action"], "release")
+        self.assertTrue(auto_daily_default())
+        late = datetime(2026, 10, 28, 7, 31, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles"))
+        self.assertFalse(late_alert_due(late, {"status": "failed"}, auto_daily=False))
+        self.assertTrue(late_alert_due(late, {"status": "failed"}))
         self.assertFalse(late_alert_due(datetime(2026, 10, 28, 7, 31, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles")), {"status": "published"}))
         self.assertFalse(late_alert_due(datetime(2026, 10, 28, 7, 10, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles")), {"status": "failed"}))
         today = date(2026, 10, 28)
