@@ -369,15 +369,20 @@ function ChartCard({ cfg }: { cfg: ChartCfg }) {
   )
 }
 
-/** Pre-React multi-panel fundamentals grid (7 charts). */
+/** Fundamentals grid. Seven charts, plus an optional eighth card. */
 export function FundCharts({
   series,
   nextEarningsDate,
+  trailing,
 }: {
   series: DashSeriesPoint[]
   nextEarningsDate?: string | null
+  trailing?: ReactNode
 }) {
-  if (!series.length) return null
+  if (!series.length) {
+    if (!trailing) return null
+    return <div className={styles.chartGrid}>{trailing}</div>
+  }
   const hist = series.filter((s) => !s.forecast)
   const labelsAll = series.map((s) => s.label || '—')
   const labels = (hist.length ? hist : series).map((s) => s.label || '—')
@@ -545,6 +550,7 @@ export function FundCharts({
       {charts.map((c, i) => (
         <ChartCard key={i} cfg={c} />
       ))}
+      {trailing}
     </div>
   )
 }

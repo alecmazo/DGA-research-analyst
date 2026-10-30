@@ -138,6 +138,8 @@ export type Dashboard = {
   forecasts_pending?: boolean
   next_earnings_date?: string | null
   price?: number | null
+  price_change?: number | null
+  price_change_pct?: number | null
   rating?: string | null
   dga_value?: number | null
   verdict?: string | null

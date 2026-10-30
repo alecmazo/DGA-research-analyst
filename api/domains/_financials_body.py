@@ -2973,6 +2973,23 @@ def _store_meta(cur, sym, m):
                  m.get("analyst_target"), m.get("source")))
 
 
+def _dash_quote_move(tk: str) -> dict:
+    """Today's move from the quote row the dashboard already uses for price."""
+    q = (_db_quotes([tk]).get(tk) or {})
+    px = _dash_f(q.get("price"))
+    pct = q.get("pct_change")
+    chg = None
+    if px is not None and pct is not None:
+        try:
+            p = float(pct)
+            denom = 1.0 + p / 100.0
+            if denom:
+                chg = round(float(px) * (p / 100.0) / denom, 2)
+        except (TypeError, ValueError):
+            chg = None
+    return {"price": px, "price_change": chg, "price_change_pct": pct}
+
+
 def _db_quotes(symbols, max_age_s=None) -> dict:
     """{SYM: {price, pct_change}} from market_quotes. If max_age_s is given, only
     rows refreshed within that window are returned (freshness gate for the
@@ -5445,6 +5462,11 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
         if not body.get("business_summary"):
             body["business_summary"] = _company_business_summary(
                 tk, body.get("entity_name") or "")
+        move = _dash_quote_move(tk)
+        if move["price"] is not None:
+            body["price"] = move["price"]
+        body["price_change"] = move["price_change"]
+        body["price_change_pct"] = move["price_change_pct"]
         return body
 
     # One store read (was 3× SELECT *). Split + annual de-dupe in process.
@@ -5463,10 +5485,10 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
                                       f"'Sync from SEC' on the Financials tab first."}
 
     # ── Price (store) + saved targets ─────────────────────────────────
-    price = None
-    q = _db_quotes([tk])
-    if q.get(tk):
-        price = _dash_f(q[tk].get("price"))
+    move = _dash_quote_move(tk)
+    price = move["price"]
+    price_change = move["price_change"]
+    price_change_pct = move["price_change_pct"]
     pt_grok = pt_claude = None
     targets_asof = None
     rating = None
@@ -5824,7 +5846,10 @@ def financials_dashboard(ticker: str, request: Request, period_type: str = "annu
             "next_earnings_date": next_earnings_date,
             "business_summary": _company_business_summary(
                 tk, (rows[-1].get("entity_name") if rows else None) or meta.get("name") or ""),
-            "price": price, "rating": rating,
+            "price": price,
+            "price_change": price_change,
+            "price_change_pct": price_change_pct,
+            "rating": rating,
             "dga_value": dga_value, "verdict": verdict,
             "targets": {"grok": pt_grok, "claude": pt_claude, "as_of": targets_asof},
             "key_metrics": key_metrics,

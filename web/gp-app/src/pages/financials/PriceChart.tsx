@@ -25,8 +25,14 @@ function fmtDate(t?: string) {
   return s.slice(0, 10)
 }
 
-export function PriceChart({ ticker }: { ticker: string }) {
-  const [range, setRange] = useState('YTD')
+export function PriceChart({
+  ticker,
+  compact = false,
+}: {
+  ticker: string
+  compact?: boolean
+}) {
+  const [range, setRange] = useState(compact ? '10Y' : 'YTD')
   const [data, setData] = useState<PriceHistory | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -83,8 +89,12 @@ export function PriceChart({ ticker }: { ticker: string }) {
     const xOf = (i: number) => PAD_L + (i / (n - 1)) * (W - PAD_L - PAD_R)
     const yOf = (v: number) => PAD_T + (1 - (v - lo) / (hi - lo)) * (H - PAD_T - PAD_B)
     const up = ys[n - 1]! >= ys[0]!
-    const lineCol = up ? '#16a34a' : '#dc2626'
-    const areaCol = up ? 'rgba(22,163,74,0.13)' : 'rgba(220,38,38,0.12)'
+    const lineCol = compact ? '#2563eb' : up ? '#16a34a' : '#dc2626'
+    const areaCol = compact
+      ? 'rgba(37,99,235,0.12)'
+      : up
+        ? 'rgba(22,163,74,0.13)'
+        : 'rgba(220,38,38,0.12)'
     let dLine = ''
     let dArea = ''
     pts.forEach((p, i) => {
@@ -138,7 +148,7 @@ export function PriceChart({ ticker }: { ticker: string }) {
       )
     })
     return { n, xOf, yOf, lineCol, areaCol, dLine, dArea, last, grid, xLabels, ys }
-  }, [pts])
+  }, [pts, compact])
 
   const pickIndex = (clientX: number, clientY: number, svg: SVGSVGElement) => {
     if (!geo) return
@@ -175,14 +185,18 @@ export function PriceChart({ ticker }: { ticker: string }) {
   const sc = (v: number | null | undefined) =>
     v == null ? undefined : v >= 0 ? '#16a34a' : '#dc2626'
 
+  const rangeBtn = compact
+    ? { on: styles.priceRangeOn, off: styles.priceRange }
+    : { on: styles.segOn, off: styles.segBtn }
+
   return (
-    <div className={styles.pricePanel}>
-      <div className={styles.priceRanges}>
+    <div className={compact ? `${styles.pricePanel} ${styles.pricePanelCompact}` : styles.pricePanel}>
+      <div className={compact ? `${styles.priceRanges} ${styles.priceRangesCompact}` : styles.priceRanges}>
         {PRICE_RANGES.map((r) => (
           <button
             key={r}
             type="button"
-            className={range === r ? styles.segOn : styles.segBtn}
+            className={range === r ? rangeBtn.on : rangeBtn.off}
             onClick={() => setRange(r)}
           >
             {r}
@@ -190,10 +204,18 @@ export function PriceChart({ ticker }: { ticker: string }) {
         ))}
       </div>
       {stats && (
-        <div className={styles.priceStats}>
+        <div className={compact ? `${styles.priceStats} ${styles.priceStatsCompact}` : styles.priceStats}>
           <span>
-            <span className={styles.muted}>{stats.change_label || range} change:</span>{' '}
-            <strong style={{ color: sc(stats.change_pct) }}>{pf(stats.change_pct)}</strong>
+            {compact ? (
+              <strong style={{ color: sc(stats.change_pct) }}>
+                {stats.change_label || range}:{pf(stats.change_pct)}
+              </strong>
+            ) : (
+              <>
+                <span className={styles.muted}>{stats.change_label || range} change:</span>{' '}
+                <strong style={{ color: sc(stats.change_pct) }}>{pf(stats.change_pct)}</strong>
+              </>
+            )}
           </span>
           <span>
             <span className={styles.muted}>Above Low:</span>{' '}
@@ -207,7 +229,7 @@ export function PriceChart({ ticker }: { ticker: string }) {
               {pf(stats.below_high_pct)}
             </strong>
           </span>
-          {(hi?.c != null || stats.last != null) && (
+          {!compact && (hi?.c != null || stats.last != null) && (
             <span className={styles.priceLast}>
               ${fmtPx(hi?.c ?? (stats.last as number))}
             </span>
@@ -222,7 +244,7 @@ export function PriceChart({ ticker }: { ticker: string }) {
         <div className={styles.priceSvgWrap}>
           <svg
             viewBox={`0 0 ${W} ${H}`}
-            className={styles.priceSvg}
+            className={compact ? `${styles.priceSvg} ${styles.priceSvgCompact}` : styles.priceSvg}
             preserveAspectRatio="none"
             onMouseMove={onMove}
             onMouseLeave={() => {

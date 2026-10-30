@@ -136,10 +136,14 @@ def test_fundcharts_hollow_forecast_bars():
     )
     assert "repeat(12, minmax(0, 1fr))" in css
     assert "grid-column: span 3" in css
-    assert "grid-column: span 4" in css
+    assert "grid-column: span 4" not in css
+    assert "nth-child(n + 5)" not in css
     title = css[css.find(".chartTitle"): css.find(".chartTitle") + 180]
     assert "font-size: 14px" in title
     dash = (ROOT / "web/gp-app/src/pages/financials/CompanyDashboard.tsx").read_text(
         encoding="utf-8",
     )
     assert "nextEarningsDate={dash.next_earnings_date}" in dash
+    assert "trailing={valueCard}" in dash
+    assert "<PriceChart ticker={dash.ticker || ticker} compact />" in dash
+    assert "price_change_pct" in dash
