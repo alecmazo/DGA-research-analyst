@@ -13,6 +13,7 @@ import styles from './Topbar.module.css'
 const RESEARCH: { to: string; label: string }[] = [
   { to: '/', label: 'Desk' },
   { to: '/financials', label: 'Financials' },
+  { to: '/ideas', label: 'Ideas' },
   { to: '/builder', label: 'Boards' },
   { to: '/gurus', label: 'Gurus' },
   { to: '/podcasts', label: 'Podcasts' },

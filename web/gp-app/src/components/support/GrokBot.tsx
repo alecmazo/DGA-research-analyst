@@ -22,6 +22,7 @@ const STORE_KEY = 'dga.grokbot.chat'
 const ALLOWED_PATHS = new Set([
   '/',
   '/financials',
+  '/ideas',
   '/options',
   '/builder',
   '/local',

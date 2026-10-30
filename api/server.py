@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui804-20261030-sogd-manual"
+WEB_BUILD_VERSION = "ui805-20261030-ideas"
 
 
 @app.get("/api/build")
@@ -46170,6 +46170,18 @@ def _mount_merger_arb_scanner() -> None:
 
 _mount_merger_arb()
 _mount_merger_arb_scanner()
+
+
+def _mount_ideas() -> None:
+    try:
+        from api.domains.ideas_cards import create_router, start_scheduler
+        app.include_router(create_router(_claims_or_401))
+        start_scheduler()
+    except Exception as exc:
+        print(f"[ideas] mount failed: {exc!r}", flush=True)
+
+
+_mount_ideas()
 
 
 def _mount_grok_bot() -> None:

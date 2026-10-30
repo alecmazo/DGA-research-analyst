@@ -40,6 +40,7 @@ const PositionsPage = lazyExport(() => import('@/pages/PositionsPage'), 'Positio
 const FundPage = lazyExport(() => import('@/pages/FundPage'), 'FundPage')
 const BuilderPage = lazyExport(() => import('@/pages/BuilderPage'), 'BuilderPage')
 const FinancialsPage = lazyExport(() => import('@/pages/FinancialsPage'), 'FinancialsPage')
+const IdeasPage = lazyExport(() => import('@/pages/IdeasPage'), 'IdeasPage')
 const MungerPage = lazyExport(() => import('@/pages/MungerPage'), 'MungerPage')
 const LocalPage = lazyExport(() => import('@/pages/LocalPage'), 'LocalPage')
 const PodcastsPage = lazyExport(() => import('@/pages/PodcastsPage'), 'PodcastsPage')
@@ -368,6 +369,14 @@ export default function App() {
                 element={
                   <LazyPage label="Financials">
                     <FinancialsPage />
+                  </LazyPage>
+                }
+              />
+              <Route
+                path="ideas"
+                element={
+                  <LazyPage label="Ideas">
+                    <IdeasPage />
                   </LazyPage>
                 }
               />

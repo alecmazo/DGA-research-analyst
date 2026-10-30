@@ -1,0 +1,199 @@
+.lede {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tabs, .filters, .row, .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tab, .tabOn, .filters select, .settings input, .settings select, .settings textarea {
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.tabOn {
+  border-color: var(--brand-600);
+  color: var(--brand-600);
+  font-weight: 700;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.card, .cardOpen {
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  min-width: 0;
+}
+
+.cardOpen {
+  grid-column: 1 / -1;
+}
+
+.cardHit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.cardTop {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brand-600);
+}
+
+.score {
+  margin-left: auto;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.card h2, .weights h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.card p, .detail p {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.tuned {
+  color: var(--brand-600) !important;
+  font-size: 12px !important;
+  font-weight: 700;
+}
+
+.alerts {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.detail {
+  padding: 0 14px 14px;
+}
+
+.spark {
+  width: 100%;
+  max-width: 420px;
+  height: 88px;
+  margin-bottom: 8px;
+}
+
+.question {
+  font-weight: 700;
+  color: var(--text-primary) !important;
+}
+
+.numbers, .sources, .weights ul {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.numbers li, .weights li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.sources a {
+  color: var(--brand-600);
+  font-size: 13px;
+}
+
+.names, .asOf, .hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.report {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.45;
+  background: var(--bg-canvas, transparent);
+  border-radius: var(--r-md);
+  padding: 10px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.pass textarea, .settings textarea {
+  width: 100%;
+  margin: 8px 0;
+}
+
+.settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.weights {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 14px;
+}
