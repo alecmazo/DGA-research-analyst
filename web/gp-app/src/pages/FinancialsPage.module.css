@@ -147,7 +147,7 @@
 /* ── Dashboard cards ── */
 .headGrid {
   display: grid;
-  grid-template-columns: 1.1fr 1fr 1.4fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
   gap: 8px;
   align-items: stretch;
 }
@@ -166,6 +166,10 @@
 }
 
 .entityLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
   font-size: 13px;
   font-weight: 800;
   color: var(--text-primary);
@@ -205,11 +209,44 @@
 }
 
 .priceBig {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
   font-size: 18px;
   font-weight: 800;
   color: var(--text-primary);
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
+}
+
+.dayMove {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dayMovePrice {
+  font-size: 14px;
+}
+
+.dayUp {
+  color: #16a34a;
+}
+
+.dayDown {
+  color: #dc2626;
+}
+
+.dayFlat {
+  color: var(--text-secondary);
+}
+
+.priceCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .ratingPill {
@@ -222,6 +259,10 @@
   padding: 1px 6px;
   vertical-align: middle;
   margin-left: 8px;
+}
+
+.priceBig .ratingPill {
+  margin-left: 0;
 }
 
 .kmGrid {
@@ -503,22 +544,24 @@
   min-height: 0;
 }
 
-.chartCard:nth-child(n + 5) {
-  grid-column: span 4;
-}
-
 @media (max-width: 860px) {
-  .chartCard,
-  .chartCard:nth-child(n + 5) {
+  .chartCard {
     grid-column: span 6;
   }
 }
 
 @media (max-width: 560px) {
-  .chartCard,
-  .chartCard:nth-child(n + 5) {
+  .chartCard {
     grid-column: span 12;
   }
+}
+
+.valueCard .anchorLbl {
+  width: 96px;
+}
+
+.valueCard .anchorVal {
+  width: 58px;
 }
 
 .chartTitle {
@@ -1026,6 +1069,54 @@
   font-weight: 600;
   font-size: 10.5px;
   margin-bottom: 1px;
+}
+
+.pricePanelCompact {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.priceRangesCompact {
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.priceRange,
+.priceRangeOn {
+  cursor: pointer;
+  border: 1px solid var(--border-default, #cbd5e1);
+  background: var(--bg-elevated, #fff);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  height: 22px;
+  padding: 0 7px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.priceRangeOn {
+  background: #0a1628;
+  color: #fff;
+  border-color: #0a1628;
+}
+
+.priceStatsCompact {
+  font-size: 11px;
+  gap: 4px 10px;
+  margin-bottom: 4px;
+}
+
+.priceSvgCompact {
+  max-height: 148px;
+  flex: 1;
 }
 
 .priceEmpty {

@@ -31,6 +31,24 @@ import { FundCharts } from './FundCharts'
 import { PriceChart } from './PriceChart'
 import styles from '../FinancialsPage.module.css'
 
+function dayMoveLabel(
+  chg: number | null | undefined,
+  pct: number | null | undefined,
+): { text: string; tone: 'up' | 'down' | 'flat' } | null {
+  if (chg == null || pct == null) return null
+  const c = Number(chg)
+  const p = Number(pct)
+  if (!Number.isFinite(c) || !Number.isFinite(p)) return null
+  const tone: 'up' | 'down' | 'flat' =
+    p > 0 || (p === 0 && c > 0) ? 'up' : p < 0 || c < 0 ? 'down' : 'flat'
+  const dollar = `${c > 0 ? '+' : ''}${c.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+  const pctTxt = `${p > 0 ? '+' : ''}${p.toFixed(2)}%`
+  return { text: `${dollar} (${pctTxt})`, tone }
+}
+
 const SCORE_ROWS: Array<{
   name: string
   key: keyof Pick<
@@ -268,6 +286,83 @@ export function CompanyDashboard({
   )
   const aColor = (k?: string) =>
     k === 'dga' ? '#eab308' : k === 'target' ? '#3b82f6' : '#64748b'
+  const move = dayMoveLabel(dash?.price_change, dash?.price_change_pct)
+  const moveTone =
+    move?.tone === 'up'
+      ? styles.dayUp
+      : move?.tone === 'down'
+        ? styles.dayDown
+        : styles.dayFlat
+
+  const valueCard = dash ? (
+    <div className={`${styles.chartCard} ${styles.valueCard}`}>
+      <div className={styles.valueHead}>
+        <span className={styles.scoreKicker}>DGA VALUE™</span>
+        <span className={styles.valuePx}>
+          {dash.dga_value != null
+            ? `$${Number(dash.dga_value).toLocaleString('en-US', {
+                maximumFractionDigits: 2,
+              })}`
+            : '—'}
+        </span>
+        {dash.verdict && (
+          <span
+            className={styles.verdictPill}
+            style={{ color: verdictColor(dash.verdict) }}
+          >
+            {dash.verdict}
+          </span>
+        )}
+      </div>
+      <div className={styles.anchors}>
+        {anchors.length ? (
+          anchors.map((a, i) => {
+            const w = Math.min(100, (Math.abs(a.value || 0) / maxAbs) * 100)
+            return (
+              <div key={i} className={styles.anchorRow}>
+                <span className={styles.anchorLbl} title={a.label}>
+                  {a.label}
+                </span>
+                <div className={styles.anchorTrack}>
+                  <div
+                    className={styles.anchorFill}
+                    style={{
+                      width: `${w}%`,
+                      background:
+                        (a.value || 0) < 0 ? '#dc2626' : aColor(a.kind),
+                    }}
+                  />
+                  {price != null && (
+                    <div
+                      className={styles.anchorPx}
+                      style={{
+                        left: `${Math.min(100, (price / maxAbs) * 100)}%`,
+                      }}
+                    />
+                  )}
+                </div>
+                <span className={`${styles.anchorVal} tabular`}>
+                  $
+                  {Number(a.value).toLocaleString('en-US', {
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+            )
+          })
+        ) : (
+          <span className={styles.mutedSm}>
+            No valuation anchors (need a saved report + financials).
+          </span>
+        )}
+      </div>
+      {price != null && (
+        <div className={styles.mutedSm}>
+          ┆ dashed line = current price ({fmtPx(price)})
+        </div>
+      )}
+    </div>
+  ) : null
 
   const action = (
     <div className={styles.dashActions}>
@@ -342,10 +437,12 @@ export function CompanyDashboard({
             <div className={styles.card}>
               <div className={styles.entityLine}>
                 <strong>{dash.entity_name || dash.ticker}</strong>
-                <span className={styles.muted}>
-                  {' '}
-                  · {dash.ticker || ticker}
-                </span>
+                <span className={styles.muted}>· {dash.ticker || ticker}</span>
+                {move && (
+                  <span className={`${styles.dayMove} ${moveTone}`}>
+                    {move.text}
+                  </span>
+                )}
               </div>
               {(dash.sector || dash.industry) && (
                 <div className={styles.sectorLine}>
@@ -354,7 +451,12 @@ export function CompanyDashboard({
               )}
               <BizBlurb text={dash.business_summary} />
               <div className={styles.priceBig}>
-                {price != null ? fmtPx(price) : '—'}
+                <span>{price != null ? fmtPx(price) : '—'}</span>
+                {move && (
+                  <span className={`${styles.dayMove} ${styles.dayMovePrice} ${moveTone}`}>
+                    {move.text}
+                  </span>
+                )}
                 {dash.rating && (
                   <span className={styles.ratingPill}>
                     {String(dash.rating).toUpperCase()}
@@ -509,77 +611,9 @@ export function CompanyDashboard({
               )}
             </div>
 
-            {/* DGA Value + anchors */}
-            <div className={styles.card}>
-              <div className={styles.valueHead}>
-                <span className={styles.scoreKicker}>DGA VALUE™</span>
-                <span className={styles.valuePx}>
-                  {dash.dga_value != null
-                    ? `$${Number(dash.dga_value).toLocaleString('en-US', {
-                        maximumFractionDigits: 2,
-                      })}`
-                    : '—'}
-                </span>
-                {dash.verdict && (
-                  <span
-                    className={styles.verdictPill}
-                    style={{ color: verdictColor(dash.verdict) }}
-                  >
-                    {dash.verdict}
-                  </span>
-                )}
-              </div>
-              <div className={styles.anchors}>
-                {anchors.length ? (
-                  anchors.map((a, i) => {
-                    const w = Math.min(
-                      100,
-                      (Math.abs(a.value || 0) / maxAbs) * 100,
-                    )
-                    return (
-                      <div key={i} className={styles.anchorRow}>
-                        <span className={styles.anchorLbl} title={a.label}>
-                          {a.label}
-                        </span>
-                        <div className={styles.anchorTrack}>
-                          <div
-                            className={styles.anchorFill}
-                            style={{
-                              width: `${w}%`,
-                              background:
-                                (a.value || 0) < 0
-                                  ? '#dc2626'
-                                  : aColor(a.kind),
-                            }}
-                          />
-                          {price != null && (
-                            <div
-                              className={styles.anchorPx}
-                              style={{
-                                left: `${Math.min(100, (price / maxAbs) * 100)}%`,
-                              }}
-                            />
-                          )}
-                        </div>
-                        <span className={`${styles.anchorVal} tabular`}>
-                          $
-                          {Number(a.value).toLocaleString('en-US', {
-                            maximumFractionDigits: 2,
-                          })}
-                        </span>
-                      </div>
-                    )
-                  })
-                ) : (
-                  <span className={styles.mutedSm}>
-                    No valuation anchors (need a saved report + financials).
-                  </span>
-                )}
-              </div>
-              {price != null && (
-                <div className={styles.mutedSm}>
-                  ┆ dashed line = current price ({fmtPx(price)})
-                </div>
+            <div className={`${styles.card} ${styles.priceCard}`}>
+              {(dash.ticker || ticker) && (
+                <PriceChart ticker={dash.ticker || ticker} compact />
               )}
             </div>
           </div>
@@ -643,11 +677,12 @@ export function CompanyDashboard({
           )}
 
           {/* Pre-React multi-card fundamentals charts */}
-          {Array.isArray(dash.series) && dash.series.length > 0 && (
+          {Array.isArray(dash.series) && dash.series.length > 0 ? (
             <>
               <FundCharts
                 series={dash.series}
                 nextEarningsDate={dash.next_earnings_date}
+                trailing={valueCard}
               />
               {typeof dash.notes === 'object' &&
                 dash.notes &&
@@ -658,16 +693,13 @@ export function CompanyDashboard({
                 </p>
               )}
             </>
+          ) : (
+            valueCard && <div className={styles.chartGrid}>{valueCard}</div>
           )}
 
           {/* Compact series table under charts */}
           {Array.isArray(dash.series) && dash.series.length > 0 && (
             <SeriesPanel series={dash.series} ticker={dash.ticker} />
-          )}
-
-          {/* Price history */}
-          {(dash.ticker || ticker) && (
-            <PriceChart ticker={dash.ticker || ticker} />
           )}
 
           {/* Peers */}
