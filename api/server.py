@@ -8988,7 +8988,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui803-20261029-fin-fast"
+WEB_BUILD_VERSION = "ui804-20261030-sogd-manual"
 
 
 @app.get("/api/build")
@@ -22052,13 +22052,14 @@ def _sogd_scheduler_worker() -> None:
                 start_local=ctx["start_local"],
                 publish_local=ctx["publish_local"],
                 auto_publish=ctx["auto_publish"],
+                auto_daily=ctx.get("auto_daily", True),
             )
             print(f"[sogd-scheduler] {decision['action']} ({decision['reason']})", flush=True)
             if decision["action"] == "generate":
                 execute_daily(now.date(), connect=connect)
             elif decision["action"] == "release":
                 release_ready(now.date(), connect, now=now)
-            maintain_sogd(connect, now)
+            maintain_sogd(connect, now, auto_daily=ctx.get("auto_daily", True))
             ctx = load_run_context(now.date(), connect)
             decision = plan_tick(
                 _dt.now(tz),
@@ -22066,6 +22067,7 @@ def _sogd_scheduler_worker() -> None:
                 start_local=ctx["start_local"],
                 publish_local=ctx["publish_local"],
                 auto_publish=ctx["auto_publish"],
+                auto_daily=ctx.get("auto_daily", True),
             )
             sleep_for = max(5.0, min(float(decision.get("sleep_sec") or 30), 900))
             local = _dt.now(tz)
@@ -40283,6 +40285,7 @@ class PodcastDailyIn(BaseModel):
 
 class PodcastShowSettingsIn(BaseModel):
     auto_publish: bool | None = None
+    auto_daily: bool | None = None
     cost_cap_usd: float | None = None
 
 
@@ -40393,7 +40396,7 @@ def podcast_daily_status(show: str, request: Request):
     _claims_or_401(request)
     _known_podcast_show(show)
     from podcast_sogd import (
-        SHOW_ID, auto_publish_default, cost_cap_usd, default_voice, normalize_voice, voice_for_day,
+        SHOW_ID, auto_daily_default, auto_publish_default, cost_cap_usd, default_voice, normalize_voice, voice_for_day,
     )
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo as _Zone
@@ -40408,6 +40411,7 @@ def podcast_daily_status(show: str, request: Request):
         "voice": voice,
         "voice_today": voice_today.get("voice"),
         "auto_publish": bool(settings["auto_publish"]) if "auto_publish" in settings else auto_publish_default(),
+        "auto_daily": bool(settings["auto_daily"]) if "auto_daily" in settings else auto_daily_default(),
         "cost_cap_usd": float(settings["cost_cap_usd"]) if settings.get("cost_cap_usd") is not None else cost_cap_usd(),
         "month_spend_usd": 0.0,
         "runs": [],
@@ -40505,7 +40509,7 @@ def podcast_daily_status(show: str, request: Request):
 def podcast_daily_settings(show: str, body: PodcastShowSettingsIn, request: Request):
     _claims_or_401(request)
     _known_podcast_show(show)
-    from podcast_sogd import auto_publish_default, cost_cap_usd
+    from podcast_sogd import auto_daily_default, auto_publish_default, cost_cap_usd
     current = _kv_get(_podcast_settings_key(show)) or {}
     if not isinstance(current, dict):
         current = {}
@@ -40513,6 +40517,10 @@ def podcast_daily_settings(show: str, body: PodcastShowSettingsIn, request: Requ
         current["auto_publish"] = auto_publish_default()
     elif body.auto_publish is not None:
         current["auto_publish"] = bool(body.auto_publish)
+    if body.auto_daily is None and "auto_daily" not in current:
+        current["auto_daily"] = auto_daily_default()
+    elif body.auto_daily is not None:
+        current["auto_daily"] = bool(body.auto_daily)
     if body.cost_cap_usd is None and current.get("cost_cap_usd") is None:
         current["cost_cap_usd"] = cost_cap_usd()
     elif body.cost_cap_usd is not None:
