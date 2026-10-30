@@ -5101,6 +5101,7 @@ class AgenticStartRequest(BaseModel):
     source: str = "analyst"
     llm_provider: str = ""
     provider: str = ""
+    images: list | None = None
 
     class Config:
         extra = "allow"
@@ -8988,7 +8989,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui806-20261030-fin-price"
+WEB_BUILD_VERSION = "ui807-20261030-analyst-image"
 
 
 @app.get("/api/build")
@@ -31713,7 +31714,8 @@ def _agentic_final_write_prompt(mode: str, model: str, *, reason: str = "budget"
 
 def _run_agentic_analysis(job_id: str, question: str,
                            system_override: str | None = None,
-                           tools: list | None = None) -> None:
+                           tools: list | None = None,
+                           images: list | None = None) -> None:
     """Background worker: tool-use loop (Claude or OpenAI-compat engines).
 
     Provider comes from Settings → Models task route (agentic | strategist) or
@@ -31747,6 +31749,19 @@ def _run_agentic_analysis(job_id: str, question: str,
         # Same tools for every host; non-Claude gets batching + full-answer coaching
         if provider != "claude":
             system = system + _agentic_non_claude_system_addon(mode, max_steps, model or "")
+        user_turn: str | list = question
+        if images:
+            from api.domains.analyst_images import (
+                analyst_image_content,
+                image_system_note,
+            )
+            if provider == "deepseek":
+                _set(stage="error", status="error",
+                     label="❌ DeepSeek cannot read pictures. Pick Grok or Claude.",
+                     error="deepseek_no_vision")
+                return
+            system = system + image_system_note(len(images))
+            user_turn = analyst_image_content(question, images, provider)
         total_cost = 0.0
         tool_log: list[dict] = []
 
@@ -31818,7 +31833,7 @@ def _run_agentic_analysis(job_id: str, question: str,
         if provider == "claude":
             client = _anthropic.Anthropic(api_key=analyst.get_claude_api_key(), timeout=120.0)
             think = _agentic_thinking_kwargs(model)
-            messages = [{"role": "user", "content": question}]
+            messages = [{"role": "user", "content": user_turn}]
             _loop_t0 = time.time()
 
             for step in range(max_steps):
@@ -31904,7 +31919,7 @@ def _run_agentic_analysis(job_id: str, question: str,
         oai_tools = _agentic_tools_openai(_tools)
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": question},
+            {"role": "user", "content": user_turn},
         ]
         # Generous wall so Grok can complete competitively; force only near end.
         # Strategist: 12 min · Analyst: 10 min · quarterly letter: 4 min.
@@ -32198,13 +32213,27 @@ def research_agentic_start(req: Request, background_tasks: BackgroundTasks,
         (body.get("question") or body.get("q") or body.get("prompt")
          or body.get("text") or body.get("topic") or "")
     ).strip()
-    if len(question) < 4:
+    from api.domains.analyst_images import (
+        DEFAULT_IMAGE_QUESTION,
+        normalize_analyst_images,
+    )
+    try:
+        images = normalize_analyst_images(body.get("images"))
+    except ValueError as _img_err:
+        return JSONResponse({"ok": False, "error": str(_img_err)}, status_code=422)
+    if images and len(question) < 4:
+        question = DEFAULT_IMAGE_QUESTION
+    elif len(question) < 4:
         return JSONResponse(
             {"ok": False,
              "error": "Ask a real question — the request body had no question text."},
             status_code=400)
     if len(question) > 2000:
         question = question[:2000]
+    if images:
+        _n = len(images)
+        _word = "image" if _n == 1 else "images"
+        question = f"{question} [{_n} {_word}]"
     # source tags where the run came from ('analyst' = main Research card,
     # 'transcript' = transcript-scoped) so each list shows only its own.
     source = ((body or {}).get("source") or "analyst").strip()[:40] or "analyst"
@@ -32217,6 +32246,16 @@ def research_agentic_start(req: Request, background_tasks: BackgroundTasks,
             {"ok": False, "error": "llm_provider must be claude | grok | deepseek"},
             status_code=422,
         )
+    try:
+        _prov, _mdl = _agent_route_and_model("agentic", provider_override=_lp or None)
+    except Exception:
+        _prov, _mdl = "claude", _AGENTIC_MODEL
+    if images and _prov == "deepseek":
+        return JSONResponse(
+            {"ok": False,
+             "error": "DeepSeek cannot read pictures. Pick Grok or Claude."},
+            status_code=422,
+        )
     import uuid as _uuid
     job_id = "AGENTIC_" + _uuid.uuid4().hex[:12]
     _agentic_jobs[job_id] = {"stage": "queued", "status": "running",
@@ -32225,13 +32264,14 @@ def research_agentic_start(req: Request, background_tasks: BackgroundTasks,
                               "source": source,
                               "llm_provider": _lp or None,
                               "steps": 0, "tool_calls": [], "cost_usd": 0.0}
-    background_tasks.add_task(_run_agentic_analysis, job_id, question)
-    try:
-        _prov, _mdl = _agent_route_and_model("agentic", provider_override=_lp or None)
-    except Exception:
-        _prov, _mdl = "claude", _AGENTIC_MODEL
-    print(f"🤖 [agentic] queued {job_id}: {question[:80]!r}  provider={_prov} model={_mdl}",
-          flush=True)
+    background_tasks.add_task(
+        _run_agentic_analysis, job_id, question, None, None, images or None,
+    )
+    print(
+        f"🤖 [agentic] queued {job_id}: {question[:80]!r}  "
+        f"images={len(images)} provider={_prov} model={_mdl}",
+        flush=True,
+    )
     return {"ok": True, "job_id": job_id, "model": _mdl, "provider": _prov}
 
 

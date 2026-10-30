@@ -46,6 +46,65 @@ Then propose a target sector sleeve suited to a 69-year-old whose priorities are
 
 End with the sleeve block at this account's real market value so I can push it to the Builder.`
 
+const MAX_SHOTS = 4
+const MAX_EDGE = 1600
+const MAX_DATA_URL = 1_400_000
+const IMAGE_FALLBACK =
+  'Break down the attached image. Read every number and label, and say what it implies.'
+
+type Shot = { id: string; mime: string; data: string; preview: string }
+
+function looksLikeImage(file: File) {
+  return file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(file.name)
+}
+
+function readImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve(img)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Could not read that image.'))
+    }
+    img.src = url
+  })
+}
+
+async function fileToShot(file: File): Promise<Shot> {
+  const img = await readImage(file)
+  const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height, 1))
+  const w = Math.max(1, Math.round(img.width * scale))
+  const h = Math.max(1, Math.round(img.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not read that image.')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, w, h)
+  ctx.drawImage(img, 0, 0, w, h)
+  let quality = 0.82
+  let dataUrl = canvas.toDataURL('image/jpeg', quality)
+  while (dataUrl.length > MAX_DATA_URL && quality > 0.45) {
+    quality = Math.round((quality - 0.08) * 100) / 100
+    dataUrl = canvas.toDataURL('image/jpeg', quality)
+  }
+  if (dataUrl.length > MAX_DATA_URL) {
+    throw new Error('That image is still too large. Try a smaller picture.')
+  }
+  const comma = dataUrl.indexOf(',')
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    mime: 'image/jpeg',
+    data: dataUrl.slice(comma + 1),
+    preview: dataUrl,
+  }
+}
+
 type ReviewRow = {
   id: string
   question?: string
@@ -68,7 +127,11 @@ export function AnalystCard({ bare = false }: Props) {
   const [lastQ, setLastQ] = useState('')
   const [jobId, setJobId] = useState<string | null>(null)
   const [reviews, setReviews] = useState<ReviewRow[]>([])
+  const [shots, setShots] = useState<Shot[]>([])
+  const [dragOver, setDragOver] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const dragDepth = useRef(0)
 
   const costLabel = useMemo(() => {
     const r = costs.agentic[engine]
@@ -88,7 +151,34 @@ export function AnalystCard({ bare = false }: Props) {
     flushSync(() => {
       setEngine(e)
       saveEngine(ENGINE_KEY, e)
+      if (e !== 'deepseek') {
+        setErr((cur) => (cur && cur.includes('DeepSeek') ? null : cur))
+      }
     })
+  }
+
+  const addFiles = async (list: File[]) => {
+    const images = list.filter(looksLikeImage)
+    if (!images.length) {
+      setErr('Attach a JPEG, PNG, WebP, or GIF.')
+      return
+    }
+    const room = MAX_SHOTS - shots.length
+    if (room <= 0) {
+      setErr('Attach at most 4 images.')
+      return
+    }
+    if (images.length > room) setErr('Attach at most 4 images.')
+    else setErr(null)
+    const next: Shot[] = []
+    for (const file of images.slice(0, room)) {
+      try {
+        next.push(await fileToShot(file))
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : 'Could not read that image.')
+      }
+    }
+    if (next.length) setShots((cur) => [...cur, ...next].slice(0, MAX_SHOTS))
   }
 
   const loadReviews = useCallback(async () => {
@@ -107,33 +197,50 @@ export function AnalystCard({ bare = false }: Props) {
   }, [loadReviews])
 
   const run = async () => {
+    const attached = shots
+    if (attached.length && engine === 'deepseek') return
     const q = question.trim()
-    if (q.length < 4) {
+    if (q.length < 4 && !attached.length) {
       setErr('Ask a real question.')
       return
     }
+    const sentQ = q.length >= 4 ? q : IMAGE_FALLBACK
+    const shown = attached.length
+      ? `${sentQ} [${attached.length} image${attached.length === 1 ? '' : 's'}]`
+      : sentQ
     setErr(null)
     setResult(null)
-    setLastQ(q)
+    setLastQ(shown)
     setJobId(null)
     setBusy(true)
     setProgress({ status: 'running', label: `Starting · ${engLabel(engine)}…`, steps: 0 })
     setElapsed(0)
     // Open on the click so the finished answer is not popup-blocked.
-    const win = openPendingResearchWindow('analyst', q, engine)
+    const win = openPendingResearchWindow('analyst', shown, engine)
     let startedId: string | null = null
     try {
       const d0 = await api<{ ok?: boolean; job_id?: string; error?: string }>(
         '/api/research/agentic',
         {
           method: 'POST',
-          body: JSON.stringify({ question: q, llm_provider: engine, source: 'analyst' }),
+          body: JSON.stringify({
+            question: sentQ,
+            llm_provider: engine,
+            source: 'analyst',
+            ...(attached.length
+              ? { images: attached.map((s) => ({ mime: s.mime, data: s.data })) }
+              : {}),
+          }),
         },
       )
       if (!d0.ok || !d0.job_id) throw new Error(d0.error || 'Failed to start')
       startedId = d0.job_id
       setJobId(d0.job_id)
-      navigateResearchWindow(win, 'analyst', d0.job_id, { question: q, title: 'Analyst' })
+      setShots([])
+      navigateResearchWindow(win, 'analyst', d0.job_id, {
+        question: shown,
+        title: attached.length ? `Analyst · ${attached.length} image${attached.length === 1 ? '' : 's'}` : 'Analyst',
+      })
       let res: AgenticResult
       try {
         res = await pollAgenticJob(d0.job_id, (j, ms) => {
@@ -166,8 +273,8 @@ export function AnalystCard({ bare = false }: Props) {
       setResult(res)
       setProgress(null)
       const seed = {
-        question: q,
-        title: 'Analyst',
+        question: shown,
+        title: attached.length ? `Analyst · ${attached.length} image${attached.length === 1 ? '' : 's'}` : 'Analyst',
         answer: res.answer,
         model: res.model,
         cost_usd: res.cost_usd,
@@ -326,8 +433,7 @@ export function AnalystCard({ bare = false }: Props) {
     <div className={`${styles.agentBody} ${bare ? styles.heroBare : ''}`}>
       <p className={styles.agentHint}>
         Multi-step research over live quotes, saved reports, news, and your books.
-        The answer opens in a new window when ready — same as Saved Reports.
-        Cost follows the selected engine.
+        Attach a chart and Grok or Claude will read it. The answer opens in a new window.
       </p>
 
       <div className={styles.agentToolbar}>
@@ -364,19 +470,89 @@ export function AnalystCard({ bare = false }: Props) {
         </span>
       </div>
 
-      <div className={styles.compose}>
-        <textarea
-          ref={taRef}
-          className={styles.composeTa}
-          rows={3}
-          placeholder="Ask a research question — e.g. Compare NVDA and AMD on valuation and catalysts using our saved reports."
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          disabled={busy}
-        />
-        <Button variant="primary" size="sm" disabled={busy} onClick={() => void run()}>
-          {busy ? `⏳ ${engLabel(engine)}…` : 'Analyze'}
-        </Button>
+      {engine === 'deepseek' && shots.length > 0 && (
+        <div className={styles.err}>DeepSeek cannot read pictures. Pick Grok or Claude.</div>
+      )}
+      <div
+        className={`${styles.compose} ${dragOver ? styles.composeDrag : ''}`}
+        onDragEnter={(e) => {
+          e.preventDefault()
+          dragDepth.current += 1
+          setDragOver(true)
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={() => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1)
+          if (dragDepth.current === 0) setDragOver(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          dragDepth.current = 0
+          setDragOver(false)
+          if (busy) return
+          void addFiles(Array.from(e.dataTransfer.files || []))
+        }}
+      >
+        <div className={styles.composeMain}>
+          {shots.length > 0 && (
+            <div className={styles.shots}>
+              {shots.map((shot) => (
+                <div key={shot.id} className={styles.shot}>
+                  <img src={shot.preview} alt="" />
+                  <button
+                    type="button"
+                    className={styles.shotRemove}
+                    aria-label="Remove image"
+                    disabled={busy}
+                    onClick={() => setShots((cur) => cur.filter((s) => s.id !== shot.id))}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className={styles.composeRow}>
+            <textarea
+              ref={taRef}
+              className={styles.composeTa}
+              rows={2}
+              placeholder="Ask a question, or drop a chart and ask what it means."
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              disabled={busy}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData?.files || []).filter(looksLikeImage)
+                if (!files.length) return
+                e.preventDefault()
+                void addFiles(files)
+              }}
+            />
+            <input
+              ref={fileRef}
+              className={styles.fileInput}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files || [])
+                e.target.value = ''
+                if (files.length) void addFiles(files)
+              }}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy || shots.length >= MAX_SHOTS}
+              onClick={() => fileRef.current?.click()}
+            >
+              Image
+            </Button>
+            <Button variant="primary" size="sm" disabled={busy} onClick={() => void run()}>
+              {busy ? `⏳ ${engLabel(engine)}…` : 'Analyze'}
+            </Button>
+          </div>
+        </div>
       </div>
 
       <div className={styles.suggestChips}>

@@ -386,6 +386,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Daily mode** | **`ui804-20261030-sogd-manual`** | Systems Over Goals Daily can stay on the 6:35 AM scout or wait for Generate today’s episode. Manual skips the morning retries and the 7:30 alert. The feed still stays quiet until 7:00 AM Pacific. |
 | **Ideas** | **`ui805-20261030-ideas`** | Research → Ideas. Weekday 6:00 AM Pacific screens for beaten-down sectors, weekly drops, and insider / 13F changes. Sunday adds early-trend cards. Dig in, Watch, and Pass (with a reason) sit on the card. Pass reasons nudge the weights, bounded, and the card says when feedback tuned them. |
 | **Price card** | **`ui806-20261030-fin-price`** | The company dashboard shows today’s dollar and percent move beside the price. A compact price chart sits at the top right. DGA Value is the fourth card on the ROIC row. |
+| **Analyst image** | **`ui807-20261030-analyst-image`** | The desk Analyst card takes up to four pictures with the question. Paste, drop, or use Image. Grok and Claude read the chart. DeepSeek stays text-only and says so. Saved analyses note the picture count. The picture itself is not stored. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -596,4 +597,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-10-30 · Agent: Cursor · Built: `ui806-20261030-fin-price` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui807-YYYYMMDD-slug`*
+*Last updated: 2026-10-30 · Agent: Cursor · Built: `ui807-20261030-analyst-image` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui808-YYYYMMDD-slug`*
