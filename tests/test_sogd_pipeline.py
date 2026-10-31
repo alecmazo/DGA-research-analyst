@@ -211,6 +211,26 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertLessEqual(long["words"], 4300)
         self.assertTrue(any(note["action"] == "trim" for note in long["notes"]))
 
+    def test_over_cap_finishes_early(self):
+        from podcast_engine import _word_count
+        from podcast_sogd import enforce_word_budget, script_text
+
+        stuck = enforce_word_budget(
+            _script(80),
+            word_count=_word_count,
+            regenerate_section=lambda section, need: section,
+            trim_section=lambda section, extra: section,
+            word_min=20,
+            word_max=40,
+        )
+        self.assertTrue(stuck["ok"], stuck)
+        self.assertLessEqual(stuck["words"], 40)
+        self.assertGreaterEqual(stuck["words"], 20)
+        self.assertTrue(any(note["action"] == "finish_early" for note in stuck["notes"]))
+        spoken = script_text(stuck["script"]).lower()
+        self.assertIn("why does this matter", spoken)
+        self.assertIn("recap", spoken)
+
     def test_likeness_guard_rejects_scott_adams(self):
         from podcast_sogd import guard_script, run_daily_episode
         script = _script(tail="Scott Adams")
