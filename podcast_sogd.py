@@ -102,36 +102,48 @@ def style_prompt() -> str:
     between = s["gap_between_stories"]
     preview = s["gap_preview"]
     return (
-        "Morning-news feel. Topic pool: politics, Trump, markets and finance, AI, "
-        "science, health and cancer research, world developments, war. "
+        "You are talking to one person, and that person is about 13. "
+        "Use plain words and short sentences. Mix in a few longer ones so it does not sound like a list. "
+        "If a term is hard, explain it in everyday language or with a comparison. "
+        "Talk to the listener as you. Ask a question they would actually ask. "
+        "React like a person: 'wait, this is wild' is fine. One reaction per story, not every line. "
+        "After each story, say why a regular person should care. "
+        "Drop filler and corporate words. Do not say utilize, stakeholders, paradigm, synergy, "
+        "going forward, at the end of the day, deep dive, optics, headwinds, or priced in. "
+        "Topic pool: politics, Trump, markets and finance, AI, science, health and cancer research, "
+        "world developments, war. "
         "Pick the most important real stories of the day from X trends and reliable outlets. "
         "Verify facts and dates, cite every claim, never invent facts. "
-        f"{s['stories_min']}-{s['stories_max']} stories, gone into deeply, each drawing on 2-3 or more sources. "
-        "No rapid-fire headline lists. "
-        "Per story: what happened, then who says what, then the other side, then "
+        f"{s['stories_min']}-{s['stories_max']} stories, each from several angles, about 20 to 30 minutes. "
+        "Each story is its own chapter. No rapid-fire headline list. "
+        "Per story, in this order: what happened, then who says what, then the other side, then "
         "follow the money: who wins if you believe this, then so why does this matter to you, "
         "then a short recap, then what to watch next. "
         + human_delivery_rules() + " "
-        "Concrete examples, rhetorical questions, and signposting. "
+        "The cold open should sound lively, like you just sat down with a friend, not like you are reading a memo. "
+        "Start with energy. Vary the sentence length. Stress one or two words with <emphasis>, never a whole paragraph. "
+        "Do not open with <slow> or <soft>. "
         "Opening styles, one per day, never the same wording two days in a row: "
         "classic (Good morning, the date, the show name Systems Over Goals Daily, a short how this works, then the topic preview), "
         "cold open (the biggest story first, no explanation of the show), "
         "question (a question tied to the top story), "
         "or a quick preview (show name and date, then the topics). "
         "Explain the show on at most two days a week. Use the intro style named for today. "
+        "No disclaimer and no music before the host speaks. "
         "No AI disclosure at the top. "
         "Close: a short zoom-out on the day's pattern. Vary the sign-off wording. "
         "The AI-narration disclosure and the not-investment-advice line go only at the close. "
         "Never name Scott Adams or Dilbert. "
         f"Length about {s['word_min']}-{s['word_max']} words. "
-        f"Voice {s['voice']} when voice mode is fixed. "
+        f"Default voice is {s['voice']}. If the show settings pick another voice, that voice wins. "
         f"Rotate uses {', '.join(s['voice_pool'])}, the same voice for a given date. "
         f"Text normalization {'on' if s['text_normalization'] else 'off'}. "
-        f"Use {s['pause']} and {s['long_pause']} freely. Put {s['long_pause']} before each new story. "
+        f"Use {s['pause']} where a person would actually breathe, and {s['long_pause']} before each new story. "
         f"Use [breath] at most {s['breath_max']} times, only at a natural inhale after a long sentence. "
         "Never mid-phrase, never right after a pause. "
-        "Use <slow>, <emphasis>, and <soft> sparingly. No cough or sneeze. "
-        f"Per-section speed {s['speed_min']}-{s['speed_max']} (opening {s['opening_speed']}). "
+        "Use <emphasis> on the word you would punch. Do not wrap lines in <slow> or <soft>. No cough or sneeze. "
+        f"Story speed stays near the saved voice speed, inside {s['speed_min']}-{s['speed_max']}. "
+        f"The opening may sit a little faster than the stories, around {s['opening_speed']} to {s['speed_max']}, still close to the saved voice speed. "
         "Render paragraph by paragraph, then join with silence: "
         f"{within[0]}-{within[1]} seconds within a story, "
         f"{recap[0]}-{recap[1]} seconds around recaps, "
@@ -156,16 +168,16 @@ def style_prompt() -> str:
 def pilot_shape_example() -> str:
     """Cadence from the Oct 27 v4 pilot. Facts in it are not today's news."""
     return (
-        "Shape example from the approved Oct 27 v4 pilot. Match this cadence and these tags. "
+        "Shape example from the approved Oct 27 v4 pilot. Match this energy and these tags. "
         "Do not reuse its facts, names, numbers, or dates.\n"
-        "COLD OPEN, spoken at the normal voice speed, not slowed down and not wrapped in <slow>: "
-        "Good morning. [pause] It's Tuesday, and you're listening to Systems Over Goals Daily. "
-        "So, here's the deal with this show. Most news gives you twenty headlines in twenty minutes, "
-        "right? [pause] I know I can't. Then one short preview line per story. "
+        "COLD OPEN, a little brighter than the stories, not wrapped in <slow> or <soft>: "
+        "Good morning. [pause] It's Tuesday. <emphasis>You're</emphasis> listening to Systems Over Goals Daily. "
+        "So here's the deal. Most news throws twenty headlines at you. [pause] Right? I can't hold that many either. "
+        "Then one short preview line per story. "
         "No disclaimer and no music before this. No AI disclosure here.\n"
-        "STORY: [long-pause] Story one. [pause] What happened, with two or three named sources. "
+        "STORY: [long-pause] Wait. [pause] Story one. What happened, in plain words, with two or three named sources. "
         "[pause] Who says what. [pause] Now the other side. [pause] Follow the money. Who wins if "
-        "you believe this? [pause] So why does this matter to you? [pause] Quick recap before we "
+        "you believe this? [pause] So why does this matter to you? [pause] A short recap before we "
         "move on. What to watch next.\n"
         "CLOSE: [long-pause] Zoom out on the day's pattern. Then, and only then: this episode was "
         "AI-narrated, and nothing here is investment advice."
@@ -773,6 +785,246 @@ def guard_script(script: dict) -> dict:
     return {"ok": not hits, "hits": hits}
 
 
+# Aim for about a 7th-grade reading level. A segment over this gets rewritten.
+GRADE_MAX = 8.0
+LONG_SENTENCE_WORDS = 22
+_SPOKEN_TAG_RE = re.compile(
+    r"\[[^\[\]]+\]|</?(?:slow|soft|emphasis)>",
+    re.IGNORECASE,
+)
+# Corporate filler. News terms are fine once the writer explains them in plain words.
+_JARGON_RES = (
+    re.compile(r"\butiliz(?:e|es|ed|ing)\b", re.I),
+    re.compile(r"\bstakeholders?\b", re.I),
+    re.compile(r"\bparadigm(?:\s+shift)?\b", re.I),
+    re.compile(r"\bsynerg(?:y|ies)\b", re.I),
+    re.compile(r"\bgoing forward\b", re.I),
+    re.compile(r"\bat the end of the day\b", re.I),
+    re.compile(r"\bcircle back\b", re.I),
+    re.compile(r"\bdeep dive\b", re.I),
+    re.compile(r"\b(?:let's|let us) unpack\b", re.I),
+    re.compile(r"\bholistic\b", re.I),
+    re.compile(r"\bgranular\b", re.I),
+    re.compile(r"\bactionable\b", re.I),
+    re.compile(r"\boptics\b", re.I),
+    re.compile(r"\bmove the needle\b", re.I),
+    re.compile(r"\blow-hanging fruit\b", re.I),
+    re.compile(r"\bbest-in-class\b", re.I),
+    re.compile(r"\bworld-class\b", re.I),
+    re.compile(r"\bcutting-edge\b", re.I),
+    re.compile(r"\bthought leader\b", re.I),
+    re.compile(r"\bvalue-add\b", re.I),
+    re.compile(r"\bincentiviz(?:e|es|ed|ing)\b", re.I),
+    re.compile(r"\boperationaliz(?:e|es|ed|ing)\b", re.I),
+    re.compile(r"\bheadwinds?\b", re.I),
+    re.compile(r"\btailwinds?\b", re.I),
+    re.compile(r"\bnet-net\b", re.I),
+    re.compile(r"\bdouble-click\b", re.I),
+    re.compile(r"\bkey takeaway\b", re.I),
+    re.compile(r"\bin this space\b", re.I),
+    re.compile(r"\bpriced in\b", re.I),
+    re.compile(r"\brisk-o(?:n|ff)\b", re.I),
+    re.compile(r"\bhawkish\b", re.I),
+    re.compile(r"\bdovish\b", re.I),
+    re.compile(r"\bbasis points?\b", re.I),
+    re.compile(r"\bquantitative easing\b", re.I),
+    re.compile(r"\bebitda\b", re.I),
+    re.compile(r"\bmonetiz(?:e|es|ed|ing)\b", re.I),
+    re.compile(r"\bleverage (?:this|our|the)\b", re.I),
+)
+_JARGON_SWAPS = (
+    (re.compile(r"\bstakeholders\b", re.I), "the people involved"),
+    (re.compile(r"\bstakeholder\b", re.I), "the person involved"),
+    (re.compile(r"\butiliz(?:e|es|ed|ing)\b", re.I), "use"),
+    (re.compile(r"\bgoing forward\b", re.I), "from here"),
+    (re.compile(r"\bat the end of the day\b", re.I), "in the end"),
+    (re.compile(r"\bdeep dive\b", re.I), "a closer look"),
+    (re.compile(r"\bheadwinds\b", re.I), "things pushing against this"),
+    (re.compile(r"\bheadwind\b", re.I), "something pushing against this"),
+    (re.compile(r"\btailwinds\b", re.I), "things helping this"),
+    (re.compile(r"\btailwind\b", re.I), "something helping this"),
+    (re.compile(r"\bpriced in\b", re.I), "already expected"),
+    (re.compile(r"\bhawkish\b", re.I), "in favor of higher rates"),
+    (re.compile(r"\bdovish\b", re.I), "in favor of lower rates"),
+    (re.compile(r"\bbasis points\b", re.I), "hundredths of a percent"),
+    (re.compile(r"\bbasis point\b", re.I), "hundredth of a percent"),
+    (re.compile(r"\bquantitative easing\b", re.I), "the central bank buying bonds to push rates down"),
+    (re.compile(r"\bebitda\b", re.I), "profit before interest, taxes, and some accounting charges"),
+    (re.compile(r"\brisk-off\b", re.I), "people selling risky stuff"),
+    (re.compile(r"\brisk-on\b", re.I), "people buying risky stuff"),
+    (re.compile(r"\bparadigm shift\b", re.I), "a real change in how this works"),
+    (re.compile(r"\bparadigm\b", re.I), "way of thinking"),
+    (re.compile(r"\bsynergies\b", re.I), "the ways these fit together"),
+    (re.compile(r"\bsynergy\b", re.I), "the way these fit together"),
+)
+
+
+def _spoken_text(text: str) -> str:
+    return _SPOKEN_TAG_RE.sub(" ", text or "")
+
+
+def _spoken_words(text: str) -> list[str]:
+    return re.findall(r"[A-Za-z']+", _spoken_text(text))
+
+
+def _syllables(word: str) -> int:
+    w = re.sub(r"[^a-z]", "", (word or "").lower())
+    if len(w) <= 3:
+        return 1
+    w = re.sub(r"e$", "", w)
+    groups = re.findall(r"[aeiouy]+", w)
+    return max(1, len(groups))
+
+
+def grade_level(text: str) -> float:
+    """Flesch-Kincaid grade. Speech tags do not count as words."""
+    words = _spoken_words(text)
+    sentences = [p for p in re.split(r"[.!?]+", _spoken_text(text)) if _spoken_words(p)]
+    if len(words) < 12 or not sentences:
+        return 0.0
+    syll = sum(_syllables(w) for w in words)
+    return 0.39 * (len(words) / len(sentences)) + 11.8 * (syll / len(words)) - 15.59
+
+
+def jargon_hits(text: str) -> list[str]:
+    found = []
+    spoken = _spoken_text(text)
+    for pattern in _JARGON_RES:
+        hit = pattern.search(spoken)
+        if hit:
+            found.append(hit.group(0))
+    return found
+
+
+def plain_talk_issues(text: str) -> list[str]:
+    """Why a section is too dry, too hard, or full of filler."""
+    issues = []
+    for hit in jargon_hits(text):
+        issues.append(f"jargon: {hit}")
+    spoken = _spoken_text(text)
+    for sentence in re.split(r"[.!?]+", spoken):
+        if len(_spoken_words(sentence)) > LONG_SENTENCE_WORDS:
+            issues.append("a sentence runs too long")
+            break
+    level = grade_level(text)
+    if level > GRADE_MAX:
+        issues.append(f"reading level {level:.1f}, aim for about grade 7")
+    return issues
+
+
+def scrub_banned(text: str) -> str:
+    out = text or ""
+    for pattern, repl in _JARGON_SWAPS:
+        out = pattern.sub(repl, out)
+    return out
+
+
+def split_long_sentences(text: str, limit: int = 16) -> str:
+    """Break a run-on into short spoken lines. Words stay the same."""
+    raw = text or ""
+    bits = re.split(r"([.!?])", raw)
+    out: list[str] = []
+    i = 0
+    while i < len(bits):
+        chunk = bits[i]
+        punct = bits[i + 1] if i + 1 < len(bits) and bits[i + 1] in ".!?" else ""
+        words = chunk.split()
+        if len(words) <= limit:
+            out.append((chunk + punct).strip())
+        else:
+            step = limit
+            for start in range(0, len(words), step):
+                piece = " ".join(words[start:start + step]).strip()
+                if piece:
+                    out.append(piece + (punct if start + step >= len(words) else "."))
+        i += 2 if punct else 1
+    return " ".join(part for part in out if part).strip()
+
+
+def _rewrite_text(updated) -> str:
+    if isinstance(updated, str):
+        return updated.strip()
+    if isinstance(updated, dict):
+        if updated.get("text"):
+            return str(updated.get("text") or "").strip()
+        return _section_text(updated).strip()
+    return ""
+
+
+def apply_plain_talk(script: dict, rewrite=None) -> dict:
+    """Rewrite any section that fails the jargon or reading-level check.
+
+    `rewrite(section, issues)` may return text or {text, usage}. One try.
+    Banned phrases are still swapped out, and a run-on is still split.
+    """
+    script = deepcopy(script or {})
+    notes = []
+    usages = []
+    for sec in script.get("sections") or []:
+        text = _section_text(sec)
+        issues = plain_talk_issues(text)
+        if not issues:
+            continue
+        new_text = text
+        if rewrite:
+            try:
+                updated = rewrite(sec, issues)
+            except Exception as exc:
+                print(f"[sogd] plain rewrite failed: {exc!s:.160}", flush=True)
+                updated = None
+            if isinstance(updated, dict) and updated.get("usage"):
+                usages.append(updated.get("usage") or {})
+            got = _rewrite_text(updated)
+            if got:
+                new_text = got
+        new_text = split_long_sentences(scrub_banned(new_text))
+        turns = sec.get("turns") or []
+        if turns:
+            turns[0]["text"] = new_text
+        elif new_text:
+            sec["turns"] = [{"speaker": "kimi", "intensity": "normal", "text": new_text}]
+        notes.append({"id": sec.get("id"), "issues": issues, "remaining": plain_talk_issues(new_text)})
+    return {"script": script, "notes": notes, "usages": usages}
+
+
+def live_plain_rewrite(section: dict, issues: list[str]) -> dict:
+    """One model pass for a section that failed the plain-talk check."""
+    text, usage = _call_grok(
+        "Return JSON only: {\"text\":\"\"}. Rewrite this one podcast section so a 13-year-old "
+        "can follow it and enjoy it. Short sentences. Everyday words. If you must keep a hard "
+        "word, explain it with a comparison in the next sentence. Talk to the listener as you. "
+        "You may add one reaction such as 'wait, this is wild'. Keep every fact, name, number, "
+        "date, and source. Do not add facts. Keep the beats 'why does this matter' and 'recap' "
+        "if they are already there. Use [pause] where a person would breathe, [long-pause] only "
+        "before a new story, and <emphasis> on one or two words you would stress. Do not wrap "
+        "the opening in <slow> or <soft>. No AI disclosure in the cold open. Never use the name "
+        "Scott Adams or the word Dilbert. Fix these problems: " + "; ".join(issues),
+        json.dumps({"id": section.get("id"), "text": _section_text(section)}),
+    )
+    data = _json_obj(text)
+    return {"text": (data.get("text") or "").strip(), "usage": usage}
+
+
+def _plain_pass(script: dict, *, model: bool, plain_rewrite=None) -> tuple[dict, list]:
+    """Model rewrite only on a fresh production script. Local scrub always runs."""
+    fn = plain_rewrite if plain_rewrite is not None else (live_plain_rewrite if model else None)
+    done = apply_plain_talk(script, fn)
+    return done["script"], list(done.get("usages") or [])
+
+
+def sogd_delivery_speed(base: float, intensity: str, section_id: str) -> float:
+    """Dropdown speed is the center. The open sits a little faster. Stories flex with intensity.
+
+    xAI TTS also reads [pause], [long-pause], [breath], and <emphasis> inside the text.
+    """
+    base_f = float(base if base is not None else 1.0)
+    name = (intensity or "normal").lower()
+    delta = {"calm": -0.03, "normal": 0.0, "heated": 0.03}.get(name, 0.0)
+    if str(section_id or "") == "cold_open":
+        delta = max(delta, 0.0) + 0.04
+    return round(max(0.7, min(1.5, base_f + delta)), 2)
+
+
 def writer_section_line() -> str:
     """The section ids the daily writer is told to emit."""
     return "Sections in order: cold_open, story_1..story_N, close."
@@ -899,8 +1151,13 @@ def plan_tts_chunks(script: dict, voice: dict | None, pronunciation: dict | None
         })
 
     for sec in (script or {}).get("sections") or []:
+        sid = str(sec.get("id") or "")
         for turn in sec.get("turns") or []:
-            add(turn.get("text") or "", "turn")
+            add(
+                turn.get("text") or "",
+                "turn",
+                sogd_delivery_speed(speed, turn.get("intensity") or "normal", sid),
+            )
     asm = show_assembly((script or {}).get("format") or "sogd")
     if asm["outro_disclaimer"]:
         add(DEFAULT_DISCLAIMER_OUTRO, "disclaimer", DISCLAIMER_SPEED)
@@ -1626,11 +1883,12 @@ def live_lens(stories: list[dict]) -> dict:
 def _assemble(episode_date: date, lead: str, sections: list[dict]) -> dict:
     built = []
     for sec in sections:
+        sid = sec.get("id")
         built.append({
-            "id": sec.get("id"),
+            "id": sid,
             "turns": [{
                 "speaker": "kimi",
-                "intensity": "normal",
+                "intensity": "heated" if sid == "cold_open" else "normal",
                 "text": (sec.get("text") or "").strip(),
             }],
         })
@@ -1893,6 +2151,7 @@ def run_daily_episode(
     synthesize=None,
     store_put=None,
     repair=None,
+    plain_rewrite=None,
     word_min: int | None = None,
     word_max: int | None = None,
     recent_intros=None,
@@ -2110,7 +2369,13 @@ def run_daily_episode(
             validation = validate_script(script)
             if not validation["ok"]:
                 raise NeedsAttention("script invalid: " + "; ".join(validation["errors"]))
-            result["words"] = budget["words"]
+            script, plain_usage = _plain_pass(script, model=writer is None, plain_rewrite=plain_rewrite)
+            for extra in plain_usage:
+                charge("script", extra)
+            validation = validate_script(script)
+            if not validation["ok"]:
+                raise NeedsAttention("script invalid: " + "; ".join(validation["errors"]))
+            result["words"] = _word_count(script_text(script))
             result["script"] = script
             result["title"] = script.get("episode_title") or episode_title(episode_date, stories[0]["title"])
             result["show_notes"] = show_notes(stories)
@@ -2209,10 +2474,16 @@ def run_daily_episode(
             if not budget["ok"]:
                 raise NeedsAttention(f"word count {budget['words']} outside {word_min}-{word_max} after fact-check")
             script = budget["script"]
+            script, plain_usage = _plain_pass(script, model=False, plain_rewrite=None)
+            for extra in plain_usage:
+                charge("script", extra)
             guarded = guard_script(script)
             if not guarded["ok"]:
                 raise NeedsAttention("likeness guard rejected: " + ", ".join(guarded["hits"]))
-            result["words"] = budget["words"]
+            validation = validate_script(script)
+            if not validation["ok"]:
+                raise NeedsAttention("script invalid: " + "; ".join(validation["errors"]))
+            result["words"] = _word_count(script_text(script))
             result["script"] = script
             result["title"] = script.get("episode_title") or episode_title(episode_date, stories[0]["title"])
             result["show_notes"] = show_notes(stories)

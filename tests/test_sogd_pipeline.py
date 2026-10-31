@@ -522,6 +522,68 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertIn(needle, engine)
         self.assertIn("run.status === 'failed' ? '—' : money(run.cost_usd_total)", page)
 
+    def test_plain_talk_rewrites_jargon_and_runons(self):
+        from podcast_sogd import (
+            apply_plain_talk,
+            grade_level,
+            plain_talk_issues,
+            sogd_delivery_speed,
+            style_prompt,
+        )
+        easy = (
+            "You know that feeling when a plan sounds great, but the reward points the other way? "
+            "That is this story. [pause] Wait, this is wild. "
+            "The rule says one thing. The bonus says another. "
+            "So why does this matter to you? A short recap. What to watch next."
+        )
+        self.assertFalse(plain_talk_issues(easy), plain_talk_issues(easy))
+        self.assertLessEqual(grade_level(easy), 8.0)
+        hard = (
+            "Stakeholders will utilize a paradigm of synergy going forward, "
+            "and the optics of this hawkish, priced in deep dive show robust headwinds "
+            + " ".join(["accordingly"] * 40) + "."
+        )
+        issues = plain_talk_issues(hard)
+        self.assertTrue(any(item.startswith("jargon:") for item in issues))
+        self.assertTrue(any("reading level" in item or "too long" in item for item in issues))
+        calls = []
+
+        def rewrite(section, found):
+            calls.append(found)
+            return (
+                "You can picture a scoreboard. One team gets points for talking. "
+                "The other team gets points for doing the thing. [pause] "
+                "People chase the points. So why does this matter to you? A short recap."
+            )
+
+        script = {
+            "sections": [
+                {"id": "cold_open", "turns": [{"speaker": "kimi", "intensity": "heated", "text": easy}]},
+                {"id": "story_1", "turns": [{"speaker": "kimi", "intensity": "normal", "text": hard}]},
+            ]
+        }
+        done = apply_plain_talk(script, rewrite)
+        self.assertEqual(len(calls), 1)
+        story = done["script"]["sections"][1]["turns"][0]["text"]
+        self.assertNotIn("stakeholders", story.lower())
+        self.assertIn("why does this matter", story.lower())
+        self.assertIn("recap", story.lower())
+        self.assertLessEqual(grade_level(story), 8.0)
+        self.assertEqual(sogd_delivery_speed(1.0, "normal", "story_1"), 1.0)
+        self.assertGreater(sogd_delivery_speed(1.0, "normal", "cold_open"), 1.0)
+        self.assertGreater(
+            sogd_delivery_speed(1.0, "heated", "cold_open"),
+            sogd_delivery_speed(1.0, "heated", "story_1"),
+        )
+        self.assertEqual(sogd_delivery_speed(1.2, "normal", "story_1"), 1.2)
+        prompt = style_prompt()
+        self.assertIn("13", prompt)
+        self.assertIn("wait, this is wild", prompt)
+        self.assertIn("that voice wins", prompt)
+        engine = (ROOT / "podcast_engine.py").read_text(encoding="utf-8")
+        self.assertIn("if is_sogd:", engine)
+        self.assertIn("sogd_delivery_speed", engine)
+
     def _run(self, **overrides):
         from podcast_sogd import run_daily_episode
 

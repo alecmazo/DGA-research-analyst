@@ -2198,10 +2198,18 @@ def synthesize_episode(
             try: on_progress("turn", i, total,
                              f"{sp.upper()} ({intensity}) · {sid} · turn {i}/{total}")
             except Exception: pass
+        pace = speed_override
+        if is_sogd:
+            from podcast_sogd import sogd_delivery_speed
+            pace = sogd_delivery_speed(
+                1.0 if speed_override is None else speed_override,
+                intensity,
+                sid,
+            )
         mp3_bytes = _tts_turn(
             None, sp, text, intensity, model=tts_model,
             provider_name=tts_provider, voice_override=voice_override,
-            speed_override=speed_override, replacements=pronunciation,
+            speed_override=pace, replacements=pronunciation,
             chunk_cache=chunk_cache,
         )
         seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
