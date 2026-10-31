@@ -1380,6 +1380,11 @@ def enforce_word_budget(
             _replace_section(script, long.get("id"), updated)
             notes.append({"action": "trim", "id": long.get("id")})
     total = int(word_count(script_text(script)))
+    if total > word_max:
+        script = finish_at_word_cap(script, word_count, word_max)
+        total = int(word_count(script_text(script)))
+        notes.append({"action": "finish_early", "id": "cap", "words": total})
+        print(f"[sogd] finished early at {total} words (cap {word_max})", flush=True)
     return {"ok": word_min <= total <= word_max, "script": script, "words": total, "notes": notes}
 
 
@@ -1411,6 +1416,73 @@ def trim_section_words(section: dict, extra: int) -> dict:
         turn["text"] = (kept + tail).strip()
         remaining -= cut
     return section
+
+
+def _section_with_turn(section: dict, turn_index: int, new_text: str) -> str:
+    parts = []
+    for i, turn in enumerate(section.get("turns") or []):
+        parts.append(new_text if i == turn_index else (turn.get("text") or ""))
+    return " ".join(parts)
+
+
+def finish_at_word_cap(script: dict, word_count, word_max: int) -> dict:
+    """Stop at the word cap and keep going. Cut the ending, not the story beats."""
+    script = deepcopy(script or {})
+    cap = int(word_max)
+
+    def total() -> int:
+        return int(word_count(script_text(script)))
+
+    def ordered_turns():
+        rows = []
+        for i, sec in enumerate(script.get("sections") or []):
+            sid = str(sec.get("id") or "")
+            rank = 0 if sid.startswith("story_") else 1 if sid == "cold_open" else 2
+            for j in range(len(sec.get("turns") or [])):
+                rows.append((rank, -i, -j, i, j))
+        rows.sort()
+        return rows
+
+    def cut_one(allow_beats: bool) -> bool:
+        sections = script.get("sections") or []
+        for _rank, _i, _j, i, j in ordered_turns():
+            sec = sections[i]
+            turns = sec.get("turns") or []
+            if j >= len(turns):
+                continue
+            turn = turns[j]
+            text = turn.get("text") or ""
+            spans = list(re.finditer(r"\b[\w']+\b", text))
+            sid = str(sec.get("id") or "")
+            for span in reversed(spans):
+                trial = re.sub(r"[ \t]{2,}", " ", (text[:span.start()] + " " + text[span.end():])).strip()
+                if not trial:
+                    continue
+                if sid.startswith("story_") and not allow_beats:
+                    preview = _section_with_turn(sec, j, trial)
+                    if story_missing_beats({"id": sid, "turns": [{"text": preview}]}):
+                        continue
+                turn["text"] = trial
+                return True
+        return False
+
+    def drop_last_story() -> bool:
+        sections = script.get("sections") or []
+        idxs = [i for i, sec in enumerate(sections) if str(sec.get("id") or "").startswith("story_")]
+        if len(idxs) <= 1:
+            return False
+        del sections[idxs[-1]]
+        return True
+
+    spins = 0
+    while total() > cap and spins < 20000:
+        spins += 1
+        if cut_one(False) or drop_last_story() or cut_one(True):
+            continue
+        break
+    for sec in script.get("sections") or []:
+        sec["turns"] = [turn for turn in (sec.get("turns") or []) if (turn.get("text") or "").strip()]
+    return script
 
 
 def ensure_disclosure(script: dict) -> dict:

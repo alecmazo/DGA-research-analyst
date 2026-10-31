@@ -211,6 +211,43 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertLessEqual(long["words"], 4300)
         self.assertTrue(any(note["action"] == "trim" for note in long["notes"]))
 
+        # Beats sit at the front, so the gentle trim cannot reach the extra words.
+        # One word over the cap still finishes. It is not an error.
+        stuck = "So why does this matter to you? A short recap. " + " ".join(["markets"] * 30)
+        over = {
+            "ticker": "SOGD",
+            "format": "sogd",
+            "episode_title": "SOGD — Oct 31, 2026: Lead",
+            "winner": "kimi",
+            "sections": [
+                {"id": "cold_open", "turns": [{"speaker": "kimi", "intensity": "normal", "text": "Good morning from the desk."}]},
+                {"id": "story_1", "turns": [{"speaker": "kimi", "intensity": "normal", "text": stuck}]},
+                {"id": "close", "turns": [{"speaker": "kimi", "intensity": "normal", "text": "Zoom out on the day."}]},
+            ],
+        }
+        early = enforce_word_budget(
+            over,
+            word_count=_word_count,
+            regenerate_section=lambda section, need: section,
+            trim_section=trim_section_words,
+            word_min=12,
+            word_max=24,
+        )
+        self.assertTrue(early["ok"], early)
+        self.assertLessEqual(early["words"], 24)
+        self.assertGreaterEqual(early["words"], 12)
+        self.assertTrue(any(note["action"] == "finish_early" for note in early["notes"]))
+        story = early["script"]["sections"][1]["turns"][0]["text"].lower()
+        self.assertIn("why does this matter", story)
+        self.assertIn("recap", story)
+        recorded = self._run(
+            writer=lambda stories, notes: {"script": over, "usage": {}},
+            word_min=12,
+            word_max=24,
+        )
+        self.assertIn(recorded["status"], ("published", "ready_pending"))
+        self.assertNotIn("word count", recorded.get("error") or "")
+
     def test_likeness_guard_rejects_scott_adams(self):
         from podcast_sogd import guard_script, run_daily_episode
         script = _script(tail="Scott Adams")
