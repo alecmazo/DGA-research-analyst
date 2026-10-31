@@ -17,3 +17,8 @@ def test_desk_button_calls_local_model_and_is_labeled_gpt_oss():
     assert "call_llm" not in fn
     assert "gpt-oss-20b-finance" in fn
     assert "does not call the paid API" in fn
+    assert "13-year-old" in page
+    assert "13-year-old" in route
+    assert "Scott Adams" in page
+    assert "Scott Adams" in route
+    assert '"/ideas"' in route

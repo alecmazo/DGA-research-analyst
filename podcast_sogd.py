@@ -215,7 +215,21 @@ _DISCLOSURE_RE = re.compile(
     r"ai[-\s]?narrat|ai[-\s]?generat|narrated by an ai|this episode is ai",
     re.IGNORECASE,
 )
+_DISCLOSURE_LINE_RE = re.compile(
+    r"(?:^|(?<=[.!?\n])\s*)"
+    r"This episode (?:is|was) (?:AI-generated and )?AI-narrated\b[^.!?\n]*[.!?]?",
+    re.IGNORECASE,
+)
+_EMPTY_EMPHASIS_RE = re.compile(
+    r"<\s*emphasis\s*>[\s.!?]*</\s*emphasis\s*>",
+    re.IGNORECASE,
+)
 _TAG_RE = re.compile(r"\[[^\[\]]+\]|</?(?:slow|soft|emphasis)>", re.IGNORECASE)
+VOICE_CREDIT_NOTE = (
+    "The xAI voice account is out of credits, so recording stopped. "
+    "The script is already written. Add credits, then Generate again. "
+    "It records this script and does not write a new one."
+)
 
 PILOT_GUID = "11546341-0cb4-5cda-8267-26668ac6a3cc"
 PILOT_BYTE_SIZE = 17158220
@@ -588,6 +602,26 @@ def _secs_until(target: datetime, now: datetime) -> float:
     return max(0.0, (target - now).total_seconds())
 
 
+def voice_credit_failure(error: str | None) -> bool:
+    """True when xAI refused to record because the voice account has no credits."""
+    text = (error or "").lower()
+    if "out of credits" in text or "need a grok subscription" in text or "need a subscription" in text:
+        return True
+    if ("402" in text or "403" in text) and (
+        "tts" in text or "xai" in text or "credit" in text or "subscription" in text or "permission" in text
+    ):
+        return True
+    return False
+
+
+def explain_run_error(error: str | None) -> str:
+    """The page note. A credit refusal stays a plain sentence, not the HTTP body."""
+    text = (error or "").strip()
+    if voice_credit_failure(text):
+        return VOICE_CREDIT_NOTE
+    return text
+
+
 def plan_tick(
     now: datetime,
     episode: dict | None,
@@ -638,6 +672,14 @@ def plan_tick(
         age = (local - started).total_seconds() if started is not None else 0
         if started is not None and age < 3 * 3600:
             return {"action": "sleep", "sleep_sec": 60, "reason": "in_progress"}
+
+    error = str((episode or {}).get("error") or (episode or {}).get("last_error") or "")
+    if status == "failed" and voice_credit_failure(error):
+        return {
+            "action": "sleep",
+            "sleep_sec": _secs_until(next_start, local),
+            "reason": "voice_credits",
+        }
 
     attempts = int((episode or {}).get("attempts") or 0)
     if status == "failed_needs_attention" or attempts >= 5:
@@ -951,6 +993,22 @@ def _rewrite_text(updated) -> str:
     return ""
 
 
+def strip_empty_emphasis(text: str) -> str:
+    """Drop <emphasis></emphasis> and put a space back before the next word."""
+    out = _EMPTY_EMPHASIS_RE.sub(" ", text or "")
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r"(\])([A-Za-z])", r"\1 \2", out)
+    return out.strip()
+
+
+def strip_disclosure_lines(text: str) -> str:
+    """Remove a spoken AI-narration line. The close gets exactly one later."""
+    out = _DISCLOSURE_LINE_RE.sub(" ", text or "")
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r" +([.!?])", r"\1", out)
+    return out.strip()
+
+
 def apply_plain_talk(script: dict, rewrite=None) -> dict:
     """Rewrite any section that fails the jargon or reading-level check.
 
@@ -964,6 +1022,8 @@ def apply_plain_talk(script: dict, rewrite=None) -> dict:
         text = _section_text(sec)
         issues = plain_talk_issues(text)
         if not issues:
+            for turn in sec.get("turns") or []:
+                turn["text"] = strip_empty_emphasis(turn.get("text") or "")
             continue
         new_text = text
         if rewrite:
@@ -977,13 +1037,15 @@ def apply_plain_talk(script: dict, rewrite=None) -> dict:
             got = _rewrite_text(updated)
             if got:
                 new_text = got
-        new_text = split_long_sentences(scrub_banned(new_text))
+        new_text = strip_empty_emphasis(split_long_sentences(scrub_banned(strip_empty_emphasis(new_text))))
         turns = sec.get("turns") or []
         if turns:
             turns[0]["text"] = new_text
         elif new_text:
             sec["turns"] = [{"speaker": "kimi", "intensity": "normal", "text": new_text}]
         notes.append({"id": sec.get("id"), "issues": issues, "remaining": plain_talk_issues(new_text)})
+        for turn in sec.get("turns") or []:
+            turn["text"] = strip_empty_emphasis(turn.get("text") or "")
     return {"script": script, "notes": notes, "usages": usages}
 
 
@@ -1109,9 +1171,22 @@ def failure_is_retryable(status: str, error: str = "") -> bool:
     if status in ("failed_needs_attention", "cost_cap_hit", "needs_confirm"):
         return False
     text = (error or "").lower()
+    if voice_credit_failure(text):
+        return False
     if "script invalid" in text or "likeness guard" in text or "word count" in text:
         return False
     return status == "failed"
+
+
+def resume_over_held_episode(state: dict | None, existing_status: str) -> bool:
+    """A credit stop keeps the written script. Generate records it over a held file."""
+    if (existing_status or "").strip().lower() != "ready_pending":
+        return False
+    if not state or (state.get("status") or "") != "failed":
+        return False
+    if not stage_reached(state.get("stage_done"), "script"):
+        return False
+    return voice_credit_failure(state.get("last_error") or "")
 
 
 def reconcile_saved_script(script: dict) -> dict:
@@ -1339,30 +1414,26 @@ def trim_section_words(section: dict, extra: int) -> dict:
 
 
 def ensure_disclosure(script: dict) -> dict:
-    """Keep the AI line on the close. The cold open stays a good morning."""
+    """One AI line, on the close. Empty emphasis tags are not spoken."""
     script = deepcopy(script)
     sections = script.setdefault("sections", [])
     for sec in sections:
-        if sec.get("id") != "cold_open":
-            continue
-        turns = sec.get("turns") or []
-        if turns:
-            text = turns[0].get("text") or ""
-            if text.startswith(DISCLOSURE):
-                rest = text[len(DISCLOSURE):].lstrip(" .")
-                if rest:
-                    turns[0]["text"] = rest
-        break
+        kept = []
+        for turn in sec.get("turns") or []:
+            text = strip_disclosure_lines(strip_empty_emphasis(turn.get("text") or ""))
+            if not text:
+                continue
+            turn["text"] = text
+            kept.append(turn)
+        sec["turns"] = kept
     if not sections:
         sections.append({
             "id": "close",
             "turns": [{"speaker": "kimi", "intensity": "normal", "text": DISCLOSURE}],
         })
         return script
-    if DISCLOSURE in script_text(script):
-        return script
-    last = sections[-1]
-    turns = last.setdefault("turns", [])
+    close = next((sec for sec in sections if sec.get("id") in SOGD_CLOSE_IDS), sections[-1])
+    turns = close.setdefault("turns", [])
     turns.append({"speaker": "kimi", "intensity": "normal", "text": DISCLOSURE})
     return script
 
@@ -2475,6 +2546,7 @@ def run_daily_episode(
                 raise NeedsAttention(f"word count {budget['words']} outside {word_min}-{word_max} after fact-check")
             script = budget["script"]
             script, plain_usage = _plain_pass(script, model=False, plain_rewrite=None)
+            script = ensure_disclosure(script)
             for extra in plain_usage:
                 charge("script", extra)
             guarded = guard_script(script)
@@ -2593,12 +2665,13 @@ def run_daily_episode(
         print(f"[sogd] needs attention at {stage}: {exc!s:.300}", flush=True)
         return result
     except Exception as exc:
+        message = explain_run_error(f"{exc!s:.400}")
         result.update(
             ok=False,
             status="failed",
             stage=stage,
-            error=f"{exc!s:.400}",
-            retryable=failure_is_retryable("failed", str(exc)),
+            error=message,
+            retryable=failure_is_retryable("failed", message),
         )
         try:
             result["stage_done"] = done
@@ -3257,6 +3330,14 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
             state = None
         locked = db is not None
         guard = date_guard(ctx["existing"], force=force, now=ctx["now"], lock_held=locked and not dry_run)
+        existing_status = ((ctx.get("existing") or {}).get("status") or "").strip().lower()
+        credit_resume = (
+            not force
+            and not dry_run
+            and resume_over_held_episode(state, existing_status)
+        )
+        if credit_resume and not guard["ok"] and guard.get("reason") == "episode_exists":
+            guard = {"ok": True, "retry": True}
         if not dry_run and not guard["ok"]:
             return {
                 "ok": True,
@@ -3336,7 +3417,7 @@ def execute_daily(episode_date=None, *, on_progress=None, connect=None, force: b
                 ctx["episode_date"],
                 force=force,
                 dry_run=dry_run,
-                existing=None if force or retry_running else ctx["existing"],
+                existing=None if force or retry_running or credit_resume else ctx["existing"],
                 voice=kwargs.get("voice") or ctx["voice"],
                 auto_publish=ctx["auto_publish"],
                 cost_cap=ctx["cost_cap_usd"],
