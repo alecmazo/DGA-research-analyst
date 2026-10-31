@@ -211,6 +211,43 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertLessEqual(long["words"], 4300)
         self.assertTrue(any(note["action"] == "trim" for note in long["notes"]))
 
+        # Beats sit at the front, so the gentle trim cannot reach the extra words.
+        # One word over the cap still finishes. It is not an error.
+        stuck = "So why does this matter to you? A short recap. " + " ".join(["markets"] * 30)
+        over = {
+            "ticker": "SOGD",
+            "format": "sogd",
+            "episode_title": "SOGD — Oct 31, 2026: Lead",
+            "winner": "kimi",
+            "sections": [
+                {"id": "cold_open", "turns": [{"speaker": "kimi", "intensity": "normal", "text": "Good morning from the desk."}]},
+                {"id": "story_1", "turns": [{"speaker": "kimi", "intensity": "normal", "text": stuck}]},
+                {"id": "close", "turns": [{"speaker": "kimi", "intensity": "normal", "text": "Zoom out on the day."}]},
+            ],
+        }
+        early = enforce_word_budget(
+            over,
+            word_count=_word_count,
+            regenerate_section=lambda section, need: section,
+            trim_section=trim_section_words,
+            word_min=12,
+            word_max=24,
+        )
+        self.assertTrue(early["ok"], early)
+        self.assertLessEqual(early["words"], 24)
+        self.assertGreaterEqual(early["words"], 12)
+        self.assertTrue(any(note["action"] == "finish_early" for note in early["notes"]))
+        story = early["script"]["sections"][1]["turns"][0]["text"].lower()
+        self.assertIn("why does this matter", story)
+        self.assertIn("recap", story)
+        recorded = self._run(
+            writer=lambda stories, notes: {"script": over, "usage": {}},
+            word_min=12,
+            word_max=24,
+        )
+        self.assertIn(recorded["status"], ("published", "ready_pending"))
+        self.assertNotIn("word count", recorded.get("error") or "")
+
     def test_likeness_guard_rejects_scott_adams(self):
         from podcast_sogd import guard_script, run_daily_episode
         script = _script(tail="Scott Adams")
@@ -358,6 +395,63 @@ class SogdPipelineTests(unittest.TestCase):
         source = (ROOT / "podcast_sogd.py").read_text(encoding="utf-8")
         self.assertNotIn("disclaimer_intro", source)
         self.assertIn("synthesize_episode(", source)
+
+    def test_credit_stop_keeps_one_disclosure_and_drops_empty_emphasis(self):
+        from podcast_sogd import (
+            DISCLOSURE,
+            VOICE_CREDIT_NOTE,
+            explain_run_error,
+            failure_is_retryable,
+            reconcile_saved_script,
+            resume_over_held_episode,
+            script_text,
+            voice_credit_failure,
+        )
+        script = {
+            "ticker": "SOGD",
+            "format": "sogd",
+            "episode_title": "SOGD — Oct 31, 2026: Lead",
+            "winner": "kimi",
+            "sections": [
+                {"id": "cold_open", "turns": [{"speaker": "kimi", "intensity": "normal", "text": "Good morning. The big story is first."}]},
+                {"id": "story_1", "turns": [{"speaker": "kimi", "intensity": "normal", "text": "It is like erasing [pause] <emphasis> </emphasis> [pause]Why does this matter to you? A short recap."}]},
+                {"id": "story_2", "turns": [{"speaker": "kimi", "intensity": "normal", "text": "A fact. <emphasis></emphasis> So why does this matter to you? Recap."}]},
+                {"id": "close", "turns": [
+                    {"speaker": "kimi", "intensity": "normal", "text": "Zoom out. This episode was AI-narrated. This episode is AI-generated and AI-narrated."},
+                    {"speaker": "kimi", "intensity": "normal", "text": DISCLOSURE},
+                ]},
+            ],
+        }
+        cleaned = reconcile_saved_script(script)
+        text = script_text(cleaned)
+        self.assertNotIn("<emphasis> </emphasis>", text)
+        self.assertNotIn("<emphasis></emphasis>", text)
+        self.assertIn("[pause] Why", text)
+        self.assertEqual(text.lower().count(DISCLOSURE.lower()), 1)
+        self.assertNotIn("this episode was ai-narrated", text.lower())
+        self.assertIn("why does this matter", text.lower())
+        self.assertEqual(cleaned["sections"][-1]["id"], "close")
+        raw = 'xAI TTS HTTP 402: {"error":"You have run out of credits or need a Grok subscription."}'
+        self.assertTrue(voice_credit_failure(raw))
+        self.assertFalse(failure_is_retryable("failed", raw))
+        self.assertEqual(explain_run_error(raw), VOICE_CREDIT_NOTE)
+        self.assertNotIn("HTTP 402", explain_run_error(raw))
+        self.assertTrue(failure_is_retryable("failed", "connection reset"))
+        held = {"status": "failed", "stage_done": "factcheck", "last_error": raw}
+        self.assertTrue(resume_over_held_episode(held, "ready_pending"))
+        self.assertFalse(resume_over_held_episode(held, "published"))
+        self.assertFalse(resume_over_held_episode({"status": "failed", "stage_done": "scout", "last_error": raw}, "ready_pending"))
+        page = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
+        self.assertIn("Recording stopped", page)
+        self.assertIn(VOICE_CREDIT_NOTE, page)
+        self.assertNotIn("Stage {status.run_state.stage_done", page)
+        bot = (ROOT / "web/gp-app/src/components/support/GrokBot.tsx").read_text(encoding="utf-8")
+        twin = (ROOT / "api/domains/grok_bot.py").read_text(encoding="utf-8")
+        for prompt in (bot, twin):
+            self.assertIn("13-year-old", prompt)
+            self.assertIn("Scott Adams", prompt)
+            self.assertIn("<emphasis>", prompt)
+            self.assertIn("/ideas", prompt)
 
     def test_loudnorm_second_pass_uses_measured_values(self):
         from podcast_engine import LOUDNORM_FILTER, loudnorm_apply_filter

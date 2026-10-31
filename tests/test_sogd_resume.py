@@ -269,6 +269,8 @@ class SogdResumeTests(unittest.TestCase):
         self.assertIsNone(retry_backoff(6, 0))
         self.assertFalse(failure_is_retryable("failed_needs_attention", "script invalid"))
         self.assertFalse(failure_is_retryable("failed", "script invalid: missing recap"))
+        credit = 'xAI TTS HTTP 402: You have run out of credits or need a Grok subscription.'
+        self.assertFalse(failure_is_retryable("failed", credit))
         tz_now = datetime(2026, 10, 28, 8, 0, tzinfo=timezone.utc)  # 01:00 PT, before the window
         la = datetime(2026, 10, 28, 11, 0, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles"))
         self.assertEqual(plan_tick(la, {"status": "failed_needs_attention"})["reason"], "needs_attention")
@@ -280,6 +282,9 @@ class SogdResumeTests(unittest.TestCase):
         self.assertEqual(plan_tick(noon, {"status": "failed", "attempts": 1})["reason"], "after_window")
         morning = datetime(2026, 10, 28, 6, 40, tzinfo=__import__("zoneinfo").ZoneInfo("America/Los_Angeles"))
         self.assertEqual(plan_tick(morning, None)["action"], "generate")
+        morning_credit = plan_tick(morning, {"status": "failed", "attempts": 1, "error": credit})
+        self.assertEqual(morning_credit["action"], "sleep")
+        self.assertEqual(morning_credit["reason"], "voice_credits")
         manual = plan_tick(morning, None, auto_daily=False)
         self.assertEqual(manual["action"], "sleep")
         self.assertEqual(manual["reason"], "manual")

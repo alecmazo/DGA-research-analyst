@@ -100,6 +100,23 @@ function money(value: number | null | undefined): string {
   return `$${n.toFixed(2)}`
 }
 
+const VOICE_CREDIT_NOTE = 'The xAI voice account is out of credits, so recording stopped. The script is already written. Add credits, then Generate again. It records this script and does not write a new one.'
+
+function isVoiceCredit(error: string | null | undefined): boolean {
+  const text = (error || '').toLowerCase()
+  if (text.includes('out of credits') || text.includes('need a grok subscription') || text.includes('need a subscription')) {
+    return true
+  }
+  return (text.includes('402') || text.includes('403')) && (
+    text.includes('tts') || text.includes('xai') || text.includes('credit') || text.includes('subscription') || text.includes('permission')
+  )
+}
+
+function runNote(error: string | null | undefined): string {
+  if (!error) return ''
+  return isVoiceCredit(error) ? VOICE_CREDIT_NOTE : error
+}
+
 function stageLabel(stage: string | null | undefined): string {
   switch ((stage || '').toLowerCase()) {
     case 'scout': return 'Searching'
@@ -247,7 +264,8 @@ export function SogdDaily({
 
   async function generate() {
     const today = status?.today
-    const blocked = !!today && !['failed', 'cost_cap_hit'].includes(today.status || '')
+    const creditHold = today?.status === 'ready_pending' && isVoiceCredit(status?.run_state?.last_error)
+    const blocked = !!today && !['failed', 'cost_cap_hit'].includes(today.status || '') && !creditHold
     if (blocked && !window.confirm('Replace today’s episode? This starts a new generation.')) return
     setBusy('generate')
     setNote('')
@@ -256,7 +274,9 @@ export function SogdDaily({
         method: 'POST',
         body: JSON.stringify({ force: blocked, confirm: blocked ? 'replace' : undefined }),
       })
-      setNote('Generation started. This page will show the run when it finishes.')
+      setNote(creditHold
+        ? 'Recording the saved script. This does not write a new one.'
+        : 'Generation started. This page will show the run when it finishes.')
       window.setTimeout(() => void load().catch(() => undefined), 4000)
     } catch (err) {
       setNote(err instanceof Error ? err.message : 'Could not start')
@@ -398,7 +418,9 @@ export function SogdDaily({
       {status?.run_state && (
         <div className={styles.pcDesc}>
           <div>
-            Stage {status.run_state.stage_done || 'not started'}
+            {isVoiceCredit(status.run_state.last_error)
+              ? 'Recording stopped'
+              : `Stage ${stageLabel(status.run_state.stage_done) || 'not started'}`}
             {status.run_state.attempts ? ` · attempt ${status.run_state.attempts}` : ''}
             {status.run_state.next_retry_at ? ` · next retry ${status.run_state.next_retry_at}` : ''}
           </div>
@@ -411,7 +433,7 @@ export function SogdDaily({
               ))}
             </div>
           )}
-          {status.run_state.last_error && <div>{status.run_state.last_error}</div>}
+          {status.run_state.last_error && <div>{runNote(status.run_state.last_error)}</div>}
         </div>
       )}
       {status?.today?.episode_title && (
@@ -436,10 +458,10 @@ export function SogdDaily({
               <tr key={run.id}>
                 <td>{(run.episode_date || '').slice(0, 10)}</td>
                 <td>{run.status}</td>
-                <td>{run.status === 'running' ? stageLabel(run.stage) : run.stage}</td>
+                <td>{run.status === 'running' || isVoiceCredit(run.error) ? stageLabel(run.stage) : run.stage}</td>
                 <td>{formatElapsed(runSeconds(run, now))}</td>
                 <td>{run.status === 'failed' ? '—' : money(run.cost_usd_total)}</td>
-                <td>{run.error || ''}</td>
+                <td>{runNote(run.error)}</td>
               </tr>
             ))}
           </tbody>
