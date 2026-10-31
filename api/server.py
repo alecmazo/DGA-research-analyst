@@ -7178,10 +7178,18 @@ def _persist_analysis_text(
     text = ""
     if isinstance(result, dict):
         text = (result.get("report_text") or "")
-    # 2. From disk file
+    # 2. From a file this run just wrote. An older file is the previous
+    # analysis. Saving it would stamp a new generated_at on the old note.
     if not text and _md_path.exists():
         try:
-            text = _md_path.read_text()
+            if analyst.fresh_report_file(_md_path):
+                text = _md_path.read_text()
+            else:
+                print(
+                    f"⚠️  [persist] refusing cached report file for "
+                    f"{ticker}/{provider} — not written by this run",
+                    flush=True,
+                )
         except Exception:
             pass
     # 3. From in-memory streamed_text (Claude streams; Grok doesn't, so this
@@ -8989,7 +8997,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui808-20261031-sogd-plain"
+WEB_BUILD_VERSION = "ui811-20261031-fresh-note"
 
 
 @app.get("/api/build")

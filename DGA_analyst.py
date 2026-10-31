@@ -2012,6 +2012,88 @@ def build_munger_system_appendix() -> str:
 # Primary:  yfinance fast_info — reliably exposes last_price + previous_close
 # Fallback: Yahoo Finance chart API via raw requests
 # ============================================================================
+_COVER_ASOF_RE = re.compile(r"as of\s+(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
+_COVER_HEADER_DATE_RE = re.compile(
+    r"\b(January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)\s+(\d{1,2}),\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+
+
+def report_cover_asof(text: str) -> str | None:
+    """The date printed on the cover, not a date buried in the news section."""
+    head = (text or "")[:1500]
+    dated = _COVER_ASOF_RE.search(head)
+    if dated:
+        return dated.group(1)
+    named = _COVER_HEADER_DATE_RE.search(head[:700])
+    if not named:
+        return None
+    try:
+        return datetime.strptime(
+            f"{named.group(1)} {named.group(2)} {named.group(3)}", "%B %d %Y",
+        ).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def report_repeats_prior(text: str, prior: dict | None, *, today: str | None = None) -> bool:
+    """True when the new draft still wears the previous run's cover date."""
+    old = str((prior or {}).get("asof") or "")[:10]
+    if len(old) != 10:
+        return False
+    new = report_cover_asof(text) or ""
+    if new != old:
+        return False
+    day = (today or datetime.now().strftime("%Y-%m-%d"))[:10]
+    return new != day
+
+
+def redact_prior_market_price(thesis: str, price) -> str:
+    """The thesis may quote the old last. That number does not belong in the new note."""
+    if not thesis or price is None:
+        return thesis or ""
+    try:
+        px = float(price)
+    except (TypeError, ValueError):
+        return thesis
+    if px <= 0:
+        return thesis
+    amounts = {f"{px:,.2f}", f"{px:.2f}"}
+    if px >= 1000:
+        amounts.add(f"{px:,.0f}")
+    out = thesis
+    for amount in amounts:
+        out = re.sub(
+            rf"\$\s*{re.escape(amount)}\b",
+            "the prior market price",
+            out,
+        )
+    return out
+
+
+def clear_analysis_input_cache(ticker: str) -> None:
+    """Drop the saved prompt and price snapshot. A new analysis does not reuse them."""
+    tkr = (ticker or "").strip().upper()
+    if not tkr:
+        return
+    for name in (f"{tkr}_user_msg.txt", f"{tkr}_market_snapshot.json"):
+        path = STOCKS_FOLDER / name
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def fresh_report_file(path, *, max_age_sec: int = 45 * 60, now: float | None = None) -> bool:
+    """True when the markdown file was written during this analysis, not months ago."""
+    try:
+        age = (time.time() if now is None else float(now)) - path.stat().st_mtime
+    except OSError:
+        return False
+    return 0 <= age <= max_age_sec
+
+
 def stamp_live_cover_price(report_text: str, price, as_of: str | None = None) -> str:
     """Force the cover Current Price to the live last from this run.
 
@@ -2039,8 +2121,17 @@ def stamp_live_cover_price(report_text: str, price, as_of: str | None = None) ->
         return f"{m.group(1)}{shown}{tail}"
 
     new, n = price_re.subn(_price, report_text, count=1)
+    if date:
+        try:
+            pretty = datetime.strptime(date, "%Y-%m-%d").strftime("%B %d, %Y")
+        except ValueError:
+            pretty = ""
+        if pretty:
+            head, rest = new[:800], new[800:]
+            head, _ = _COVER_HEADER_DATE_RE.subn(pretty, head, count=1)
+            new = head + rest
     if not n:
-        return report_text
+        return new if new != report_text else report_text
     pt = re.search(
         r"12-Month Price Target:\*\*\s*\$([0-9]{1,5}(?:,[0-9]{3})*(?:\.[0-9]+)?)",
         new[:5000],
@@ -9705,6 +9796,7 @@ def load_prior_report_context(ticker: str, provider: str = "grok") -> dict | Non
         return None
     summary = extract_summary_from_report(md)
     thesis = summary.get("thesis") or extract_thesis_snippet(md)
+    thesis = redact_prior_market_price(thesis, summary.get("current_price"))
     # mtime as rough generated hint
     gen_hint = None
     try:
@@ -9718,7 +9810,8 @@ def load_prior_report_context(ticker: str, provider: str = "grok") -> dict | Non
         "current_price": summary.get("current_price"),
         "thesis": thesis,
         "generated_hint": gen_hint,
-        "report_excerpt": md[:4500],
+        "asof": report_cover_asof(md),
+        "report_excerpt": "",
         "path": str(path.name),
         "provider": prov,
     }
@@ -9732,7 +9825,10 @@ def format_prior_thesis_block(prior: dict) -> str:
     pt_s = f"${pt:.2f}" if isinstance(pt, (int, float)) else (str(pt) if pt else "—")
     up = prior.get("upside_pct")
     up_s = f"{up:+.1f}%" if isinstance(up, (int, float)) else (str(up) if up else "—")
-    thesis = (prior.get("thesis") or "").strip() or "(No dedicated thesis paragraph found — use rating/target and excerpt.)"
+    thesis = redact_prior_market_price(
+        (prior.get("thesis") or "").strip(),
+        prior.get("current_price"),
+    ).strip() or "(No dedicated thesis paragraph found — use rating and target.)"
     return (
         "=== PRIOR DGA THESIS (same ticker — previous Analyze run) ===\n"
         f"Provider: {(prior.get('provider') or 'grok').upper()}\n"
@@ -9746,8 +9842,12 @@ def format_prior_thesis_block(prior: dict) -> str:
         "Include a short section titled exactly:\n"
         "## Thesis Continuity vs Prior DGA Report\n"
         "Place it after the Investment Thesis / Executive Summary and before valuation detail.\n"
-        "The prior report body is not attached. Do not copy its price, its news dates, "
-        "or its quarterly figures. Those belong to the old run.\n"
+        "The prior report body is not attached. Write every section except this "
+        "continuity section as a new report. Do not copy the prior run's market "
+        "price, its as-of date, its news, or its quarterly figures.\n"
+        "What changed belongs only in the continuity section. Carry the prior "
+        "rating and the prior 12-month price target so the difference is visible. "
+        "Do not carry the prior market price.\n"
         "Rules:\n"
         "1. Cover Current Price is the CURRENT_PRICE in this user message, dated DATE. "
         "Never reprint the prior run's market price.\n"
@@ -10266,6 +10366,11 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
                 flush=True,
             )
             reuse_user_msg = False
+
+    # A new analysis starts from a blank prompt. Compare may reuse a gather
+    # from the last half hour. Anything older, and every Grok run, drops it.
+    if not reuse_user_msg:
+        clear_analysis_input_cache(ticker)
 
     if reuse_user_msg and _cached_um_path.exists() and audit_path.exists():
         try:
@@ -11012,6 +11117,8 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     # Re-runs archive the previous version in Postgres; the model still needs
     # the prior thesis *in context* so the report itself narrates CONSISTENT
     # vs UPDATED (lost when React Desk stopped showing the legacy delta UI).
+    # The prior body is not attached. Only the thesis, rating, and target.
+    _prior = None
     try:
         _prior = load_prior_report_context(ticker, _prov)
         if _prior:
@@ -11032,7 +11139,17 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
     except Exception as _pe:
         print(f"   ⚠️  Prior thesis inject failed: {_pe!s:.120}", flush=True)
 
-    _live_px = (mkt or {}).get("price")
+    _live_px = (mkt or {}).get("price") if isinstance(mkt, dict) else None
+    if not _live_px:
+        _retry_px: dict = {}
+        _apply_desk_quote(_retry_px, ticker)
+        _live_px = _retry_px.get("price")
+        if _live_px and isinstance(mkt, dict):
+            mkt["price"] = _live_px
+            if _retry_px.get("previous_close"):
+                mkt["previous_close"] = _retry_px["previous_close"]
+            if _retry_px.get("pct_change") is not None:
+                mkt["pct_change"] = _retry_px["pct_change"]
     _live_day = datetime.now().strftime("%Y-%m-%d")
     if _live_px:
         user_msg = re.sub(
@@ -11228,11 +11345,61 @@ def _analyze_ticker_impl(ticker: str, *, system_prompt: str, generate_gamma: boo
         except Exception as _re:
             print(f"   ⚠️  no-search retry failed ({_re!s:.120}); keeping first draft")
 
+    # A draft that still wears the prior cover date is the old report. Write
+    # it again from this run. The prior body is not sent back to the model.
+    if (
+        isinstance(report_text, str)
+        and report_text
+        and report_repeats_prior(report_text, _prior)
+    ):
+        print(
+            f"   ♻️❌ {ticker}: draft reused the prior cover "
+            f"({(_prior or {}).get('asof')}) — writing the report again",
+            flush=True,
+        )
+        _ck()
+        _emit_progress(on_progress, "grok", 0.78,
+                       f"{_prov.title()} — writing a new report")
+        try:
+            rewritten = call_llm_with_heartbeat(
+                _prov, system_prompt,
+                user_msg + (
+                    "\n\nThe draft copied the prior report's cover date. "
+                    "Discard that draft. Write the full report again from "
+                    "THIS RUN only: DATE, CURRENT_PRICE, FREE CATALYST HEADLINES, "
+                    "and VERIFIED FINANCIAL DATA. The only place the prior run "
+                    "appears is Thesis Continuity vs Prior DGA Report, using the "
+                    "prior rating and the prior 12-month price target. Do not "
+                    "reuse the prior market price or the prior as-of date.\n"
+                ),
+                live_search=False,
+                on_delta=on_delta,
+                usage_capture=_bill,
+                should_cancel=should_cancel,
+                on_progress=on_progress,
+                progress_step="grok",
+                progress_base=0.78,
+                progress_cap=0.84,
+                local_model=local_model if _prov == "local" else None,
+            )
+            if rewritten and not looks_like_unfinished_report(rewritten):
+                report_text = rewritten
+                print(f"   ✅ {ticker}: rewrote the copied draft ({len(rewritten):,} chars)", flush=True)
+        except ClaudeCancelled:
+            raise
+        except Exception as exc:
+            print(f"   ⚠️  {ticker}: rewrite of copied draft failed: {exc!s:.160}", flush=True)
+
     # The cover price is the live last from this run, not a number the model
     # copied out of the previous report.
     if isinstance(report_text, str) and report_text:
         _asof = datetime.now().strftime("%Y-%m-%d")
-        report_text = stamp_live_cover_price(report_text, (mkt or {}).get("price"), _asof)
+        _cover_px = (mkt or {}).get("price") if isinstance(mkt, dict) else None
+        if not _cover_px:
+            _cover_snap: dict = {}
+            _apply_desk_quote(_cover_snap, ticker)
+            _cover_px = _cover_snap.get("price")
+        report_text = stamp_live_cover_price(report_text, _cover_px, _asof)
 
     # Save markdown — suffixed for non-Grok providers so they don't overwrite.
     md_path = STOCKS_FOLDER / f"{ticker}_DGA_Report{_suffix}.md"
