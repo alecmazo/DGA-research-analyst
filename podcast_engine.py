@@ -222,12 +222,12 @@ EPISODE_FORMATS = {
     "sogd": {
         "label":   "Systems Over Goals Daily",
         "icon":    "🧭",
-        "tagline": "One daily briefing through incentives, persuasion, and systems",
+        "tagline": "Four or five news stories, then a short reaction. No intro.",
         "multi_ticker":     False,
         "dynamic_sections": True,
-        "word_budget_low":  3800,
-        "word_budget_high": 4300,
-        "approx_minutes":   "26-29",
+        "word_budget_low":  1800,
+        "word_budget_high": 3000,
+        "approx_minutes":   "12-20",
         "title_pattern":    "SOGD — {DATE}: {LEAD}",
     },
 }
@@ -560,12 +560,10 @@ FORMAT_SECTIONS = {
         "twelve_month",
         "pm_verdict",
     ],
-    # Story sections are dynamic (story_1, story_2, …). Cold open and the
-    # close are fixed. `close` is the sign-off; `systems_takeaway` is the
-    # older name for that same section. The narrator is Kimi.
-    "sogd": [
-        "cold_open",
-    ],
+    # Story sections are dynamic (story_1, story_2, …). There is no intro.
+    # `close` is the sign-off; `systems_takeaway` is the older name for that
+    # same section. The narrator is Kimi.
+    "sogd": [],
 }
 
 # Backward-compat alias for any legacy code still importing REQUIRED_SECTIONS.
@@ -844,12 +842,13 @@ No per-ticker verdict; the wrap delivers a synthesized portfolio-level conclusio
             "No Rock, no Claudia, no bull-versus-bear.\n"
             "Sections in order: cold_open, story_1 through story_N (four or five), close.\n"
             "The sign-off id is close. Do not emit systems_takeaway.\n"
-            "Each story covers what happened, who says what, the other side, "
-            "follow the money, why it matters, a recap, and what to watch.\n\n"
+            "No intro section. story_1 is the first thing spoken. "
+            "Each story is the news, then one or two short host reactions. "
+            "No lesson, no recap, no preview.\n\n"
             + style_prompt()
         )
         winner_field = '  "winner": "kimi",\n'
-        sections = ["cold_open", "story_1", "close"]
+        sections = ["story_1", "story_2", "close"]
 
     else:
         # Fallback — should never hit
@@ -1085,19 +1084,21 @@ def validate_script(script: dict[str, Any]) -> dict[str, Any]:
         if fmt_name == "sogd":
             from podcast_sogd import (
                 SOGD_STORY_MAX,
+                lecture_hits,
                 opening_has_disclosure,
-                story_missing_beats,
             )
             story_ids = [sid for sid in section_ids if str(sid or "").startswith("story_")]
             if len(story_ids) > SOGD_STORY_MAX:
                 errors.append(f"too many stories: {len(story_ids)}")
             for sec in sections:
                 sid = str(sec.get("id") or "")
-                if sid == "cold_open" and opening_has_disclosure(sec):
+                if sid == "cold_open":
+                    errors.append("no separate intro section")
+                if sid == "story_1" and opening_has_disclosure(sec):
                     errors.append("AI disclosure belongs only at the close")
                 if sid.startswith("story_"):
-                    for beat in story_missing_beats(sec):
-                        errors.append(f"{sid} missing {beat}")
+                    for hit in lecture_hits(sec):
+                        errors.append(f"{sid} has format talk: {hit}")
     elif is_multi_ticker:
         # roundup            → cold_open + per-ticker dynamics + wrap
         # portfolio_roundup  → full fixed section list (no per-ticker dynamics)

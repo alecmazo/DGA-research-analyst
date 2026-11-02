@@ -24,14 +24,12 @@ CATEGORIES = ("politics", "world", "science", "markets")
 ADVISORY_LOCK_KEY = 78126026
 DROP_LIMIT = 0.30
 
-# Prompt guard. The post-check scans the script, not this string.
+# Likeness guard. The post-check scans the script, not this string.
 LENS_GUARD = (
-    "Write in the spirit of incentives, persuasion, and systems over goals: "
-    "who benefits, what the incentives predict, which persuasion tactics are "
-    "in play, and how a system behaves versus a stated goal. "
     "Never use that writer's name, voice, catchphrases, or likeness. "
     "The script must not contain the words Scott Adams, Dilbert, Dogbert, "
-    "or pointy-haired."
+    "or pointy-haired. Do not explain how the show works, and do not teach "
+    "a systems-versus-goals lesson."
 )
 
 BANNED_RE = re.compile(
@@ -43,33 +41,11 @@ BANNED_RE = re.compile(
 SOGD_STYLE = {
     "stories_min": 4,
     "stories_max": 5,
-    "word_min": 3700,
-    "word_max": 4400,
+    "word_min": 1800,
+    "word_max": 3000,
     "voice": "kepler",
     "voice_mode": "fixed",
     "voice_pool": ("kepler", "eve", "orion", "lux"),
-    "intros": (
-        {
-            "id": "classic",
-            "explain_show": True,
-            "text": 'Start with "Good morning", the date, the show name Systems Over Goals Daily, a short how-this-works, then the topic preview.',
-        },
-        {
-            "id": "cold_open",
-            "explain_show": False,
-            "text": "Start straight on the biggest story with a hook line, then the show name and a quick preview. No explanation of the show.",
-        },
-        {
-            "id": "question",
-            "explain_show": False,
-            "text": "Open with a question the listener cares about, tied to the top story. Then the show name and a short preview. No explanation of the show.",
-        },
-        {
-            "id": "preview",
-            "explain_show": False,
-            "text": "Say the show name and the date, then go straight into the topics. No explanation of the show.",
-        },
-    ),
     "text_normalization": True,
     "pause": "[pause]",
     "long_pause": "[long-pause]",
@@ -98,43 +74,34 @@ def style_prompt() -> str:
     from podcast_engine import human_delivery_rules
     s = SOGD_STYLE
     within = s["gap_within_story"]
-    recap = s["gap_recap"]
     between = s["gap_between_stories"]
-    preview = s["gap_preview"]
     return (
-        "You are talking to one person, and that person is about 13. "
-        "Use plain words and short sentences. Mix in a few longer ones so it does not sound like a list. "
-        "If a term is hard, explain it in everyday language or with a comparison. "
-        "Talk to the listener as you. Ask a question they would actually ask. "
-        "React like a person: 'wait, this is wild' is fine. One reaction per story, not every line. "
-        "After each story, say why a regular person should care. "
+        "You are a lively news host talking to one person, about a 13-year-old. Plain words. Short sentences. "
+        "Energetic, not a lecture. "
+        "There is no intro. Do not explain the show. Do not say how this show works. "
+        "Do not preview the other stories. Do not say good morning as its own bit. "
+        "story_1 starts on the news. In that first sentence, weave in the date and the name "
+        "Systems Over Goals Daily, then the fact. One clause, then the story. "
+        "Each story is its own chapter. Four or five stories, never a headline list. "
+        "For each story: what happened, who did it, the numbers, and a short quote from the sources. "
+        "Then one or two short host reactions, like 'wait, this is wild'. Punchy. Then stop. "
+        "No systems-versus-goals lesson. No follow the money. No why this matters. "
+        "No recap. No what to watch. Do not pad. "
+        "Explain a term only when it is truly obscure, and then in a few words. "
         "Drop filler and corporate words. Do not say utilize, stakeholders, paradigm, synergy, "
         "going forward, at the end of the day, deep dive, optics, headwinds, or priced in. "
         "Topic pool: politics, Trump, markets and finance, AI, science, health and cancer research, "
         "world developments, war. "
-        "Pick the most important real stories of the day from X trends and reliable outlets. "
-        "Verify facts and dates, cite every claim, never invent facts. "
-        f"{s['stories_min']}-{s['stories_max']} stories, each from several angles, about 20 to 30 minutes. "
-        "Each story is its own chapter. No rapid-fire headline list. "
-        "Per story, in this order: what happened, then who says what, then the other side, then "
-        "follow the money: who wins if you believe this, then so why does this matter to you, "
-        "then a short recap, then what to watch next. "
+        "Pick the most important real stories of the day. Cite every claim. Never invent facts. "
+        f"About 12 to 20 minutes, {s['word_min']}-{s['word_max']} words. "
         + human_delivery_rules() + " "
-        "The cold open should sound lively, like you just sat down with a friend, not like you are reading a memo. "
-        "Start with energy. Vary the sentence length. Stress one or two words with <emphasis>, never a whole paragraph. "
+        "The first story should sound lively, like you just heard the news, not like you are reading a memo. "
+        "Vary the sentence length. Stress one or two words with <emphasis>, never a whole paragraph. "
         "Do not open with <slow> or <soft>. "
-        "Opening styles, one per day, never the same wording two days in a row: "
-        "classic (Good morning, the date, the show name Systems Over Goals Daily, a short how this works, then the topic preview), "
-        "cold open (the biggest story first, no explanation of the show), "
-        "question (a question tied to the top story), "
-        "or a quick preview (show name and date, then the topics). "
-        "Explain the show on at most two days a week. Use the intro style named for today. "
         "No disclaimer and no music before the host speaks. "
         "No AI disclosure at the top. "
-        "Close: a short zoom-out on the day's pattern. Vary the sign-off wording. "
-        "The AI-narration disclosure and the not-investment-advice line go only at the close. "
+        "The close is only the AI-narration line. No lesson about the day. "
         "Never name Scott Adams or Dilbert. "
-        f"Length about {s['word_min']}-{s['word_max']} words. "
         f"Default voice is {s['voice']}. If the show settings pick another voice, that voice wins. "
         f"Rotate uses {', '.join(s['voice_pool'])}, the same voice for a given date. "
         f"Text normalization {'on' if s['text_normalization'] else 'off'}. "
@@ -143,22 +110,17 @@ def style_prompt() -> str:
         "Never mid-phrase, never right after a pause. "
         "Use <emphasis> on the word you would punch. Do not wrap lines in <slow> or <soft>. No cough or sneeze. "
         f"Story speed stays near the saved voice speed, inside {s['speed_min']}-{s['speed_max']}. "
-        f"The opening may sit a little faster than the stories, around {s['opening_speed']} to {s['speed_max']}, still close to the saved voice speed. "
+        f"The first story may sit a little faster, around {s['opening_speed']} to {s['speed_max']}, still close to the saved voice speed. "
         "Render paragraph by paragraph, then join with silence: "
         f"{within[0]}-{within[1]} seconds within a story, "
-        f"{recap[0]}-{recap[1]} seconds around recaps, "
-        f"{between[0]}-{between[1]} seconds between stories, "
-        f"{preview[0]}-{preview[1]} seconds between topic-preview items. "
+        f"{between[0]}-{between[1]} seconds between stories. "
         f"{s['pad_sec']} seconds of pad at the start and end. "
         f"Master: highpass {s['highpass_hz']} Hz, then gain, then a light peak limiter, "
         f"targeting {s['lufs']} LUFS integrated, peak <= {s['peak_dbtp']} dBTP, no heavy compression. "
         f"Output {s['bitrate_kbps']} kbps mono MP3, under 25 MB. "
         f"Publish at {s['publish_local']} America/Los_Angeles, never earlier. "
-        "Each story must say, in this order, what happened, who says what, the other side, "
-        "follow the money: who wins if you believe this, so why does this matter to you, "
-        "a short recap, and what to watch next. "
         "Use at least two sources for each story when they are in the packet. Do not invent a URL. "
-        "Four or five stories, never more than six, and never a headline list. "
+        "Four or five stories, never more than six. "
         "The opening has no AI disclosure. The disclosure and the not-investment-advice line "
         "are spoken only in the close. "
         + pilot_shape_example()
@@ -166,21 +128,19 @@ def style_prompt() -> str:
 
 
 def pilot_shape_example() -> str:
-    """Cadence from the Oct 27 v4 pilot. Facts in it are not today's news."""
+    """News-first cadence. Facts in it are not today's news."""
     return (
-        "Shape example from the approved Oct 27 v4 pilot. Match this energy and these tags. "
-        "Do not reuse its facts, names, numbers, or dates.\n"
-        "COLD OPEN, a little brighter than the stories, not wrapped in <slow> or <soft>: "
-        "Good morning. [pause] It's Tuesday. <emphasis>You're</emphasis> listening to Systems Over Goals Daily. "
-        "So here's the deal. Most news throws twenty headlines at you. [pause] Right? I can't hold that many either. "
-        "Then one short preview line per story. "
+        "Shape example. Match this energy and these tags. "
+        "Do not reuse its facts, names, numbers, or dates. Do not copy it as a template lecture.\n"
+        "STORY 1, a little brighter, not wrapped in <slow> or <soft>: "
+        "On Tuesday, October 27, Systems Over Goals Daily, Iran's leader told his generals to hit back. "
+        "[pause] <emphasis>Wait.</emphasis> Axios and Xinhua both reported the meeting. "
+        "He said the reply should be immediate. [pause] That is a loud line for a Saturday. "
         "No disclaimer and no music before this. No AI disclosure here.\n"
-        "STORY: [long-pause] Wait. [pause] Story one. What happened, in plain words, with two or three named sources. "
-        "[pause] Who says what. [pause] Now the other side. [pause] Follow the money. Who wins if "
-        "you believe this? [pause] So why does this matter to you? [pause] A short recap before we "
-        "move on. What to watch next.\n"
-        "CLOSE: [long-pause] Zoom out on the day's pattern. Then, and only then: this episode was "
-        "AI-narrated, and nothing here is investment advice."
+        "NEXT STORY: [long-pause] The U.S. cleared a sale of 500 Patriot missiles to Ukraine, "
+        "about 2.1 billion dollars, Xinhua and Anadolu said. [pause] Other countries pay. "
+        "<emphasis>Not</emphasis> a new U.S. check. [pause] A Patriot knocks a missile out of the sky.\n"
+        "CLOSE: This episode was AI-narrated, and nothing here is investment advice."
     )
 
 
@@ -189,7 +149,7 @@ SOGD_STYLE_GUIDE = SOGD_STYLE
 
 # Writer section ids. validate_script reads these. `close` is the sign-off.
 # `systems_takeaway` remains a legacy alias so an older saved script still plays.
-SOGD_FIXED_SECTIONS = ("cold_open",)
+SOGD_FIXED_SECTIONS = ("story_1",)
 SOGD_CLOSE_IDS = ("close", "systems_takeaway")
 SOGD_STORY_MAX = 6
 RUN_STAGES = (
@@ -427,71 +387,8 @@ def normalize_voice(raw, show_id: str = SHOW_ID) -> dict:
     return out
 
 
-_INTRO_EPOCH = date(2024, 1, 1)
-
-
 def _as_day(episode_date: date | datetime) -> date:
     return episode_date.date() if isinstance(episode_date, datetime) else episode_date
-
-
-def _intro_id(item) -> str:
-    if isinstance(item, dict):
-        return str(item.get("id") or item.get("intro_style") or "")
-    return str(item or "")
-
-
-def _pick_intro(day: date, yesterday_id: str | None) -> dict:
-    """Classic on Monday and Thursday. Any other day skips yesterday's style."""
-    styles = list(SOGD_STYLE["intros"])
-    by_id = {row["id"]: row for row in styles}
-    yesterday_id = yesterday_id or ""
-    if day.weekday() in (0, 3) and yesterday_id != "classic":
-        return by_id["classic"]
-    pool = [row for row in styles if not row.get("explain_show") and row["id"] != yesterday_id]
-    if not pool:
-        pool = [row for row in styles if row["id"] != yesterday_id] or styles
-    return pool[day.toordinal() % len(pool)]
-
-
-def intro_style_for_date(episode_date: date | datetime, recent=None) -> dict:
-    """The opening for this date. A non-empty recent list's first item is yesterday."""
-    day = _as_day(episode_date)
-    if recent:
-        return _pick_intro(day, _intro_id(recent[0]))
-    prev = ""
-    chosen = _pick_intro(day, "")
-    cursor = _INTRO_EPOCH if day >= _INTRO_EPOCH else day - timedelta(days=21)
-    while cursor <= day:
-        chosen = _pick_intro(cursor, prev)
-        prev = chosen["id"]
-        cursor += timedelta(days=1)
-    return chosen
-
-
-def intro_for_date(episode_date: date | datetime, recent=None) -> str:
-    """Instruction text for today's opening. The next day uses different wording."""
-    return intro_style_for_date(episode_date, recent)["text"]
-
-
-def intro_prompt(episode_date: date | datetime, recent=None) -> str:
-    """What the writer sees: today's style, plus the last openings to avoid."""
-    style = intro_style_for_date(episode_date, recent)
-    last = []
-    for item in list(recent or [])[:7]:
-        label = _intro_id(item)
-        if label:
-            last.append(label)
-    shown = ", ".join(last) if last else "none"
-    explain = (
-        "Explain how the show works in a sentence or two."
-        if style.get("explain_show")
-        else "Do not explain how the show works."
-    )
-    return (
-        f"Today's intro style is {style['id']}. {style['text']} {explain} "
-        f"Last intros: {shown}. Never reuse yesterday's opening wording. "
-        "Vary the sign-off wording. The disclosure and the disclaimer stay at the close."
-    )
 
 
 def voice_for_day(
@@ -993,9 +890,9 @@ def live_plain_rewrite(section: dict, issues: list[str]) -> dict:
         "Return JSON only: {\"text\":\"\"}. Rewrite this one podcast section so a 13-year-old "
         "can follow it and enjoy it. Short sentences. Everyday words. If you must keep a hard "
         "word, explain it with a comparison in the next sentence. Talk to the listener as you. "
-        "You may add one reaction such as 'wait, this is wild'. Keep every fact, name, number, "
-        "date, and source. Do not add facts. Keep the beats 'why does this matter' and 'recap' "
-        "if they are already there. Use [pause] where a person would breathe, [long-pause] only "
+        "You may add one short reaction such as 'wait, this is wild'. Keep every fact, name, number, "
+        "date, and source. Do not add facts. Do not add a lesson, a recap, or a what-to-watch line. "
+        "Use [pause] where a person would breathe, [long-pause] only "
         "before a new story, and <emphasis> on one or two words you would stress. Do not wrap "
         "the opening in <slow> or <soft>. No AI disclosure in the cold open. Never use the name "
         "Scott Adams or the word Dilbert. Fix these problems: " + "; ".join(issues),
@@ -1020,14 +917,14 @@ def sogd_delivery_speed(base: float, intensity: str, section_id: str) -> float:
     base_f = float(base if base is not None else 1.0)
     name = (intensity or "normal").lower()
     delta = {"calm": -0.03, "normal": 0.0, "heated": 0.03}.get(name, 0.0)
-    if str(section_id or "") == "cold_open":
+    if str(section_id or "") in ("story_1", "cold_open"):
         delta = max(delta, 0.0) + 0.04
     return round(max(0.7, min(1.5, base_f + delta)), 2)
 
 
 def writer_section_line() -> str:
     """The section ids the daily writer is told to emit."""
-    return "Sections in order: cold_open, story_1..story_N, close."
+    return "Sections in order: story_1..story_N, close. No cold_open. No intro section."
 
 
 def writer_instructions(episode_date: date, recent_intros, word_min: int, word_max: int) -> str:
@@ -1039,7 +936,7 @@ def writer_instructions(episode_date: date, recent_intros, word_min: int, word_m
         "Every number, date, quote, and who-did-what must come from the stories you were given. "
         "Do not invent those. When a story lists two or more sources, cite at least two of them. "
         "Do not invent a URL. "
-        + intro_prompt(episode_date, recent_intros) + " "
+        "Do not write an intro. story_1 is the first thing spoken. "
         + style_prompt() + " "
         + LENS_GUARD
     )
@@ -1052,14 +949,28 @@ def opening_has_disclosure(section: dict) -> bool:
     return bool(_DISCLOSURE_RE.search(text))
 
 
+_LECTURE_RE = re.compile(
+    r"follow the money|why (?:does this|this) matter|what to watch|"
+    r"here'?s the deal|most news (?:throws|gives)|how (?:this|the) show works|"
+    r"(?:a )?short recap|quick recap|systems[- ]versus[- ]goals|systems vs\.? goals",
+    re.IGNORECASE,
+)
+
+
+def lecture_hits(section: dict) -> list[str]:
+    """Format talk Alec does not want spoken."""
+    found = []
+    for match in _LECTURE_RE.finditer(_section_text(section)):
+        phrase = match.group(0)
+        if phrase.lower() not in [item.lower() for item in found]:
+            found.append(phrase)
+    return found
+
+
 def story_missing_beats(section: dict) -> list[str]:
-    text = _section_text(section).lower()
-    missing = []
-    if "why does this matter" not in text and "why this matters" not in text:
-        missing.append("why it matters")
-    if "recap" not in text:
-        missing.append("recap")
-    return missing
+    """Old beat check. Stories are news plus a reaction, so nothing is required."""
+    del section
+    return []
 
 
 def stage_reached(stage_done: str | None, target: str) -> bool:
@@ -1281,8 +1192,8 @@ def enforce_word_budget(
     word_count,
     regenerate_section,
     trim_section,
-    word_min: int = 3800,
-    word_max: int = 4300,
+    word_min: int = 1800,
+    word_max: int = 3000,
 ) -> dict:
     """Regenerate only short sections. Trim only long ones. Uses _word_count."""
     script = deepcopy(script)
@@ -1316,31 +1227,24 @@ def enforce_word_budget(
 
 
 def trim_section_words(section: dict, extra: int) -> dict:
-    """Cut words from the end of the story body. Keep speech tags and the closing beats."""
+    """Cut words from the end of the story. Keep speech tags that were in the cut."""
     section = deepcopy(section)
     remaining = max(0, int(extra))
     for turn in reversed(section.get("turns") or []):
         if remaining <= 0:
             break
         text = turn.get("text") or ""
-        lowered = text.lower()
-        protect = len(text)
-        for phrase in ("why does this matter", "why this matters", "recap", "what to watch"):
-            found = lowered.find(phrase)
-            if found >= 0:
-                protect = min(protect, found)
-        head, tail = text[:protect], text[protect:]
-        spans = list(re.finditer(r"\b[\w']+\b", head))
+        spans = list(re.finditer(r"\b[\w']+\b", text))
         if len(spans) <= 1:
             continue
         cut = min(remaining, len(spans) - 1)
         keep_until = spans[len(spans) - cut - 1].end()
-        dropped = head[keep_until:]
+        dropped = text[keep_until:]
         tags = " ".join(_TAG_RE.findall(dropped))
-        kept = head[:keep_until].rstrip()
+        kept = text[:keep_until].rstrip()
         if tags:
             kept = f"{kept} {tags}"
-        turn["text"] = (kept + tail).strip()
+        turn["text"] = kept.strip()
         remaining -= cut
     return section
 
@@ -1353,7 +1257,7 @@ def _section_with_turn(section: dict, turn_index: int, new_text: str) -> str:
 
 
 def finish_at_word_cap(script: dict, word_count, word_max: int) -> dict:
-    """Stop at the word cap and keep going. Cut the ending, not the story beats."""
+    """Stop at the word cap. Cut the ending instead of failing the episode."""
     script = deepcopy(script or {})
     cap = int(word_max)
 
@@ -1385,10 +1289,8 @@ def finish_at_word_cap(script: dict, word_count, word_max: int) -> dict:
                 trial = re.sub(r"[ \t]{2,}", " ", (text[:span.start()] + " " + text[span.end():])).strip()
                 if not trial:
                     continue
-                if sid.startswith("story_") and not allow_beats:
-                    preview = _section_with_turn(sec, j, trial)
-                    if story_missing_beats({"id": sid, "turns": [{"text": preview}]}):
-                        continue
+                if sid.startswith("story_") and not allow_beats and not trial:
+                    continue
                 turn["text"] = trial
                 return True
         return False
@@ -1413,11 +1315,11 @@ def finish_at_word_cap(script: dict, word_count, word_max: int) -> dict:
 
 
 def ensure_disclosure(script: dict) -> dict:
-    """Keep the AI line on the close. The cold open stays a good morning."""
+    """Keep the AI line on the close. The first story starts on the news."""
     script = deepcopy(script)
     sections = script.setdefault("sections", [])
     for sec in sections:
-        if sec.get("id") != "cold_open":
+        if sec.get("id") not in ("story_1", "cold_open"):
             continue
         turns = sec.get("turns") or []
         if turns:
@@ -1631,8 +1533,8 @@ def resolve_chapters(notes: str, duration_sec, stored=None) -> list[dict]:
 
 def chapters_from_stories(stories: list[dict], duration_sec) -> list[dict]:
     """Fallback marks when the assembler did not time the sections."""
-    titles = ["Opening"]
-    urls = [""]
+    titles = []
+    urls = []
     for story in stories or []:
         titles.append((story.get("title") or "Story").strip())
         urls.append((story.get("url") or "").strip())
@@ -1946,7 +1848,8 @@ def live_scout(episode_date: date) -> dict:
 
 def live_lens(stories: list[dict]) -> dict:
     text, usage = _call_grok(
-        "Return JSON only: {\"notes\":[{\"title\":\"\",\"who_benefits\":\"\",\"incentives\":\"\",\"persuasion\":\"\",\"systems\":\"\"}]}. "
+        "Return JSON only: {\"notes\":[{\"title\":\"\",\"what\":\"\",\"who\":\"\",\"numbers\":\"\",\"quote\":\"\"}]}. "
+        "Facts only. No lesson. "
         + LENS_GUARD,
         json.dumps({"stories": stories}),
     )
@@ -1962,7 +1865,7 @@ def _assemble(episode_date: date, lead: str, sections: list[dict]) -> dict:
             "id": sid,
             "turns": [{
                 "speaker": "kimi",
-                "intensity": "heated" if sid == "cold_open" else "normal",
+                "intensity": "heated" if sid in ("story_1", "cold_open") else "normal",
                 "text": (sec.get("text") or "").strip(),
             }],
         })
@@ -2415,8 +2318,7 @@ def run_daily_episode(
 
             before("script")
             progress("script", "section by section")
-            style = intro_style_for_date(episode_date, recent_intros)
-            result["intro_style"] = style["id"]
+            result["intro_style"] = ""
             if writer:
                 written = writer(stories, (lensed or {}).get("notes"))
             else:
@@ -2835,22 +2737,7 @@ def load_run_context(episode_date: date | None, connect) -> dict:
                 (SHOW_ID,),
             )
             ctx["month_spend"] = float(_cell(cur.fetchone()) or 0)
-            cur.execute(
-                """
-                SELECT script_json->>'intro_style' AS intro_style
-                  FROM analyst_podcast_episodes
-                 WHERE show = %s
-                   AND episode_date IS NOT NULL
-                   AND episode_date < %s
-                   AND COALESCE(script_json->>'intro_style', '') <> ''
-                 ORDER BY episode_date DESC
-                 LIMIT 7
-                """,
-                (SHOW_ID, day),
-            )
-            ctx["recent_intros"] = [
-                row.get("intro_style") for row in (cur.fetchall() or []) if row.get("intro_style")
-            ]
+            ctx["recent_intros"] = []
             conn.rollback()
     except Exception as exc:
         print(f"[sogd] context skipped: {exc!s:.180}", flush=True)

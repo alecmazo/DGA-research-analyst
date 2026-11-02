@@ -27,24 +27,13 @@ def _stories():
 def _beats(n: int, words: int) -> str:
     body = " ".join(["detail"] * words)
     return (
-        f"Story {n}. What happened. {body} Who says what. Now the other side. "
-        "Follow the money. Who wins if you believe this? "
-        "So why does this matter to you? A short recap. What to watch next."
+        f"Story {n}. What happened. {body} Reuters said the number. "
+        "The Associated Press quoted the official. Wait. That is fast."
     )
 
 
 def _style_script(words: int = 900) -> dict:
-    sections = [{
-        "id": "cold_open",
-        "turns": [{
-            "speaker": "kimi",
-            "intensity": "normal",
-            "text": (
-                "Good morning. It is Wednesday. Systems Over Goals Daily. "
-                "First the markets. Then the world. Then science. Then politics."
-            ),
-        }],
-    }]
+    sections = []
     for n in range(1, 5):
         sections.append({
             "id": f"story_{n}",
@@ -63,7 +52,6 @@ def _style_script(words: int = 900) -> dict:
         "format": "sogd",
         "episode_title": "SOGD — Oct 28, 2026: Markets",
         "winner": "kimi",
-        "intro_style": "question",
         "sections": sections,
     }
 
@@ -101,25 +89,27 @@ class SogdResumeTests(unittest.TestCase):
             writer_section_line,
         )
         line = writer_section_line()
-        self.assertIn("cold_open", line)
+        self.assertIn("story_1", line)
         self.assertIn("close", line)
+        self.assertIn("No cold_open", line)
         self.assertNotIn("systems_takeaway", line)
         self.assertEqual(SOGD_CLOSE_IDS[0], "close")
-        prompt = writer_instructions(date(2026, 10, 28), None, 3700, 4400)
+        prompt = writer_instructions(date(2026, 10, 28), None, 1800, 3000)
         for phrase in (
-            "follow the money",
-            "why does this matter",
+            "There is no intro",
+            "No follow the money",
+            "No why this matters",
+            "No recap",
+            "No what to watch",
             "No AI disclosure",
-            "short recap",
-            "what to watch",
             "[long-pause]",
-            "Good morning",
+            "Systems Over Goals Daily",
             "4-5" if "4-5" in prompt else "Four or five",
             "Scott Adams",
         ):
             self.assertIn(phrase, prompt)
-        self.assertIn("Oct 27 v4 pilot", prompt)
-        self.assertLessEqual(prompt.count("Shape example from the approved Oct 27 v4 pilot"), 1)
+        self.assertNotIn("Explain the show on at most", prompt)
+        self.assertNotIn("Today's intro style", prompt)
         script = _style_script(50)
         self.assertTrue(validate_script(script)["ok"], validate_script(script)["errors"])
         too_many = _style_script(20)
@@ -130,12 +120,18 @@ class SogdResumeTests(unittest.TestCase):
             })
         self.assertFalse(validate_script(too_many)["ok"])
         disclosed = _style_script(20)
-        disclosed["sections"][0]["turns"][0]["text"] = "This episode is AI-generated and AI-narrated. Good morning."
+        disclosed["sections"][0]["turns"][0]["text"] = "This episode is AI-generated and AI-narrated. Markets opened flat."
         self.assertFalse(validate_script(disclosed)["ok"])
         thin = _style_script(20)
-        thin["sections"][1]["turns"][0]["text"] = "Markets moved and nobody said why."
+        thin["sections"][0]["turns"][0]["text"] = "Follow the money. So why does this matter to you? A short recap. What to watch next."
         errors = validate_script(thin)["errors"]
-        self.assertTrue(any("recap" in err or "why it matters" in err for err in errors))
+        self.assertTrue(any("format talk" in err for err in errors))
+        intro = _style_script(20)
+        intro["sections"].insert(0, {
+            "id": "cold_open",
+            "turns": [{"speaker": "kimi", "intensity": "normal", "text": "Here is how the show works."}],
+        })
+        self.assertTrue(any("no separate intro" in err for err in validate_script(intro)["errors"]))
 
     def test_full_run_reaches_publish_and_notify(self):
         seen = []
@@ -331,10 +327,14 @@ class SogdResumeTests(unittest.TestCase):
         from podcast_sogd import SOGD_STYLE, cost_cap_usd, default_voice, schedule_clocks
         snap = json.loads((ROOT / "tests/fixtures/sogd_settings_39985ba.json").read_text(encoding="utf-8"))
         for key, value in snap["SOGD_STYLE"].items():
+            if key in ("word_min", "word_max"):
+                continue
             got = SOGD_STYLE[key]
             if isinstance(got, tuple):
                 got = list(got)
             self.assertEqual(got, value, key)
+        self.assertEqual(SOGD_STYLE["word_min"], 1800)
+        self.assertEqual(SOGD_STYLE["word_max"], 3000)
         self.assertEqual(default_voice("systems-over-goals"), snap["default_voice"])
         self.assertEqual(list(schedule_clocks()), snap["schedule"])
         self.assertEqual(cost_cap_usd(), snap["cost_cap_usd"])
@@ -433,14 +433,13 @@ class SogdResumeTests(unittest.TestCase):
         section = {
             "id": "story_1",
             "turns": [{
-                "text": "Hello [pause] world extra words here. So why does this matter to you? A short recap.",
+                "text": "Hello [pause] world extra words here today.",
             }],
         }
         trimmed = trim_section_words(section, 3)
         text = trimmed["turns"][0]["text"]
         self.assertIn("[pause]", text)
-        self.assertIn("recap", text.lower())
-        self.assertIn("why does this matter", text.lower())
+        self.assertIn("Hello", text)
 
 
 if __name__ == "__main__":
