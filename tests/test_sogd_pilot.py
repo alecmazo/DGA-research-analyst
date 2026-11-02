@@ -142,7 +142,7 @@ class SogdPilotTests(unittest.TestCase):
         self.assertIs(SOGD_STYLE_GUIDE, SOGD_STYLE)
         self.assertEqual(SOGD_STYLE["stories_min"], 4)
         self.assertEqual(SOGD_STYLE["stories_max"], 5)
-        self.assertEqual(word_bounds(), (3700, 4400))
+        self.assertEqual(word_bounds(), (1800, 3000))
         self.assertEqual(SOGD_STYLE["voice"], "kepler")
         self.assertTrue(SOGD_STYLE["text_normalization"])
         self.assertEqual(SOGD_STYLE["pause"], "[pause]")
@@ -164,7 +164,7 @@ class SogdPilotTests(unittest.TestCase):
         self.assertLessEqual(SOGD_STYLE["max_bytes"], 25 * 1024 * 1024)
         self.assertEqual(SOGD_STYLE["publish_local"], "07:00")
         prompt = style_prompt()
-        self.assertIn("Good morning", prompt)
+        self.assertIn("There is no intro", prompt)
         self.assertIn("No AI disclosure at the top", prompt)
         self.assertIn("[long-pause]", prompt)
         self.assertIn("[breath]", prompt)
@@ -186,34 +186,22 @@ class SogdPilotTests(unittest.TestCase):
         daily = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
         self.assertIn("show_notes", daily)
 
-    def test_varied_intros_and_optional_voice_rotation(self):
+    def test_no_intro_rotation_and_optional_voice_rotation(self):
         from datetime import date, timedelta
-        from podcast_sogd import (
-            SOGD_STYLE,
-            _script_payload,
-            intro_prompt,
-            intro_style_for_date,
-            voice_for_day,
-        )
+        from podcast_sogd import SOGD_STYLE, _script_payload, voice_for_day, writer_instructions
         from tests.test_sogd_pipeline import _audio, _script, _stories
 
-        ids = [row["id"] for row in SOGD_STYLE["intros"]]
-        self.assertEqual(ids, ["classic", "cold_open", "question", "preview"])
-        self.assertEqual(SOGD_STYLE["voice_mode"], "fixed")
-        self.assertEqual(SOGD_STYLE["voice_pool"], ("kepler", "eve", "orion", "lux"))
-        monday = date(2026, 10, 26)
-        styles = [intro_style_for_date(monday + timedelta(days=i)) for i in range(7)]
-        style_ids = [row["id"] for row in styles]
-        self.assertEqual(style_ids[0], "classic")
-        self.assertTrue(all(a != b for a, b in zip(style_ids, style_ids[1:])))
-        self.assertLessEqual(sum(1 for row in styles if row["explain_show"]), 2)
-        self.assertEqual(intro_style_for_date(monday)["id"], intro_style_for_date(monday)["id"])
-        skipped = intro_style_for_date(monday, recent=["classic"])
-        self.assertNotEqual(skipped["id"], "classic")
-        brief = intro_prompt(date(2026, 10, 27), ["classic", "question"])
-        self.assertIn("Last intros: classic, question", brief)
-        self.assertIn("Today's intro style is", brief)
+        self.assertNotIn("intros", SOGD_STYLE)
+        source = (ROOT / "podcast_sogd.py").read_text(encoding="utf-8")
+        self.assertNotIn("def intro_style_for_date", source)
+        self.assertNotIn("def intro_prompt", source)
+        self.assertNotIn("explain_show", source)
+        prompt = writer_instructions(date(2026, 10, 27), ["classic"], 1800, 3000)
+        self.assertNotIn("Today's intro style", prompt)
+        self.assertNotIn("Explain how the show works", prompt)
+        self.assertIn("There is no intro", prompt)
 
+        monday = date(2026, 10, 26)
         saved = {"provider": "xai", "voice": "ara", "speed": 1.0, "voice_mode": "fixed"}
         held = voice_for_day(saved, date(2026, 10, 27), mode="fixed")
         self.assertEqual(held["voice"], "ara")
@@ -247,9 +235,9 @@ class SogdPilotTests(unittest.TestCase):
         monday_run = run_daily_episode(monday, **common)
         tuesday_run = run_daily_episode(monday + timedelta(days=1), **common)
         self.assertTrue(monday_run["ok"], monday_run.get("error"))
-        self.assertEqual(monday_run["intro_style"], "classic")
-        self.assertNotEqual(monday_run["intro_style"], tuesday_run["intro_style"])
-        self.assertEqual(_script_payload(monday_run)["intro_style"], "classic")
+        self.assertFalse(monday_run.get("intro_style"))
+        self.assertFalse(tuesday_run.get("intro_style"))
+        self.assertNotIn("intro_style", _script_payload(monday_run))
 
         page = (ROOT / "web/gp-app/src/pages/podcasts/SogdDaily.tsx").read_text(encoding="utf-8")
         self.assertIn("Voice mode", page)

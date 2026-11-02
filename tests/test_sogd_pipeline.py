@@ -51,8 +51,8 @@ def _script(words: int = 4000, tail: str = "") -> dict:
         "episode_title": "SOGD — Oct 26, 2026: Lead",
         "winner": "kimi",
         "sections": [
-            {"id": "cold_open", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(first, tail)}]},
-            {"id": "story_1", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(second) + " So why does this matter to you? A short recap."}]},
+            {"id": "story_1", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(first, tail)}]},
+            {"id": "story_2", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(second) + " Reuters said it. Wait. That number is huge."}]},
             {"id": "systems_takeaway", "turns": [{"speaker": "kimi", "intensity": "normal", "text": _words(third)}]},
         ],
     }
@@ -228,8 +228,8 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertGreaterEqual(stuck["words"], 20)
         self.assertTrue(any(note["action"] == "finish_early" for note in stuck["notes"]))
         spoken = script_text(stuck["script"]).lower()
-        self.assertIn("why does this matter", spoken)
-        self.assertIn("recap", spoken)
+        self.assertIn("markets", spoken)
+        self.assertNotIn("why does this matter", spoken)
 
     def test_likeness_guard_rejects_scott_adams(self):
         from podcast_sogd import guard_script, run_daily_episode
@@ -554,7 +554,7 @@ class SogdPipelineTests(unittest.TestCase):
             "You know that feeling when a plan sounds great, but the reward points the other way? "
             "That is this story. [pause] Wait, this is wild. "
             "The rule says one thing. The bonus says another. "
-            "So why does this matter to you? A short recap. What to watch next."
+            "Wait. That is a lot of money."
         )
         self.assertFalse(plain_talk_issues(easy), plain_talk_issues(easy))
         self.assertLessEqual(grade_level(easy), 8.0)
@@ -571,9 +571,8 @@ class SogdPipelineTests(unittest.TestCase):
         def rewrite(section, found):
             calls.append(found)
             return (
-                "You can picture a scoreboard. One team gets points for talking. "
-                "The other team gets points for doing the thing. [pause] "
-                "People chase the points. So why does this matter to you? A short recap."
+                "The vote passed 52 to 48. [pause] Reuters quoted the chair. "
+                "Wait. That is a one-vote margin."
             )
 
         script = {
@@ -586,16 +585,17 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         story = done["script"]["sections"][1]["turns"][0]["text"]
         self.assertNotIn("stakeholders", story.lower())
-        self.assertIn("why does this matter", story.lower())
-        self.assertIn("recap", story.lower())
+        self.assertIn("reuters", story.lower())
+        self.assertIn("wait", story.lower())
         self.assertLessEqual(grade_level(story), 8.0)
-        self.assertEqual(sogd_delivery_speed(1.0, "normal", "story_1"), 1.0)
-        self.assertGreater(sogd_delivery_speed(1.0, "normal", "cold_open"), 1.0)
+        self.assertEqual(sogd_delivery_speed(1.0, "normal", "story_2"), 1.0)
+        self.assertGreater(sogd_delivery_speed(1.0, "normal", "story_1"), 1.0)
         self.assertGreater(
-            sogd_delivery_speed(1.0, "heated", "cold_open"),
             sogd_delivery_speed(1.0, "heated", "story_1"),
+            sogd_delivery_speed(1.0, "heated", "story_2"),
         )
-        self.assertEqual(sogd_delivery_speed(1.2, "normal", "story_1"), 1.2)
+        self.assertEqual(sogd_delivery_speed(1.2, "normal", "story_2"), 1.2)
+        self.assertEqual(sogd_delivery_speed(1.2, "normal", "story_1"), 1.24)
         prompt = style_prompt()
         self.assertIn("13", prompt)
         self.assertIn("wait, this is wild", prompt)
