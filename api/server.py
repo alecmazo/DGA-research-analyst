@@ -7178,10 +7178,18 @@ def _persist_analysis_text(
     text = ""
     if isinstance(result, dict):
         text = (result.get("report_text") or "")
-    # 2. From disk file
+    # 2. From a file this run just wrote. An older file is the previous
+    # analysis. Saving it would stamp a new generated_at on the old note.
     if not text and _md_path.exists():
         try:
-            text = _md_path.read_text()
+            if analyst.fresh_report_file(_md_path):
+                text = _md_path.read_text()
+            else:
+                print(
+                    f"⚠️  [persist] refusing cached report file for "
+                    f"{ticker}/{provider} — not written by this run",
+                    flush=True,
+                )
         except Exception:
             pass
     # 3. From in-memory streamed_text (Claude streams; Grok doesn't, so this
@@ -8989,7 +8997,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui813-20261102-sogd-news"
+WEB_BUILD_VERSION = "ui814-20261102-clear-light"
 
 
 @app.get("/api/build")
@@ -40436,7 +40444,8 @@ def podcast_daily_status(show: str, request: Request):
     _claims_or_401(request)
     _known_podcast_show(show)
     from podcast_sogd import (
-        SHOW_ID, auto_daily_default, auto_publish_default, cost_cap_usd, default_voice, normalize_voice, voice_for_day,
+        SHOW_ID, auto_daily_default, auto_publish_default, cost_cap_usd, default_voice,
+        explain_run_error, normalize_voice, voice_for_day,
     )
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo as _Zone
@@ -40479,6 +40488,7 @@ def podcast_daily_status(show: str, request: Request):
                 for key in ("started_at", "finished_at", "episode_date"):
                     if item.get(key) is not None and hasattr(item[key], "isoformat"):
                         item[key] = item[key].isoformat()
+                item["error"] = explain_run_error(item.get("error") or "")
                 runs.append(item)
             payload["runs"] = runs
             cur.execute(
@@ -40534,7 +40544,8 @@ def podcast_daily_status(show: str, request: Request):
                 for key in ("next_retry_at", "heartbeat_at"):
                     if item.get(key) is not None and hasattr(item[key], "isoformat"):
                         item[key] = item[key].isoformat()
-                from podcast_sogd import RUN_STAGES, stage_reached
+                from podcast_sogd import RUN_STAGES, explain_run_error, stage_reached
+                item["last_error"] = explain_run_error(item.get("last_error") or "")
                 item["stages"] = [
                     {"id": name, "done": stage_reached(item.get("stage_done"), name)}
                     for name in RUN_STAGES

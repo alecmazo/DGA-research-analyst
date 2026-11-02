@@ -368,6 +368,23 @@ class SogdPipelineTests(unittest.TestCase):
         self.assertIn("<th>Time</th>", page)
         self.assertIn("setInterval", page)
 
+    def test_voice_credit_stop_is_plain_and_not_retried(self):
+        from podcast_sogd import (
+            explain_run_error, failure_is_retryable, plan_tick, voice_credit_failure,
+        )
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        raw = 'xAI TTS HTTP 402: You have run out of credits or need a Grok subscription.'
+        self.assertTrue(voice_credit_failure(raw))
+        note = explain_run_error(raw)
+        self.assertNotIn("402", note)
+        self.assertIn("out of credits", note)
+        self.assertFalse(failure_is_retryable("failed", note))
+        now = datetime(2026, 10, 31, 18, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+        plan = plan_tick(now, {"status": "failed", "error": raw, "attempts": 1}, auto_daily=True)
+        self.assertEqual(plan["reason"], "voice_credits")
+        self.assertEqual(plan["action"], "sleep")
+
     def test_disclosure_and_existing_disclaimer(self):
         from podcast_engine import DEFAULT_DISCLAIMER_INTRO, DEFAULT_DISCLAIMER_OUTRO
         from podcast_sogd import DISCLOSURE, ensure_disclosure, script_text

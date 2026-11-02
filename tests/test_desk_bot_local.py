@@ -17,3 +17,7 @@ def test_desk_button_calls_local_model_and_is_labeled_gpt_oss():
     assert "call_llm" not in fn
     assert "gpt-oss-20b-finance" in fn
     assert "does not call the paid API" in fn
+    assert "/ideas" in page
+    assert "out of credits" in page
+    assert "/ideas" in route
+    assert "out of credits" in route

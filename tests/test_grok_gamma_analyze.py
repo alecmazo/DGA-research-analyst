@@ -209,6 +209,7 @@ def test_rerun_does_not_copy_the_prior_report_body():
 def test_cover_price_is_replaced_with_the_live_last():
     import DGA_analyst as analyst
     src = (
+        "**DGA CAPITAL RESEARCH** | **June 08, 2026**\n"
         "| **Current Price:** $28.10 (as of 2026-09-24) | 52-Week Range: $22–$45 |\n"
         "| **12-Month Price Target:** $40.00 | Implied Return: +42.3% |\n"
     )
@@ -217,6 +218,39 @@ def test_cover_price_is_replaced_with_the_live_last():
     assert "as of 2026-10-28" in out
     assert "$28.10" not in out
     assert "+19.4%" in out
+    assert "October 28, 2026" in out
+    assert "June 08, 2026" not in out
+
+
+def test_copied_cover_is_the_prior_run():
+    import DGA_analyst as analyst
+    prior = {"asof": "2026-06-08", "current_price": 110.27}
+    copied = "**Current Price:** $110.27 (as of 2026-06-08)\n"
+    fresh = "**Current Price:** $65.76 (as of 2026-10-30)\n"
+    assert analyst.report_repeats_prior(copied, prior, today="2026-10-31")
+    assert not analyst.report_repeats_prior(fresh, prior, today="2026-10-31")
+    assert not analyst.report_repeats_prior(copied, prior, today="2026-06-08")
+
+
+def test_prior_block_keeps_the_target_and_drops_the_old_last():
+    import DGA_analyst as analyst
+    block = analyst.format_prior_thesis_block({
+        "provider": "grok",
+        "generated_hint": "2026-06-08",
+        "rating": "Buy",
+        "price_target": 145.0,
+        "upside_pct": 31.5,
+        "current_price": 110.27,
+        "thesis": "Upside from the current $110.27 level after the June order.",
+    })
+    assert "$145.00" in block
+    assert "Buy" in block
+    assert "$110.27" not in block
+    assert "the prior market price" in block
+    assert "prior report body is not attached" in block
+    assert "report_repeats_prior" in (ROOT / "DGA_analyst.py").read_text(encoding="utf-8")
+    server = (ROOT / "api/server.py").read_text(encoding="utf-8")
+    assert "refusing cached report file" in server
 
 
 def test_newer_edgar_period_forces_a_filing_pull():
