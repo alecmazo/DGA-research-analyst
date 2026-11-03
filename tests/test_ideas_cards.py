@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from ideas_cards.catalog import DEFAULT_SETTINGS, DEFAULT_WEIGHTS
 from ideas_cards.compose import attach_watch_alerts
@@ -359,3 +360,13 @@ def test_helpers_and_merge():
     cleaned = clean_settings({"weights": {"sector": {"drawdown": 99, "relative": 1, "valuation": 1, "balance_sheet": 1}}})
     assert all(5 <= value <= 60 for value in cleaned["weights"]["sector"].values())
     assert 99 <= sum(cleaned["weights"]["sector"].values()) <= 101
+
+
+def test_ideas_page_is_an_inbox():
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "web/gp-app/src/pages/IdeasPage.tsx").read_text(encoding="utf-8")
+    css = (root / "web/gp-app/src/pages/IdeasPage.module.css").read_text(encoding="utf-8")
+    for label in ("To decide", "Watching", "Dug in", "Passed", "Previous", "Next", "How it runs"):
+        assert label in src
+    assert "grid-template-columns: minmax(280px, 380px) minmax(0, 1fr)" in css
+    assert "repeat(auto-fill, minmax(280px, 1fr))" not in css
