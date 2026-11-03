@@ -59,7 +59,7 @@ def _quote_link(symbol: str) -> dict:
 def _shell(card_type: str, key: str, title: str, scored: dict, weights: dict, as_of, **fields) -> dict:
     tuned = weights_tuned(card_type, weights)
     card = {
-        "id": f"{card_type}:{key}:{_day(as_of)}",
+        "id": f"{card_type}:{key}",
         "type": card_type,
         "subtype": "",
         "title": title,

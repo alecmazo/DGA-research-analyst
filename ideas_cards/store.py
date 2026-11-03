@@ -17,7 +17,50 @@ from ideas_cards.catalog import DEFAULT_SETTINGS, DEFAULT_WEIGHTS, PASS_CHIPS
 from ideas_cards.scoring import SCORERS, normalize_weights, tune_weights
 
 _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+_DATE_SUFFIX = re.compile(r":\d{4}-\d{2}-\d{2}$")
 _KEEP = ("report", "report_at", "watch", "pass_reason", "pass_note")
+_STATUS_RANK = {"new": 0, "passed": 1, "watching": 2, "dug_in": 3}
+
+
+def canonical_id(card_id: str) -> str:
+    """One idea, one id. A date on the end is a repeat of the same card."""
+    text = str(card_id or "").strip()
+    if _DATE_SUFFIX.search(text):
+        return _DATE_SUFFIX.sub("", text)
+    return text
+
+
+def fold_cards(group: list[dict]) -> dict:
+    """Newest numbers win. A decision already made sticks."""
+    ordered = sorted(
+        group,
+        key=lambda card: (str(card.get("as_of") or ""), _STATUS_RANK.get(card.get("status") or "new", 0)),
+    )
+    kept = None
+    for card in ordered:
+        kept = merge_card(kept, card)
+    kept["id"] = canonical_id(ordered[-1].get("id") or "")
+    return kept
+
+
+def plan_collapse(cards: list[dict]) -> list[tuple[dict, list[str]]]:
+    """Group dated copies. Return the card to keep and the ids to drop."""
+    groups: dict[str, list[dict]] = {}
+    for card in cards or []:
+        key = canonical_id(card.get("id") or "")
+        if not key:
+            continue
+        groups.setdefault(key, []).append(copy.deepcopy(card))
+    plans = []
+    for key, group in groups.items():
+        ids = [card.get("id") for card in group]
+        if ids == [key]:
+            continue
+        kept = fold_cards(group)
+        kept["id"] = key
+        drop = [card_id for card_id in ids if card_id and card_id != key]
+        plans.append((kept, drop))
+    return plans
 
 
 def merge_card(existing: dict | None, fresh: dict) -> dict:
@@ -200,18 +243,39 @@ class MemoryStore:
             rows = [card for card in rows if card.get("status") == status]
         return rows
 
+    def collapse_duplicates(self) -> int:
+        with self._lock:
+            return self._collapse_unlocked()
+
+    def _collapse_unlocked(self) -> int:
+        plans = plan_collapse(list(self._cards.values()))
+        removed = 0
+        for kept, drop in plans:
+            for old in drop:
+                self._cards.pop(old, None)
+                removed += 1
+            self._cards[kept["id"]] = kept
+            for action in self._actions:
+                if action.get("card_id") in drop:
+                    action["card_id"] = kept["id"]
+        return removed
+
     def get_card(self, card_id: str) -> dict | None:
         with self._lock:
-            card = self._cards.get(card_id)
+            self._collapse_unlocked()
+            card = self._cards.get(canonical_id(card_id))
             return copy.deepcopy(card) if card else None
 
     def upsert_cards(self, cards: list[dict]) -> int:
         with self._lock:
+            self._collapse_unlocked()
             for card in cards or []:
-                card_id = card.get("id")
+                card_id = canonical_id(card.get("id") or "")
                 if not card_id:
                     continue
-                self._cards[card_id] = merge_card(self._cards.get(card_id), card)
+                fresh = dict(card)
+                fresh["id"] = card_id
+                self._cards[card_id] = merge_card(self._cards.get(card_id), fresh)
         return len(cards or [])
 
     def runs_on(self, day) -> dict:
@@ -277,6 +341,8 @@ class MemoryStore:
         if action not in {"dig", "watch", "pass"}:
             raise ValueError(action)
         with self._lock:
+            self._collapse_unlocked()
+            card_id = canonical_id(card_id)
             card = self._cards.get(card_id)
             if not card:
                 raise KeyError(card_id)
@@ -453,29 +519,82 @@ class PostgresStore(MemoryStore):
         finally:
             conn.close()
 
-    def get_card(self, card_id: str) -> dict | None:
+    def collapse_duplicates(self) -> int:
         self._ensure()
         conn, extras = self._conn()
         try:
             with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
-                cur.execute("SELECT payload FROM ideas_cards WHERE id = %s", (card_id,))
+                cur.execute("SELECT payload FROM ideas_cards")
+                cards = [dict(row["payload"]) for row in cur.fetchall()]
+            plans = plan_collapse(cards)
+            if not plans:
+                return 0
+            removed = 0
+            with conn.cursor() as cur:
+                for kept, drop in plans:
+                    cur.execute(
+                        """
+                        INSERT INTO ideas_cards (id, card_type, as_of, title, score, status, payload, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, now())
+                        ON CONFLICT (id) DO UPDATE SET
+                            card_type = EXCLUDED.card_type,
+                            as_of = EXCLUDED.as_of,
+                            title = EXCLUDED.title,
+                            score = EXCLUDED.score,
+                            status = EXCLUDED.status,
+                            payload = EXCLUDED.payload,
+                            updated_at = now()
+                        """,
+                        (
+                            kept["id"],
+                            kept.get("type") or "",
+                            kept.get("as_of"),
+                            kept.get("title") or "",
+                            float(kept.get("score") or 0),
+                            kept.get("status") or "new",
+                            json.dumps(kept),
+                        ),
+                    )
+                    if drop:
+                        cur.execute("DELETE FROM ideas_cards WHERE id = ANY(%s)", (drop,))
+                        cur.execute(
+                            "UPDATE ideas_actions SET card_id = %s WHERE card_id = ANY(%s)",
+                            (kept["id"], drop),
+                        )
+                        removed += len(drop)
+            conn.commit()
+            return removed
+        finally:
+            conn.close()
+
+    def get_card(self, card_id: str) -> dict | None:
+        self.collapse_duplicates()
+        want = canonical_id(card_id)
+        conn, extras = self._conn()
+        try:
+            with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+                cur.execute("SELECT payload FROM ideas_cards WHERE id = %s", (want,))
                 row = cur.fetchone()
             return dict(row["payload"]) if row else None
         finally:
             conn.close()
 
     def upsert_cards(self, cards: list[dict]) -> int:
+        self.collapse_duplicates()
         self._ensure()
         conn, extras = self._conn()
         try:
             with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
                 for card in cards or []:
-                    card_id = card.get("id")
+                    card_id = canonical_id(card.get("id") or "")
                     if not card_id:
                         continue
+                    fresh = dict(card)
+                    fresh["id"] = card_id
                     cur.execute("SELECT payload FROM ideas_cards WHERE id = %s", (card_id,))
                     row = cur.fetchone()
-                    merged = merge_card(dict(row["payload"]) if row else None, card)
+                    merged = merge_card(dict(row["payload"]) if row else None, fresh)
+                    merged["id"] = card_id
                     cur.execute(
                         """
                         INSERT INTO ideas_cards (id, card_type, as_of, title, score, status, payload, updated_at)
@@ -630,6 +749,7 @@ class PostgresStore(MemoryStore):
         card = self.get_card(card_id)
         if not card:
             raise KeyError(card_id)
+        card_id = card.get("id") or canonical_id(card_id)
         if action == "dig":
             card["status"] = "dug_in"
             card["report"] = report or ""

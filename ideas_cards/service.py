@@ -20,6 +20,8 @@ def _quote_price(quotes: dict | None, ticker: str):
 
 
 def list_view(store, *, card_type: str = "", status: str = "", sort: str = "score", quotes: dict | None = None) -> list[dict]:
+    if hasattr(store, "collapse_duplicates"):
+        store.collapse_duplicates()
     settings = store.get_settings()
     cards = store.list_cards(card_type=card_type or None, status=status or None)
     move = float(settings.get("watch_move_pct") or 0.08)

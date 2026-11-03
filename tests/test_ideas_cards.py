@@ -74,6 +74,7 @@ def test_sector_needs_drawdown_and_both_horizons():
     assert card["names"][0]["ticker"] == "AAA"
     assert any(row["label"].startswith("Valuation") and row["value"] != "n/a" for row in card["key_numbers"])
     assert card["sources"][0]["url"].startswith("https://finance.yahoo.com/quote/")
+    assert card["id"] == "sector:XLK"
     assert 0 <= card["score"] <= 100
 
 
@@ -111,6 +112,7 @@ def test_weekly_cause_cap_and_overreaction():
     cards = cards_for_bundle("weekly", {"names": names}, DEFAULT_SETTINGS, date(2026, 10, 30))
     by = {card["ticker"]: card for card in cards}
     assert "TINY" not in by
+    assert by["DROP"]["id"] == "weekly:DROP"
     assert by["DROP"]["subtype"] == "guidance cut"
     assert by["TAPE"]["subtype"] == "market-wide"
     assert by["DROP"]["signals"]["overreaction"] > 50
@@ -219,6 +221,88 @@ def test_plan_tick_week_and_manual():
     assert plan_tick(friday, {"sector": {"attempts": 3, "status": "failed"}})["stage"] == "weekly"
     assert stage_open({"sector": {"status": "succeeded"}}, "sector") is False
     assert capped_sleep(5000) == 900
+
+
+def test_dated_copies_collapse_to_one_card():
+    store = MemoryStore()
+    store._cards["sector:URA:2026-10-30"] = {
+        "id": "sector:URA:2026-10-30",
+        "type": "sector",
+        "as_of": "2026-10-30",
+        "title": "Uranium old",
+        "score": 80,
+        "status": "watching",
+        "ticker": "URA",
+        "watch": {"price": 20},
+        "report": "",
+        "signals": {},
+    }
+    store._cards["sector:URA:2026-11-03"] = {
+        "id": "sector:URA:2026-11-03",
+        "type": "sector",
+        "as_of": "2026-11-03",
+        "title": "Uranium new",
+        "score": 82,
+        "status": "new",
+        "ticker": "URA",
+        "signals": {},
+    }
+    store._cards["weekly:FICO:2026-10-30"] = {
+        "id": "weekly:FICO:2026-10-30",
+        "type": "weekly",
+        "as_of": "2026-10-30",
+        "title": "FICO old",
+        "score": 50,
+        "status": "dug_in",
+        "ticker": "FICO",
+        "report": "The note",
+        "signals": {},
+    }
+    store._cards["weekly:FICO:2026-11-03"] = {
+        "id": "weekly:FICO:2026-11-03",
+        "type": "weekly",
+        "as_of": "2026-11-03",
+        "title": "FICO new",
+        "score": 60,
+        "status": "new",
+        "ticker": "FICO",
+        "signals": {},
+    }
+    rows = list_view(store)
+    by = {row["ticker"]: row for row in rows}
+    assert set(by) == {"URA", "FICO"}
+    assert by["URA"]["id"] == "sector:URA"
+    assert by["URA"]["status"] == "watching"
+    assert by["URA"]["title"] == "Uranium new"
+    assert by["URA"]["watch"]["price"] == 20
+    assert by["FICO"]["id"] == "weekly:FICO"
+    assert by["FICO"]["status"] == "dug_in"
+    assert by["FICO"]["report"] == "The note"
+    assert by["FICO"]["title"] == "FICO new"
+    assert set(store._cards) == {"sector:URA", "weekly:FICO"}
+    assert list_view(store) and store.collapse_duplicates() == 0
+
+
+def test_a_later_morning_refreshes_the_same_card():
+    store = MemoryStore()
+    bundle = {"prices": _book(), "constituents": {}}
+
+    def loader(stage, settings, day, _store):
+        if stage != "sector":
+            return []
+        return cards_for_bundle("sector", bundle, settings, day)
+
+    run_stages(store, ["sector"], date(2026, 10, 30), loader)
+    card_id = next(card["id"] for card in store.list_cards() if card.get("ticker") == "XLK")
+    assert card_id == "sector:XLK"
+    pass_card(store, card_id, "structural", "already looked")
+    run_stages(store, ["sector"], date(2026, 11, 3), loader)
+    rows = [card for card in store.list_cards() if card.get("ticker") == "XLK"]
+    assert len(rows) == 1
+    assert rows[0]["id"] == "sector:XLK"
+    assert rows[0]["status"] == "passed"
+    assert rows[0]["as_of"] == "2026-11-03"
+    assert rows[0]["pass_reason"] == "structural"
 
 
 def test_upsert_preserves_a_pass_and_does_not_duplicate():
