@@ -160,13 +160,39 @@ def test_analyze_does_not_blame_gamma_for_llm_timeout():
     hb = src.split("def call_llm_with_heartbeat")[1].split("def extract_thesis_snippet")[0]
     assert "disable Gamma" not in hb
     assert "idle_cap" in hb
-    assert "silent_cap" in hb
+    assert "grok_still_working" in hb
+    assert "never started" not in hb
+    assert "thought for" not in src.split("def call_llm_with_heartbeat")[1].split("def extract_thesis_snippet")[0]
     grok = src.split("def call_grok")[1].split("def call_claude")[0]
     assert "GROK_LIVE_SEARCH_TIMEOUT_S" in grok
     assert "_bounded_call" in grok
     gamma = src.split("def _gamma_generate")[1].split("def analyze_ticker")[0]
     assert '"folderIds": [GAMMA_FOLDER_ID] if GAMMA_FOLDER_ID else None' not in gamma
     assert 'payload["folderIds"]' in gamma
+
+
+def test_grok_long_think_is_not_a_failed_report():
+    import DGA_analyst as analyst
+
+    class Delta:
+        def __init__(self, content="", reasoning=""):
+            self.content = content
+            self.reasoning_content = reasoning
+
+    content, reasoning = analyst.grok_delta_parts(Delta("", "checking the 10-Q"))
+    assert content == ""
+    assert reasoning == "checking the 10-Q"
+    content, reasoning = analyst.grok_delta_parts(Delta("Intel is a hold."))
+    assert content == "Intel is a hold."
+    assert reasoning == ""
+    # 480s of thinking, a reasoning pulse a second ago: keep waiting.
+    assert analyst.grok_still_working(480, 0, 1, 480, 1080) is True
+    # No pulse and no words for the whole cap: stop, but that is not the 480s wall.
+    assert analyst.grok_still_working(480, 0, 480, 480, 1080) is True
+    assert analyst.grok_still_working(1080, 0, 1080, 1080, 1080) is False
+    # Words arriving: a quiet stretch stops; a live write does not.
+    assert analyst.grok_still_working(200, 5000, 1, 5, 1080) is True
+    assert analyst.grok_still_working(200, 5000, 1, 130, 1080) is False
 
 
 def test_headlines_sort_newest_first():

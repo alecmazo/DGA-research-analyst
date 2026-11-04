@@ -392,6 +392,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **News open** | **`ui813-20261102-sogd-news`** | Systems Over Goals Daily starts on the first story. No intro, no preview, no lesson, no recap. Four or five tighter stories, about 12 to 20 minutes. HiTech is unchanged. |
 | **Clear light** | **`ui814-20261102-clear-light`** | SUP_20261031_54989fbd and SUP_20261031_5d503f51. A new analysis writes the note again and keeps only the thesis and the prior target. A voice-credit stop says so in one sentence, does not retry, and Generate records the saved script. |
 | **Ideas once** | **`ui815-20261103-ideas-dedupe`** | An idea keeps one card. The next morning refreshes that card. A pass, a watch, or a dig-in stays on it. Dated copies already on the desk fold together on the next load. |
+| **Grok writes** | **`ui816-20261104-grok-write`** | Analyze no longer fails when Grok spends several minutes reading the filing before the first report word. That wait is not an error. If the report still has not started, a short write starts it. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -602,4 +603,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-03 · Agent: Cursor · Built: `ui815-20261103-ideas-dedupe` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui816-YYYYMMDD-slug`*
+*Last updated: 2026-11-04 · Agent: Cursor · Built: `ui816-20261104-grok-write` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui817-YYYYMMDD-slug`*

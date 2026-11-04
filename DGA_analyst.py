@@ -8479,12 +8479,59 @@ def set_grok_report_effort(value: str | None) -> str:
     return _grok_report_effort
 
 
+def grok_delta_parts(delta) -> tuple[str, str]:
+    """Report words and reasoning words from one streamed delta.
+
+    Reasoning is not the report. Counting it as report text is what made a
+    long think look like a blank answer.
+    """
+    if delta is None:
+        return "", ""
+
+    def field(name: str) -> str:
+        val = getattr(delta, name, None)
+        if isinstance(val, str) and val:
+            return val
+        extra = getattr(delta, "model_extra", None)
+        if isinstance(extra, dict):
+            val = extra.get(name)
+            if isinstance(val, str) and val:
+                return val
+        return ""
+
+    return field("content"), field("reasoning_content") or field("reasoning")
+
+
+def grok_still_working(
+    elapsed: float,
+    chars: int,
+    since_pulse: float,
+    since_write: float,
+    timeout_s: float,
+) -> bool:
+    """True while Grok is thinking or writing.
+
+    A long think with no report words yet is still a live call. The old
+    480-second wall treated that as "never started" and showed it on the phone.
+    """
+    elapsed = float(elapsed)
+    timeout_s = float(timeout_s)
+    if int(chars) >= 200:
+        if float(since_write) >= 120:
+            return False
+        return elapsed < timeout_s
+    if float(since_pulse) < 30:
+        return elapsed < timeout_s + 180
+    return elapsed < timeout_s
+
+
 def call_grok(system_prompt: str, user_content: str,
               model: str = GROK_MODEL,
               *,
               live_search: bool = False,
               search_from_date: str | None = None,
               on_delta=None,
+              on_activity=None,
               usage_capture=None) -> str:
     """Call xAI Grok.
 
@@ -8706,91 +8753,133 @@ def call_grok(system_prompt: str, user_content: str,
     effort = get_grok_report_effort()
     max_out = int(os.environ.get("GROK_REPORT_MAX_TOKENS") or "12000")
     max_out = max(4000, min(max_out, 20000))
-    n_chars = len(system_prompt) + len(plain)
-    print(
-        f"   [grok] chat.completions start model={model} effort={effort} "
-        f"max_tokens={max_out} prompt_chars={n_chars:,} stream=1 retries=0",
-        flush=True,
-    )
-    t_call = time.time()
-    parts: list[str] = []
-    usage_chunk = None
-    first_s = None
+    # A full filing can reason for several minutes before the first report
+    # word. Switching earlier than that threw away a finished note. Past this
+    # wait we start a short write instead of showing a failure.
+    content_wait = float(os.environ.get("GROK_CONTENT_WAIT_S") or "660")
+    content_wait = max(180.0, min(content_wait, 900.0))
 
-    def _open_stream(with_usage: bool):
-        kw = dict(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": plain},
-            ],
-            max_tokens=max_out,
-            extra_body={"reasoning_effort": effort},
-            stream=True,
-        )
-        if with_usage:
-            kw["stream_options"] = {"include_usage": True}
-        return client.chat.completions.create(**kw)
-
-    try:
-        try:
-            stream = _open_stream(True)
-        except Exception as exc:
-            if not _usage_rejected(exc):
-                raise
-            print(
-                "   [grok] stream usage flag was rejected; "
-                "this call will estimate tokens from length",
-                flush=True,
-            )
-            stream = _open_stream(False)
-        for chunk in stream:
-            if getattr(chunk, "usage", None):
-                usage_chunk = chunk
-            choices = getattr(chunk, "choices", None) or []
-            if not choices:
-                continue
-            delta = choices[0].delta
-            piece = getattr(delta, "content", None) or ""
-            if piece and first_s is None:
-                first_s = time.time() - t_call
-                print(f"   [grok] first token {first_s:.1f}s", flush=True)
-            if piece:
-                parts.append(piece)
-                if on_delta is not None:
-                    try:
-                        on_delta(piece)
-                    except Exception:
-                        pass
-    except Exception as exc:
-        got = "".join(parts)
+    def _write(content: str, effort_name: str, switch_after: float) -> str:
+        n_chars = len(system_prompt) + len(content)
         print(
-            f"   [grok] stream failed after {time.time() - t_call:.0f}s "
-            f"chars={len(got):,} ({type(exc).__name__}: {exc!s:.160})",
+            f"   [grok] chat.completions start model={model} effort={effort_name} "
+            f"max_tokens={max_out} prompt_chars={n_chars:,} stream=1",
             flush=True,
         )
-        if got and len(got) > 800 and not looks_like_unfinished_report(got):
-            print("   [grok] keeping partial report", flush=True)
-            _capture(
-                usage_chunk, text_for_estimate=got,
-                prompt_chars=len(system_prompt) + len(plain),
+        t_call = time.time()
+        parts: list[str] = []
+        usage_chunk = None
+        first_s = None
+        switched = False
+        stream = None
+
+        def _open_stream(with_usage: bool):
+            kw = dict(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": content},
+                ],
+                max_tokens=max_out,
+                extra_body={"reasoning_effort": effort_name},
+                stream=True,
             )
-            return got
-        raise TimeoutError(
-            "Grok write timed out before the report was finished. "
-            "Run Analyze again."
-        ) from exc
-    text = "".join(parts)
-    _capture(
-        usage_chunk, search_count=0, text_for_estimate=text,
-        prompt_chars=len(system_prompt) + len(plain),
+            if with_usage:
+                kw["stream_options"] = {"include_usage": True}
+            return client.chat.completions.create(**kw)
+
+        try:
+            try:
+                stream = _open_stream(True)
+            except Exception as exc:
+                if not _usage_rejected(exc):
+                    raise
+                print(
+                    "   [grok] stream usage flag was rejected; "
+                    "this call will estimate tokens from length",
+                    flush=True,
+                )
+                stream = _open_stream(False)
+            for chunk in stream:
+                if getattr(chunk, "usage", None):
+                    usage_chunk = chunk
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                delta = choices[0].delta
+                piece, reasoning = grok_delta_parts(delta)
+                if reasoning and on_activity is not None:
+                    try:
+                        on_activity()
+                    except Exception:
+                        pass
+                if piece and first_s is None:
+                    first_s = time.time() - t_call
+                    print(f"   [grok] first report word {first_s:.1f}s", flush=True)
+                if piece:
+                    parts.append(piece)
+                    if on_delta is not None:
+                        try:
+                            on_delta(piece)
+                        except Exception:
+                            pass
+                if not parts and (time.time() - t_call) >= switch_after:
+                    switched = True
+                    print(
+                        f"   [grok] no report words after {int(switch_after)}s "
+                        "— writing the report now",
+                        flush=True,
+                    )
+                    break
+        except Exception as exc:
+            got = "".join(parts)
+            print(
+                f"   [grok] stream failed after {time.time() - t_call:.0f}s "
+                f"chars={len(got):,} ({type(exc).__name__}: {exc!s:.160})",
+                flush=True,
+            )
+            if got and len(got) > 800 and not looks_like_unfinished_report(got):
+                print("   [grok] keeping partial report", flush=True)
+                _capture(
+                    usage_chunk, text_for_estimate=got,
+                    prompt_chars=len(system_prompt) + len(content),
+                )
+                return got
+            return ""
+        finally:
+            if switched and stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+        text = "".join(parts)
+        _capture(
+            usage_chunk, search_count=0, text_for_estimate=text,
+            prompt_chars=len(system_prompt) + len(content),
+        )
+        print(
+            f"   [grok] chat.completions done chars={len(text):,} "
+            f"in {time.time() - t_call:.0f}s",
+            flush=True,
+        )
+        if switched:
+            return ""
+        return text
+
+    text = _write(plain, effort, content_wait)
+    if text and len(text.strip()) >= 200:
+        return text
+    print("   [grok] starting the report at low effort", flush=True)
+    short = (
+        plain
+        + "\n\nWrite the complete DGA markdown research report now from the "
+        "SEC tables and market data in this prompt. Do not plan. Do not "
+        "describe your reasoning. The first line is the report title."
     )
-    print(
-        f"   [grok] chat.completions done chars={len(text):,} "
-        f"in {time.time() - t_call:.0f}s",
-        flush=True,
-    )
-    return text
+    text = _write(short, "low", 240)
+    if text and len(text.strip()) >= 200:
+        return text
+    raise TimeoutError("Grok did not finish the report. Run Analyze again.")
 
 
 # ============================================================================
@@ -9232,13 +9321,12 @@ def _financial_tables_look_degraded(report_md: str) -> bool:
 
 def call_llm(provider: str, system_prompt: str, user_content: str,
              *, live_search: bool = False, search_from_date: str | None = None,
-             on_delta=None, usage_capture=None,
+             on_delta=None, on_activity=None, usage_capture=None,
              should_cancel=None, local_model: str | None = None) -> str:
     """Provider-routed LLM call. ``provider`` ∈ {'grok', 'claude', 'kimi', 'volume', 'local'}.
 
-    ``on_delta`` is forwarded to providers that support streaming (Claude).
-    Grok / Kimi use non-streaming chat.completions so the callback is ignored
-    there — the report appears all at once when the call returns.
+    ``on_delta`` receives report text as it streams. ``on_activity`` fires
+    while Grok is still reasoning, before those report words exist.
 
     Kimi = volume host (Moonshot kimi-k3 by default). No live web/X search;
     analysis is grounded in the gathered user_msg (SEC/yfinance/etc.).
@@ -9294,6 +9382,7 @@ def call_llm(provider: str, system_prompt: str, user_content: str,
             system_prompt, user_content,
             live_search=live_search,
             on_delta=on_delta,
+            on_activity=on_activity,
             usage_capture=usage_capture,
         )
     raise ValueError(f"Unknown LLM provider: {provider!r}")
@@ -9330,7 +9419,9 @@ def call_llm_with_heartbeat(
         # kill threw that report away. The caps below are idle/silent, not a
         # single wall that fires while text is still arriving.
         if prov_l == "grok":
-            timeout_s = float(os.environ.get("ANALYZE_GROK_TIMEOUT_S") or "720")
+            # Think plus a short rewrite. The old 480s silent wall fired
+            # while Grok was still reading the filing and no report existed yet.
+            timeout_s = float(os.environ.get("ANALYZE_GROK_TIMEOUT_S") or "1080")
         elif prov_l == "local":
             timeout_s = float(os.environ.get("LOCAL_LLM_TIMEOUT_MS") or "300000") / 1000.0
             timeout_s = max(300.0, timeout_s)
@@ -9348,24 +9439,30 @@ def call_llm_with_heartbeat(
         expected_s = float(os.environ.get("ANALYZE_LLM_EXPECTED_S") or "240")
     expected_s = max(60.0, min(expected_s, timeout_s))
 
-    box: dict = {"text": None, "err": None, "chars": 0}
+    box: dict = {"text": None, "err": None, "chars": 0, "pulse": time.time()}
     done = threading.Event()
 
     def _work() -> None:
         def _delta_wrap(chunk: str) -> None:
             if chunk:
                 box["chars"] = int(box.get("chars") or 0) + len(chunk)
+                box["pulse"] = time.time()
             if on_delta is not None:
                 try:
                     on_delta(chunk)
                 except Exception:
                     pass
+
+        def _pulse() -> None:
+            box["pulse"] = time.time()
+
         try:
             box["text"] = call_llm(
                 provider, system_prompt, user_content,
                 live_search=live_search,
                 search_from_date=search_from_date,
                 on_delta=_delta_wrap,  # always wrap so char counter advances for progress
+                on_activity=_pulse,
                 usage_capture=usage_capture,
                 should_cancel=should_cancel,
                 local_model=local_model,
@@ -9378,10 +9475,12 @@ def call_llm_with_heartbeat(
     th = threading.Thread(target=_work, name=f"llm-{provider}", daemon=True)
     th.start()
     t0 = time.time()
+    box["pulse"] = t0
     last_chars = 0
     last_change = t0
-    # No report words yet: medium effort reasoned 340s on ADBE before writing.
-    silent_cap = 480.0 if prov_l == "grok" else float(timeout_s)
+    # Other providers still have a silent wall at their own timeout. Grok
+    # uses grok_still_working so a long read of the filing is not a failure.
+    silent_cap = float(timeout_s)
     # Words arriving: only stop if the stream goes quiet, or the whole call
     # runs past the absolute cap. Do not cut a report that is still growing.
     idle_cap = 120.0
@@ -9401,22 +9500,34 @@ def call_llm_with_heartbeat(
             last_chars = chars
             last_change = now
         idle = now - last_change
-        if chars < 200 and elapsed >= silent_cap:
-            raise TimeoutError(
-                f"{provider} thought for {int(elapsed)}s and never started "
-                f"the report. Run Analyze again."
-            )
-        if chars >= 200 and idle >= idle_cap:
-            raise TimeoutError(
-                f"{provider} stopped writing for {int(idle)}s at {chars:,} "
-                f"characters. The partial report was not saved."
-            )
-        if elapsed >= timeout_s:
-            raise TimeoutError(
-                f"{provider} LLM call exceeded {int(timeout_s)}s — "
-                f"the report was not saved. Run it again; Gamma is separate "
-                f"and is not what stalled this step."
-            )
+        since_pulse = now - float(box.get("pulse") or t0)
+        if prov_l == "grok":
+            if not grok_still_working(elapsed, chars, since_pulse, idle, timeout_s):
+                if chars >= 200:
+                    raise TimeoutError(
+                        f"Grok stopped writing for {int(idle)}s at {chars:,} "
+                        f"characters. The partial report was not saved."
+                    )
+                raise TimeoutError(
+                    "Grok did not finish the report in time. Run Analyze again."
+                )
+        else:
+            if chars < 200 and elapsed >= silent_cap:
+                raise TimeoutError(
+                    f"{provider} did not start the report within {int(elapsed)}s. "
+                    f"Run Analyze again."
+                )
+            if chars >= 200 and idle >= idle_cap:
+                raise TimeoutError(
+                    f"{provider} stopped writing for {int(idle)}s at {chars:,} "
+                    f"characters. The partial report was not saved."
+                )
+            if elapsed >= timeout_s:
+                raise TimeoutError(
+                    f"{provider} LLM call exceeded {int(timeout_s)}s — "
+                    f"the report was not saved. Run it again; Gamma is separate "
+                    f"and is not what stalled this step."
+                )
         span = max(0.01, progress_cap - progress_base)
         # Time-based toward expected, plus a boost once tokens are streaming
         time_frac = min(0.90, elapsed / expected_s)
@@ -9428,6 +9539,8 @@ def call_llm_with_heartbeat(
         if chars > 200:
             label = (f"{provider.title()} writing… {mins}m {secs:02d}s "
                      f"· {chars:,} chars")
+        elif prov_l == "grok" and since_pulse < 30 and elapsed > 20:
+            label = f"Grok is reading the filing… {mins}m {secs:02d}s"
         else:
             label = f"{provider.title()} generating… {mins}m {secs:02d}s"
         _emit_progress(on_progress, progress_step, pct, label)
