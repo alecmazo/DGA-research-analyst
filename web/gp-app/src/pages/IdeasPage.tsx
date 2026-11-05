@@ -90,7 +90,7 @@ export function IdeasPage() {
         </div>
       </header>
       <p className={styles.lede}>
-        Names whose saved fair value is still above the price, and that are down today, this week, this month, or over 6 or 12 months.
+        Below fair value, and down on at least one window. Open a name for the moves and the headlines.
       </p>
       {error && <p className={styles.error} role="alert">{error}</p>}
       <div className={styles.filters} role="group" aria-label="Drop window">
@@ -120,13 +120,6 @@ export function IdeasPage() {
       )}
       {rows && shown.length > 0 && (
         <div className={styles.list}>
-          <div className={styles.head} aria-hidden>
-            <span>Name</span>
-            <span>Price</span>
-            <span>Fair value</span>
-            <span>Upside</span>
-            {WINDOWS.map((item) => <span key={item.id}>{item.label}</span>)}
-          </div>
           {shown.map((row) => {
             const expanded = open === row.ticker
             const headlines = news[row.ticker]
@@ -139,40 +132,36 @@ export function IdeasPage() {
                   onClick={() => toggle(row.ticker)}
                 >
                   <span className={styles.name}>
-                    <span className={styles.ticker}>{row.ticker}</span>
-                    {row.name && row.name !== row.ticker && <span className={styles.company}>{row.name}</span>}
+                    <span className={styles.titleLine}>
+                      <span className={styles.ticker}>{row.ticker}</span>
+                      {row.name && row.name !== row.ticker && <span className={styles.company}>{row.name}</span>}
+                    </span>
                     <span className={styles.reason}>{row.reason}</span>
                   </span>
-                  <span className={styles.num}>{money(row.price)}</span>
-                  <span className={styles.num}>{money(row.fair_value)}</span>
-                  <span className={styles.up}>{pct(row.upside)}</span>
-                  {WINDOWS.map((item) => {
-                    const value = row.returns?.[item.id]
-                    const hit = row.windows.includes(item.id)
-                    return (
-                      <span key={item.id} className={hit ? styles.down : styles.flat}>
-                        {pct(value)}
-                      </span>
-                    )
-                  })}
+                  <span className={styles.quote}>
+                    <span className={styles.up}>{pct(row.upside)}</span>
+                    <span className={styles.px}>{money(row.price)}</span>
+                  </span>
                 </button>
                 {expanded && (
                   <div className={styles.detail}>
-                    <p className={styles.why}>{row.reason}</p>
+                    <div className={styles.stats}>
+                      {WINDOWS.map((item) => {
+                        const hit = row.windows.includes(item.id)
+                        return (
+                          <span key={item.id} className={hit ? styles.hit : styles.miss}>
+                            {item.label} {pct(row.returns?.[item.id])}
+                          </span>
+                        )
+                      })}
+                    </div>
                     <p className={styles.meta}>
                       Fair value {money(row.fair_value)}
                       {row.rating ? ` · ${row.rating}` : ''}
-                      {row.fair_as_of ? ` · target as of ${row.fair_as_of}` : ''}
+                      {row.fair_as_of ? ` · ${row.fair_as_of}` : ''}
                       {' · '}
-                      <Link to={`/financials?ticker=${encodeURIComponent(row.ticker)}`}>Open {row.ticker}</Link>
+                      <Link to={`/financials?ticker=${encodeURIComponent(row.ticker)}`}>Financials</Link>
                     </p>
-                    <div className={styles.phones}>
-                      {WINDOWS.map((item) => (
-                        <span key={item.id}>
-                          {item.label} {pct(row.returns?.[item.id])}
-                        </span>
-                      ))}
-                    </div>
                     {headlines === 'loading' && <p className={styles.meta}>Loading headlines…</p>}
                     {Array.isArray(headlines) && headlines.length === 0 && (
                       <p className={styles.meta}>No recent headlines.</p>

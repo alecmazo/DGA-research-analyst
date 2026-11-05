@@ -1,15 +1,16 @@
 .lede {
   margin: 0;
+  max-width: 52ch;
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.45;
-  max-width: 68ch;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .filters {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  max-width: 640px;
 }
 
 .filter, .filterOn {
@@ -17,9 +18,9 @@
   background: var(--bg-surface);
   color: var(--text-primary);
   border-radius: var(--r-md);
-  padding: 6px 10px;
+  padding: 4px 8px;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -31,41 +32,29 @@
 }
 
 .list {
+  max-width: 640px;
   border: 1px solid var(--border-default);
   border-radius: var(--r-md);
   background: var(--bg-surface);
-  overflow: hidden;
-}
-
-.head, .row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1.6fr) repeat(8, minmax(64px, 0.7fr));
-  gap: 8px;
-  align-items: center;
-}
-
-.head {
-  padding: 8px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  border-bottom: 1px solid var(--border-subtle);
 }
 
 .row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   text-align: left;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
-  padding: 10px 12px;
+  padding: 8px 12px;
   cursor: pointer;
 }
 
-.item + .item, .itemOpen + .item, .item + .itemOpen {
+.item + .item,
+.itemOpen + .item,
+.item + .itemOpen {
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -74,72 +63,99 @@
 }
 
 .name {
+  flex: 1;
+  min-width: 0;
+}
+
+.titleLine {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
 }
 
 .ticker {
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.03em;
 }
 
-.company, .reason, .meta {
+.company {
+  overflow: hidden;
   color: var(--text-secondary);
   font-size: 12px;
-  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .reason {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  display: block;
   overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.num, .up, .down, .flat {
-  font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  text-align: right;
+.quote {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
 }
 
 .up {
   color: var(--success-700);
+  font-size: 13px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
-.down {
+.px {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail {
+  padding: 0 12px 10px;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.hit, .miss {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hit {
+  background: var(--danger-50);
   color: var(--danger-700);
   font-weight: 700;
 }
 
-.flat {
+.miss {
   color: var(--text-tertiary);
 }
 
-.detail {
-  padding: 0 12px 14px 12px;
-}
-
-.why {
-  margin: 0 0 6px;
-  font-size: 14px;
-  line-height: 1.45;
-}
-
 .meta {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .meta a, .news a {
   color: var(--brand-700);
   font-weight: 700;
   text-decoration: none;
-}
-
-.phones {
-  display: none;
 }
 
 .news {
@@ -149,15 +165,15 @@
 }
 
 .news li {
-  padding: 8px 0;
+  padding: 6px 0;
   border-top: 1px solid var(--border-subtle);
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .news span {
   display: block;
-  margin-top: 2px;
+  margin-top: 1px;
   color: var(--text-tertiary);
   font-size: 11px;
 }
@@ -168,36 +184,12 @@
   font-size: 14px;
 }
 
-@media (max-width: 860px) {
-  .head {
-    display: none;
-  }
-
-  .row {
-    grid-template-columns: 1fr auto auto;
-  }
-
-  .num, .up, .down, .flat {
-    display: none;
-  }
-
-  .up {
-    display: block;
-  }
-
-  .phones {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    margin-bottom: 8px;
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    color: var(--text-secondary);
-  }
-}
-
 [data-theme='dark'] .filterOn,
 [data-theme='dark'] .itemOpen {
   background: var(--bg-elevated);
   color: var(--text-primary);
+}
+
+[data-theme='dark'] .hit {
+  background: var(--bg-elevated);
 }
