@@ -141,11 +141,19 @@ export function IdeasPage() {
                     <span className={styles.reason}>{row.reason}</span>
                   </span>
                   <span className={styles.quote}>
-                    <span className={`tabular ${styles.move} ${pctClass(row.returns?.day == null ? null : row.returns.day * 100)}`}>
-                      {moveText(row.returns?.day)}
-                    </span>
-                    <span className={`tabular ${styles.dollars} ${pctClass(row.day_change)}`}>
-                      {fmtUsdSigned(row.day_change, 2)}
+                    <span className={styles.pair}>
+                      <span className={styles.drop}>
+                        <span className={`tabular ${styles.move} ${pctClass(row.returns?.day == null ? null : row.returns.day * 100)}`}>
+                          {moveText(row.returns?.day)}
+                        </span>
+                        <span className={`tabular ${styles.dollars} ${pctClass(row.day_change)}`}>
+                          {fmtUsdSigned(row.day_change, 2)}
+                        </span>
+                      </span>
+                      <span className={`tabular ${styles.upside} pos`} title="Fair value upside">
+                        <span className={styles.fv}>FV</span>
+                        {moveText(row.upside)}
+                      </span>
                     </span>
                     <span className={styles.px}>{money(row.price)}</span>
                   </span>
