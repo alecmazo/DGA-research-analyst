@@ -470,6 +470,7 @@ def test_value_list_is_a_drop_below_fair_value():
     assert "today" in rows[0]["reason"] or "this week" in rows[0]["reason"]
     assert "Fair value $100.00" in rows[0]["reason"]
     assert rows[0]["upside"] > 0.2
+    assert rows[0]["day_change"] == -20.0
     assert rows[0]["name"] == "Intel"
     assert quote_day_return(-3.2) == -0.032
     assert quote_day_return(None) is None

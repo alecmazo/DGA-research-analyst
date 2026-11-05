@@ -105,11 +105,16 @@
   flex-shrink: 0;
 }
 
-.up {
-  color: var(--success-700);
+.move {
   font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.dollars {
+  font-size: 12px;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .px {

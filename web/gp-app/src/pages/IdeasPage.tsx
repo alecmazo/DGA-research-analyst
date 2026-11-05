@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Empty, Spinner } from '@/components/ui/Empty'
 import { api } from '@/lib/api'
+import { fmtPct, fmtUsdSigned, pctClass } from '@/lib/format'
 import page from './page.module.css'
 import styles from './IdeasPage.module.css'
 
@@ -12,6 +13,7 @@ type Row = {
   price: number
   fair_value: number
   upside: number
+  day_change?: number | null
   rating?: string
   fair_as_of?: string
   returns: Returns
@@ -28,11 +30,11 @@ const WINDOWS = [
   { id: 'year', label: '12 mo' },
 ]
 
-function pct(value: number | null | undefined): string {
+function moveText(value: number | null | undefined): string {
   if (value == null || Number.isNaN(Number(value))) return '—'
   const n = Number(value) * 100
-  const sign = n > 0 ? '+' : ''
-  return `${sign}${n.toFixed(1)}%`
+  const arrow = n < 0 ? '▼ ' : n > 0 ? '▲ ' : ''
+  return `${arrow}${fmtPct(n, 1)}`
 }
 
 function money(value: number): string {
@@ -139,7 +141,12 @@ export function IdeasPage() {
                     <span className={styles.reason}>{row.reason}</span>
                   </span>
                   <span className={styles.quote}>
-                    <span className={styles.up}>{pct(row.upside)}</span>
+                    <span className={`tabular ${styles.move} ${pctClass(row.returns?.day == null ? null : row.returns.day * 100)}`}>
+                      {moveText(row.returns?.day)}
+                    </span>
+                    <span className={`tabular ${styles.dollars} ${pctClass(row.day_change)}`}>
+                      {fmtUsdSigned(row.day_change, 2)}
+                    </span>
                     <span className={styles.px}>{money(row.price)}</span>
                   </span>
                 </button>
@@ -150,7 +157,7 @@ export function IdeasPage() {
                         const hit = row.windows.includes(item.id)
                         return (
                           <span key={item.id} className={hit ? styles.hit : styles.miss}>
-                            {item.label} {pct(row.returns?.[item.id])}
+                            {item.label} {moveText(row.returns?.[item.id])}
                           </span>
                         )
                       })}

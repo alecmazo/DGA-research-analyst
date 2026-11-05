@@ -72,12 +72,17 @@ def build_value_rows(names: list[dict] | None) -> list[dict]:
         if not hits:
             continue
         upside = fair / price - 1.0
+        day = returns.get("day")
+        day_change = None
+        if day is not None and day > -1:
+            day_change = round(price * day / (1.0 + day), 2)
         rows.append({
             "ticker": ticker,
             "name": str(name.get("name") or ticker),
             "price": round(price, 4),
             "fair_value": round(fair, 4),
             "upside": round(upside, 4),
+            "day_change": day_change,
             "rating": str(name.get("rating") or ""),
             "fair_as_of": str(name.get("fair_as_of") or "")[:10],
             "returns": {key: (None if val is None else round(float(val), 4)) for key, val in returns.items()},
