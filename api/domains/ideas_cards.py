@@ -114,11 +114,127 @@ def _polish(cards, settings, remaining):
     return polish(cards, settings, remaining)
 
 
+def _report_targets() -> list[dict]:
+    """Saved 12-month targets. That number is the fair value on this list."""
+    try:
+        import api.server as server
+        if not server._PSYCOPG2_OK or not os.environ.get("DATABASE_URL"):
+            return []
+        with server._fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT r.ticker, r.rating, r.price_target, r.generated_at, m.name
+                  FROM analyst_reports r
+                  LEFT JOIN security_meta m ON upper(m.symbol) = upper(r.ticker)
+                 WHERE r.archived IS NOT TRUE
+                   AND r.price_target IS NOT NULL
+                   AND r.price_target > 0
+                """
+            )
+            rows = []
+            for ticker, rating, target, generated, name in cur.fetchall():
+                stamp = generated.isoformat() if hasattr(generated, "isoformat") else str(generated or "")
+                rows.append({
+                    "ticker": str(ticker or "").upper(),
+                    "rating": rating or "",
+                    "fair_value": float(target),
+                    "fair_as_of": stamp[:10],
+                    "name": name or ticker or "",
+                })
+            return rows
+    except Exception as exc:
+        print(f"[ideas] report targets: {exc!s:.160}", flush=True)
+        return []
+
+
+def _history(tickers: list[str]) -> dict[str, list]:
+    if not tickers:
+        return {}
+    try:
+        import api.server as server
+        with server._fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT upper(symbol), d, close
+                  FROM price_history
+                 WHERE upper(symbol) = ANY(%s)
+                   AND d >= CURRENT_DATE - INTERVAL '420 days'
+                 ORDER BY upper(symbol), d
+                """,
+                (tickers,),
+            )
+            books: dict[str, list] = {}
+            for symbol, day, close in cur.fetchall():
+                if close is None:
+                    continue
+                stamp = day.isoformat() if hasattr(day, "isoformat") else str(day)[:10]
+                books.setdefault(symbol, []).append({"date": stamp, "close": float(close)})
+            return books
+    except Exception as exc:
+        print(f"[ideas] price history: {exc!s:.160}", flush=True)
+        return {}
+
+
+def _equity_rows() -> list[dict]:
+    from ideas_cards.value_list import build_value_rows, quote_day_return
+
+    reports = _report_targets()
+    tickers = [row["ticker"] for row in reports if row.get("ticker")]
+    history = _history(tickers)
+    quotes = _quotes(tickers)
+    names = []
+    for row in reports:
+        ticker = row["ticker"]
+        quote = quotes.get(ticker) or quotes.get(ticker.upper()) or {}
+        if not isinstance(quote, dict):
+            quote = {}
+        bars = history.get(ticker) or []
+        price = quote.get("price")
+        if price is None and bars:
+            price = bars[-1]["close"]
+        names.append({
+            **row,
+            "price": price,
+            "bars": bars,
+            "day_return": quote_day_return(quote.get("pct_change")),
+        })
+    return build_value_rows(names)
+
+
 def create_router(claims_fn) -> APIRouter:
     router = APIRouter(prefix="/api/ideas", tags=["ideas"])
 
     def gp(request: Request) -> dict:
         return _gp(claims_fn, request)
+
+    @router.get("/equities")
+    def equities(request: Request):
+        gp(request)
+        rows = _equity_rows()
+        return {"rows": rows, "count": len(rows)}
+
+    @router.get("/equities/{ticker}/headlines")
+    def equity_headlines(ticker: str, request: Request):
+        gp(request)
+        tk = (ticker or "").strip().upper()
+        if not tk:
+            raise HTTPException(400, "Ticker required")
+        try:
+            from api.domains.yahoo_finance_news import fetch_yahoo_finance_news
+            items = fetch_yahoo_finance_news(tk, limit=6) or []
+        except Exception:
+            items = []
+        headlines = []
+        for item in items:
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            headlines.append({
+                "title": title,
+                "url": str(item.get("link") or ""),
+                "publisher": str(item.get("publisher") or ""),
+            })
+        return {"ticker": tk, "headlines": headlines}
 
     @router.get("/cards")
     def cards(request: Request, type: str = "", status: str = "", sort: str = "score"):

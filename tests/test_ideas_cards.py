@@ -443,3 +443,36 @@ def test_helpers_and_merge():
     cleaned = clean_settings({"weights": {"sector": {"drawdown": 99, "relative": 1, "valuation": 1, "balance_sheet": 1}}})
     assert all(5 <= value <= 60 for value in cleaned["weights"]["sector"].values())
     assert 99 <= sum(cleaned["weights"]["sector"].values()) <= 101
+
+
+def test_value_list_is_a_drop_below_fair_value():
+    from pathlib import Path
+
+    from ideas_cards.value_list import build_value_rows, quote_day_return
+
+    down = _bars([100] * 250 + [80], start=date(2025, 1, 2))
+    flat = _bars([100] * 30, start=date(2025, 1, 2))
+    rows = build_value_rows([
+        {
+            "ticker": "intc",
+            "name": "Intel",
+            "fair_value": 100,
+            "price": 80,
+            "bars": down,
+            "rating": "Buy",
+            "fair_as_of": "2026-10-01",
+        },
+        {"ticker": "RICH", "fair_value": 70, "price": 80, "bars": down},
+        {"ticker": "FLAT", "fair_value": 120, "price": 100, "bars": flat, "day_return": -0.001},
+    ])
+    assert [row["ticker"] for row in rows] == ["INTC"]
+    assert "week" in rows[0]["windows"]
+    assert "today" in rows[0]["reason"] or "this week" in rows[0]["reason"]
+    assert "Fair value $100.00" in rows[0]["reason"]
+    assert rows[0]["upside"] > 0.2
+    assert rows[0]["name"] == "Intel"
+    assert quote_day_return(-3.2) == -0.032
+    assert quote_day_return(None) is None
+    page = Path(__file__).resolve().parents[1].joinpath("web/gp-app/src/pages/IdeasPage.tsx").read_text()
+    assert "/api/ideas/equities" in page
+    assert "headlines" in page
