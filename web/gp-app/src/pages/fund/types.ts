@@ -60,6 +60,8 @@ export type FundPosition = {
   total_qty?: number
   avg_cost?: number | null
   last_price?: number | null
+  /** Day move versus the prior close, in percent points. */
+  day_change_pct?: number | null
   market_value?: number | null
   unrealized_gain?: number | null
   market_weight_pct?: number | null

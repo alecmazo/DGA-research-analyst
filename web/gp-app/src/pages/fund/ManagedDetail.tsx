@@ -5,6 +5,7 @@ import { Empty, Spinner } from '@/components/ui/Empty'
 import { api, downloadAuth } from '@/lib/api'
 import { fmtPct, fmtUsd, pctClass } from '@/lib/format'
 import { AccountChrome, type BookOption } from './AccountChrome'
+import { portfolioYtdPath } from './positionDay'
 import { FundPositionsTable } from './FundPositionsTable'
 import { RebalanceCard } from './RebalanceCard'
 import { AllTimePerfChart, MonthlyBarChart } from './perfCharts'
@@ -318,6 +319,10 @@ export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: P
     () => rollupYtd(monthlyChartPts, ytdGrain),
     [monthlyChartPts, ytdGrain],
   )
+  const ytdThrough = useMemo(
+    () => portfolioYtdPath(ytdDisplayPts),
+    [ytdDisplayPts],
+  )
 
   const attr = [...(ytd?.attribution || [])].sort(
     (a, b) => (b.contribution_pct || 0) - (a.contribution_pct || 0),
@@ -611,6 +616,12 @@ export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: P
                       <th className="tabular">End balance</th>
                       <th className="tabular">Portfolio</th>
                       <th className="tabular">{bench}</th>
+                      <th className="tabular" title="Portfolio return from January through this period">
+                        Portfolio YTD
+                      </th>
+                      <th className="tabular" title={`${bench} return from January through this period`}>
+                        {bench} YTD
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -636,6 +647,12 @@ export function ManagedDetail({ fundId, detail, onBack, books, onSelectBook }: P
                           </td>
                           <td className={`tabular ${pctClass(bRet)}`}>
                             {fmtPct(bRet)}
+                          </td>
+                          <td className={`tabular ${pctClass(ytdThrough[i])}`}>
+                            {m.skip ? 'N/A' : fmtPct(ytdThrough[i])}
+                          </td>
+                          <td className={`tabular ${pctClass(m.spy_ytd_pct)}`}>
+                            {fmtPct(m.spy_ytd_pct)}
                           </td>
                         </tr>
                       )
