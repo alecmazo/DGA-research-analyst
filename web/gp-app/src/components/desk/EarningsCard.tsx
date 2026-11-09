@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { api, type EarningsCardPayload } from '@/lib/api'
 import { fmtPct, fmtPx, pctClass } from '@/lib/format'
+import { grokEarningsHref } from '@/lib/grokEarnings'
 import { openReportWindow } from '@/lib/openWindows'
 import styles from './EarningsCard.module.css'
 
@@ -354,11 +355,21 @@ export function EarningsCard({ ticker, onClose }: Props) {
                 </>
               )}
 
-              {/* IR / press-release deep links */}
-              {(data.investor_relations_url ||
-                data.press_release_url ||
-                data.website_url) && (
-                <div className={styles.irLinks}>
+              <div className={styles.irLinks}>
+                <a
+                  className={styles.irLink}
+                  href={grokEarningsHref(ticker, ev.name)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Opens grok.com on this computer and asks the free Grok to dissect this company's latest earnings release."
+                >
+                  ↗ Dissect on Grok
+                  <span className={styles.irSub}>free Grok on this computer</span>
+                </a>
+                {(data.investor_relations_url ||
+                  data.press_release_url ||
+                  data.website_url) && (
+                  <>
                   {data.investor_relations_url && (
                     <a
                       className={styles.irLink}
@@ -391,8 +402,9 @@ export function EarningsCard({ ticker, onClose }: Props) {
                       ↗ Company website
                     </a>
                   )}
-                </div>
-              )}
+                  </>
+                )}
+              </div>
 
               <div className={styles.disclaimer}>
                 Not investment advice. EPS from Nasdaq/Yahoo · call Q&amp;A

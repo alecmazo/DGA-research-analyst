@@ -14,6 +14,7 @@ import { getCachedUser } from '@/lib/auth'
 import { readQuote } from '@/lib/quoteBook'
 import { fmtPct, fmtPx, pctClass, printEngineName, relativeTime, scrubPrintEngineNames } from '@/lib/format'
 import { shortModelLabel } from '@/lib/localOllama'
+import { grokEarningsHref } from '@/lib/grokEarnings'
 import { renderMd, reportMarkdown } from '@/lib/md'
 import { PrintLetterhead } from '@/components/brand/PrintLetterhead'
 import styles from './ReportPage.module.css'
@@ -576,6 +577,17 @@ export function ReportPage() {
                 </button>
               )}
             </div>
+          )}
+          {ticker && (
+            <a
+              className={styles.grokOut}
+              href={grokEarningsHref(ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Opens grok.com on this computer and asks the free Grok to dissect this company's latest earnings release."
+            >
+              Dissect on Grok
+            </a>
           )}
           <select
             className={styles.exportPull}
