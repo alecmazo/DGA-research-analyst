@@ -48,3 +48,35 @@ def test_thursday_report_is_still_on_mondays_list(monkeypatch):
     assert kept["HHH"]["days_until"] == -4
     assert kept["HHH"]["beat"] == "beat"
     assert md.earnings_chip_label(-4, kept["HHH"]["beat"], kept["HHH"]["eps_actual"]) == "BEAT"
+
+
+def test_same_day_headline_turns_a_scheduled_chip_into_beat_or_miss():
+    """CEG was still 'today' and IBRX was still '1d' after the release.
+    Nasdaq had no EPS yet. The headline is the beat or the miss."""
+    from datetime import datetime
+    today = date(2026, 11, 9)
+    morning = datetime(2026, 11, 9, 14, 31, tzinfo=ZoneInfo("UTC"))
+    ceg = [{
+        "title": "CEG Q3 Earnings Beat on Calpine, Strong Commercial Performance",
+        "published": morning,
+    }, {
+        "title": "Constellation Energy Shares Rise Over 4% as Q3 Earnings Beat Estimates",
+        "published": morning,
+    }]
+    ibrx = [{
+        "title": "ImmunityBio (IBRX) Reports Q3 Loss, Misses Revenue Estimates",
+        "published": datetime(2026, 11, 9, 12, 50, tzinfo=ZoneInfo("UTC")),
+    }]
+    old = [{
+        "title": "Constellation Energy Q2 Earnings Beat Estimates",
+        "published": datetime(2026, 8, 6, 12, 0, tzinfo=ZoneInfo("UTC")),
+    }]
+    assert md.headline_print_verdict(ceg, today) == "beat"
+    assert md.headline_print_verdict(ibrx, today) == "miss"
+    assert md.headline_print_verdict(old, today) is None
+    scheduled = {"date": "2026-11-10", "eps_actual": None, "beat": None}
+    stamped = md.apply_headline_print(scheduled, today, "miss")
+    assert stamped["date"] == "2026-11-09"
+    assert stamped["beat"] == "miss"
+    assert md.earnings_chip_label(0, stamped["beat"], None, reported=True) == "MISS"
+    assert md.earnings_chip_label(0, "beat", None, reported=True) == "BEAT"

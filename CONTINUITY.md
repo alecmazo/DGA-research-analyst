@@ -398,6 +398,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Ideas day** | **`ui819-20261105-ideas-day`** | The Ideas row shows today’s move the way the watchlist does: red with a down arrow, in dollars and in percent. |
 | **Ideas upside** | **`ui820-20261105-ideas-upside`** | Next to today’s drop, the Ideas row shows the fair-value upside in green. |
 | **Earn chip** | **`ui821-20261109-earn-chip`** | Watchlist earnings chips use the Pacific day, and a print stays for seven days. HHH reported Nov 5 and had fallen off by Monday; the chip now says BEAT. |
+| **Earn live** | **`ui822-20261109-earn-live`** | A same-day release becomes BEAT or MISS from the headline when Nasdaq still has no EPS. CEG and IBRX no longer stay on TODAY or 1d after the print. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -608,4 +609,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-09 · Agent: Cursor · Built: `ui821-20261109-earn-chip` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui822-YYYYMMDD-slug`*
+*Last updated: 2026-11-09 · Agent: Cursor · Built: `ui822-20261109-earn-live` · Railway workspace Pro (from Hobby) · Phone OTA: `mobile-ui36-swipe-commit-20261028` · Next: `ui823-YYYYMMDD-slug`*

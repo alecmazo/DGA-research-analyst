@@ -4310,6 +4310,71 @@ _WL_EARNINGS_CACHE: dict = {"ts": 0.0, "raw": {}}  # symbol -> raw event
 _WL_EARNINGS_TTL_S = 3600
 _WL_EARNINGS_BG_LOCK = threading.Lock()
 _WL_EARNINGS_BG_RUNNING = False
+_WL_PRINT_CACHE: dict = {}  # symbol -> (epoch, verdict or "")
+_WL_PRINT_TTL_S = 5 * 60
+
+
+def _same_day_prints(symbols: list[str], today) -> dict[str, str]:
+    """Beat/miss from today's headlines when Nasdaq has not filled the EPS yet.
+
+    Only names due today or tomorrow. Cached five minutes. A slow feed does
+    not hold the watchlist.
+    """
+    from market_data import headline_print_verdict
+
+    now = time.time()
+    out: dict[str, str] = {}
+    need: list[str] = []
+    for tk in symbols:
+        hit = _WL_PRINT_CACHE.get(tk)
+        if hit and now - hit[0] < _WL_PRINT_TTL_S:
+            if hit[1]:
+                out[tk] = hit[1]
+            continue
+        need.append(tk)
+    if not need:
+        return out
+    need = need[:12]
+
+    def one(tk: str):
+        try:
+            from api.domains.yahoo_finance_news import fetch_yahoo_finance_news
+            items = fetch_yahoo_finance_news(tk, limit=8) or []
+        except Exception:
+            items = []
+        return tk, headline_print_verdict(items, today) or ""
+
+    found: dict[str, str] = {}
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutTimeout
+        pool = ThreadPoolExecutor(max_workers=min(6, len(need)))
+        try:
+            futs = {pool.submit(one, tk): tk for tk in need}
+            try:
+                for fut in as_completed(futs, timeout=2.5):
+                    tk, verdict = fut.result()
+                    found[tk] = verdict
+            except FutTimeout:
+                for fut, tk in futs.items():
+                    if fut.done():
+                        try:
+                            tk, verdict = fut.result()
+                            found[tk] = verdict
+                        except Exception:
+                            found[tk] = ""
+        finally:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)
+    except Exception as exc:
+        print(f"[watchlist] same-day print lookup failed: {exc!s:.140}", flush=True)
+    for tk in need:
+        verdict = found.get(tk, "")
+        _WL_PRINT_CACHE[tk] = (now, verdict)
+        if verdict:
+            out[tk] = verdict
+    return out
 
 
 def _format_watchlist_earnings(tickers: list[str], raw: dict) -> dict[str, dict]:
@@ -4326,6 +4391,19 @@ def _format_watchlist_earnings(tickers: list[str], raw: dict) -> dict[str, dict]
     if not want or not raw:
         return out
     today = earnings_as_of()
+    pending = []
+    for tk in want:
+        ev = raw.get(tk)
+        if not ev or ev.get("eps_actual") is not None:
+            continue
+        ev_day = str(ev.get("date") or "")[:10]
+        try:
+            du = (_date.fromisoformat(ev_day) - today).days if len(ev_day) == 10 else 99
+        except ValueError:
+            du = 99
+        if du in (0, 1):
+            pending.append(tk)
+    prints = _same_day_prints(pending, today) if pending else {}
     for tk in want:
         ev = raw.get(tk)
         if not ev:
@@ -4340,6 +4418,11 @@ def _format_watchlist_earnings(tickers: list[str], raw: dict) -> dict[str, dict]
         # A print older than a week is no longer the chip. Fourteen days ahead.
         if du < -7 or du > 14:
             continue
+        verdict = prints.get(tk)
+        if verdict and ev.get("eps_actual") is None and du in (0, 1):
+            from market_data import apply_headline_print
+            ev = apply_headline_print(ev, today, verdict)
+            du = 0
         tlabel = (ev.get("time") or "").lower()
         if "pre" in tlabel:
             sess = "BMO"
@@ -4356,7 +4439,10 @@ def _format_watchlist_earnings(tickers: list[str], raw: dict) -> dict[str, dict]
             "eps_forecast": ev.get("eps_forecast") or "",
             "eps_actual": ev.get("eps_actual"),
             "beat": ev.get("beat") or "",
-            "label": earnings_chip_label(du, ev.get("beat"), ev.get("eps_actual")),
+            "label": earnings_chip_label(
+                du, ev.get("beat"), ev.get("eps_actual"),
+                reported=bool(ev.get("reported")),
+            ),
         }
     return out
 
@@ -9009,7 +9095,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui821-20261109-earn-chip"
+WEB_BUILD_VERSION = "ui822-20261109-earn-live"
 
 
 @app.get("/api/build")

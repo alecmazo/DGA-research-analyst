@@ -19,6 +19,7 @@ option row: {strike, option_type('call'|'put'), bid, ask, last, iv, delta,
 from __future__ import annotations
 
 import os
+import re
 import time
 
 
@@ -1061,14 +1062,85 @@ def earnings_as_of(now=None):
     return now.astimezone(pacific).date()
 
 
-def earnings_chip_label(days_until: int, beat: str | None, eps_actual) -> str:
+_BEAT_TITLE = re.compile(
+    r"\bearnings?\s+beat\b"
+    r"|\bq[1-4]\s+(?:\w+\s+){0,4}beat\b"
+    r"|\bbeat(?:s|en)?\s+(?:estimates|expectations|consensus)\b",
+    re.I,
+)
+_MISS_TITLE = re.compile(
+    r"\bearnings?\s+miss(?:es|ed)?\b"
+    r"|\bmiss(?:es|ed)?\s+(?:estimates|expectations|consensus|revenue)\b"
+    r"|\brevenue\s+miss(?:es|ed)?\b"
+    r"|\breports?\s+q[1-4]\s+loss\b",
+    re.I,
+)
+_REPORTED_TITLE = re.compile(
+    r"\bearnings call transcript\b"
+    r"|\bearnings snapshot\b"
+    r"|\breports q[1-4] (?:earnings|results)\b",
+    re.I,
+)
+
+
+def headline_print_verdict(items, today) -> str | None:
+    """'beat', 'miss', or 'reported' when today's headlines say the print is out.
+
+    Nasdaq often leaves the calendar on tomorrow, or on today with no EPS,
+    for hours after the release. The headline is the same-day signal.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    pacific = ZoneInfo("America/Los_Angeles")
+    beat = miss = reported = False
+    for item in items or []:
+        when = item.get("published") if isinstance(item, dict) else None
+        title = (item.get("title") if isinstance(item, dict) else "") or ""
+        if not isinstance(when, datetime):
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=ZoneInfo("UTC"))
+        if when.astimezone(pacific).date() != today:
+            continue
+        if _BEAT_TITLE.search(title):
+            beat = True
+        elif _MISS_TITLE.search(title):
+            miss = True
+        elif _REPORTED_TITLE.search(title):
+            reported = True
+    if beat and not miss:
+        return "beat"
+    if miss and not beat:
+        return "miss"
+    if beat or miss or reported:
+        return "reported"
+    return None
+
+
+def apply_headline_print(event: dict, today, verdict: str | None) -> dict:
+    """Move a still-scheduled chip onto today's print."""
+    if not event or not verdict:
+        return event
+    if event.get("eps_actual") is not None:
+        return event
+    out = dict(event)
+    out["date"] = today.isoformat()
+    out["reported"] = True
+    if verdict in ("beat", "miss"):
+        out["beat"] = verdict
+    return out
+
+
+def earnings_chip_label(days_until: int, beat: str | None, eps_actual, *,
+                        reported: bool = False) -> str:
     """What the watchlist chip says.
 
-    A print that is already in (actual EPS on the calendar) says BEAT, MISS,
-    or RPT. A future date stays a countdown.
+    A print that is already in says BEAT, MISS, or RPT. That is either an
+    actual EPS on the calendar, or a same-day headline that the release is out.
+    A future date with no print stays a countdown.
     """
-    reported = days_until <= 0 and eps_actual is not None
-    if reported:
+    known = reported or (int(days_until) <= 0 and eps_actual is not None)
+    if known:
         if beat == "beat":
             return "BEAT"
         if beat == "miss":
