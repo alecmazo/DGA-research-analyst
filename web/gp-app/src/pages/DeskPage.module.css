@@ -276,6 +276,18 @@
   border-color: #cbd5e1;
 }
 
+.earnBeat {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #6ee7b7;
+}
+
+.earnMiss {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
 @keyframes earnPulse {
   0%,
   100% {

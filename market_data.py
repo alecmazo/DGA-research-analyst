@@ -1045,6 +1045,44 @@ _EARNINGS_CACHE: dict = {}   # day_iso -> (epoch, rows)
 _EARNINGS_TTL_S = 4 * 3600
 
 
+def earnings_as_of(now=None):
+    """The earnings day the desk is on. Pacific, not the UTC date.
+
+    Railway's clock is UTC. After 4pm Pacific that date is already tomorrow,
+    so a chip said TODAY for a print that had not happened yet.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    pacific = ZoneInfo("America/Los_Angeles")
+    if now is None:
+        now = datetime.now(pacific)
+    elif getattr(now, "tzinfo", None) is None:
+        now = now.replace(tzinfo=ZoneInfo("UTC"))
+    return now.astimezone(pacific).date()
+
+
+def earnings_chip_label(days_until: int, beat: str | None, eps_actual) -> str:
+    """What the watchlist chip says.
+
+    A print that is already in (actual EPS on the calendar) says BEAT, MISS,
+    or RPT. A future date stays a countdown.
+    """
+    reported = days_until <= 0 and eps_actual is not None
+    if reported:
+        if beat == "beat":
+            return "BEAT"
+        if beat == "miss":
+            return "MISS"
+        return "RPT"
+    if days_until == 0:
+        return "TODAY"
+    if days_until == -1:
+        return "YDAY"
+    if days_until > 0:
+        return f"{days_until}d"
+    return f"{abs(int(days_until))}d ago"
+
+
 def nasdaq_earnings_for_day(day_iso: str) -> list[dict]:
     """Earnings scheduled for a calendar day (YYYY-MM-DD) from Nasdaq's free API.
 
@@ -1085,12 +1123,17 @@ def nasdaq_earnings_for_day(day_iso: str) -> list[dict]:
                 sym = (row.get("symbol") or "").strip().upper()
                 if not sym:
                     continue
+                actual = _parse_money_num(row.get("eps"))
+                forecast = _parse_money_num(row.get("epsForecast"))
                 rows_out.append({
                     "symbol": sym,
                     "name": row.get("name") or "",
                     "time": row.get("time") or "",  # time-pre-market / time-after-hours / …
                     "fiscal_quarter": row.get("fiscalQuarterEnding") or "",
                     "eps_forecast": row.get("epsForecast") or "",
+                    "eps_actual": actual,
+                    "surprise_pct": _parse_money_num(row.get("surprise")),
+                    "beat": _beat_from_eps(actual, forecast),
                     "date": day_iso,
                 })
             ok = True
@@ -1107,7 +1150,8 @@ def nasdaq_earnings_for_day(day_iso: str) -> list[dict]:
 
 def earnings_upcoming(symbols: list[str] | None = None,
                       horizon_days: int = 5,
-                      include_past_days: int = 1) -> dict[str, dict]:
+                      include_past_days: int = 1,
+                      today=None) -> dict[str, dict]:
     """Map SYMBOL → next earnings event within the horizon window.
 
     Window: [today - include_past_days, today + horizon_days] (calendar days).
@@ -1119,7 +1163,7 @@ def earnings_upcoming(symbols: list[str] | None = None,
         want = {str(s).strip().upper() for s in symbols if s}
         if not want:
             return {}
-    today = date.today()
+    today = today or earnings_as_of()
     start = today - timedelta(days=max(0, int(include_past_days)))
     end = today + timedelta(days=max(0, int(horizon_days)))
     days: list[str] = []
@@ -1139,7 +1183,9 @@ def earnings_upcoming(symbols: list[str] | None = None,
         try:
             futs = {pool.submit(nasdaq_earnings_for_day, day): day for day in days}
             try:
-                for fut in as_completed(futs, timeout=8):
+                # A Thursday print has to still be in Monday's list. Give the
+                # extra past days time to return instead of dropping them.
+                for fut in as_completed(futs, timeout=14):
                     day = futs[fut]
                     try:
                         day_rows.append((day, fut.result() or []))
@@ -1555,7 +1601,7 @@ def earnings_card(symbol: str, horizon_days: int = 5,
         reported_d = _parse_reported_date(row.get("date_reported"))
         if reported_d is None:
             return False
-        today = date.today()
+        today = earnings_as_of()
         age = (today - reported_d).days
         if age < 0 or age > 14:
             return False

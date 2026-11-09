@@ -4313,19 +4313,33 @@ _WL_EARNINGS_BG_RUNNING = False
 
 
 def _format_watchlist_earnings(tickers: list[str], raw: dict) -> dict[str, dict]:
-    """Shape Nasdaq/upcoming events into the chip payload the Desk UI expects."""
+    """Shape Nasdaq/upcoming events into the chip payload the Desk UI expects.
+
+    days_until is recomputed from the event date and today's Pacific date.
+    A cached map must not keep yesterday's TODAY.
+    """
+    from datetime import date as _date
+    from market_data import earnings_as_of, earnings_chip_label
+
     out: dict[str, dict] = {}
     want = {str(t).strip().upper() for t in (tickers or []) if t}
     if not want or not raw:
         return out
+    today = earnings_as_of()
     for tk in want:
         ev = raw.get(tk)
         if not ev:
             continue
+        ev_day = str(ev.get("date") or "")[:10]
         try:
-            du = int(ev.get("days_until") if ev.get("days_until") is not None else 0)
+            du = (_date.fromisoformat(ev_day) - today).days if len(ev_day) == 10 else int(
+                ev.get("days_until") if ev.get("days_until") is not None else 0
+            )
         except (TypeError, ValueError):
             du = 0
+        # A print older than a week is no longer the chip. Fourteen days ahead.
+        if du < -7 or du > 14:
+            continue
         tlabel = (ev.get("time") or "").lower()
         if "pre" in tlabel:
             sess = "BMO"
@@ -4340,17 +4354,15 @@ def _format_watchlist_earnings(tickers: list[str], raw: dict) -> dict[str, dict]
             "time": ev.get("time") or "",
             "fiscal_quarter": ev.get("fiscal_quarter") or "",
             "eps_forecast": ev.get("eps_forecast") or "",
-            "label": (
-                "TODAY" if du == 0 else
-                ("YDAY" if du == -1 else
-                 (f"{du}d" if du > 0 else f"{abs(du)}d ago"))
-            ),
+            "eps_actual": ev.get("eps_actual"),
+            "beat": ev.get("beat") or "",
+            "label": earnings_chip_label(du, ev.get("beat"), ev.get("eps_actual")),
         }
     return out
 
 
 def _fetch_earnings_calendar_raw(horizon_days: int = 14,
-                                 include_past_days: int = 2) -> dict:
+                                 include_past_days: int = 7) -> dict:
     """Full SYMBOL→event map for the horizon window (cached by market_data)."""
     from market_data import earnings_upcoming
     return earnings_upcoming(
@@ -4364,7 +4376,7 @@ def _bg_refresh_watchlist_earnings() -> None:
     """Background calendar fill so the next watchlist paint has chips."""
     global _WL_EARNINGS_BG_RUNNING
     try:
-        raw = _fetch_earnings_calendar_raw(14, 2)
+        raw = _fetch_earnings_calendar_raw(14, 7)
         if raw:
             _WL_EARNINGS_CACHE["raw"] = raw
             _WL_EARNINGS_CACHE["ts"] = time.time()
@@ -4395,7 +4407,7 @@ def _watchlist_earnings_for(tickers: list[str],
         return _format_watchlist_earnings(tickers, cached_raw)
 
     raw = _run_with_timeout(
-        lambda: _fetch_earnings_calendar_raw(14, 2),
+        lambda: _fetch_earnings_calendar_raw(14, 7),
         budget_s,
         default=None,
     )
@@ -8997,7 +9009,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui820-20261105-ideas-upside"
+WEB_BUILD_VERSION = "ui821-20261109-earn-chip"
 
 
 @app.get("/api/build")

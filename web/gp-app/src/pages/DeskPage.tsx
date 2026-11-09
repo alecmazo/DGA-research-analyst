@@ -32,6 +32,8 @@ import { openReportWindow } from '@/lib/openWindows'
 import styles from './DeskPage.module.css'
 
 function earnChipClass(earn: WatchlistEarning): string {
+  if (earn.label === 'BEAT') return `${styles.earn} ${styles.earnBeat}`
+  if (earn.label === 'MISS') return `${styles.earn} ${styles.earnMiss}`
   const du = earn.days_until
   if (du === 0) return `${styles.earn} ${styles.earnToday}`
   if (du != null && du < 0) return `${styles.earn} ${styles.earnPast}`
@@ -51,14 +53,18 @@ function earnLabel(earn: WatchlistEarning): string {
 
 function earnTitle(tk: string, earn: WatchlistEarning): string {
   const du = earn.days_until
-  const when =
-    du === 0
+  const reported = earn.label === 'BEAT' || earn.label === 'MISS' || earn.label === 'RPT'
+  const when = reported
+    ? 'reported'
+    : du === 0
       ? 'TODAY'
       : du === -1
         ? 'yesterday'
         : du != null && du > 0
           ? `in ${du}d`
-          : ''
+          : du != null && du < 0
+            ? `${Math.abs(du)}d ago`
+            : ''
   const bits = [
     `Earnings ${when}`,
     earn.date ? `(${earn.date})` : '',
