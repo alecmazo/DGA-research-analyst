@@ -15,9 +15,9 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 if not (ROOT / "podcast_intel").is_dir():
@@ -29,7 +29,11 @@ if str(ROOT) not in sys.path:
 
 HOST = "127.0.0.1"
 PORT = 8766
-OLLAMA = "http://127.0.0.1:11434/api/tags"
+# The portal is a public https page. Chrome will not let it read Ollama's own
+# port. These two routes are forwarded, with the private-network header Chrome
+# requires. Nothing else on Ollama is exposed.
+OLLAMA_ROOT = "http://127.0.0.1:11434"
+PROXY_PATHS = frozenset({"/api/tags", "/api/chat"})
 ORIGINS = "https://portfolio.dgacapital.com,http://localhost:5173,http://127.0.0.1:5173"
 ALLOWED = {
     "https://portfolio.dgacapital.com",
@@ -38,9 +42,13 @@ ALLOWED = {
 }
 
 
+def upstream(path: str) -> str:
+    return OLLAMA_ROOT.rstrip("/") + path
+
+
 def serve_ok() -> bool:
     try:
-        with urlopen(OLLAMA, timeout=2) as res:
+        with urlopen(upstream("/api/tags"), timeout=2) as res:
             return getattr(res, "status", 200) == 200
     except (URLError, TimeoutError, OSError):
         return False
@@ -167,8 +175,68 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):  # noqa: N802
         self._preflight()
 
+    def _cors(self) -> None:
+        origin = self.headers.get("Origin") or ""
+        if origin in ALLOWED:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+
+    def _proxy(self, method: str, body: bytes) -> None:
+        path = self.path.split("?", 1)[0]
+        origin = self.headers.get("Origin") or ""
+        if origin and origin not in ALLOWED:
+            self._send(403, {"ok": False, "message": "Origin not allowed"})
+            return
+        if path not in PROXY_PATHS:
+            self._send(404, {"ok": False, "message": "Not found"})
+            return
+        req = Request(upstream(self.path), data=body or None, method=method)
+        ctype = self.headers.get("Content-Type")
+        if ctype:
+            req.add_header("Content-Type", ctype)
+        timeout = 20 if path == "/api/tags" else 600
+        try:
+            resp = urlopen(req, timeout=timeout)
+        except HTTPError as exc:
+            payload = exc.read()
+            self.send_response(exc.code)
+            self.send_header("Content-Type", exc.headers.get("Content-Type") or "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self._cors()
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        except (URLError, TimeoutError, OSError):
+            self._send(502, {"ok": False, "message": "Ollama did not answer on this Mac."})
+            return
+        self.send_response(getattr(resp, "status", 200))
+        self.send_header(
+            "Content-Type",
+            resp.headers.get("Content-Type") or "application/json",
+        )
+        self.send_header("Transfer-Encoding", "chunked")
+        self._cors()
+        self.end_headers()
+        try:
+            while True:
+                chunk = resp.read(16384)
+                if not chunk:
+                    break
+                self.wfile.write(f"{len(chunk):X}\r\n".encode("ascii"))
+                self.wfile.write(chunk)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
     def do_GET(self):  # noqa: N802
         path = self.path.split("?", 1)[0]
+        if path in PROXY_PATHS:
+            self._proxy("GET", b"")
+            return
         if path == "/health":
             self._send(200, {"ok": True, "ollama": serve_ok()})
             return
@@ -180,8 +248,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         path = self.path.split("?", 1)[0]
         length = int(self.headers.get("Content-Length") or 0)
-        if length:
-            self.rfile.read(min(length, 4096))
+        cap = 20_000_000 if path in PROXY_PATHS else 4096
+        body = self.rfile.read(min(length, cap)) if length else b""
+        if path in PROXY_PATHS:
+            self._proxy("POST", body)
+            return
         if path != "/ensure":
             self._send(404, {"ok": False, "message": "Not found"})
             return

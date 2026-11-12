@@ -111,6 +111,10 @@ export function selectedLocalModel(): string {
 }
 
 const OFFLINE = 'Local model offline – start Ollama'
+const HELPER_RESTART =
+  'Ollama is running on this Mac. Pull the portal repo here and restart scripts/ollama_desk.py, then click the pill again.'
+const HELPER_DOWN =
+  'Ollama is running in the app, but this page cannot read port 11434. Start the desk helper on this Mac (port 8766), then click the pill again.'
 
 /** A one-line apology is not a research note. */
 export function isModelRefusal(text: string): boolean {
@@ -168,14 +172,59 @@ type ChatOpts = {
   onProgress?: (state: { textChars: number; thinkingChars: number }) => void
 }
 
+async function readTags(): Promise<{ models?: { name?: string }[] } | 'helper-stale' | null> {
+  const load = async (url: string) => {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) })
+    if (!res.ok) return null
+    return (await res.json()) as { models?: { name?: string }[] }
+  }
+  try {
+    const direct = await load(`${OLLAMA_HOST}/api/tags`)
+    if (direct) return direct
+  } catch {
+    /* Chrome blocks the public site from Ollama's own port. */
+  }
+  try {
+    const res = await fetch(`${OLLAMA_DESK}/api/tags`, { signal: AbortSignal.timeout(2000) })
+    if (res.ok) return (await res.json()) as { models?: { name?: string }[] }
+    if (res.status === 404) return 'helper-stale'
+  } catch {
+    /* The desk helper is not running. */
+  }
+  return null
+}
+
+async function helperOllama(): Promise<boolean | null> {
+  try {
+    const res = await fetch(`${OLLAMA_DESK}/health`, { signal: AbortSignal.timeout(800) })
+    if (!res.ok) return null
+    const data = (await res.json()) as { ollama?: boolean }
+    return Boolean(data.ollama)
+  } catch {
+    return null
+  }
+}
+
 export async function ollamaStatus(model?: string): Promise<OllamaState> {
   const done = trackLoad('ollama://tags')
+  const wanted = (model || '').trim()
+  const fail = (message: string, modelName = wanted || selectedLocalModel()): OllamaState => {
+    done('fail', message)
+    return { ok: false, message, model: modelName }
+  }
   try {
-    const res = await fetch(`${OLLAMA_HOST}/api/tags`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = (await res.json()) as { models?: { name?: string }[] }
+    const data = await readTags()
+    if (data === 'helper-stale') {
+      const up = await helperOllama()
+      return fail(up ? HELPER_RESTART : HELPER_DOWN)
+    }
+    if (!data) {
+      const up = await helperOllama()
+      if (up === true) return fail(HELPER_RESTART)
+      if (up === null) return fail(HELPER_DOWN)
+      return fail(OFFLINE)
+    }
     const names = (data.models || []).map((m) => m.name || '')
-    const wanted = (model || '').trim()
     if (!wanted) {
       done('ok')
       return { ok: true, message: 'ok', model: '' }
@@ -184,25 +233,20 @@ export async function ollamaStatus(model?: string): Promise<OllamaState> {
       (n) => n === wanted || n.startsWith(`${wanted}:`) || wanted.startsWith(`${n}:`),
     )
     if (!present) {
-      done('fail', `Local model ${wanted} is not installed in Ollama`)
-      return { ok: false, message: `Local model ${wanted} is not installed in Ollama`, model: wanted }
+      return fail(`Local model ${wanted} is not installed in Ollama`, wanted)
     }
     done('ok')
     return { ok: true, message: 'ok', model: wanted }
   } catch {
-    done('fail', OFFLINE)
-    return { ok: false, message: OFFLINE, model: selectedLocalModel() }
+    return fail(OFFLINE)
   }
 }
 
 /** Browser-side ping. The API on Railway cannot see Ollama on this Mac. */
 export async function ollamaReachable(): Promise<boolean> {
-  try {
-    const res = await fetch(`${OLLAMA_HOST}/api/tags`, { signal: AbortSignal.timeout(1500) })
-    return res.ok
-  } catch {
-    return false
-  }
+  const tags = await readTags()
+  if (tags && tags !== 'helper-stale') return true
+  return (await helperOllama()) === true
 }
 
 /** This browser is the Mac that runs Ollama or the desk helper.
@@ -263,33 +307,63 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
   const started = performance.now()
   const finish = trackLoad('ollama://chat')
   try {
-  let res: Response
+  const chatBody = JSON.stringify({
+    model: opts.model || selectedLocalModel(),
+    stream: true,
+    think: opts.think === false ? false : (opts.think || 'low'),
+    messages: [
+      { role: 'system', content: opts.system || '' },
+      { role: 'user', content: opts.user || '' },
+    ],
+    options: {
+      num_ctx: opts.numCtx || 32768,
+      num_predict: opts.maxTokens || 12000,
+      temperature: 0.2,
+    },
+  })
+  const chatInit = {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: chatBody,
+  }
+  let res: Response | null = null
   try {
-    res = await fetch(`${OLLAMA_HOST}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: opts.model || selectedLocalModel(),
-        stream: true,
-        think: opts.think === false ? false : (opts.think || 'low'),
-        messages: [
-          { role: 'system', content: opts.system || '' },
-          { role: 'user', content: opts.user || '' },
-        ],
-        options: {
-          num_ctx: opts.numCtx || 32768,
-          num_predict: opts.maxTokens || 12000,
-          temperature: 0.2,
-        },
-      }),
-    })
+    const via = await fetch(`${OLLAMA_DESK}/api/chat`, chatInit)
+    if (via.status === 404) {
+      const detail = await via.clone().text()
+      let helperMiss = false
+      try {
+        const data = JSON.parse(detail) as { ok?: boolean; message?: string; error?: string }
+        helperMiss = data.ok === false && data.message === 'Not found' && !data.error
+      } catch {
+        helperMiss = false
+      }
+      if (!helperMiss) res = via
+    } else {
+      res = via
+    }
   } catch {
-    throw new Error(OFFLINE)
+    res = null
+  }
+  if (!res) {
+    try {
+      res = await fetch(`${OLLAMA_HOST}/api/chat`, chatInit)
+    } catch {
+      throw new Error(HELPER_DOWN)
+    }
   }
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => '')
     if (res.status === 403) throw new Error('Ollama blocked this site. Restart Ollama.')
     if (res.status === 404) {
+      let helperMiss = false
+      try {
+        const data = JSON.parse(detail) as { ok?: boolean; message?: string; error?: string }
+        helperMiss = data.ok === false && data.message === 'Not found' && !data.error
+      } catch {
+        helperMiss = false
+      }
+      if (helperMiss) throw new Error(HELPER_RESTART)
       throw new Error(`Ollama does not have ${opts.model || 'that model'}.`)
     }
     throw new Error(detail.trim().slice(0, 180) || OFFLINE)
