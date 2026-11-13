@@ -9095,7 +9095,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui825-20261112-ollama-see"
+WEB_BUILD_VERSION = "ui826-20261113-cap-gains"
 
 
 @app.get("/api/build")
@@ -31415,6 +31415,23 @@ _AGENTIC_SYSTEM_DEFAULT = (
     "The app turns that block into a one-click 'Build in Builder' button "
     "(pre-filled with the account's size), so always include it when "
     "recommending an allocation.\n\n"
+    "CAPITAL GAINS TAX (binding on any portfolio balance adjustment):\n"
+    "You MUST take capital gains taxes into consideration when recommending "
+    "trims, sales, rotations, or rebalances.\n"
+    "• Taxable accounts: use unrealized P&L from get_portfolio_holdings and "
+    "compute a rough tax cost of realizing the gain (prefer long-term vs "
+    "short-term when holding period is known; otherwise state the assumption). "
+    "Weigh after-tax expected value of the move, not just the pretax idea.\n"
+    "• Example: selling a name up ~100% to rotate into a similar-industry "
+    "substitute that may move similarly — show whether the rotation is still "
+    "the right call AFTER tax. If the tax drag eats the edge, say wait until "
+    "early next calendar year (or hold) and why. If it remains right after "
+    "tax, say that explicitly with the math.\n"
+    "• Tax-advantaged accounts (IRA, Roth, 401k, etc.): state that realizing "
+    "gains inside the account does not create a current capital-gains tax "
+    "event, so tax is not the binding constraint there.\n"
+    "• This is a math question — use compute; never recommend a taxable "
+    "rotation that ignores tax cost.\n\n"
     "Be concise and decisive: lead with the answer, then the evidence. This "
     "is internal analysis, not investment advice."
 )
