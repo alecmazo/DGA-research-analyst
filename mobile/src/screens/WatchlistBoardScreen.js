@@ -18,6 +18,38 @@ import {
   absChange, companyName, PctPill, SectionHeader,
 } from './marketsShared';
 
+function renderQuoteRow(row, i, n, t, s, setPeekTk) {
+  const { tk, q, pct, chg, name } = row;
+  const up = pct == null || isNaN(pct) ? null : pct >= 0;
+  const chgColor = up == null ? t.textDim : up ? t.pillUpFg : t.pillDownFg;
+  return (
+    <View key={tk} style={i < n - 1 ? s.divider : null}>
+      <TouchableOpacity
+        style={s.wlRow}
+        activeOpacity={0.7}
+        onPress={() => {
+          haptics.onPressPrimary?.();
+          setPeekTk(tk);
+        }}
+      >
+        <View style={s.wlLeft}>
+          <Text style={s.wlTk} numberOfLines={1}>{tk}</Text>
+          {!!name && (
+            <Text style={s.wlName} numberOfLines={1}>{name}</Text>
+          )}
+        </View>
+        <View style={s.wlRight}>
+          <Text style={s.wlPx}>{fmtPx(q.price)}</Text>
+          <View style={s.wlChgRow}>
+            <Text style={[s.wlChg, { color: chgColor }]}>{fmtChg(chg)}</Text>
+            <PctPill p={pct} t={t} caret={false} />
+          </View>
+        </View>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function WatchlistBoardScreen({ navigation }) {
   const { theme: t } = useTheme();
   const s = useMemo(() => makeStyles(t), [t]);
@@ -175,6 +207,24 @@ export default function WatchlistBoardScreen({ navigation }) {
       .sort((a, b) => b.abs - a.abs);
   }, [watch]);
 
+  const ownedSet = useMemo(() => {
+    const s = new Set();
+    for (const tk of (watch && watch.owned_tickers) || []) {
+      const u = String(tk || '').toUpperCase();
+      if (u) s.add(u);
+    }
+    return s;
+  }, [watch]);
+
+  const trackingRows = useMemo(
+    () => watchRows.filter((r) => !ownedSet.has(String(r.tk || '').toUpperCase())),
+    [watchRows, ownedSet],
+  );
+  const ownedRows = useMemo(
+    () => watchRows.filter((r) => ownedSet.has(String(r.tk || '').toUpperCase())),
+    [watchRows, ownedSet],
+  );
+
   const cardStyle = [s.card, { backgroundColor: t.surface, borderColor: t.border, borderWidth: 1 }];
 
   const quotesRefreshBtn = (
@@ -216,41 +266,35 @@ export default function WatchlistBoardScreen({ navigation }) {
         >Watchlist</SectionHeader>
         {watch == null ? (
           <Card style={cardStyle}><ActivityIndicator color={t.primary} /></Card>
-        ) : !watchRows.length ? (
-          <Card style={cardStyle}><Text style={s.muted}>No tickers followed yet.</Text></Card>
+        ) : !trackingRows.length ? (
+          <Card style={cardStyle}>
+            <Text style={s.muted}>
+              {ownedRows.length
+                ? 'Every followed name is in an account.'
+                : 'No tickers followed yet.'}
+            </Text>
+          </Card>
         ) : (
           <Card style={[...cardStyle, { padding: 0 }]}>
-            {watchRows.map((row, i) => {
-              const { tk, q, pct, chg, name } = row;
-              const up = pct == null || isNaN(pct) ? null : pct >= 0;
-              const chgColor = up == null ? t.textDim : up ? t.pillUpFg : t.pillDownFg;
-              return (
-                <View key={tk} style={i < watchRows.length - 1 ? s.divider : null}>
-                  <TouchableOpacity
-                    style={s.wlRow}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      haptics.onPressPrimary?.();
-                      setPeekTk(tk);
-                    }}
-                  >
-                    <View style={s.wlLeft}>
-                      <Text style={s.wlTk} numberOfLines={1}>{tk}</Text>
-                      {!!name && (
-                        <Text style={s.wlName} numberOfLines={1}>{name}</Text>
-                      )}
-                    </View>
-                    <View style={s.wlRight}>
-                      <Text style={s.wlPx}>{fmtPx(q.price)}</Text>
-                      <View style={s.wlChgRow}>
-                        <Text style={[s.wlChg, { color: chgColor }]}>{fmtChg(chg)}</Text>
-                        <PctPill p={pct} t={t} caret={false} />
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
+            {trackingRows.map((row, i) => renderQuoteRow(row, i, trackingRows.length, t, s, setPeekTk))}
+          </Card>
+        )}
+
+        <SectionHeader
+          icon="briefcase-outline"
+          t={t}
+          s={s}
+          right={<Text style={s.asOf}>in an account</Text>}
+        >Owned Companies</SectionHeader>
+        {watch == null ? (
+          <Card style={cardStyle}><ActivityIndicator color={t.primary} /></Card>
+        ) : !ownedRows.length ? (
+          <Card style={cardStyle}>
+            <Text style={s.muted}>No followed name is in an account.</Text>
+          </Card>
+        ) : (
+          <Card style={[...cardStyle, { padding: 0 }]}>
+            {ownedRows.map((row, i) => renderQuoteRow(row, i, ownedRows.length, t, s, setPeekTk))}
           </Card>
         )}
 

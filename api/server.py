@@ -5137,8 +5137,17 @@ def watchlist_get(request: Request, fresh: bool = False, lite: bool = False):
           f"priced={len(priced)} earn={len(earnings_map)} ytd={ytd_n} "
           f"{elapsed_ms}ms phases={phases}",
           flush=True)
+    owned_tickers: list[str] = []
+    if tickers_sorted:
+        try:
+            held = set(_held_tickers(demo=_request_is_demo(request)))
+            owned_tickers = owned_on_watchlist(tickers_sorted, held)
+        except Exception as e:
+            print(f"[watchlist] owned book failed: {e!s:.120}", flush=True)
+            owned_tickers = []
     payload = {
         "tickers": tickers_sorted,
+        "owned_tickers": owned_tickers,
         "quotes": quotes,
         "earnings": earnings_map,
         "reports": reports_map,
@@ -9095,7 +9104,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui827-20261116-agentic-400"
+WEB_BUILD_VERSION = "ui828-20261116-owned"
 
 
 @app.get("/api/build")
@@ -38967,6 +38976,24 @@ def _options_live_book_sql(demo: bool = False) -> str:
         "AND f.fund_type IN ('managed_account', 'lp_fund') "
         f"AND {pred}"
     )
+
+
+def owned_on_watchlist(tickers: list[str], held: set[str]) -> list[str]:
+    """Watchlist names that are open in any live account.
+
+    The desk and phone show these on Owned Companies and leave the watchlist
+    as names we follow but do not hold. Membership stays on the watchlist so
+    a sale puts the name back on the tracking list.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in tickers or []:
+        tk = (raw or "").strip().upper()
+        if not tk or tk in seen or tk not in held:
+            continue
+        seen.add(tk)
+        out.append(tk)
+    return out
 
 
 def _held_tickers(demo: bool = False) -> list:

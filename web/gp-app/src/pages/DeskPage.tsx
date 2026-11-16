@@ -115,6 +115,7 @@ function writeWlCache(w: WatchlistResponse) {
       WL_CACHE_KEY,
       JSON.stringify({
         tickers: w.tickers || [],
+        owned_tickers: w.owned_tickers || [],
         quotes: w.quotes || {},
         earnings: w.earnings || {},
         reports: w.reports || {},
@@ -378,6 +379,24 @@ export function DeskPage() {
       })
   }, [wl, wlSort, wlDir])
 
+  const ownedSet = useMemo(() => {
+    const s = new Set<string>()
+    for (const tk of wl?.owned_tickers || []) {
+      const u = String(tk || '').toUpperCase()
+      if (u) s.add(u)
+    }
+    return s
+  }, [wl?.owned_tickers])
+
+  const trackingRows = useMemo(
+    () => rows.filter((r) => !ownedSet.has(String(r.tk).toUpperCase())),
+    [rows, ownedSet],
+  )
+  const ownedRows = useMemo(
+    () => rows.filter((r) => ownedSet.has(String(r.tk).toUpperCase())),
+    [rows, ownedSet],
+  )
+
   const clickWlSort = (col: WlSort) => {
     if (wlSort === col) {
       setWlDir((d) => (d === 'desc' ? 'asc' : 'desc'))
@@ -450,7 +469,7 @@ export function DeskPage() {
     {
       id: 'watchlist' as const,
       title: 'Watchlist',
-      badge: rows.length || '0',
+      badge: trackingRows.length || '0',
       flush: true,
       action: (
         <span className={styles.meta}>
@@ -540,23 +559,25 @@ export function DeskPage() {
                 </tr>
               </thead>
               <tbody>
-                {loading && !rows.length && (
+                {loading && !trackingRows.length && (
                   <tr>
                     <td colSpan={5} className={styles.empty}>
                       Loading quotes…
                     </td>
                   </tr>
                 )}
-                {!loading && !rows.length && (
+                {!loading && !trackingRows.length && (
                   <tr>
                     <td colSpan={5} className={styles.empty}>
                       {err
                         ? 'Could not load the list — click Refresh.'
-                        : 'No tickers yet — add a name above.'}
+                        : ownedRows.length
+                          ? 'Every followed name is in an account.'
+                          : 'No tickers yet — add a name above.'}
                     </td>
                   </tr>
                 )}
-                {rows.map(({ tk, q, pct, ytd, ytdStatus, earn }) => (
+                {trackingRows.map(({ tk, q, pct, ytd, ytdStatus, earn }) => (
                   <tr
                     key={tk}
                     className={`${styles.rowClick} ${earn ? styles.rowEarn : ''}`}
@@ -628,6 +649,118 @@ export function DeskPage() {
                         className={styles.rm}
                         onClick={() => void removeTicker(tk)}
                         title="Remove"
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'owned' as const,
+      title: 'Owned Companies',
+      badge: ownedRows.length || '0',
+      flush: true,
+      action: <span className={styles.meta}>In an account</span>,
+      children: (
+        <div className={styles.fillCol}>
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th className={`tabular ${styles.colLast}`}>Last</th>
+                  <th className={`tabular ${styles.colDay}`}>Day %</th>
+                  <th className={`tabular ${styles.colYtd}`}>YTD</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {!ownedRows.length && (
+                  <tr>
+                    <td colSpan={5} className={styles.empty}>
+                      No followed name is in an account.
+                    </td>
+                  </tr>
+                )}
+                {ownedRows.map(({ tk, q, pct, ytd, ytdStatus, earn }) => (
+                  <tr
+                    key={tk}
+                    className={`${styles.rowClick} ${earn ? styles.rowEarn : ''}`}
+                    onClick={() => openPeek(tk)}
+                  >
+                    <td>
+                      <div className={styles.tkCell}>
+                        <button
+                          type="button"
+                          className={styles.tkBtn}
+                          title={`Snapshot for ${tk}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openPeek(tk)
+                          }}
+                        >
+                          <span className={styles.tk}>{tk}</span>
+                        </button>
+                        {earn && (
+                          <button
+                            type="button"
+                            className={earnChipClass(earn)}
+                            title={earnTitle(tk, earn)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setEarningsTk(tk)
+                            }}
+                          >
+                            {earnLabel(earn)}
+                          </button>
+                        )}
+                        {(wl?.reports?.[tk] || earn?.has_report) && (
+                          <button
+                            type="button"
+                            className={styles.rptBtn}
+                            title={`Open saved report for ${tk}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openReportWindow(tk, 'grok')
+                            }}
+                          >
+                            Rpt
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className={`tabular ${styles.colLast}`}>{fmtPx(q.price)}</td>
+                    <td className={`tabular ${styles.colDay} ${pctClass(pct)}`}>
+                      {fmtPct(pct)}
+                    </td>
+                    <td
+                      className={`tabular ${styles.colYtd} ${pctClass(ytd)}`}
+                      title={
+                        ytdStatus === 'ipo'
+                          ? 'Return since IPO'
+                          : 'Calendar year-to-date %'
+                      }
+                    >
+                      <span className={styles.ytdNum}>{fmtPct(ytd)}</span>
+                      {ytdStatus === 'ipo' && (
+                        <span className={styles.ytdMark}>IPO</span>
+                      )}
+                    </td>
+                    <td className={styles.actions}>
+                      <button
+                        type="button"
+                        className={styles.rm}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void removeTicker(tk)
+                        }}
+                        title="Remove from followed names"
                       >
                         ×
                       </button>
@@ -742,12 +875,18 @@ export function DeskPage() {
         <ul className={styles.health}>
           <li>
             <span>Watchlist</span>
-            <strong>{rows.length} names</strong>
+            <strong>{trackingRows.length} names</strong>
+          </li>
+          <li>
+            <span>Owned</span>
+            <strong>{ownedRows.length}</strong>
           </li>
           <li>
             <span>Quotes</span>
             <strong>
-              {rows.filter((r) => r.q.price != null).length}/{rows.length || 0}
+              {trackingRows.filter((r) => r.q.price != null).length +
+                ownedRows.filter((r) => r.q.price != null).length}
+              /{trackingRows.length + ownedRows.length || 0}
             </strong>
           </li>
           <li>
@@ -769,7 +908,7 @@ export function DeskPage() {
 
       <DeskBoard
         title="Desk"
-        meta="Watchlist, reports, and the morning note"
+        meta="Watchlist, owned companies, reports, and the morning note"
         onRefresh={() => void refreshDesk()}
         refreshBusy={refreshing}
         cards={cards}

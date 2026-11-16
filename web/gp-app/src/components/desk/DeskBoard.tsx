@@ -12,6 +12,7 @@ import { TicketStatusDot } from './TicketStatusDot'
 
 export type CardId =
   | 'watchlist'
+  | 'owned'
   | 'pulse'
   | 'reports'
   | 'analyst'
@@ -45,23 +46,24 @@ const LEGACY_KEYS = [
 
 /**
  * First visit, and the Desk menu's Daily layout.
- * Open: watchlist, reports, analyst, analyze.
+ * Open: watchlist, owned companies directly under it, reports, analyst, analyze.
  * Collapsed on the next row: morning note, headlines, movers, strategist.
  * Parked as collapsed strips: wire, health.
  * Load flow and repo flow live on Settings → Flows.
  * A saved layout is never replaced by this map.
  */
 const DEFAULT_LAYOUT: DeskLayoutMap = {
-  watchlist: { x: 0, y: 0, w: 400, h: 440 },
+  watchlist: { x: 0, y: 0, w: 400, h: 360 },
+  owned: { x: 0, y: 376, w: 400, h: 220 },
   reports: { x: 416, y: 0, w: 370, h: 440 },
   analyst: { x: 802, y: 0, w: 370, h: 248 },
   analyze: { x: 802, y: 264, w: 370, h: 176 },
-  pulse: { x: 0, y: 456, w: 281, h: 280, collapsed: true },
-  mpulse: { x: 297, y: 456, w: 281, h: 400, collapsed: true },
-  movers: { x: 594, y: 456, w: 281, h: 420, collapsed: true },
-  strategist: { x: 891, y: 456, w: 281, h: 380, collapsed: true },
-  wire: { x: 0, y: 516, w: 1172, h: 380, collapsed: true },
-  health: { x: 0, y: 576, w: 1172, h: 180, collapsed: true },
+  pulse: { x: 0, y: 612, w: 281, h: 280, collapsed: true },
+  mpulse: { x: 297, y: 612, w: 281, h: 400, collapsed: true },
+  movers: { x: 594, y: 612, w: 281, h: 420, collapsed: true },
+  strategist: { x: 891, y: 612, w: 281, h: 380, collapsed: true },
+  wire: { x: 0, y: 672, w: 1172, h: 380, collapsed: true },
+  health: { x: 0, y: 732, w: 1172, h: 180, collapsed: true },
 }
 
 function cloneLayout(map: DeskLayoutMap): DeskLayoutMap {
@@ -157,6 +159,29 @@ function dropRemovedCard(saved: Partial<DeskLayoutMap> | null, id: string): Part
   return next
 }
 
+function overlapsX(a: CardLayout, b: CardLayout): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x
+}
+
+/** Put Owned Companies under the watchlist and push that column down. */
+function seatOwnedUnderWatchlist(map: DeskLayoutMap): void {
+  const wl = map.watchlist
+  if (!isLayout(wl)) return
+  const gap = 16
+  const h = DEFAULT_LAYOUT.owned.h
+  const y = wl.y + wl.h + gap
+  const block = h + gap
+  for (const id of ALL_IDS) {
+    if (id === 'owned' || id === 'watchlist') continue
+    const L = map[id]
+    if (!isLayout(L)) continue
+    if (overlapsX(L, wl) && L.y >= wl.y + wl.h - 4) {
+      map[id] = { ...L, y: L.y + block }
+    }
+  }
+  map.owned = { x: wl.x, y, w: wl.w, h, collapsed: false }
+}
+
 function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
   saved = dropRemovedCard(dropRemovedCard(withoutMarkets(saved), 'repo'), 'flow')
   if (!saved) return cloneLayout(DEFAULT_LAYOUT)
@@ -180,11 +205,18 @@ function mergeLayout(saved: Partial<DeskLayoutMap> | null): DeskLayoutMap {
     }
   }
 
-  // New cards stack below cards the user already placed.
-  // Do not measure the defaults of cards that are still missing.
-  if (kept.length && missing.length) {
-    let y = maxBottom(kept, out) + 16
-    for (const id of missing) {
+  // Owned Companies always opens directly under the watchlist the first time
+  // it appears. Other new cards still stack under the board the user saved.
+  if (!isLayout(saved.owned)) {
+    seatOwnedUnderWatchlist(out)
+  }
+  const stack = missing.filter((id) => id !== 'owned')
+  if (kept.length && stack.length) {
+    const anchored = ALL_IDS.filter(
+      (id) => id === 'owned' || isLayout(saved[id]),
+    )
+    let y = maxBottom(anchored, out) + 16
+    for (const id of stack) {
       const def = DEFAULT_LAYOUT[id]
       out[id] = { ...def, x: def.x, y, w: def.w, h: def.h }
       y += def.h + 16

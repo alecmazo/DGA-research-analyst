@@ -413,6 +413,8 @@ export type WatchlistEarning = {
 
 export type WatchlistResponse = {
   tickers: string[]
+  /** Followed names that are open in any live account. */
+  owned_tickers?: string[]
   quotes: Record<string, Quote>
   earnings?: Record<string, WatchlistEarning>
   reports?: Record<string, boolean>
