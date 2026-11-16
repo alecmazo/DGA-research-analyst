@@ -9095,7 +9095,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui826-20261113-cap-gains"
+WEB_BUILD_VERSION = "ui827-20261116-agentic-400"
 
 
 @app.get("/api/build")
@@ -30759,7 +30759,10 @@ _AGENTIC_TOOLS = [
         },
     },
     {
-        "name": "web_search",
+        # Named search_web — NOT web_search. xAI injects a native web_search tool
+        # on Grok; a duplicate name returns HTTP 400 "Duplicate tool names: web_search"
+        # and the OpenAI SDK only surfaces "Error code: 400" (SUP_20261116_da98d330).
+        "name": "search_web",
         "description": "Search the live web + X (Twitter) for current information past "
                        "the model's training cutoff — breaking news, recent analyst "
                        "moves, macro prints, management changes. Powered by Grok live "
@@ -30828,6 +30831,32 @@ _AGENTIC_TOOLS = [
         },
     },
 ]
+
+
+def _llm_api_error_text(exc: BaseException, *, limit: int = 280) -> str:
+    """Human-readable LLM API failure text.
+
+    xAI often returns ``{"code": "...", "error": "<string>"}``. The OpenAI SDK
+    then sets ``str(exc)`` to only ``Error code: 400`` and puts the useful
+    string on ``exc.body``. Prefer that body so the desk shows a real reason
+    (SUP_20261116_da98d330).
+    """
+    body = getattr(exc, "body", None)
+    if isinstance(body, str) and body.strip():
+        return body.strip()[:limit]
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, str) and err.strip():
+            return err.strip()[:limit]
+        if isinstance(err, dict):
+            msg = err.get("message") or err.get("error") or err.get("code")
+            if msg:
+                return str(msg).strip()[:limit]
+        code = body.get("code")
+        if code:
+            return f"{code}"[:limit]
+    msg = (getattr(exc, "message", None) or str(exc) or type(exc).__name__).strip()
+    return msg[:limit]
 
 
 def _safe_arith(expr: str) -> float:
@@ -31172,7 +31201,7 @@ def _agentic_exec_tool(name: str, args: dict) -> str:
                         else "No portfolio YTD figures found.")
             return json.dumps(out, default=str)[:4000]
 
-        if name == "web_search":
+        if name in ("search_web", "web_search"):
             query = (args.get("query") or "").strip()
             if not query:
                 return "Empty query."
@@ -31185,7 +31214,7 @@ def _agentic_exec_tool(name: str, args: dict) -> str:
                 )
                 return (res or "")[:4000]
             except Exception as e:
-                return f"web_search error: {e!s:.150}"
+                return f"search_web error: {_llm_api_error_text(e)}"
 
         if name == "list_transcripts":
             if not (_PSYCOPG2_OK and os.environ.get("DATABASE_URL")):
@@ -31385,7 +31414,7 @@ _AGENTIC_SYSTEM_DEFAULT = (
     "Dietz). Never derive YTD from price changes.\n"
     "• Current price / daily move: get_quote. Sector: get_sector. Existing "
     "thesis: read_saved_report. Recent events: get_recent_news, then "
-    "web_search if still uncovered.\n"
+    "search_web if still uncovered.\n"
     "• Primary-source spoken word: search_call_transcripts for what MANAGEMENT "
     "said on earnings calls (margins, guidance, demand) — quote it. "
     "list_transcripts / read_transcript / search_transcripts for ingested "
@@ -32304,8 +32333,25 @@ def _run_agentic_analysis(job_id: str, question: str,
              label=f"❌ Reached {max_steps}-step limit without finishing",
              error="step_limit", cost_usd=round(total_cost, 4))
     except Exception as e:
-        print(f"❌ [agentic {job_id}] failed: {e!s:.500}", flush=True)
-        _set(stage="error", status="error", label=f"❌ {e!s:.200}", error=str(e))
+        detail = _llm_api_error_text(e, limit=400)
+        body = getattr(e, "body", None)
+        print(
+            f"❌ [agentic {job_id}] failed: {detail[:400]}  "
+            f"raw={e!s:.200} body={body!r:.400}",
+            flush=True,
+        )
+        try:
+            _kv_put("agentic.last_error", {
+                "job_id": job_id,
+                "detail": detail[:800],
+                "raw": str(e)[:400],
+                "body": body if isinstance(body, (str, dict, list)) else repr(body)[:400],
+                "at": _now_pacific().isoformat(),
+            })
+        except Exception:
+            pass
+        _set(stage="error", status="error",
+             label=f"❌ {detail[:200]}", error=detail[:500])
 
 
 @app.post("/api/research/agentic")
@@ -32978,7 +33024,7 @@ _STRATEGIST_SYSTEM = (
     "mental math); get_financials for any fundamental; get_ytd_attribution for real "
     "returns. Grok and Claude 12m PT/upside are ALREADY in the book list — do NOT "
     "read_saved_report for every name. At most 4 theses (largest weights + outliers). "
-    "get_recent_news / web_search only for fresh catalysts. NEVER invent a number. "
+    "get_recent_news / search_web only for fresh catalysts. NEVER invent a number. "
     "Prefer multi-ticker tool calls over one-ticker serial loops. Finish as soon as "
     "the six sections are grounded — extra tool rounds waste money.\n\n"
     "Each name in the book may list a Grok 12m PT/upside AND a Claude 12m "

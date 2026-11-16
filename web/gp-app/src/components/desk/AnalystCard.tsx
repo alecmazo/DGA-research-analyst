@@ -575,7 +575,11 @@ export function AnalystCard({ bare = false }: Props) {
         ))}
       </div>
 
-      {err && <div className={styles.err}>❌ {err}</div>}
+      {err && (
+        <div className={styles.err}>
+          {/^❌/.test(err) ? err : `❌ ${err}`}
+        </div>
+      )}
 
       {progress && !result && (
         <div className={styles.progress}>
