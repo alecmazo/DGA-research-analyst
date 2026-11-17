@@ -146,4 +146,10 @@ def test_fundcharts_hollow_forecast_bars():
     assert "nextEarningsDate={dash.next_earnings_date}" in dash
     assert "trailing={valueCard}" in dash
     assert "<PriceChart ticker={dash.ticker || ticker} compact />" in dash
+    chart = (ROOT / "web/gp-app/src/pages/financials/PriceChart.tsx").read_text(
+        encoding="utf-8",
+    )
+    assert 'range="YTD"' in chart
+    assert 'mark="YTD"' in chart
+    assert "r !== 'YTD'" in chart
     assert "price_change_pct" in dash

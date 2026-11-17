@@ -25,14 +25,17 @@ function fmtDate(t?: string) {
   return s.slice(0, 10)
 }
 
-export function PriceChart({
+function PriceSeries({
   ticker,
+  range,
   compact = false,
+  mark = '',
 }: {
   ticker: string
+  range: string
   compact?: boolean
+  mark?: string
 }) {
-  const [range, setRange] = useState(compact ? '10Y' : 'YTD')
   const [data, setData] = useState<PriceHistory | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -185,30 +188,14 @@ export function PriceChart({
   const sc = (v: number | null | undefined) =>
     v == null ? undefined : v >= 0 ? '#16a34a' : '#dc2626'
 
-  const rangeBtn = compact
-    ? { on: styles.priceRangeOn, off: styles.priceRange }
-    : { on: styles.segOn, off: styles.segBtn }
-
   return (
-    <div className={compact ? `${styles.pricePanel} ${styles.pricePanelCompact}` : styles.pricePanel}>
-      <div className={compact ? `${styles.priceRanges} ${styles.priceRangesCompact}` : styles.priceRanges}>
-        {PRICE_RANGES.map((r) => (
-          <button
-            key={r}
-            type="button"
-            className={range === r ? rangeBtn.on : rangeBtn.off}
-            onClick={() => setRange(r)}
-          >
-            {r}
-          </button>
-        ))}
-      </div>
+    <div className={compact ? styles.priceSeries : undefined}>
       {stats && (
         <div className={compact ? `${styles.priceStats} ${styles.priceStatsCompact}` : styles.priceStats}>
           <span>
             {compact ? (
               <strong style={{ color: sc(stats.change_pct) }}>
-                {stats.change_label || range}:{pf(stats.change_pct)}
+                {mark || stats.change_label || range}:{pf(stats.change_pct)}
               </strong>
             ) : (
               <>
@@ -258,6 +245,17 @@ export function PriceChart({
             }}
           >
             {geo.grid}
+            {mark && (
+              <text
+                x={PAD_L + 4}
+                y={PAD_T + 2}
+                fontSize={13}
+                fontWeight={800}
+                fill="var(--text-secondary,#64748b)"
+              >
+                {mark}
+              </text>
+            )}
             <line
               x1={PAD_L}
               x2={W - PAD_R}
@@ -338,6 +336,41 @@ export function PriceChart({
       {!loading && !err && !geo && (
         <div className={styles.priceEmpty}>Not enough data to plot.</div>
       )}
+    </div>
+  )
+}
+
+const COMPARE_RANGES = PRICE_RANGES.filter((r) => r !== 'YTD')
+
+export function PriceChart({
+  ticker,
+  compact = false,
+}: {
+  ticker: string
+  compact?: boolean
+}) {
+  const [range, setRange] = useState(compact ? '1Y' : 'YTD')
+  const rangeBtn = compact
+    ? { on: styles.priceRangeOn, off: styles.priceRange }
+    : { on: styles.segOn, off: styles.segBtn }
+  const choices = compact ? COMPARE_RANGES : PRICE_RANGES
+
+  return (
+    <div className={compact ? `${styles.pricePanel} ${styles.pricePanelCompact}` : styles.pricePanel}>
+      {compact && <PriceSeries ticker={ticker} range="YTD" compact mark="YTD" />}
+      <div className={compact ? `${styles.priceRanges} ${styles.priceRangesCompact}` : styles.priceRanges}>
+        {choices.map((r) => (
+          <button
+            key={r}
+            type="button"
+            className={range === r ? rangeBtn.on : rangeBtn.off}
+            onClick={() => setRange(r)}
+          >
+            {r}
+          </button>
+        ))}
+      </div>
+      <PriceSeries ticker={ticker} range={range} compact={compact} mark={compact ? range : ''} />
     </div>
   )
 }

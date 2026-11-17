@@ -1060,8 +1060,18 @@
   color: var(--text-primary);
 }
 
+.priceSeries {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .priceSvgWrap {
   position: relative;
+  flex: 1 1 auto;
+  min-height: 88px;
+  display: flex;
 }
 
 .priceSvg {
@@ -1139,7 +1149,9 @@
 }
 
 .priceSvgCompact {
-  max-height: 148px;
+  height: 100%;
+  max-height: none;
+  min-height: 88px;
   flex: 1;
 }
 
