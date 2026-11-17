@@ -585,7 +585,7 @@ When switching machine or agent (Claude ↔ Grok):
 | `DGA_analyst.py` | Multi-LLM Analyze pipeline (Grok/Claude/Kimi/DeepSeek) |
 | `web/gp/` | Legacy GP (`/gp-legacy`) — do not treat as source of truth |
 | `web/portfolio.html` | Login gateway |
-| `mobile/` | Expo app (OTA); keep YTD/IPO/watchlist in sync when you touch desk quotes |
+| `mobile/` | TestFlight app **DGA Capital**. Alec does not use Expo. A phone change ships as a new TestFlight build (`eas build --platform ios --profile production --auto-submit` from the Mac). Keep YTD/IPO/watchlist in sync when you touch desk quotes. |
 | `market_data.py` / `snaptrade_link.py` | Quotes / SnapTrade |
 | `docs/support-inbox/` | Support ticket notes (if present) |
 | `docs/continuity/` | **Handoff kit** — README, short HANDOFF.md, PRODUCT_LOG.md |
@@ -615,4 +615,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-16 · Agent: Cursor · Built: `ui828-20261116-owned` · Railway workspace Pro (from Hobby) · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui829-YYYYMMDD-slug`*
+*Last updated: 2026-11-17 · Agent: Cursor · Built: `ui828-20261116-owned` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui829-YYYYMMDD-slug`*

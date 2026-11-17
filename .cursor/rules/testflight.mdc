@@ -1,0 +1,20 @@
+---
+description: Phone updates ship to TestFlight. Alec does not use Expo.
+alwaysApply: true
+---
+
+# Phone updates go to TestFlight
+
+Alec installs the phone app from TestFlight. The app is DGA Capital, bundle `com.dgacapital.research`, App Store Connect `6764731342`. He does not use Expo, and he does not log in at expo.dev.
+
+When he asks to update the phone, push an OTA, or ship a mobile UI change, the ship is a new TestFlight build.
+
+1. Do not send him an expo.dev link. Do not run `eas login` or `eas update` as the way he gets the app.
+2. From `mobile/` on the Mac that already has the Apple login:
+
+```bash
+npx eas-cli build --platform ios --profile production --auto-submit --non-interactive
+```
+
+3. That uses the production profile in `mobile/eas.json`. It uploads to TestFlight. It does not submit the app for App Store review.
+4. This cloud VM cannot sign the iOS binary. The Mac mini is the machine that can. If this session cannot start a job there, say so and leave that command. Do not substitute an Expo login.

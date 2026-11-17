@@ -277,16 +277,16 @@ Performance by fund/SMA, documents / planning (shared worksheet), quarterly lett
 
 ### Native iOS (`mobile/`)
 
-- Expo app **DGA Capital**, bundle `com.dgacapital.research`, ASC 6764731342
+- TestFlight app **DGA Capital**, bundle `com.dgacapital.research`, ASC 6764731342. Alec installs from TestFlight. He does not use Expo and he does not log in at expo.dev.
 - Icon: glass Option A; splash navy `#0A1628`
 - Production EAS profile (store). `preview` is simulator-only
 - GP tabs: Markets, Watchlist, Research, Financials, Positions, More (Fund is under More)
 - Markets (home tab): index board, Watchlist CTA, earnings (±14d watchlist), Market Wire (free RSS), Market Pulse (Yahoo/Google RSS, ranked by |day %|, no LLM). Daily Brief is not on Markets.
 - Research: Analyze + saved reports. Earnings and Market Wire live on Markets.
 - LP tabs: Positions, Performance, Documents, Podcast, Settings
-- OTA via `updates.url` / runtimeVersion appVersion
-- APP_BUILD `mobile-ui32-markets-news-20261015` (production OTA)
-- Last TestFlight path: EAS production iOS 1.0.0 (build numbers autoIncrement). Do not App Store review unless asked
+- A phone UI change ships as a new TestFlight build: `npx eas-cli build --platform ios --profile production --auto-submit --non-interactive` from `mobile/` on the Mac that already has the Apple login. Do not send him to expo.dev. Do not use `eas update` or `eas login` as the ship path.
+- Do not submit for App Store review unless he asks.
+- APP_BUILD in the repo: `mobile-ui37-owned-cos-20261116`. The TestFlight build he has stays on the last uploaded binary until the next TestFlight upload.
 
 ---
 
