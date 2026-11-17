@@ -406,6 +406,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Agentic 400** | **`ui827-20261116-agentic-400`** | SUP_20261116_da98d330. Rename the desk Analyst live-search tool to `search_web` so it no longer collides with Grok's native `web_search` (HTTP 400). Surface the real xAI error string on failure. |
 | **Owned companies** | **`ui828-20261116-owned`** | Followed names that are open in any account leave the Watchlist and sit on Owned Companies, directly under it. Desktop desk and the phone Watchlist tab. The name stays on the stored list, so a sale puts it back on the Watchlist. |
 | **Local brief** | **`ui829-20261117-local-brief`** | Right-hand brief on this Mac. Ideas keeps it open and a company click fills it. Watchlist and Owned Companies rows open it on the desk. Financials follows the open ticker. Model menu is the installed Ollama list, and GPT-oss is the default. |
+| **Brief read** | **`ui830-20261117-brief-read`** | The brief scrolls inside the rail. Latest is the real headlines. The model writes a short take, and its reasoning stays off the page. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -616,4 +617,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-17 · Agent: Cursor · Built: `ui829-20261117-local-brief` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui830-YYYYMMDD-slug`*
+*Last updated: 2026-11-17 · Agent: Cursor · Built: `ui830-20261117-brief-read` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui831-YYYYMMDD-slug`*

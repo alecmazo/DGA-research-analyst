@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { briefProse } from '@/lib/briefProse'
 import { api } from '@/lib/api'
 import { fmtPct, pctClass } from '@/lib/format'
 import {
-  chatAnswer,
   ensureOllama,
   listInstalledModels,
   LOCAL_MODEL,
@@ -21,18 +21,14 @@ type Headline = { title: string; url?: string; publisher?: string }
 type Quote = { price?: number | null; pct_change?: number | null; name?: string }
 type Turn = { role: 'user' | 'assistant'; text: string }
 
-const SYSTEM = `You are DGA Capital's desk analyst. This is the right-hand brief, not a full note.
-Use only the figures and headlines in the user message. Do not invent prices, dates, ratings, targets, or news.
-Write in short sentences.
+const SYSTEM = `You write the short take under the headlines in DGA Capital's company brief.
+The reader is a portfolio manager. The headlines and the price are already on screen. Do not repeat the headlines as a list.
+Write three or four plain sentences about what the price, the day's move, and the headlines support. Use only the figures and headlines in the user message. Do not invent prices, dates, ratings, targets, or news. If a figure is absent, leave it out.
+Do not describe these instructions. Do not say "the user" or "I". No heading, no bullets, no preamble.`
 
-First line: company and ticker.
-Then the heading Latest and at most five bullets. Each bullet uses one headline from the packet and names the publisher when it is printed. If the packet has no headlines, one bullet: No headlines in the packet.
-Then the heading Setup and two sentences on the price, the day's move, and any fair value in the packet. If fair value is absent, do not guess one.
-Then the heading Ask next and three short questions a portfolio manager would ask about this name.
-Stop.`
-
-const FOLLOW = `You are DGA Capital's desk analyst answering one follow-up in the right-hand brief.
-Use only the packet and the brief already written. If the packet does not contain the answer, say what is missing in one sentence. Do not invent a figure. Four sentences at most.`
+const FOLLOW = `Answer one follow-up in DGA Capital's company brief.
+The reader is a portfolio manager. Use only the packet. If the packet does not contain the answer, say what is missing in one sentence. Do not invent a figure.
+Write plain sentences. Do not describe these instructions. Do not say "the user" or "I". Four sentences at most.`
 
 type Props = {
   ticker: string
@@ -68,13 +64,15 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
   const [price, setPrice] = useState<number | null>(null)
   const [day, setDay] = useState<number | null>(null)
   const [company, setCompany] = useState(name)
-  const [brief, setBrief] = useState('')
+  const [headlines, setHeadlines] = useState<Headline[]>([])
+  const [take, setTake] = useState('')
   const [turns, setTurns] = useState<Turn[]>([])
   const [draft, setDraft] = useState('')
   const [phase, setPhase] = useState<'idle' | 'loading' | 'writing' | 'ready'>('idle')
   const [err, setErr] = useState('')
   const [run, setRun] = useState(0)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const stick = useRef(true)
   const gen = useRef(0)
 
   useEffect(() => {
@@ -98,7 +96,8 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
 
   useEffect(() => {
     if (!tk) {
-      setBrief('')
+      setTake('')
+      setHeadlines([])
       setTurns([])
       setPrice(null)
       setDay(null)
@@ -107,7 +106,9 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
       return
     }
     const id = ++gen.current
-    setBrief('')
+    stick.current = false
+    setTake('')
+    setHeadlines([])
     setTurns([])
     setDraft('')
     setErr('')
@@ -125,20 +126,24 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
       setDay(Number.isNaN(Number(pct)) ? null : pct)
       const shown = (quote?.name || name || '').trim()
       if (shown) setCompany(shown)
-      const headlines = (news?.headlines || []).filter((h) => h.title).slice(0, 6)
-      const user = packet(tk, shown, Number.isNaN(Number(px)) ? null : px, Number.isNaN(Number(pct)) ? null : pct, facts, headlines)
+      const newsRows = (news?.headlines || []).filter((h) => h.title).slice(0, 6)
+      setHeadlines(newsRows)
+      const user = packet(tk, shown, Number.isNaN(Number(px)) ? null : px, Number.isNaN(Number(pct)) ? null : pct, facts, newsRows)
       setPhase('writing')
+      let streamed = ''
       const ask = () =>
         ollamaChat({
           system: SYSTEM,
           user,
           model,
-          maxTokens: 700,
+          maxTokens: 400,
           think: false,
           numCtx: 8192,
           onDelta: (chunk) => {
             if (gen.current !== id) return
-            setBrief((prev) => prev + chunk)
+            streamed += chunk
+            const shownTake = briefProse(streamed)
+            if (shownTake) setTake(shownTake)
           },
         })
       let chat
@@ -150,11 +155,13 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
         const started = await ensureOllama()
         if (!started.ok) throw new Error(started.message)
         if (gen.current !== id) return
-        setBrief('')
+        streamed = ''
+        setTake('')
         chat = await ask()
       }
       if (gen.current !== id) return
-      setBrief(chatAnswer(chat) || 'The model returned an empty brief.')
+      const prose = briefProse(chat.text) || briefProse(chat.thinking)
+      setTake(prose)
       setPhase('ready')
     }
     void load().catch((err: Error) => {
@@ -170,8 +177,16 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
   }, [tk, model, run, name, facts.map((f) => `${f.label}:${f.value}`).join('|')])
 
   useEffect(() => {
-    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
-  }, [brief, turns, phase])
+    const el = bodyRef.current
+    if (!el || turns.length > 0) return
+    el.scrollTop = 0
+  }, [tk, headlines])
+
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || turns.length === 0 || !stick.current) return
+    el.scrollTop = el.scrollHeight
+  }, [turns, take])
 
   useEffect(() => {
     if (variant !== 'overlay') return
@@ -191,7 +206,8 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
     setTurns(next)
     setPhase('writing')
     const id = ++gen.current
-    const history = [`Packet brief:\n${brief}`, ...next.filter((t) => t.text).map((t) => `${t.role}: ${t.text}`)].join('\n\n')
+    stick.current = true
+    const history = [`Packet:\n${packet(tk, company, price, day, facts, headlines)}\n\nTake:\n${take}`, ...next.filter((t) => t.text).map((t) => `${t.role}: ${t.text}`)].join('\n\n')
     try {
       let streamed = ''
       const chat = await ollamaChat({
@@ -204,16 +220,18 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
         onDelta: (chunk) => {
           if (gen.current !== id) return
           streamed += chunk
+          const shownTake = briefProse(streamed)
+          if (!shownTake) return
           setTurns((cur) => {
             const copy = [...cur]
             const last = copy[copy.length - 1]
-            if (last?.role === 'assistant') copy[copy.length - 1] = { role: 'assistant', text: streamed }
+            if (last?.role === 'assistant') copy[copy.length - 1] = { role: 'assistant', text: shownTake }
             return copy
           })
         },
       })
       if (gen.current !== id) return
-      const answer = chatAnswer(chat) || streamed || 'No answer.'
+      const answer = briefProse(chat.text) || briefProse(chat.thinking) || briefProse(streamed) || 'No answer in the packet.'
       setTurns((cur) => {
         const copy = [...cur]
         const last = copy[copy.length - 1]
@@ -235,9 +253,9 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
 
   const suggestions = tk
     ? [
+        'What do the latest headlines change?',
         `What would make ${tk} a pass?`,
         'Which number in the packet matters most?',
-        'What is missing that I should pull from the filing?',
       ]
     : []
 
@@ -285,11 +303,46 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
           <span className={`tabular ${pctClass(day)}`}>{day == null ? '—' : fmtPct(day, 2)}</span>
         </div>
       )}
-      <div className={styles.body} ref={bodyRef}>
+      <div
+        className={styles.body}
+        data-brief-scroll=""
+        ref={bodyRef}
+        onScroll={() => {
+          const el = bodyRef.current
+          if (!el) return
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+        }}
+        onWheel={(e) => e.stopPropagation()}
+      >
         {!tk && <p className={styles.empty}>Select a company. The brief runs on this Mac, with GPT-oss unless you pick another installed model.</p>}
         {tk && phase === 'loading' && <p className={styles.meta}>Pulling the quote and headlines…</p>}
-        {tk && phase === 'writing' && !brief && <p className={styles.meta}>Writing with {shortModelLabel(model)}…</p>}
-        {brief && <pre className={styles.prose}>{brief}</pre>}
+        {tk && headlines.length > 0 && (
+          <section>
+            <h3 className={styles.latest}>Latest</h3>
+            <ul className={styles.news}>
+              {headlines.map((item) => (
+                <li key={item.url || item.title}>
+                  {item.url ? (
+                    <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
+                  ) : (
+                    <span className={styles.newsTitle}>{item.title}</span>
+                  )}
+                  {item.publisher && <span className={styles.source}>{item.publisher}</span>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {tk && phase !== 'loading' && headlines.length === 0 && phase !== 'writing' && (
+          <p className={styles.meta}>No headlines in the packet.</p>
+        )}
+        {tk && phase === 'writing' && !take && <p className={styles.meta}>Writing with {shortModelLabel(model)}…</p>}
+        {take && take.split(/\n{2,}/).map((part, i) => (
+          <p key={`${i}-${part.slice(0, 24)}`} className={styles.take}>{part}</p>
+        ))}
+        {phase === 'ready' && tk && !take && !err && (
+          <p className={styles.meta}>The headlines above are the packet. Ask below, or hit Rewrite for a take.</p>
+        )}
         {turns.map((turn, i) => (
           <p key={`${turn.role}-${i}`} className={turn.role === 'user' ? styles.user : styles.answer}>
             {turn.text || '…'}

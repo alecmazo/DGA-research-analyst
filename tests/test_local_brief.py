@@ -1,4 +1,5 @@
 """The local brief is the right-hand rail on Ideas, Financials, and the desk."""
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,14 @@ def test_brief_lists_installed_models_and_defaults_to_gpt_oss():
     assert "LOCAL_PICK_KEYS.brief" in brief
     assert "'gpt-oss'" in brief
     assert "Do not invent prices" in brief
+    assert "data-brief-scroll" in brief
+    assert "briefProse" in brief
+    prose = _read("web/gp-app/src/lib/briefProse.ts")
+    assert "export function briefProse" in prose
+    css = _read("web/gp-app/src/components/desk/CompanyBrief.module.css")
+    assert "overflow-y: auto" in css
+    assert "overscroll-behavior: contain" in css
+    assert "height: 0" in css
 
 
 def test_brief_opens_on_ideas_financials_and_desk_lists():
@@ -32,3 +41,21 @@ def test_brief_opens_on_ideas_financials_and_desk_lists():
     assert "CompanyBrief" in financials
     assert "data-local-brief" in ideas
     assert "data-local-brief" in financials
+
+
+def test_brief_prose_keeps_the_take_and_drops_the_monologue():
+    script = r"""
+import { briefProse } from './web/gp-app/src/lib/briefProse.ts'
+const mono = "The user wants a brief.\n\nI need to look at the packet and decide what to say.\n\nNike is at $36.38, down 4.9% today. The headlines are about the margin target."
+const out = briefProse(mono)
+if (!out.includes('$36.38')) throw new Error('lost the take: ' + out)
+if (/the user|I need to/i.test(out)) throw new Error('kept the monologue: ' + out)
+const harmony = '<|channel|>analysis<|message|>thinking hard<|end|><|start|>assistant<|channel|>final<|message|>The price is $36.38 and the day is down.'
+const out2 = briefProse(harmony)
+if (!out2.startsWith('The price is $36.38')) throw new Error('lost the final channel: ' + out2)
+"""
+    subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        check=True,
+        cwd=ROOT,
+    )
