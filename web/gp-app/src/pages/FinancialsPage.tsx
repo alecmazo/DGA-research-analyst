@@ -9,6 +9,7 @@ import { ValueLineSheet } from './financials/ValueLineSheet'
 import { FinancialsStore } from './financials/FinancialsStore'
 import { HistoryScreen } from './financials/HistoryScreen'
 import { LocalDcf } from '@/components/local/LocalDcf'
+import { CompanyBrief } from '@/components/desk/CompanyBrief'
 
 export function FinancialsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -69,7 +70,7 @@ export function FinancialsPage() {
   }, [])
 
   return (
-    <div className={`${page.page} ${styles.shell}`}>
+    <div className={`${page.page} ${styles.shell} ${styles.withBrief}`} data-local-brief="">
       <header className={`${page.hero} ${styles.heroTight}`}>
         <div>
           <p className={page.kicker}>Research · SEC store</p>
@@ -86,6 +87,8 @@ export function FinancialsPage() {
         </div>
       </header>
 
+      <div className={styles.briefStage}>
+      <div className={styles.briefMain}>
       <CompanyDashboard
         ticker={ticker}
         setTicker={setTicker}
@@ -114,6 +117,12 @@ export function FinancialsPage() {
       />
 
       <HistoryScreen ticker={ticker} onSelectTicker={selectTicker} />
+      </div>
+      <CompanyBrief
+        ticker={ticker}
+        name={coverage.find((row) => (row.ticker || '').toUpperCase() === ticker)?.entity_name || ''}
+      />
+      </div>
     </div>
   )
 }

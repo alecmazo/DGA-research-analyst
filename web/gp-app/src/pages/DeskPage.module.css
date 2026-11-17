@@ -197,6 +197,10 @@
   background: var(--bg-hover);
 }
 
+.rowOn {
+  background: var(--bg-subtle);
+}
+
 .rowClick {
   cursor: pointer;
 }

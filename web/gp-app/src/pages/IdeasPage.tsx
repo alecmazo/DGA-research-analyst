@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Empty, Spinner } from '@/components/ui/Empty'
+import { CompanyBrief, type BriefFact } from '@/components/desk/CompanyBrief'
 import { api } from '@/lib/api'
 import { fmtPct, fmtUsdSigned, pctClass } from '@/lib/format'
 import page from './page.module.css'
@@ -46,6 +47,7 @@ export function IdeasPage() {
   const [error, setError] = useState('')
   const [windowId, setWindowId] = useState('')
   const [open, setOpen] = useState('')
+  const [selected, setSelected] = useState('')
   const [news, setNews] = useState<Record<string, Headline[] | 'loading'>>({})
 
   const load = useCallback(async () => {
@@ -71,6 +73,7 @@ export function IdeasPage() {
   }, [rows, windowId])
 
   const toggle = (ticker: string) => {
+    setSelected(ticker)
     setOpen((current) => (current === ticker ? '' : ticker))
     if (news[ticker]) return
     setNews((current) => ({ ...current, [ticker]: 'loading' }))
@@ -84,7 +87,7 @@ export function IdeasPage() {
   }
 
   return (
-    <div className={page.page}>
+    <div className={page.page} data-local-brief="">
       <header className={page.hero}>
         <div>
           <p className={page.kicker}>Desk</p>
@@ -92,7 +95,7 @@ export function IdeasPage() {
         </div>
       </header>
       <p className={styles.lede}>
-        Below fair value, and down on at least one window. Open a name for the moves and the headlines.
+        Below fair value, and down on at least one window. Open a name for the brief.
       </p>
       {error && <p className={styles.error} role="alert">{error}</p>}
       <div className={styles.filters} role="group" aria-label="Drop window">
@@ -120,13 +123,15 @@ export function IdeasPage() {
           sub="A name shows up when a saved fair value is above the price and the drop is large enough on one of these windows."
         />
       )}
+      <div className={styles.stage}>
+      <div>
       {rows && shown.length > 0 && (
         <div className={styles.list}>
           {shown.map((row) => {
             const expanded = open === row.ticker
             const headlines = news[row.ticker]
             return (
-              <article key={row.ticker} className={expanded ? styles.itemOpen : styles.item}>
+              <article key={row.ticker} className={expanded || selected === row.ticker ? styles.itemOpen : styles.item}>
                 <button
                   type="button"
                   className={styles.row}
@@ -202,6 +207,24 @@ export function IdeasPage() {
           })}
         </div>
       )}
+      </div>
+      <CompanyBrief
+        ticker={selected}
+        name={shown.find((row) => row.ticker === selected)?.name || ''}
+        facts={ideaFacts(shown.find((row) => row.ticker === selected))}
+      />
+      </div>
     </div>
   )
+}
+
+function ideaFacts(row: Row | undefined): BriefFact[] {
+  if (!row) return []
+  return [
+    { label: 'Fair value', value: money(row.fair_value) },
+    { label: 'Upside', value: moveText(row.upside) },
+    { label: 'Rating', value: row.rating || '' },
+    { label: 'Why it is on the list', value: row.reason || '' },
+    { label: 'Today', value: moveText(row.returns?.day) },
+  ]
 }

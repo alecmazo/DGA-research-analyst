@@ -1,0 +1,241 @@
+.dock,
+.overlay {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100vh - 312px);
+  max-height: calc(100vh - 312px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--brand-600) 35%, transparent);
+  overflow: hidden;
+}
+
+.dock {
+  position: sticky;
+  top: 12px;
+}
+
+.overlay {
+  position: fixed;
+  top: calc(var(--topbar-h) + var(--ribbon-h) + 28px);
+  right: 16px;
+  bottom: 78px;
+  width: min(400px, calc(100vw - 24px));
+  height: auto;
+  max-height: none;
+  z-index: 35;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 8px;
+  border-top: 3px solid var(--brand-600);
+}
+
+.kicker {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand-600);
+}
+
+.title {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.sub {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.headActions {
+  display: flex;
+  gap: 6px;
+}
+
+.textBtn {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+
+.textBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.modelRow select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 8px;
+}
+
+.quote {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 14px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.quote strong {
+  font-size: 18px;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty,
+.meta {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.prose {
+  margin: 0;
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.user,
+.answer {
+  margin: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.user {
+  align-self: flex-end;
+  max-width: 92%;
+  background: color-mix(in srgb, var(--brand-600) 16%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.answer {
+  background: var(--bg-subtle);
+}
+
+.err {
+  margin: 0;
+  color: var(--danger-700);
+  font-size: 13px;
+}
+
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chip {
+  text-align: left;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--brand-600);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.composer input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.composer button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--brand-600);
+  color: var(--text-on-brand);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.composer button:disabled,
+.composer input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (max-width: 960px) {
+  .dock {
+    position: static;
+    height: 70vh;
+    max-height: 70vh;
+  }
+}

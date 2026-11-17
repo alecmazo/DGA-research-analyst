@@ -16,6 +16,7 @@ export const LOCAL_PICK_KEYS = {
   book: 'dga.local.book.model',
   transcript: 'dga.local.transcript.model',
   bot: 'dga.local.bot.model',
+  brief: 'dga.local.brief.model',
 } as const
 
 /** Short name for a chip or a target tag. The full Ollama name stays in the tooltip. */
@@ -240,6 +241,26 @@ export async function ollamaStatus(model?: string): Promise<OllamaState> {
   } catch {
     return fail(OFFLINE)
   }
+}
+
+/** Models installed in Ollama on this Mac. GPT-oss is listed first. */
+export async function listInstalledModels(): Promise<string[]> {
+  const data = await readTags()
+  if (!data || data === 'helper-stale') return []
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const row of data.models || []) {
+    const name = (row.name || '').trim()
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    names.push(name)
+  }
+  names.sort((a, b) => {
+    const rank = (name: string) => (name.toLowerCase().includes('gpt-oss') ? 0 : 1)
+    const diff = rank(a) - rank(b)
+    return diff || a.localeCompare(b)
+  })
+  return names
 }
 
 /** Browser-side ping. The API on Railway cannot see Ollama on this Mac. */

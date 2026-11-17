@@ -48,6 +48,10 @@
   max-width: none;
 }
 
+.inner:has([data-local-brief]) {
+  max-width: 1720px;
+}
+
 .inner:has([data-ship]) {
   max-width: none;
   flex: 1;

@@ -4,6 +4,7 @@ import { AnalyzeCard } from '@/components/desk/AnalyzeCard'
 import { AnalystCard } from '@/components/desk/AnalystCard'
 import { StrategistCard } from '@/components/desk/StrategistCard'
 import { SavedReports } from '@/components/desk/SavedReports'
+import { CompanyBrief } from '@/components/desk/CompanyBrief'
 import { DeskBoard } from '@/components/desk/DeskBoard'
 import { EarningsCard } from '@/components/desk/EarningsCard'
 import { StockPeek } from '@/components/layout/StockPeek'
@@ -244,6 +245,7 @@ export function DeskPage() {
   const [reportsKey, setReportsKey] = useState(0)
   const [earningsTk, setEarningsTk] = useState<string | null>(null)
   const [peekTk, setPeekTk] = useState<string | null>(null)
+  const [briefTk, setBriefTk] = useState<string | null>(null)
   const [peekFiling, setPeekFiling] = useState<{
     form?: string
     filed?: string
@@ -580,8 +582,8 @@ export function DeskPage() {
                 {trackingRows.map(({ tk, q, pct, ytd, ytdStatus, earn }) => (
                   <tr
                     key={tk}
-                    className={`${styles.rowClick} ${earn ? styles.rowEarn : ''}`}
-                    onClick={() => openPeek(tk)}
+                    className={`${styles.rowClick} ${earn ? styles.rowEarn : ''} ${briefTk === tk ? styles.rowOn : ''}`}
+                    onClick={() => setBriefTk(tk)}
                   >
                     <td>
                       <div className={styles.tkCell}>
@@ -647,7 +649,10 @@ export function DeskPage() {
                       <button
                         type="button"
                         className={styles.rm}
-                        onClick={() => void removeTicker(tk)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void removeTicker(tk)
+                        }}
                         title="Remove"
                       >
                         ×
@@ -691,8 +696,8 @@ export function DeskPage() {
                 {ownedRows.map(({ tk, q, pct, ytd, ytdStatus, earn }) => (
                   <tr
                     key={tk}
-                    className={`${styles.rowClick} ${earn ? styles.rowEarn : ''}`}
-                    onClick={() => openPeek(tk)}
+                    className={`${styles.rowClick} ${earn ? styles.rowEarn : ''} ${briefTk === tk ? styles.rowOn : ''}`}
+                    onClick={() => setBriefTk(tk)}
                   >
                     <td>
                       <div className={styles.tkCell}>
@@ -914,6 +919,15 @@ export function DeskPage() {
         cards={cards}
       />
 
+      {briefTk && (
+        <CompanyBrief
+          key={briefTk}
+          variant="overlay"
+          ticker={briefTk}
+          facts={deskBriefFacts(rows.find((row) => row.tk === briefTk))}
+          onClose={() => setBriefTk(null)}
+        />
+      )}
       {peekTk && (
         <StockPeek
           key={peekTk}
@@ -944,4 +958,13 @@ export function DeskPage() {
       />
     </div>
   )
+}
+
+function deskBriefFacts(row?: { last: number | null; pct: number | null; ytd: number | null }): { label: string; value: string }[] {
+  if (!row) return []
+  return [
+    { label: 'Last', value: row.last == null ? '' : `$${row.last.toFixed(2)}` },
+    { label: 'Day', value: row.pct == null ? '' : fmtPct(row.pct, 2) },
+    { label: 'YTD', value: row.ytd == null ? '' : fmtPct(row.ytd, 2) },
+  ]
 }
