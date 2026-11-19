@@ -408,6 +408,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Local brief** | **`ui829-20261117-local-brief`** | Right-hand brief on this Mac. Ideas keeps it open and a company click fills it. Watchlist and Owned Companies rows open it on the desk. Financials follows the open ticker. Model menu is the installed Ollama list, and GPT-oss is the default. |
 | **Brief read** | **`ui830-20261117-brief-read`** | The brief scrolls inside the rail. Latest is the real headlines. The model writes a short take, and its reasoning stays off the page. |
 | **YTD pair** | **`ui831-20261117-ytd-pair`** | SUP_20261117_463cc241. The Financials price card stacks a YTD chart over a comparison chart. Window buttons sit between them. The YTD label is drawn on the top chart. |
+| **Brief span** | **`ui832-20261119-brief-span`** | Financials can close the local brief and the page uses the full width again. The brief reasons from the headlines: the read, the tension, and what would confirm it or make it a pass. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -618,4 +619,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-17 · Agent: Cursor · Built: `ui831-20261117-ytd-pair` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui832-YYYYMMDD-slug`*
+*Last updated: 2026-11-19 · Agent: Cursor · Built: `ui832-20261119-brief-span` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui833-YYYYMMDD-slug`*

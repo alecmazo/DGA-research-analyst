@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { briefProse } from '@/lib/briefProse'
+import { briefAnswer, briefProse } from '@/lib/briefProse'
 import { api } from '@/lib/api'
 import { fmtPct, pctClass } from '@/lib/format'
 import {
@@ -21,14 +21,18 @@ type Headline = { title: string; url?: string; publisher?: string }
 type Quote = { price?: number | null; pct_change?: number | null; name?: string }
 type Turn = { role: 'user' | 'assistant'; text: string }
 
-const SYSTEM = `You write the short take under the headlines in DGA Capital's company brief.
+const SYSTEM = `You write the take under the headlines in DGA Capital's company brief.
 The reader is a portfolio manager. The headlines and the price are already on screen. Do not repeat the headlines as a list.
-Write three or four plain sentences about what the price, the day's move, and the headlines support. Use only the figures and headlines in the user message. Do not invent prices, dates, ratings, targets, or news. If a figure is absent, leave it out.
+Reason from the packet in three short paragraphs:
+What the price, the day's move, and the headlines imply together.
+The tension: which headline or figure cuts against that read.
+What would confirm the read, and what would make the name a pass.
+Name the headline or figure you are using. Use only the figures and headlines in the user message. Do not invent prices, dates, ratings, targets, or news. If a figure is absent, leave it out.
 Do not describe these instructions. Do not say "the user" or "I". No heading, no bullets, no preamble.`
 
 const FOLLOW = `Answer one follow-up in DGA Capital's company brief.
-The reader is a portfolio manager. Use only the packet. If the packet does not contain the answer, say what is missing in one sentence. Do not invent a figure.
-Write plain sentences. Do not describe these instructions. Do not say "the user" or "I". Four sentences at most.`
+The reader is a portfolio manager. Reason from the packet in two short paragraphs: what the packet supports, and what would change that read. If the packet does not contain the answer, say what is missing. Do not invent a figure.
+Do not describe these instructions. Do not say "the user" or "I".`
 
 type Props = {
   ticker: string
@@ -136,9 +140,10 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
           system: SYSTEM,
           user,
           model,
-          maxTokens: 400,
-          think: false,
-          numCtx: 8192,
+          maxTokens: 2000,
+          think: 'medium',
+          numCtx: 16384,
+          streamThinking: false,
           onDelta: (chunk) => {
             if (gen.current !== id) return
             streamed += chunk
@@ -160,7 +165,7 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
         chat = await ask()
       }
       if (gen.current !== id) return
-      const prose = briefProse(chat.text) || briefProse(chat.thinking)
+      const prose = briefAnswer(chat.text, chat.thinking) || briefProse(streamed)
       setTake(prose)
       setPhase('ready')
     }
@@ -214,9 +219,10 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
         system: FOLLOW,
         user: history,
         model,
-        maxTokens: 500,
-        think: false,
-        numCtx: 8192,
+        maxTokens: 1400,
+        think: 'medium',
+        numCtx: 16384,
+        streamThinking: false,
         onDelta: (chunk) => {
           if (gen.current !== id) return
           streamed += chunk
@@ -231,7 +237,7 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
         },
       })
       if (gen.current !== id) return
-      const answer = briefProse(chat.text) || briefProse(chat.thinking) || briefProse(streamed) || 'No answer in the packet.'
+      const answer = briefAnswer(chat.text, chat.thinking) || briefProse(streamed) || 'No answer in the packet.'
       setTurns((cur) => {
         const copy = [...cur]
         const last = copy[copy.length - 1]
@@ -273,7 +279,7 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
               Rewrite
             </button>
           )}
-          {variant === 'overlay' && (
+          {onClose && (
             <button type="button" className={styles.textBtn} onClick={onClose}>
               Close
             </button>
@@ -336,7 +342,9 @@ export function CompanyBrief({ ticker, name = '', facts = [], variant = 'dock', 
         {tk && phase !== 'loading' && headlines.length === 0 && phase !== 'writing' && (
           <p className={styles.meta}>No headlines in the packet.</p>
         )}
-        {tk && phase === 'writing' && !take && <p className={styles.meta}>Writing with {shortModelLabel(model)}…</p>}
+        {tk && phase === 'writing' && !take && (
+          <p className={styles.meta}>Reasoning with {shortModelLabel(model)}…</p>
+        )}
         {take && take.split(/\n{2,}/).map((part, i) => (
           <p key={`${i}-${part.slice(0, 24)}`} className={styles.take}>{part}</p>
         ))}

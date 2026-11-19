@@ -170,6 +170,8 @@ type ChatOpts = {
   think?: string | false
   numCtx?: number
   onDelta?: (chunk: string) => void
+  /** When false, the scratchpad is kept off the stream. The final thinking text is still returned. */
+  streamThinking?: boolean
   onProgress?: (state: { textChars: number; thinkingChars: number }) => void
 }
 
@@ -425,7 +427,7 @@ export async function ollamaChat(opts: ChatOpts): Promise<LocalChat> {
       if (piece) {
         text += piece
         opts.onDelta?.(piece)
-      } else if (thought) {
+      } else if (thought && opts.streamThinking !== false) {
         opts.onDelta?.(thought)
       }
       if (piece || thought) {

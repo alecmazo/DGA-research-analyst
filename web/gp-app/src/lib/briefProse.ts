@@ -35,3 +35,12 @@ export function briefProse(raw: string): string {
     .filter((part) => !isMonologue(part))
   return paragraphs.join('\n\n').trim()
 }
+
+/** Prefer a full written take. When that is thin, keep the reasoned paragraphs. */
+export function briefAnswer(text: string, thinking = ''): string {
+  const written = briefProse(text)
+  const reasoned = briefProse(thinking)
+  if (written.length >= 280) return written
+  if (reasoned.length > written.length + 40) return reasoned
+  return written || reasoned
+}

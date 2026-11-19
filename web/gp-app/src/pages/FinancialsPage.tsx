@@ -11,6 +11,16 @@ import { HistoryScreen } from './financials/HistoryScreen'
 import { LocalDcf } from '@/components/local/LocalDcf'
 import { CompanyBrief } from '@/components/desk/CompanyBrief'
 
+const BRIEF_KEY = 'dga.financials.brief'
+
+function briefStartsOpen(): boolean {
+  try {
+    return sessionStorage.getItem(BRIEF_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
 export function FinancialsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const urlTk = (searchParams.get('ticker') || '').trim().toUpperCase()
@@ -18,6 +28,16 @@ export function FinancialsPage() {
   const [period, setPeriod] = useState<PeriodType>('annual')
   const [coverage, setCoverage] = useState<CoverageRow[]>([])
   const [reloadKey, setReloadKey] = useState(0)
+  const [briefOpen, setBriefOpen] = useState(briefStartsOpen)
+
+  const setBrief = (open: boolean) => {
+    setBriefOpen(open)
+    try {
+      sessionStorage.setItem(BRIEF_KEY, open ? '1' : '0')
+    } catch {
+      /* the page still toggles for this view */
+    }
+  }
 
   const loadCoverage = useCallback(async () => {
     try {
@@ -70,7 +90,10 @@ export function FinancialsPage() {
   }, [])
 
   return (
-    <div className={`${page.page} ${styles.shell} ${styles.withBrief}`} data-local-brief="">
+    <div
+      className={`${page.page} ${briefOpen ? `${styles.shell} ${styles.withBrief}` : styles.span}`}
+      data-local-brief=""
+    >
       <header className={`${page.hero} ${styles.heroTight}`}>
         <div>
           <p className={page.kicker}>Research · SEC store</p>
@@ -85,9 +108,14 @@ export function FinancialsPage() {
             ) : null}
           </p>
         </div>
+        {!briefOpen && (
+          <button type="button" className={styles.briefOpen} onClick={() => setBrief(true)}>
+            Local brief
+          </button>
+        )}
       </header>
 
-      <div className={styles.briefStage}>
+      <div className={briefOpen ? styles.briefStage : undefined}>
       <div className={styles.briefMain}>
       <CompanyDashboard
         ticker={ticker}
@@ -118,10 +146,13 @@ export function FinancialsPage() {
 
       <HistoryScreen ticker={ticker} onSelectTicker={selectTicker} />
       </div>
-      <CompanyBrief
-        ticker={ticker}
-        name={coverage.find((row) => (row.ticker || '').toUpperCase() === ticker)?.entity_name || ''}
-      />
+      {briefOpen && (
+        <CompanyBrief
+          ticker={ticker}
+          name={coverage.find((row) => (row.ticker || '').toUpperCase() === ticker)?.entity_name || ''}
+          onClose={() => setBrief(false)}
+        />
+      )}
       </div>
     </div>
   )
