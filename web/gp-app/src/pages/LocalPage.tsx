@@ -12,7 +12,9 @@ import {
   refusalDiagnosis,
   ollamaStatus,
   parseToolCall,
+  HELPER_COMMAND,
   shortModelLabel,
+  type OllamaStart,
 } from '@/lib/localOllama'
 import { LocalBook } from '@/components/local/LocalBook'
 import { LocalCompare } from '@/components/local/LocalCompare'
@@ -98,6 +100,8 @@ export function LocalPage() {
   const [reportsKey, setReportsKey] = useState(0)
   const [launching, setLaunching] = useState(false)
   const [deskMsg, setDeskMsg] = useState<string | null>(null)
+  const [guide, setGuide] = useState<OllamaStart['reason'] | null>(null)
+  const [copied, setCopied] = useState(false)
   const [libraryCount, setLibraryCount] = useState<string | null>(null)
   const researchModels = useLocalModelChoice(LOCAL_PICK_KEYS.research, true)
   const askModel = useLocalModelChoice(LOCAL_PICK_KEYS.ask)
@@ -124,6 +128,7 @@ export function LocalPage() {
         message: ollama.ok ? meta.message : ollama.message,
         model: meta.model,
       })
+      if (ollama.ok) setGuide(null)
     })
   }, [])
 
@@ -177,13 +182,29 @@ export function LocalPage() {
   const startOllama = async () => {
     setLaunching(true)
     setDeskMsg(null)
+    setCopied(false)
     try {
       const result = await ensureOllama()
-      setDeskMsg(result.message)
+      const again = await ollamaStatus()
       loadStatus()
-      window.setTimeout(loadStatus, 1500)
+      if (again.ok) {
+        setGuide(null)
+        setDeskMsg(result.message)
+        return
+      }
+      setGuide(result.reason === 'up' ? 'helper' : result.reason)
+      setDeskMsg(null)
     } finally {
       setLaunching(false)
+    }
+  }
+
+  const copyHelper = async () => {
+    try {
+      await navigator.clipboard.writeText(HELPER_COMMAND)
+      setCopied(true)
+    } catch {
+      setCopied(false)
     }
   }
 
@@ -560,7 +581,13 @@ export function LocalPage() {
             <span className={`${styles.dot} ${styles.down}`} />
             <div>
               <strong>{launching ? 'Starting Ollama…' : 'Ollama offline'}</strong>
-              <span>{launching ? 'Launching on this Mac' : 'Click to start or restart'}</span>
+              <span>
+                {launching
+                  ? 'Launching on this Mac'
+                  : guide
+                    ? 'Steps are under this pill'
+                    : 'Click to start or restart'}
+              </span>
             </div>
           </button>
         )}
@@ -570,8 +597,26 @@ export function LocalPage() {
         Filings come from the financial store. Recent developments come from Yahoo Finance.
         The Word file is saved to Dropbox under Apps / DGA Research / Local_Reports.
       </p>
-      {!online && (deskMsg || status?.message) && (
+      {!online && !guide && (deskMsg || status?.message) && (
         <p className={styles.warn}>{deskMsg || status?.message}</p>
+      )}
+      {!online && guide && (
+        <section className={styles.guide} aria-label="Restart Ollama">
+          <h2>Ollama did not start from the click</h2>
+          <p>Do these in order. The red pill checks again at the end.</p>
+          <ol>
+            <li>Press Command-Space, type Ollama, and press Return. Wait for the llama in the menu bar.</li>
+            <li>If the llama is already there and this pill is still red, click the llama, choose Quit Ollama, then open Ollama again.</li>
+            <li>
+              If the pill is still red, open Terminal, paste this command, press Return, and leave that window open.
+              <code>{HELPER_COMMAND}</code>
+              <button type="button" onClick={() => void copyHelper()}>
+                {copied ? 'Copied' : 'Copy command'}
+              </button>
+            </li>
+            <li>Click the red Ollama pill again.</li>
+          </ol>
+        </section>
       )}
 
       <div className={styles.grid}>

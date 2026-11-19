@@ -287,8 +287,19 @@ export async function thisMacHasLocalModel(): Promise<boolean> {
   return up || desk
 }
 
+export const MAC_REPO = '/Users/dplvideo/.grok/worktrees/DGA-Research-Portal'
+export const HELPER_COMMAND = `cd ${MAC_REPO} && python3 scripts/ollama_desk.py`
+
+export type OllamaStart = {
+  ok: boolean
+  message: string
+  action?: string
+  /** helper: the page could not reach the start helper. app: the helper ran and Ollama stayed down. */
+  reason: 'up' | 'helper' | 'app'
+}
+
 /** Ask the on-Mac helper to start Ollama, or restart it when the process is stuck. */
-export async function ensureOllama(): Promise<{ ok: boolean; message: string; action?: string }> {
+export async function ensureOllama(): Promise<OllamaStart> {
   const done = trackLoad('ollama://ensure')
   try {
     const res = await fetch(`${OLLAMA_DESK}/ensure`, { method: 'POST' })
@@ -300,13 +311,12 @@ export async function ensureOllama(): Promise<{ ok: boolean; message: string; ac
       ok: Boolean(data.ok),
       message,
       action: data.action,
+      reason: data.ok ? 'up' : 'app',
     }
   } catch {
-    done('fail', 'Ollama is off, and the start helper on this Mac is not running.')
-    return {
-      ok: false,
-      message: 'Ollama is off, and the start helper on this Mac is not running.',
-    }
+    const message = 'Ollama is off, and the start helper on this Mac is not running.'
+    done('fail', message)
+    return { ok: false, message, reason: 'helper' }
   }
 }
 

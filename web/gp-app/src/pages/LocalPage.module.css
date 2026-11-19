@@ -166,6 +166,61 @@
   font-size: 14px;
 }
 
+.guide {
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--bg-surface);
+  max-width: 78ch;
+}
+
+.guide h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.guide p,
+.guide li {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.guide ol {
+  margin: 10px 0 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.guide code {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-elevated, #f8fafc);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.guide button {
+  margin-top: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated, #fff);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .card {
   border: 1px solid var(--border-subtle);
   border-radius: 12px;

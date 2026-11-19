@@ -18,6 +18,21 @@ def _desk():
     return mod
 
 
+def test_failed_restart_walks_through_the_app_and_the_helper():
+    page = (ROOT / "web/gp-app/src/pages/LocalPage.tsx").read_text(encoding="utf-8")
+    lib = (ROOT / "web/gp-app/src/lib/localOllama.ts").read_text(encoding="utf-8")
+    assert "Click to start or restart" in page
+    assert "Ollama did not start from the click" in page
+    assert "Command-Space" in page
+    assert "Quit Ollama" in page
+    assert "HELPER_COMMAND" in page
+    assert "setGuide" in page
+    assert "python3 scripts/ollama_desk.py" in lib
+    assert "/Users/dplvideo/.grok/worktrees/DGA-Research-Portal" in lib
+    assert "reason: 'helper'" in lib
+    assert "reason: data.ok ? 'up' : 'app'" in lib
+
+
 def test_red_pill_starts_when_nothing_is_running_and_restarts_a_glitch():
     desk = _desk()
     assert desk.decide(True, True) == "up"
