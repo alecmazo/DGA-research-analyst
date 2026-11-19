@@ -1,0 +1,10 @@
+---
+description: Keep the Settings directory map current when folders or the Mac checkout path change
+alwaysApply: true
+---
+
+# The directory map lives in Settings
+
+Settings → Directories reads `web/gp-app/src/pages/settings/directoryMap.ts`.
+
+When a change adds, renames, or moves a top-level directory, or changes the Mac checkout path, update that file in the same change. Set `DIRECTORY_UPDATED` to the day of the edit. The page is the map Alec uses. Do not leave it describing a folder that is gone or a path that does not hold the checkout.

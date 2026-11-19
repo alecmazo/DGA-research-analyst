@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { getCachedUser } from '@/lib/auth'
 import page from './page.module.css'
 import styles from './SettingsPage.module.css'
+import { DirectorySection } from './settings/DirectorySection'
 import { FlowsSection } from './settings/FlowsSection'
 import { HandoffSection } from './settings/HandoffSection'
 import { SupportSection } from './settings/SupportSection'
@@ -25,9 +26,12 @@ const JUMP = [
 ] as const
 
 export function SettingsPage() {
-  const [panel, setPanel] = useState<'office' | 'flows'>(() =>
-    typeof window !== 'undefined' && window.location.hash === '#set-flows' ? 'flows' : 'office',
-  )
+  const [panel, setPanel] = useState<'office' | 'flows' | 'directories'>(() => {
+    if (typeof window === 'undefined') return 'office'
+    if (window.location.hash === '#set-flows') return 'flows'
+    if (window.location.hash === '#set-directories') return 'directories'
+    return 'office'
+  })
   const [pending, setPending] = useState<string | null>(null)
 
   useEffect(() => {
@@ -36,12 +40,12 @@ export function SettingsPage() {
     setPending(null)
   }, [panel, pending])
 
-  const openFlows = (e: MouseEvent<HTMLAnchorElement>) => {
+  const openPanel = (e: MouseEvent<HTMLAnchorElement>, next: 'flows' | 'directories', hash: string) => {
     e.preventDefault()
-    setPanel('flows')
+    setPanel(next)
     setPending(null)
     try {
-      history.replaceState(null, '', '#set-flows')
+      history.replaceState(null, '', hash)
     } catch {
       /* ignore */
     }
@@ -77,9 +81,16 @@ export function SettingsPage() {
         <a
           href="#set-flows"
           aria-current={panel === 'flows' ? 'page' : undefined}
-          onClick={openFlows}
+          onClick={(e) => openPanel(e, 'flows', '#set-flows')}
         >
           Flows
+        </a>
+        <a
+          href="#set-directories"
+          aria-current={panel === 'directories' ? 'page' : undefined}
+          onClick={(e) => openPanel(e, 'directories', '#set-directories')}
+        >
+          Directories
         </a>
         {JUMP.map((j) => (
           <a key={j.id} href={`#${j.id}`} onClick={(e) => jumpTo(e, j.id)}>
@@ -89,6 +100,7 @@ export function SettingsPage() {
       </nav>
 
       {panel === 'flows' ? <FlowsSection /> : null}
+      {panel === 'directories' ? <DirectorySection /> : null}
       {panel === 'office' ? (
       <>
       <h3 className={styles.groupHead} id="set-users">
