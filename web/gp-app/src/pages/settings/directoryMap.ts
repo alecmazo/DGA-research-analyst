@@ -10,36 +10,24 @@ export type DirNode = {
 
 export const MAC_TREE: DirNode[] = [
   {
-    name: '/Users/dplvideo/.grok/worktrees',
-    note: 'Where this Mac keeps checkouts.',
+    name: '/Users/dplvideo/Desktop/DGA-Research-Analyst',
+    note: 'The one folder. Open this.',
     children: [
       {
-        name: 'DGA-Research-Portal',
-        note: 'A container. It has no scripts folder and no git checkout of its own.',
-        children: [
-          {
-            name: '2026-07-13-3a2bb445',
-            note: 'The one project folder. Open Terminal here.',
-            children: [
-              {
-                name: 'mobile',
-                note: 'The phone app. It is already inside this checkout.',
-              },
-              {
-                name: 'scripts/ollama_desk.py',
-                note: 'The restart helper. Leave this running on port 8766.',
-              },
-              {
-                name: 'web/gp-app',
-                note: 'The portal, including this Settings page.',
-              },
-              {
-                name: 'api',
-                note: 'The server the live site runs.',
-              },
-            ],
-          },
-        ],
+        name: 'mobile',
+        note: 'The phone app.',
+      },
+      {
+        name: 'scripts/ollama_desk.py',
+        note: 'The restart helper. Leave this running on port 8766.',
+      },
+      {
+        name: 'web/gp-app',
+        note: 'The portal, including this Settings page.',
+      },
+      {
+        name: 'api',
+        note: 'The server the live site runs.',
       },
     ],
   },
@@ -136,8 +124,8 @@ export const REPO_TREE: DirNode[] = [
 ]
 
 export const BRANCH_POINTS = [
-  'A branch is a line of commits, not another folder. This Mac has one checkout, 2026-07-13-3a2bb445.',
+  'A branch is a line of commits, not another folder. Open Desktop/DGA-Research-Analyst.',
   'main is the line the live portal runs. Pushing main deploys the site.',
   'A working branch uses that same folder. When the work ships, those commits join main and the extra name goes away.',
-  'Names like cursor/ollama-path-9667 are temporary lines. They are not extra copies of the project on disk.',
+  'Folders under .grok/worktrees are agent copies. They are not the folder to open.',
 ]

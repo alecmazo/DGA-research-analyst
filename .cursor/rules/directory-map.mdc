@@ -8,3 +8,5 @@ alwaysApply: true
 Settings → Directories reads `web/gp-app/src/pages/settings/directoryMap.ts`.
 
 When a change adds, renames, or moves a top-level directory, or changes the Mac checkout path, update that file in the same change. Set `DIRECTORY_UPDATED` to the day of the edit. The page is the map Alec uses. Do not leave it describing a folder that is gone or a path that does not hold the checkout.
+
+The folder he opens is `/Users/dplvideo/Desktop/DGA-Research-Analyst`. The Ollama restart command uses that path. Do not send him to `~/.grok/worktrees`.

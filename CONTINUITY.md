@@ -413,6 +413,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Menu order** | **`ui834-20261119-nav-order`** | Move menu shifts the top bar left or right. The page you put first is what opens with the portal. Desk stays at /desk. |
 | **Ollama path** | **`ui835-20261119-ollama-path`** | The restart command uses the dated checkout inside DGA-Research-Portal, where scripts/ollama_desk.py actually is. |
 | **Directories** | **`ui836-20261119-dir-map`** | Settings → Directories draws the Mac checkout, the folders inside it, and the difference between a branch and a folder. |
+| **Desktop folder** | **`ui837-20261119-desktop-home`** | The one local folder is Desktop/DGA-Research-Analyst. The Ollama restart command and Settings → Directories use that path. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -534,7 +535,7 @@ Settings stays in the account menu, not a top-level work tab. Sliw (`/sliw/`) st
 
 ### Known systems
 
-- **Repo:** `https://github.com/alecmazo/DGA-research-analyst` · branch `main` · pushing `main` deploys Railway service `web` (Nixpacks, `/health`, memory-capped start). Do not deploy `sliw` or Postgres unless asked. On this Mac the folder is `/Users/dplvideo/.grok/worktrees/DGA-Research-Portal`.
+- **Repo:** `https://github.com/alecmazo/DGA-research-analyst` · branch `main` · pushing `main` deploys Railway service `web` (Nixpacks, `/health`, memory-capped start). Do not deploy `sliw` or Postgres unless asked. On this Mac the folder is `/Users/dplvideo/Desktop/DGA-Research-Analyst`.
 - **Railway:** project `upbeat-ambition`, GP service **`web`**, Postgres plugin, Sliw service `sliw`
 - **GP login:** `/api/auth/v2/login` · header `x-auth-v2-token`
 - **Support tickets:** `/api/support/tickets` + agent inbox; mark fixed with PATCH + trail
@@ -623,4 +624,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-19 · Agent: Cursor · Built: `ui836-20261119-dir-map` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui837-YYYYMMDD-slug`*
+*Last updated: 2026-11-19 · Agent: Cursor · Built: `ui837-20261119-desktop-home` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui838-YYYYMMDD-slug`*
