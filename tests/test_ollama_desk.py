@@ -28,7 +28,8 @@ def test_failed_restart_walks_through_the_app_and_the_helper():
     assert "HELPER_COMMAND" in page
     assert "setGuide" in page
     assert "python3 scripts/ollama_desk.py" in lib
-    assert "/Users/dplvideo/.grok/worktrees/DGA-Research-Portal" in lib
+    assert "/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445" in lib
+    assert "dated checkout" in page
     assert "reason: 'helper'" in lib
     assert "reason: data.ok ? 'up' : 'app'" in lib
 
