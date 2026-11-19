@@ -7366,6 +7366,7 @@ def _persist_analysis_text(
             if ok:
                 print(f"✅ [persist] LOCAL report for {ticker} "
                       f"({len(text):,} chars · model={summary.get('model')})")
+                _reindex_munger_ticker(ticker)
                 return True, len(text)
             print(f"❌ [persist] LOCAL DB write returned False for {ticker}")
             return False, len(text)
@@ -7410,7 +7411,7 @@ def _persist_analysis_text(
             print(f"✅ [persist] GROK report for {ticker} "
                   f"({len(text):,} chars · price_target={summary.get('price_target')})")
             _stamp_report_tail(ticker, "grok", text)
-            _index_munger_rules(ticker, text)
+            _index_munger_rules(ticker, text, "grok")
             return True, len(text)
         print(f"❌ [persist] GROK DB write returned False for {ticker} "
               f"({len(text):,} chars still on disk/result — Saved Reports will miss this until re-upsert)")
@@ -7431,18 +7432,24 @@ def _ensure_munger_cites() -> None:
                 ticker TEXT NOT NULL,
                 rule SMALLINT NOT NULL,
                 excerpt TEXT,
+                source TEXT NOT NULL DEFAULT 'grok',
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 PRIMARY KEY (ticker, rule)
             )
         """)
+        cur.execute("""
+            ALTER TABLE munger_rule_cites
+            ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'grok'
+        """)
         conn.commit()
 
 
-def _index_munger_rules(ticker: str, text: str) -> None:
-    """Store Rule N citations from one Grok report. Replaces that name's old cites."""
+def _index_munger_rules(ticker: str, text: str, source: str = "grok") -> None:
+    """Store Rule N citations from one saved report. Replaces that name's old cites."""
     tk = (ticker or "").strip().upper()
     if not tk or not text:
         return
+    src = "local" if source == "local" else "grok"
     found: dict[int, str] = {}
     for m in _MUNGER_CITE_RE.finditer(text):
         n = int(m.group(1))
@@ -7454,30 +7461,83 @@ def _index_munger_rules(ticker: str, text: str) -> None:
             cur.execute("DELETE FROM munger_rule_cites WHERE ticker=%s", (tk,))
             for n, excerpt in found.items():
                 cur.execute(
-                    """INSERT INTO munger_rule_cites (ticker, rule, excerpt)
-                       VALUES (%s, %s, %s)""",
-                    (tk, n, excerpt),
+                    """INSERT INTO munger_rule_cites (ticker, rule, excerpt, source)
+                       VALUES (%s, %s, %s, %s)""",
+                    (tk, n, excerpt, src),
                 )
             conn.commit()
     except Exception as exc:
         print(f"[munger] index {tk}: {exc!s:.140}", flush=True)
 
 
+def _clear_munger_cites(ticker: str) -> None:
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        return
+    try:
+        _ensure_munger_cites()
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM munger_rule_cites WHERE ticker=%s", (tk,))
+            conn.commit()
+    except Exception as exc:
+        print(f"[munger] clear {tk}: {exc!s:.140}", flush=True)
+
+
+def _apply_munger_cites(ticker: str, grok_md: str, local_md: str) -> None:
+    import munger_fifty
+    source, text = munger_fifty.saved_report_for_cites(grok_md, local_md)
+    if not source:
+        _clear_munger_cites(ticker)
+        return
+    _index_munger_rules(ticker, text, source)
+
+
+def _reindex_munger_ticker(ticker: str) -> None:
+    """Re-read the saved notes and cite the Grok report, or the local one."""
+    tk = (ticker or "").strip().upper()
+    if not tk:
+        return
+    grok, local = "", ""
+    try:
+        with _fund_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT report_md, report_md_local FROM analyst_reports WHERE ticker=%s",
+                (tk,),
+            )
+            row = cur.fetchone()
+        if row:
+            grok, local = row[0] or "", row[1] or ""
+    except Exception as exc:
+        print(f"[munger] reread {tk}: {exc!s:.140}", flush=True)
+        return
+    _apply_munger_cites(tk, grok, local)
+
+
 def _munger_index_book(tickers: list[str]) -> None:
-    """Read saved Grok notes once, off the page request."""
-    if not tickers:
+    """Read saved notes once, off the page request.
+
+    Grok Analyze is the citation source when that report is saved.
+    The On this Mac report is the source when it is the saved note.
+    """
+    names = [str(t or "").strip().upper() for t in tickers if str(t or "").strip()]
+    if not names:
         return
     try:
         _ensure_munger_cites()
         with _fund_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                """SELECT ticker, report_md FROM analyst_reports
-                    WHERE ticker = ANY(%s) AND report_md IS NOT NULL""",
-                (tickers,),
+                """SELECT ticker, report_md, report_md_local FROM analyst_reports
+                    WHERE ticker = ANY(%s)""",
+                (names,),
             )
             rows = cur.fetchall()
-        for tk, md in rows:
-            _index_munger_rules(tk, md or "")
+        seen: set[str] = set()
+        for tk, grok, local in rows:
+            seen.add(str(tk or "").strip().upper())
+            _apply_munger_cites(tk, grok or "", local or "")
+        for tk in names:
+            if tk not in seen:
+                _clear_munger_cites(tk)
     except Exception as exc:
         print(f"[munger] book index: {exc!s:.140}", flush=True)
 
@@ -9470,6 +9530,7 @@ def munger_desk(request: Request):
     tickers = _wl_get_db(lp) if lp else []
     names: dict[str, str] = {}
     cites: list[dict] = []
+    sources: dict[str, str] = {}
     try:
         _ensure_munger_cites()
     except Exception as exc:
@@ -9483,14 +9544,34 @@ def munger_desk(request: Request):
                 )
                 names = {r[0]: r[1] or "" for r in cur.fetchall()}
                 cur.execute(
-                    """SELECT ticker, rule, excerpt FROM munger_rule_cites
+                    """SELECT ticker, rule, excerpt, COALESCE(source, 'grok')
+                         FROM munger_rule_cites
                         WHERE ticker = ANY(%s)""",
                     (tickers,),
                 )
                 cites = [
-                    {"ticker": r[0], "rule": int(r[1]), "excerpt": r[2] or ""}
+                    {
+                        "ticker": r[0],
+                        "rule": int(r[1]),
+                        "excerpt": r[2] or "",
+                        "source": r[3] or "grok",
+                    }
                     for r in cur.fetchall()
                 ]
+                cur.execute(
+                    """SELECT ticker,
+                              CASE
+                                WHEN length(btrim(COALESCE(report_md, ''))) >= 40
+                                  THEN 'grok'
+                                WHEN length(btrim(COALESCE(report_md_local, ''))) >= 40
+                                  THEN 'local'
+                                ELSE ''
+                              END
+                         FROM analyst_reports
+                        WHERE ticker = ANY(%s)""",
+                    (tickers,),
+                )
+                sources = {r[0]: r[1] or "" for r in cur.fetchall()}
     except Exception as exc:
         print(f"[munger] desk: {exc!s:.140}", flush=True)
     _kick_munger_index(tickers)
@@ -9511,9 +9592,11 @@ def munger_desk(request: Request):
             "ticker": holding,
             "name": names.get(holding) or "",
             "excerpt": excerpt,
+            "source": sources.get(holding) or "",
         },
         "holdings": [
-            {"ticker": t, "name": names.get(t) or ""} for t in tickers
+            {"ticker": t, "name": names.get(t) or "", "source": sources.get(t) or ""}
+            for t in tickers
         ],
         "citations": cites,
         "rules": [
@@ -10785,6 +10868,7 @@ def local_reports_delete(ticker: str, request: Request):
                 conn.commit()
         except Exception as exc:
             raise HTTPException(500, f"Could not remove local report: {exc!s:.160}")
+        _reindex_munger_ticker(tk)
     return {"ok": True, "ticker": tk}
 
 

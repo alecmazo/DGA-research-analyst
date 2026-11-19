@@ -5,8 +5,8 @@ import page from './page.module.css'
 import styles from './MungerPage.module.css'
 
 type Rule = { n: number; title: string; apply: string }
-type Holding = { ticker: string; name: string }
-type Cite = { ticker: string; rule: number; excerpt: string }
+type Holding = { ticker: string; name: string; source?: string }
+type Cite = { ticker: string; rule: number; excerpt: string; source?: string }
 type Desk = {
   ok?: boolean
   day?: string
@@ -16,10 +16,22 @@ type Desk = {
     ticker: string
     name: string
     excerpt: string
+    source?: string
   }
   holdings?: Holding[]
   citations?: Cite[]
   rules?: Rule[]
+}
+
+function reportTo(ticker: string, source?: string) {
+  const provider = source === 'local' ? 'local' : 'grok'
+  return `/report?ticker=${encodeURIComponent(ticker)}&provider=${provider}`
+}
+
+function sourceLabel(source?: string) {
+  if (source === 'local') return 'On this Mac'
+  if (source === 'grok') return 'Grok'
+  return ''
 }
 
 export function MungerPage() {
@@ -77,10 +89,11 @@ export function MungerPage() {
             {morning.ticker ? (
               <p className={styles.holding}>
                 Today’s name:{' '}
-                <Link to={`/report?ticker=${encodeURIComponent(morning.ticker)}&provider=grok`}>
+                <Link to={reportTo(morning.ticker, morning.source)}>
                   {morning.ticker}
                 </Link>
                 {morning.name ? ` · ${morning.name}` : ''}
+                {sourceLabel(morning.source) ? ` · ${sourceLabel(morning.source)}` : ''}
               </p>
             ) : (
               <p className={styles.quiet}>Add names to the watchlist to attach a holding.</p>
@@ -91,7 +104,6 @@ export function MungerPage() {
               morning.ticker && (
                 <p className={styles.quiet}>
                   No saved report has cited this rule for {morning.ticker} yet.
-                  The next Grok Analyze will name the rules that apply.
                 </p>
               )
             )}
@@ -122,17 +134,20 @@ export function MungerPage() {
           </h2>
           <p className={styles.apply}>{rule.apply}</p>
           <h3>Cited in a saved report</h3>
+          <p className={styles.quiet}>
+            A name with a Grok Analyze report is cited from that report. A name
+            whose saved report is On this Mac is cited from that report.
+          </p>
           {cited.length === 0 && (
-            <p className={styles.quiet}>
-              None of the saved Grok reports cite this rule yet.
-            </p>
+            <p className={styles.quiet}>None of the saved reports cite this rule yet.</p>
           )}
           <ul className={styles.cites}>
             {cited.map((c) => (
               <li key={c.ticker}>
-                <Link to={`/report?ticker=${encodeURIComponent(c.ticker)}&provider=grok`}>
-                  {c.ticker}
-                </Link>
+                <Link to={reportTo(c.ticker, c.source)}>{c.ticker}</Link>
+                {sourceLabel(c.source) ? (
+                  <span className={styles.src}>{sourceLabel(c.source)}</span>
+                ) : null}
                 <p>{c.excerpt}</p>
               </li>
             ))}

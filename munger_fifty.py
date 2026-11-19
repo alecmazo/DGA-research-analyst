@@ -60,3 +60,18 @@ RULES: tuple[tuple[int, str, str], ...] = (
 
 def prompt_list() -> str:
     return "\n".join(f"{n}. {title}" for n, title, _apply in RULES)
+
+
+def saved_report_for_cites(grok_md: str | None, local_md: str | None) -> tuple[str, str]:
+    """Which saved note supplies Rule N citations for one name.
+
+    A Grok Analyze report is the source when one is saved. The On this Mac
+    report is the source when Grok Analyze has no saved report.
+    """
+    grok = (grok_md or "").strip()
+    local = (local_md or "").strip()
+    if len(grok) >= 40:
+        return "grok", grok
+    if len(local) >= 40:
+        return "local", local
+    return "", ""
