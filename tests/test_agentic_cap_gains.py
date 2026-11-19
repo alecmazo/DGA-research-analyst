@@ -12,4 +12,4 @@ def test_agentic_system_requires_capital_gains_math():
     assert "after-tax" in system.lower() or "AFTER tax" in system
     assert "early next calendar year" in system
     assert "Tax-advantaged accounts" in system
-    assert 'WEB_BUILD_VERSION = "ui838-20261119-helper-busy"' in src
+    assert 'WEB_BUILD_VERSION = "ui839-20261119-helper-takeover"' in src

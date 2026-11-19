@@ -23,7 +23,7 @@ export function DirectorySection() {
       <header className={styles.head}>
         <h2>Directories</h2>
         <p>
-          One folder on this Mac: Desktop/DGA-Research-Analyst. mobile, scripts, web, and api are inside it. Updated {DIRECTORY_UPDATED}.
+          The project Terminal is in is the dated folder under .grok/worktrees. The prompt says dga-research-portal. That folder has the Ollama script. Updated {DIRECTORY_UPDATED}.
         </p>
       </header>
 

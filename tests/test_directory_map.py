@@ -16,8 +16,8 @@ def test_settings_directory_map_shows_the_checkout_and_branches():
     assert "On this Mac" in section
     assert "Inside the checkout" in section
     assert "Branches" in section
-    assert "/Users/dplvideo/Desktop/DGA-Research-Analyst" in data
-    assert "2026-07-13-3a2bb445" not in data
+    assert "/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445" in data
+    assert "dga-research-portal" in data
     assert "scripts/ollama_desk.py" in data
     assert "A branch is a line of commits, not another folder." in data
     assert "directoryMap.ts" in rule

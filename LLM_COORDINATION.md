@@ -7,7 +7,7 @@
 
 This is the path. Do not invent a second one.
 
-1. Edit `/Users/dplvideo/Desktop/DGA-Research-Analyst` on this Mac. That is the one folder. Do not use `~/.grok/worktrees`. Do not rename the GitHub repo.
+1. Edit `/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445` on this Mac. Terminal’s prompt says `dga-research-portal`. That is the checkout with `scripts/ollama_desk.py`. Do not rename the GitHub repo.
 2. When desk pages change, `npm run build --prefix web/gp-app` and commit `web/gp-app/dist`. Railway does not run Node.
 3. Commit everything the next model needs, including `ticket_*.jpg`, `mobile/logo-options/`, and `stocks/AAPL_user_msg.txt`. Do not commit `.env` or generated `stocks/*` reports.
 4. Push `main` on `https://github.com/alecmazo/DGA-research-analyst`. That push deploys Railway service **web** (`6aac66bc-eea5-45a1-b808-ff4275886491`) in project `upbeat-ambition`. The service is set to Nixpacks, a `/health` check, and the memory-capped start command in `railway.toml`.

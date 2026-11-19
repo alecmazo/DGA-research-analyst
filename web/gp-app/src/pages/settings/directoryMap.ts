@@ -10,8 +10,8 @@ export type DirNode = {
 
 export const MAC_TREE: DirNode[] = [
   {
-    name: '/Users/dplvideo/Desktop/DGA-Research-Analyst',
-    note: 'The one folder. Open this.',
+    name: '/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445',
+    note: 'The folder Terminal is in. The prompt says dga-research-portal.',
     children: [
       {
         name: 'mobile',
@@ -124,7 +124,7 @@ export const REPO_TREE: DirNode[] = [
 ]
 
 export const BRANCH_POINTS = [
-  'A branch is a line of commits, not another folder. Open Desktop/DGA-Research-Analyst.',
+  'A branch is a line of commits, not another folder. Terminal is in the dated checkout under .grok/worktrees.',
   'main is the line the live portal runs. Pushing main deploys the site.',
   'A working branch uses that same folder. When the work ships, those commits join main and the extra name goes away.',
   'Folders under .grok/worktrees are agent copies. They are not the folder to open.',

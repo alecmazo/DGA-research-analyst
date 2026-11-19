@@ -11,8 +11,10 @@ from __future__ import annotations
 import errno
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -271,6 +273,19 @@ def already_serving() -> bool:
         return False
 
 
+def helper_proxies() -> bool:
+    try:
+        with urlopen(f"http://{HOST}:{PORT}/api/tags", timeout=3) as res:
+            return getattr(res, "status", 200) == 200
+    except (URLError, TimeoutError, OSError):
+        return False
+
+
+def should_replace(ollama_up: bool, proxies: bool) -> bool:
+    """A stuck or old helper holds the port while the pill stays red."""
+    return not (ollama_up and proxies)
+
+
 def bind_message(exc: BaseException, serving: bool) -> str | None:
     if not isinstance(exc, OSError) or exc.errno != errno.EADDRINUSE:
         return None
@@ -279,20 +294,75 @@ def bind_message(exc: BaseException, serving: bool) -> str | None:
     return f"Port {PORT} is already in use."
 
 
-def main() -> None:
+def ask_existing() -> dict | None:
     try:
-        server = ThreadingHTTPServer((HOST, PORT), Handler)
+        req = Request(
+            f"http://{HOST}:{PORT}/ensure",
+            data=b"{}",
+            method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        with urlopen(req, timeout=30) as res:
+            return json.loads(res.read().decode() or "{}")
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return None
+
+
+def free_port() -> None:
+    try:
+        out = subprocess.run(
+            ["lsof", "-nP", f"-tiTCP:{PORT}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    for part in (out.stdout or "").split():
+        if not part.isdigit():
+            continue
+        pid = int(part)
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            continue
+    time.sleep(0.4)
+
+
+def occupy() -> ThreadingHTTPServer | None:
+    ThreadingHTTPServer.allow_reuse_address = True
+    try:
+        return ThreadingHTTPServer((HOST, PORT), Handler)
     except OSError as exc:
-        serving = already_serving() if exc.errno == errno.EADDRINUSE else False
-        message = bind_message(exc, serving)
-        if message is None:
+        if exc.errno != errno.EADDRINUSE:
             raise
-        print(message, flush=True)
-        if not serving:
+        if not should_replace(serve_ok(), helper_proxies()):
+            return None
+        asked = ask_existing()
+        if asked and asked.get("ok") and serve_ok() and helper_proxies():
+            return None
+        print(f"Replacing the stuck helper on port {PORT}.", flush=True)
+        free_port()
+        try:
+            return ThreadingHTTPServer((HOST, PORT), Handler)
+        except OSError:
+            print(f"Port {PORT} is still in use.", flush=True)
             raise SystemExit(1)
+
+
+def main() -> None:
+    server = occupy()
+    if server is None:
+        print("Ollama is running. Click the red pill.", flush=True)
         return
     print(f"Helper listening on {HOST}:{PORT}.", flush=True)
-    server.serve_forever()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    result = ensure()
+    print(result.get("message") or "Ollama did not start.", flush=True)
+    threading.Event().wait()
 
 
 if __name__ == "__main__":

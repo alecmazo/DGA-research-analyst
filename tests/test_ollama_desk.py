@@ -29,9 +29,9 @@ def test_failed_restart_walks_through_the_app_and_the_helper():
     assert "HELPER_COMMAND" in page
     assert "setGuide" in page
     assert "python3 scripts/ollama_desk.py" in lib
-    assert "/Users/dplvideo/Desktop/DGA-Research-Analyst" in lib
-    assert "Desktop/DGA-Research-Analyst" in page
-    assert "already running" in page
+    assert "/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445" in lib
+    assert "raw.githubusercontent.com/alecmazo/DGA-research-analyst/main/scripts/ollama_desk.py" in lib
+    assert "old helper is stuck" in page
     assert "reason: 'helper'" in lib
     assert "reason: data.ok ? 'up' : 'app'" in lib
 
@@ -42,6 +42,9 @@ def test_second_start_says_the_helper_is_already_running():
     assert desk.bind_message(busy, True) == "Helper already running on 127.0.0.1:8766. Leave that window open."
     assert desk.bind_message(busy, False) == "Port 8766 is already in use."
     assert desk.bind_message(OSError(errno.EACCES, "denied"), True) is None
+    assert desk.should_replace(True, True) is False
+    assert desk.should_replace(False, True) is True
+    assert desk.should_replace(True, False) is True
 
 
 def test_red_pill_starts_when_nothing_is_running_and_restarts_a_glitch():

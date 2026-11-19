@@ -9104,7 +9104,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui838-20261119-helper-busy"
+WEB_BUILD_VERSION = "ui839-20261119-helper-takeover"
 
 
 @app.get("/api/build")
@@ -9258,7 +9258,7 @@ def _continuity_pack() -> dict:
         f"memory-capped start command in `railway.toml`. Poll `/api/build` "
         f"until it matches. Do not deploy `sliw` or Postgres unless Alec asks. "
         f"On this Mac the folder is "
-        f"`/Users/dplvideo/Desktop/DGA-Research-Analyst`. The GitHub "
+        f"`/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445`. The GitHub "
         f"repo name stays `DGA-research-analyst`.\n"
         f"4. Do **not** auto-send email. Share prompts for a recipient.\n"
         f"5. Sliw is Alec/Edyta only. CRM in shared Postgres.\n"
@@ -9357,7 +9357,7 @@ def _continuity_speed_prompt() -> str:
         f"on `/data/sliw-media`; the desk bot is GPT-oss on this Mac and does not call xAI; "
         f"ticket screenshots and `mobile/logo-options/` stay in the repo; "
         f"the local folder on this Mac is "
-        f"`/Users/dplvideo/Desktop/DGA-Research-Analyst`.\n\n"
+        f"`/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445`.\n\n"
         f"## Then do the speed audit\n\n"
         f"1. Read `docs/mobile-speed/CHECKLIST.md`. The budgets are the steps "
         f"table. Older limits are under **Budget revisions**. Do not renumber "

@@ -46,7 +46,7 @@ ask him to open Terminal or clone anything himself.
 
 1. Never decrease `WEB_BUILD_VERSION` in `api/server.py`. Also bump `BUILD_VERSION` and append a CONTINUITY.md row.
 2. After UI edits: `npm run build` in `web/gp-app/` and **commit `dist/`**.
-3. Ship by pushing `main`. That deploys Railway service `web`. The web service uses Nixpacks, `/health` (300s), and the memory-capped start command in `railway.toml`. Poll `/api/build` until it matches. Do not deploy `sliw` or Postgres unless Alec asks. On this Mac the folder is `/Users/dplvideo/Desktop/DGA-Research-Analyst`. The GitHub repo name stays `DGA-research-analyst`.
+3. Ship by pushing `main`. That deploys Railway service `web`. The web service uses Nixpacks, `/health` (300s), and the memory-capped start command in `railway.toml`. Poll `/api/build` until it matches. Do not deploy `sliw` or Postgres unless Alec asks. On this Mac the folder is `/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445`. The GitHub repo name stays `DGA-research-analyst`.
 4. Do **not** auto-send email. Share/report mail prompts for a recipient.
 5. Sliw is Alec/Edyta only. CRM in shared Postgres.
 6. Never persist Grok live-search tool dumps as `report_md`.

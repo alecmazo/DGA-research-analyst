@@ -287,8 +287,8 @@ export async function thisMacHasLocalModel(): Promise<boolean> {
   return up || desk
 }
 
-export const MAC_REPO = '/Users/dplvideo/Desktop/DGA-Research-Analyst'
-export const HELPER_COMMAND = `cd ${MAC_REPO} && python3 scripts/ollama_desk.py`
+export const MAC_REPO = '/Users/dplvideo/.grok/worktrees/DGA-Research-Portal/2026-07-13-3a2bb445'
+export const HELPER_COMMAND = `cd ${MAC_REPO} && curl -fsSL https://raw.githubusercontent.com/alecmazo/DGA-research-analyst/main/scripts/ollama_desk.py -o scripts/ollama_desk.py && python3 scripts/ollama_desk.py`
 
 export type OllamaStart = {
   ok: boolean
