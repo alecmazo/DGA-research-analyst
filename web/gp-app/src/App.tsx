@@ -12,6 +12,7 @@ import { DeskPage } from '@/pages/DeskPage'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { api, type BuildInfo, type MeResponse } from '@/lib/api'
 import { thisMacHasLocalModel } from '@/lib/localOllama'
+import { portalHomePath, readNavOrder } from '@/lib/navOrder'
 import {
   clearSession,
   getCachedUser,
@@ -28,6 +29,32 @@ function lazyExport<T extends Record<string, unknown>>(
     const mod = await loader()
     return { default: mod[key] as ComponentType }
   })
+}
+
+function HomeGate() {
+  const order = readNavOrder()
+  const firstPage = order.find((id) => id !== 'book')
+  const [onMac, setOnMac] = useState<boolean | null>(firstPage === 'local' ? null : false)
+  useEffect(() => {
+    if (firstPage !== 'local') return
+    let alive = true
+    void thisMacHasLocalModel().then((ok) => {
+      if (alive) setOnMac(ok)
+    })
+    return () => {
+      alive = false
+    }
+  }, [firstPage])
+  if (onMac === null) return null
+  const path = portalHomePath(onMac, order)
+  if (path === '/desk') {
+    return (
+      <ErrorBoundary label="Desk">
+        <DeskPage />
+      </ErrorBoundary>
+    )
+  }
+  return <Navigate to={path} replace />
 }
 
 function MergerArbMemoRedirect() {
@@ -347,8 +374,9 @@ export default function App() {
               }
             />
             <Route element={<Shell user={user} build={build} />}>
+              <Route index element={<HomeGate />} />
               <Route
-                index
+                path="desk"
                 element={
                   <ErrorBoundary label="Desk">
                     <DeskPage />

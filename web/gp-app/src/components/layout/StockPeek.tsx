@@ -256,7 +256,7 @@ export function StockPeek({
 
   const runAi = () => {
     onClose()
-    navigate('/')
+    navigate('/desk')
     window.setTimeout(() => focusAnalyzeTicker(tk, false), 50)
   }
 

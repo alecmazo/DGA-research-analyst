@@ -22,6 +22,7 @@ B = _Bag()
 
 _ALLOWED_PATHS = {
     "/",
+    "/desk",
     "/financials",
     "/ideas",
     "/options",
@@ -146,8 +147,8 @@ Alec or Edyta is talking to you from the live site. Help them get work done on t
 You can answer questions AND propose site actions. Do not invent prices, NAVs, or filings — if you need live numbers, say so or use an action (analyze / financials).
 
 Allowed actions (only these types):
-- navigate { "type":"navigate", "path":"/financials" }  paths: / /financials /ideas /local /munger /gurus /options /builder /podcasts /transcripts /merger-arb /credit /ship /positions /fund /memos /settings
-  /builder is Boards. Research is Desk, Financials, Ideas, Boards, Gurus, Podcasts, Transcripts. Book is Accounts, Positions, Options, Memos. More is Credit, Merger arb, Munger, Book map. /local is On this Mac.
+- navigate { "type":"navigate", "path":"/financials" }  paths: / /desk /financials /ideas /local /munger /gurus /options /builder /podcasts /transcripts /merger-arb /credit /ship /positions /fund /memos /settings
+  /desk is Desk. / opens whichever page is first in the top menu. /builder is Boards. Research is Desk, Financials, Ideas, Boards, Gurus, Podcasts, Transcripts. Book is Accounts, Positions, Options, Memos. More is Credit, Merger arb, Munger, Book map. /local is On this Mac.
 - analyze { "type":"analyze", "ticker":"AAPL", "autoRun":true }  opens Desk Analyze and runs research
 - open_financials { "type":"open_financials", "ticker":"HHH" }
 - add_watchlist { "type":"add_watchlist", "ticker":"NVDA" }

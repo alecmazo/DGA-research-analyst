@@ -1,11 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import type { GpUser } from '@/lib/auth'
 import { logout } from '@/lib/auth'
 import { useTheme } from '@/hooks/useTheme'
 import { api } from '@/lib/api'
 import { thisMacHasLocalModel } from '@/lib/localOllama'
+import {
+  NAV_IDS,
+  placeNavBefore,
+  portalHomePath,
+  readNavOrder,
+  shiftNav,
+  writeNavOrder,
+  type NavId,
+} from '@/lib/navOrder'
 import { StockPeek } from './StockPeek'
 import styles from './Topbar.module.css'
 
@@ -42,6 +51,12 @@ const SLIW_ALLOWED = new Set([
 ])
 
 const TOP_LINKS = [...RESEARCH, ...MORE]
+
+function navIdFor(to: string): NavId {
+  if (to === '/' || to === '/desk') return 'desk'
+  if (to === '/merger-arb') return 'merger'
+  return to.replace(/^\//, '') as NavId
+}
 
 function pathActive(pathname: string, to: string) {
   if (to === '/') return pathname === '/'
@@ -277,6 +292,73 @@ function normalizeTicker(q: string) {
     .replace(/[^A-Z0-9.\-]/g, '')
 }
 
+function MenuSlot({
+  id,
+  label,
+  index,
+  last,
+  arrange,
+  onMove,
+  onDropOn,
+  children,
+}: {
+  id?: NavId
+  label: string
+  index: number
+  last: boolean
+  arrange: boolean
+  onMove: (id: NavId, dir: -1 | 1) => void
+  onDropOn: (from: NavId) => void
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={`${styles.slot} ${arrange ? styles.slotOn : ''}`}
+      draggable={arrange}
+      onDragStart={(e) => {
+        if (!arrange || !id) return
+        e.dataTransfer.setData('text/plain', id)
+        e.dataTransfer.effectAllowed = 'move'
+      }}
+      onDragOver={(e) => {
+        if (!arrange) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={(e) => {
+        if (!arrange) return
+        e.preventDefault()
+        const from = e.dataTransfer.getData('text/plain') as NavId
+        if (from && from !== id) onDropOn(from)
+      }}
+    >
+      {arrange && (
+        <button
+          type="button"
+          className={styles.nudge}
+          aria-label={`Move ${label} left`}
+          disabled={index === 0 || !id}
+          onClick={() => id && onMove(id, -1)}
+        >
+          ‹
+        </button>
+      )}
+      {children}
+      {arrange && (
+        <button
+          type="button"
+          className={styles.nudge}
+          aria-label={`Move ${label} right`}
+          disabled={last || !id}
+          onClick={() => id && onMove(id, 1)}
+        >
+          ›
+        </button>
+      )}
+    </div>
+  )
+}
+
 type Props = {
   user: GpUser | null
   build?: string
@@ -292,6 +374,10 @@ export function Topbar({ user, build }: Props) {
   const [peekTk, setPeekTk] = useState<string | null>(null)
   const [activeIdx, setActiveIdx] = useState(0)
   const [onThisMac, setOnThisMac] = useState(false)
+  const [order, setOrder] = useState<NavId[]>(() => readNavOrder())
+  const [arrange, setArrange] = useState(false)
+  const loc = useLocation()
+  const navigate = useNavigate()
 
   const inputRef = useRef<HTMLInputElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -307,6 +393,28 @@ export function Topbar({ user, build }: Props) {
       alive = false
     }
   }, [])
+
+  const visible = order.filter((id) => id !== 'local' || onThisMac)
+  const home = portalHomePath(onThisMac, order)
+  const homeRef = useRef(home)
+
+  useEffect(() => {
+    const prev = homeRef.current
+    homeRef.current = home
+    if (prev === home) return
+    const here = loc.pathname
+    const onPrev = here === prev || (prev === '/desk' && (here === '/' || here === '/desk'))
+    if (!onPrev) return
+    navigate(home === '/desk' ? '/' : home, { replace: true })
+  }, [home, loc.pathname, navigate])
+
+  const applyOrder = (next: NavId[]) => {
+    setOrder(writeNavOrder(next))
+  }
+
+  const moveItem = (id: NavId, dir: -1 | 1) => {
+    applyOrder(shiftNav(order, id, dir, visible))
+  }
 
   const openPeek = useCallback((ticker: string) => {
     const tk = normalizeTicker(ticker)
@@ -488,39 +596,70 @@ export function Topbar({ user, build }: Props) {
         </div>
 
         <nav className={styles.nav} aria-label="Primary">
-          {RESEARCH.map((it) => (
-            <NavLink
-              key={it.to}
-              to={it.to}
-              end={it.to === '/'}
-              className={({ isActive }) =>
-                `${styles.link} ${isActive ? styles.linkActive : ''}`
-              }
+          {visible.map((id, index) => {
+            if (id === 'book') {
+              return (
+                <MenuSlot
+                  key="book"
+                  id="book"
+                  label="Book"
+                  index={index}
+                  last={index === visible.length - 1}
+                  arrange={arrange}
+                  onMove={moveItem}
+                  onDropOn={(from) => applyOrder(placeNavBefore(order, from, 'book'))}
+                >
+                  <NavMenu label="Book" items={BOOK} />
+                </MenuSlot>
+              )
+            }
+            const link = TOP_LINKS.find((it) => navIdFor(it.to) === id)
+            const label = id === 'local' ? 'On this Mac' : link?.label || id
+            const to =
+              id === 'desk' ? (home === '/desk' ? '/' : '/desk') : id === 'local' ? '/local' : link?.to || '/'
+            const active =
+              id === 'desk'
+                ? loc.pathname === '/' || loc.pathname === '/desk'
+                : pathActive(loc.pathname, to)
+            return (
+              <MenuSlot
+                key={id}
+                id={id}
+                label={label}
+                index={index}
+                last={index === visible.length - 1}
+                arrange={arrange}
+                onMove={moveItem}
+                onDropOn={(from) => applyOrder(placeNavBefore(order, from, id))}
+              >
+                <NavLink
+                  to={to}
+                  end={to === '/' || to === '/desk'}
+                  className={`${styles.link} ${active ? styles.linkActive : ''}`}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  {label}
+                </NavLink>
+              </MenuSlot>
+            )
+          })}
+          <button
+            type="button"
+            className={`${styles.arrange} ${arrange ? styles.arrangeOn : ''}`}
+            aria-pressed={arrange}
+            title="Move a page left or right. The page at the left opens when you open the portal."
+            onClick={() => setArrange((on) => !on)}
+          >
+            {arrange ? 'Done' : 'Move menu'}
+          </button>
+          {arrange && (
+            <button
+              type="button"
+              className={styles.arrange}
+              onClick={() => applyOrder([...NAV_IDS])}
             >
-              {it.label}
-            </NavLink>
-          ))}
-          <NavMenu label="Book" items={BOOK} />
-          {TOP_LINKS.slice(RESEARCH.length).map((it) => (
-            <NavLink
-              key={it.to}
-              to={it.to}
-              className={({ isActive }) =>
-                `${styles.link} ${isActive ? styles.linkActive : ''}`
-              }
-            >
-              {it.label}
-            </NavLink>
-          ))}
-          {onThisMac && (
-            <NavLink
-              to="/local"
-              className={({ isActive }) =>
-                `${styles.link} ${isActive ? styles.linkActive : ''}`
-              }
-            >
-              On this Mac
-            </NavLink>
+              Reset
+            </button>
           )}
         </nav>
 

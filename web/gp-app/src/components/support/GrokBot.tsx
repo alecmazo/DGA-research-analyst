@@ -21,6 +21,7 @@ type SiteAction = {
 const STORE_KEY = 'dga.grokbot.chat'
 const ALLOWED_PATHS = new Set([
   '/',
+  '/desk',
   '/financials',
   '/ideas',
   '/options',
@@ -46,8 +47,8 @@ Alec or Edyta is talking to you from this Mac. Help them get work done on this p
 You can answer questions AND propose site actions. Do not invent prices, NAVs, or filings — if you need live numbers, say so or use an action (analyze / financials).
 
 Allowed actions (only these types):
-- navigate { "type":"navigate", "path":"/financials" }  paths: / /financials /ideas /local /munger /gurus /options /builder /podcasts /transcripts /merger-arb /credit /ship /positions /fund /memos /settings
-  /builder is Boards. Research is Desk, Financials, Ideas, Boards, Gurus, Podcasts, Transcripts. Book is Accounts, Positions, Options, Memos. More is Credit, Merger arb, Munger, Book map. /local is On this Mac.
+- navigate { "type":"navigate", "path":"/financials" }  paths: / /desk /financials /ideas /local /munger /gurus /options /builder /podcasts /transcripts /merger-arb /credit /ship /positions /fund /memos /settings
+  /desk is Desk. / opens whichever page is first in the top menu. /builder is Boards. Research is Desk, Financials, Ideas, Boards, Gurus, Podcasts, Transcripts. Book is Accounts, Positions, Options, Memos. More is Credit, Merger arb, Munger, Book map. /local is On this Mac.
 - analyze { "type":"analyze", "ticker":"AAPL", "autoRun":true }  opens Desk Analyze and runs research
 - open_financials { "type":"open_financials", "ticker":"HHH" }
 - add_watchlist { "type":"add_watchlist", "ticker":"NVDA" }
@@ -195,14 +196,14 @@ export function GrokBot() {
       if (a.type === 'navigate' && a.path) {
         navigate(a.path)
       } else if (a.type === 'analyze' && a.ticker) {
-        if (loc.pathname !== '/') navigate('/')
+        if (loc.pathname !== '/' && loc.pathname !== '/desk') navigate('/desk')
         window.setTimeout(() => {
           window.dispatchEvent(
             new CustomEvent('dga-focus-analyze', {
               detail: { ticker: a.ticker, autoRun: a.autoRun !== false },
             }),
           )
-        }, loc.pathname === '/' ? 40 : 220)
+        }, loc.pathname === '/' || loc.pathname === '/desk' ? 40 : 220)
       } else if (a.type === 'open_financials' && a.ticker) {
         if (!loc.pathname.startsWith('/financials')) navigate('/financials')
         window.setTimeout(() => {
@@ -218,15 +219,15 @@ export function GrokBot() {
       } else if (a.type === 'open_report' && a.ticker) {
         openReportWindow(a.ticker, 'grok')
       } else if (a.type === 'run_daily_pulse') {
-        if (loc.pathname !== '/') navigate('/')
+        if (loc.pathname !== '/' && loc.pathname !== '/desk') navigate('/desk')
         window.setTimeout(() => {
           window.dispatchEvent(new Event('dga-run-daily-pulse'))
-        }, loc.pathname === '/' ? 40 : 220)
+        }, loc.pathname === '/' || loc.pathname === '/desk' ? 40 : 220)
       } else if (a.type === 'run_market_pulse') {
-        if (loc.pathname !== '/') navigate('/')
+        if (loc.pathname !== '/' && loc.pathname !== '/desk') navigate('/desk')
         window.setTimeout(() => {
           window.dispatchEvent(new Event('dga-run-market-pulse'))
-        }, loc.pathname === '/' ? 40 : 220)
+        }, loc.pathname === '/' || loc.pathname === '/desk' ? 40 : 220)
       } else if (a.type === 'open_support') {
         window.dispatchEvent(new Event('dga-open-support'))
       }

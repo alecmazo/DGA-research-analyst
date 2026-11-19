@@ -410,6 +410,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **YTD pair** | **`ui831-20261117-ytd-pair`** | SUP_20261117_463cc241. The Financials price card stacks a YTD chart over a comparison chart. Window buttons sit between them. The YTD label is drawn on the top chart. |
 | **Brief span** | **`ui832-20261119-brief-span`** | Financials can close the local brief and the page uses the full width again. The brief reasons from the headlines: the read, the tension, and what would confirm it or make it a pass. |
 | **Ollama steps** | **`ui833-20261119-ollama-steps`** | On this Mac, a red Ollama pill that does not start the app shows the restart in order: open Ollama, quit and open it again, then leave the start helper running in Terminal. |
+| **Menu order** | **`ui834-20261119-nav-order`** | Move menu shifts the top bar left or right. The page you put first is what opens with the portal. Desk stays at /desk. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -620,4 +621,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-19 · Agent: Cursor · Built: `ui833-20261119-ollama-steps` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui834-YYYYMMDD-slug`*
+*Last updated: 2026-11-19 · Agent: Cursor · Built: `ui834-20261119-nav-order` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui835-YYYYMMDD-slug`*

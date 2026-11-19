@@ -118,7 +118,7 @@ export function MarketRibbon() {
   const moreBtnRef = useRef<HTMLButtonElement>(null)
   const morePanelRef = useRef<HTMLDivElement>(null)
   const loc = useLocation()
-  const onDesk = loc.pathname === '/' || loc.pathname === ''
+  const onDesk = loc.pathname === '/' || loc.pathname === '' || loc.pathname === '/desk'
   const tape = splitTape(rows)
 
   useEffect(() => {
