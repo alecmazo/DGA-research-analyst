@@ -8,6 +8,7 @@ but not answering is quit and opened again.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -262,8 +263,35 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+def already_serving() -> bool:
+    try:
+        with urlopen(f"http://{HOST}:{PORT}/health", timeout=2) as res:
+            return getattr(res, "status", 200) == 200
+    except (URLError, TimeoutError, OSError):
+        return False
+
+
+def bind_message(exc: BaseException, serving: bool) -> str | None:
+    if not isinstance(exc, OSError) or exc.errno != errno.EADDRINUSE:
+        return None
+    if serving:
+        return f"Helper already running on {HOST}:{PORT}. Leave that window open."
+    return f"Port {PORT} is already in use."
+
+
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError as exc:
+        serving = already_serving() if exc.errno == errno.EADDRINUSE else False
+        message = bind_message(exc, serving)
+        if message is None:
+            raise
+        print(message, flush=True)
+        if not serving:
+            raise SystemExit(1)
+        return
+    print(f"Helper listening on {HOST}:{PORT}.", flush=True)
     server.serve_forever()
 
 

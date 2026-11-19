@@ -608,7 +608,7 @@ export function LocalPage() {
             <li>Press Command-Space, type Ollama, and press Return. Wait for the llama in the menu bar.</li>
             <li>If the llama is already there and this pill is still red, click the llama, choose Quit Ollama, then open Ollama again.</li>
             <li>
-              If the pill is still red, open Terminal, paste this command, press Return, and leave that window open. The script is in Desktop/DGA-Research-Analyst.
+              If the pill is still red, open Terminal, paste this command, press Return, and leave that window open. The script is in Desktop/DGA-Research-Analyst. If Terminal says the helper is already running, leave it and go to the next step.
               <code>{HELPER_COMMAND}</code>
               <button type="button" onClick={() => void copyHelper()}>
                 {copied ? 'Copied' : 'Copy command'}
