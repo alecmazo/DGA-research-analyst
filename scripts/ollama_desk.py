@@ -308,28 +308,62 @@ def ask_existing() -> dict | None:
         return None
 
 
-def free_port() -> None:
-    try:
-        out = subprocess.run(
-            ["lsof", "-nP", f"-tiTCP:{PORT}", "-sTCP:LISTEN"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return
-    for part in (out.stdout or "").split():
+def lsof_commands() -> list[list[str]]:
+    flags = [
+        ["-nP", "-t", f"-iTCP:{PORT}", "-sTCP:LISTEN"],
+        ["-nP", "-t", f"-i:{PORT}"],
+    ]
+    return [[program, *flag] for program in ("/usr/sbin/lsof", "lsof") for flag in flags]
+
+
+def pids_from_lsof(text: str) -> list[int]:
+    pids: list[int] = []
+    for part in text.replace(",", " ").split():
         if not part.isdigit():
             continue
         pid = int(part)
-        if pid == os.getpid():
+        if pid == os.getpid() or pid in pids:
             continue
+        pids.append(pid)
+    return pids
+
+
+def listener_pids() -> list[int]:
+    found: list[int] = []
+    for cmd in lsof_commands():
         try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
+            out = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
             continue
-    time.sleep(0.4)
+        for pid in pids_from_lsof(out.stdout or ""):
+            if pid not in found:
+                found.append(pid)
+        if found:
+            return found
+    return found
+
+
+def free_port() -> list[int]:
+    stopped: list[int] = []
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        pids = listener_pids()
+        if not pids:
+            return stopped
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                continue
+            if pid not in stopped:
+                stopped.append(pid)
+        time.sleep(0.5)
+    return stopped
 
 
 def occupy() -> ThreadingHTTPServer | None:
@@ -345,12 +379,19 @@ def occupy() -> ThreadingHTTPServer | None:
         if asked and asked.get("ok") and serve_ok() and helper_proxies():
             return None
         print(f"Replacing the stuck helper on port {PORT}.", flush=True)
-        free_port()
-        try:
-            return ThreadingHTTPServer((HOST, PORT), Handler)
-        except OSError:
-            print(f"Port {PORT} is still in use.", flush=True)
-            raise SystemExit(1)
+        stopped = free_port()
+        if stopped:
+            print("Stopped process " + " ".join(str(pid) for pid in stopped) + ".", flush=True)
+        deadline = time.time() + 3
+        while True:
+            try:
+                return ThreadingHTTPServer((HOST, PORT), Handler)
+            except OSError as again:
+                if again.errno != errno.EADDRINUSE or time.time() >= deadline:
+                    print(f"Port {PORT} is still in use.", flush=True)
+                    raise SystemExit(1)
+                free_port()
+                time.sleep(0.3)
 
 
 def main() -> None:

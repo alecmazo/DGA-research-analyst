@@ -45,6 +45,10 @@ def test_second_start_says_the_helper_is_already_running():
     assert desk.should_replace(True, True) is False
     assert desk.should_replace(False, True) is True
     assert desk.should_replace(True, False) is True
+    commands = [" ".join(cmd) for cmd in desk.lsof_commands()]
+    assert any("-t -iTCP:8766 -sTCP:LISTEN" in cmd for cmd in commands)
+    assert all("-tiTCP:" not in cmd for cmd in commands)
+    assert desk.pids_from_lsof("4242\n4242 99") == [4242, 99]
 
 
 def test_red_pill_starts_when_nothing_is_running_and_restarts_a_glitch():
