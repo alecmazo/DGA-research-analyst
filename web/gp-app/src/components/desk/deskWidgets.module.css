@@ -717,6 +717,17 @@
   cursor: default;
 }
 
+.pillGamma {
+  background: #0a1628;
+  color: #c9a84c;
+  text-decoration: none;
+  letter-spacing: 0.06em;
+}
+
+.pillGamma:hover {
+  filter: brightness(1.15);
+}
+
 .pillStale {
   opacity: 0.55;
   text-decoration: line-through;

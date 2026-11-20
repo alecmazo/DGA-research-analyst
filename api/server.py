@@ -9104,7 +9104,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui840-20261120-ask-answer"
+WEB_BUILD_VERSION = "ui841-20261120-gamma-btn"
 
 
 @app.get("/api/build")
@@ -10566,6 +10566,7 @@ def _local_list_row(row: dict) -> dict:
         "delta_from_prior": row.get("delta_from_prior"),
         "stock_style": row.get("stock_style"),
         "stock_style_note": row.get("stock_style_note"),
+        "gamma_url": row.get("local_gamma_url") or None,
     }
 
 
@@ -10584,7 +10585,8 @@ def local_reports_list(request: Request):
                            report_md_local, local_model, local_runs,
                            last_attempt_status, last_attempt_at, last_attempt_error,
                            COALESCE(version_count, 1) AS version_count,
-                           delta_from_prior, stock_style, stock_style_note
+                           delta_from_prior, stock_style, stock_style_note,
+                           local_gamma_url
                       FROM analyst_reports
                      WHERE (
                             (report_md_local IS NOT NULL AND length(report_md_local) > 20)
@@ -18216,7 +18218,7 @@ def _db_upsert_report(
                                 rating              = EXCLUDED.rating,
                                 price_target        = EXCLUDED.price_target,
                                 upside_pct          = EXCLUDED.upside_pct,
-                                gamma_url           = EXCLUDED.gamma_url,
+                                gamma_url           = COALESCE(EXCLUDED.gamma_url, analyst_reports.gamma_url),
                                 report_date         = EXCLUDED.report_date,
                                 archived            = FALSE,
                                 last_attempt_at     = CASE WHEN %s THEN NOW()
@@ -18248,7 +18250,7 @@ def _db_upsert_report(
                                 rating              = EXCLUDED.rating,
                                 price_target        = EXCLUDED.price_target,
                                 upside_pct          = EXCLUDED.upside_pct,
-                                gamma_url           = EXCLUDED.gamma_url,
+                                gamma_url           = COALESCE(EXCLUDED.gamma_url, analyst_reports.gamma_url),
                                 pptx_stale          = EXCLUDED.pptx_stale,
                                 report_date         = EXCLUDED.report_date,
                                 archived            = FALSE,

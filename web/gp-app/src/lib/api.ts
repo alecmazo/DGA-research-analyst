@@ -606,6 +606,8 @@ export type SavedReport = {
   has_docx?: boolean
   has_pptx?: boolean
   pptx_stale?: boolean
+  /** Gamma deck for this ticker, when one has been generated. */
+  gamma_url?: string | null
   providers?: string[]
   grok_price_target?: number | null
   claude_price_target?: number | null

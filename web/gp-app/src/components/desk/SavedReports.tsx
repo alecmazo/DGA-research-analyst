@@ -372,6 +372,18 @@ export function SavedReports({
                           <span title={rep.last_attempt_error || 'Failed'}>❌</span>
                         ) : null}
                         <span className={styles.repTk}>{rep.ticker}</span>
+                        {rep.gamma_url ? (
+                          <a
+                            href={rep.gamma_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`${styles.pill} ${styles.pillGamma}`}
+                            title="Open the Gamma deck"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Gamma
+                          </a>
+                        ) : null}
                         {Number(rep.version_count || 1) > 1 && (
                           <span
                             className={`${styles.pill} ${styles.pillVer}`}

@@ -417,6 +417,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Helper busy** | **`ui838-20261119-helper-busy`** | Starting the Ollama helper when port 8766 is already open says the helper is running, instead of a traceback. |
 | **Helper takeover** | **`ui839-20261119-helper-takeover`** | The restart command replaces the stuck helper in the dated checkout and starts Ollama. The Desktop path does not hold the script. |
 | **Ask answer** | **`ui840-20261120-ask-answer`** | SUP_20261120_a9a236cd. Local Ask keeps gpt-oss reasoning off the page and shows the answer. |
+| **Gamma button** | **`ui841-20261120-gamma-btn`** | Saved Reports shows a Gamma button on the ticker when a deck link is stored. A later Analyze that does not return a new deck keeps that link. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -627,4 +628,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-20 · Agent: Cursor · Built: `ui840-20261120-ask-answer` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui841-YYYYMMDD-slug`*
+*Last updated: 2026-11-20 · Agent: Cursor · Built: `ui841-20261120-gamma-btn` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui842-YYYYMMDD-slug`*
