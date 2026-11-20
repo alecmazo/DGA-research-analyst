@@ -32,6 +32,13 @@ def test_brief_lists_installed_models_and_defaults_to_gpt_oss():
     assert "height: 0" in css
 
 
+def test_local_ask_shows_the_answer_not_the_scratchpad():
+    page = _read("web/gp-app/src/pages/LocalPage.tsx")
+    ask = page.split("const askQuestion", 1)[1][:2500]
+    assert "streamThinking: false" in ask
+    assert "Reasoning…" in ask
+
+
 def test_brief_opens_on_ideas_financials_and_desk_lists():
     ideas = _read("web/gp-app/src/pages/IdeasPage.tsx")
     desk = _read("web/gp-app/src/pages/DeskPage.tsx")

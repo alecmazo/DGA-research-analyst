@@ -453,6 +453,7 @@ export function LocalPage() {
     let transcript = q
     const steps: { tool?: string; ticker?: string }[] = []
     const stream = {
+      streamThinking: false,
       onDelta: (chunk: string) => setDraft((prev) => prev + chunk),
       onProgress: (state: { textChars: number; thinkingChars: number }) => {
         if (state.textChars) {

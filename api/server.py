@@ -9104,7 +9104,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui839-20261119-helper-takeover"
+WEB_BUILD_VERSION = "ui840-20261120-ask-answer"
 
 
 @app.get("/api/build")
