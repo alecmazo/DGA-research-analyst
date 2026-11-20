@@ -9104,7 +9104,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui842-20261120-gamma-folder"
+WEB_BUILD_VERSION = "ui843-20261120-tool-choice"
 
 
 @app.get("/api/build")
@@ -32148,14 +32148,21 @@ def _run_agentic_analysis(job_id: str, question: str,
                         reason="wall" if _elapsed >= (_wall_s * 0.90) else "budget",
                     ),
                 }]
-                create_kw["tool_choice"] = "none"
+                # "none" still requires the tool list. xAI 400s on tool_choice
+                # alone (SUP_20261120_7eb3d471).
+                _tool_choice = "none"
             else:
-                create_kw["tools"] = oai_tools
-                create_kw["tool_choice"] = "auto"
+                _tool_choice = "auto"
+            from api.domains.agentic_oai import bind_oai_tools
+            create_kw.update(bind_oai_tools(oai_tools, _tool_choice))
             try:
                 resp = oai.chat.completions.create(**create_kw)
             except Exception as _oe:
-                if last_round and "tool" in str(_oe).lower():
+                _oe_txt = _llm_api_error_text(_oe, limit=500).lower()
+                # str(exc) is often only "Error code: 400". The reason is on
+                # exc.body, so a check of str(exc) never saw "tool".
+                _bare_choice = "tool_choice" in _oe_txt and "no tools" in _oe_txt
+                if _bare_choice or (last_round and "tool" in _oe_txt):
                     create_kw.pop("tool_choice", None)
                     create_kw.pop("tools", None)
                     resp = oai.chat.completions.create(**create_kw)
