@@ -323,4 +323,4 @@ def test_city_route_stays_unmounted():
     assert "def _mount_portfolio_city" not in server
     assert "from api.domains.portfolio_city import create_router" not in server
     assert server.count("WEB_BUILD_VERSION") >= 1
-    assert 'WEB_BUILD_VERSION = "ui841-20261120-gamma-btn"' in server
+    assert 'WEB_BUILD_VERSION = "ui842-20261120-gamma-folder"' in server

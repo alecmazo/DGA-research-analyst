@@ -49,12 +49,12 @@ def _gamma_key() -> str:
     return key
 
 
-def _folder_ids() -> list[str] | None:
+def _folder_id() -> str | None:
     fid = (
         os.environ.get("SLIW_GAMMA_FOLDER_ID", "").strip()
         or os.environ.get("GAMMA_FOLDER_ID", "").strip()
     )
-    return [fid] if fid else None
+    return fid or None
 
 
 def _design_block() -> str:
@@ -300,9 +300,9 @@ def _gamma_generate(
         "numCards": max(8, num_cards),
         "exportAs": "pptx",
     }
-    folders = _folder_ids()
-    if folders:
-        payload["folderIds"] = folders
+    folder_id = _folder_id()
+    if folder_id:
+        payload["folderId"] = folder_id
 
     try:
         resp = requests.post(

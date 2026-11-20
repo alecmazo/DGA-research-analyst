@@ -10183,9 +10183,10 @@ def _gamma_generate(input_text: str, num_cards: int,
         "numCards": max(8, num_cards),
         "exportAs": "pptx",
     }
-    # Omitting the key: sending folderIds: null makes Gamma reject the deck.
+    # Gamma rejects folderIds (plural) with a 400. The current field is folderId.
+    # Omit the key when unset: a null folder id is also rejected.
     if GAMMA_FOLDER_ID:
-        payload["folderIds"] = [GAMMA_FOLDER_ID]
+        payload["folderId"] = GAMMA_FOLDER_ID
     try:
         resp = requests.post(
             "https://public-api.gamma.app/v1.0/generations",

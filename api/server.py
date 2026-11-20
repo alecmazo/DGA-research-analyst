@@ -9104,7 +9104,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui841-20261120-gamma-btn"
+WEB_BUILD_VERSION = "ui842-20261120-gamma-folder"
 
 
 @app.get("/api/build")

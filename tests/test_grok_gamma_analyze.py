@@ -167,8 +167,9 @@ def test_analyze_does_not_blame_gamma_for_llm_timeout():
     assert "GROK_LIVE_SEARCH_TIMEOUT_S" in grok
     assert "_bounded_call" in grok
     gamma = src.split("def _gamma_generate")[1].split("def analyze_ticker")[0]
-    assert '"folderIds": [GAMMA_FOLDER_ID] if GAMMA_FOLDER_ID else None' not in gamma
-    assert 'payload["folderIds"]' in gamma
+    assert '"folderIds"' not in gamma
+    assert 'payload["folderIds"]' not in gamma
+    assert 'payload["folderId"] = GAMMA_FOLDER_ID' in gamma
 
 
 def test_grok_long_think_is_not_a_failed_report():
