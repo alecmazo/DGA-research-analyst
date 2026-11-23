@@ -7420,7 +7420,6 @@ def _persist_analysis_text(
         return False, len(text)
 
 
-_MUNGER_CITE_RE = re.compile(r"Rule\s+(\d{1,2})\b[^\n]{0,320}", re.I)
 _MUNGER_INDEX_STARTED = False
 
 
@@ -7432,52 +7431,95 @@ def _ensure_munger_cites() -> None:
                 rule SMALLINT NOT NULL,
                 excerpt TEXT,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                PRIMARY KEY (ticker, rule)
+                source TEXT NOT NULL DEFAULT 'grok',
+                PRIMARY KEY (ticker, rule, source)
             )
         """)
+        cur.execute(
+            "ALTER TABLE munger_rule_cites "
+            "ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'grok'"
+        )
+        cur.execute("""
+            SELECT a.attname
+              FROM pg_index i
+              JOIN pg_attribute a
+                ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+             WHERE i.indrelid = 'munger_rule_cites'::regclass
+               AND i.indisprimary
+             ORDER BY array_position(i.indkey, a.attnum)
+        """)
+        pk_cols = [r[0] for r in cur.fetchall()]
+        if pk_cols != ["ticker", "rule", "source"]:
+            cur.execute(
+                "ALTER TABLE munger_rule_cites "
+                "DROP CONSTRAINT IF EXISTS munger_rule_cites_pkey"
+            )
+            cur.execute(
+                "ALTER TABLE munger_rule_cites "
+                "ADD PRIMARY KEY (ticker, rule, source)"
+            )
         conn.commit()
 
 
-def _index_munger_rules(ticker: str, text: str) -> None:
-    """Store Rule N citations from one Grok report. Replaces that name's old cites."""
+def _index_munger_rules(ticker: str, text: str, source: str = "grok",
+                        cur=None) -> None:
+    """Store Rule N citations from one saved note.
+
+    ``source`` is ``grok`` or ``local``. Replacing a Grok note does not
+    delete the local note's citations for that ticker.
+    """
+    from api.domains.munger_cites import rule_citations
     tk = (ticker or "").strip().upper()
+    src = "local" if (source or "").strip().lower() == "local" else "grok"
     if not tk or not text:
         return
-    found: dict[int, str] = {}
-    for m in _MUNGER_CITE_RE.finditer(text):
-        n = int(m.group(1))
-        if 1 <= n <= 50 and n not in found:
-            found[n] = " ".join(m.group(0).split())[:280]
+    found = rule_citations(text)
+
+    def _write(db_cur) -> None:
+        db_cur.execute(
+            "DELETE FROM munger_rule_cites WHERE ticker=%s AND source=%s",
+            (tk, src),
+        )
+        for n, excerpt in found.items():
+            db_cur.execute(
+                """INSERT INTO munger_rule_cites (ticker, rule, excerpt, source)
+                   VALUES (%s, %s, %s, %s)""",
+                (tk, n, excerpt, src),
+            )
+
     try:
+        if cur is not None:
+            _write(cur)
+            return
         _ensure_munger_cites()
-        with _fund_conn() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM munger_rule_cites WHERE ticker=%s", (tk,))
-            for n, excerpt in found.items():
-                cur.execute(
-                    """INSERT INTO munger_rule_cites (ticker, rule, excerpt)
-                       VALUES (%s, %s, %s)""",
-                    (tk, n, excerpt),
-                )
+        with _fund_conn() as conn, conn.cursor() as own:
+            _write(own)
             conn.commit()
     except Exception as exc:
-        print(f"[munger] index {tk}: {exc!s:.140}", flush=True)
+        print(f"[munger] index {tk}/{src}: {exc!s:.140}", flush=True)
 
 
-def _munger_index_book(tickers: list[str]) -> None:
-    """Read saved Grok notes once, off the page request."""
+def _munger_index_book(tickers: list[str], *, local_only: bool = False) -> None:
+    """Read saved notes once. The desk lists the local notes."""
     if not tickers:
         return
     try:
         _ensure_munger_cites()
         with _fund_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                """SELECT ticker, report_md FROM analyst_reports
-                    WHERE ticker = ANY(%s) AND report_md IS NOT NULL""",
+                """SELECT ticker, report_md, report_md_local
+                     FROM analyst_reports
+                    WHERE ticker = ANY(%s)
+                      AND (report_md IS NOT NULL OR report_md_local IS NOT NULL)""",
                 (tickers,),
             )
             rows = cur.fetchall()
-        for tk, md in rows:
-            _index_munger_rules(tk, md or "")
+            for tk, md, local_md in rows:
+                if not local_only and md:
+                    _index_munger_rules(tk, md, "grok", cur=cur)
+                if local_md:
+                    _index_munger_rules(tk, local_md, "local", cur=cur)
+            conn.commit()
     except Exception as exc:
         print(f"[munger] book index: {exc!s:.140}", flush=True)
 
@@ -7489,6 +7531,7 @@ def _kick_munger_index(tickers: list[str]) -> None:
     _MUNGER_INDEX_STARTED = True
     threading.Thread(
         target=_munger_index_book, args=(list(tickers),),
+        kwargs={"local_only": True},
         daemon=True, name="munger-index",
     ).start()
 
@@ -9104,7 +9147,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui843-20261120-tool-choice"
+WEB_BUILD_VERSION = "ui844-20261123-munger-local"
 
 
 @app.get("/api/build")
@@ -9457,10 +9500,10 @@ def continuity_package(request: Request):
 
 @app.get("/api/munger/desk")
 def munger_desk(request: Request):
-    """Morning rule plus the watchlist and any Rule N citations already saved.
+    """Morning rule plus the watchlist and Rule N lines from local reports.
 
-    One watchlist read and one small cite read. Reports are indexed in the
-    background, not on this request. No model call.
+    The page lists companies whose local note cites the rule. A Grok note
+    is not the source. No model call.
     """
     claims = _claims_or_401(request)
     if claims.get("role") not in ("gp", "admin"):
@@ -9484,8 +9527,20 @@ def munger_desk(request: Request):
                 )
                 names = {r[0]: r[1] or "" for r in cur.fetchall()}
                 cur.execute(
+                    """SELECT count(*) FROM munger_rule_cites
+                        WHERE source = 'local' AND ticker = ANY(%s)""",
+                    (tickers,),
+                )
+                need_local = not (cur.fetchone() or [0])[0]
+            if need_local:
+                global _MUNGER_INDEX_STARTED
+                _MUNGER_INDEX_STARTED = True
+                _munger_index_book(tickers, local_only=True)
+            with _fund_conn() as conn, conn.cursor() as cur:
+                cur.execute(
                     """SELECT ticker, rule, excerpt FROM munger_rule_cites
-                        WHERE ticker = ANY(%s)""",
+                        WHERE source = 'local' AND ticker = ANY(%s)
+                        ORDER BY ticker""",
                     (tickers,),
                 )
                 cites = [
@@ -18294,6 +18349,8 @@ def _db_upsert_report(
             if attempt > 1:
                 print(f"✅ [db-upsert] {ticker}/{provider} committed on attempt {attempt} "
                       f"({len(md_text):,} chars)", flush=True)
+            if provider == "local":
+                _index_munger_rules(ticker, md_text, "local")
             return True
 
         except Exception as _e:

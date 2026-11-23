@@ -52,6 +52,10 @@ export function MungerPage() {
   const citedSet = useMemo(() => new Set(cited.map((c) => c.ticker)), [cited])
   const quiet = (desk?.holdings || []).filter((h) => !citedSet.has(h.ticker))
   const morning = desk?.morning
+  const morningCites = useMemo(() => {
+    if (!morning) return []
+    return (desk?.citations || []).filter((c) => c.rule === morning.rule)
+  }, [desk, morning])
 
   return (
     <div className={page.page}>
@@ -74,26 +78,17 @@ export function MungerPage() {
             <p className={styles.apply}>
               {rules.find((r) => r.n === morning.rule)?.apply}
             </p>
-            {morning.ticker ? (
-              <p className={styles.holding}>
-                Today’s name:{' '}
-                <Link to={`/report?ticker=${encodeURIComponent(morning.ticker)}&provider=grok`}>
-                  {morning.ticker}
-                </Link>
-                {morning.name ? ` · ${morning.name}` : ''}
+            <h3>Cited in a local report</h3>
+            {morningCites.length === 0 ? (
+              <p className={styles.quiet}>None of the local reports cite this rule yet.</p>
+            ) : (
+              <p className={styles.chips}>
+                {morningCites.map((c) => (
+                  <Link key={c.ticker} to={`/local-report?ticker=${encodeURIComponent(c.ticker)}`}>
+                    {c.ticker}
+                  </Link>
+                ))}
               </p>
-            ) : (
-              <p className={styles.quiet}>Add names to the watchlist to attach a holding.</p>
-            )}
-            {morning.excerpt ? (
-              <p className={styles.excerpt}>{morning.excerpt}</p>
-            ) : (
-              morning.ticker && (
-                <p className={styles.quiet}>
-                  No saved report has cited this rule for {morning.ticker} yet.
-                  The next Grok Analyze will name the rules that apply.
-                </p>
-              )
             )}
           </>
         )}
@@ -121,16 +116,16 @@ export function MungerPage() {
             Rule {rule.n} — {rule.title}
           </h2>
           <p className={styles.apply}>{rule.apply}</p>
-          <h3>Cited in a saved report</h3>
+          <h3>Cited in a local report</h3>
           {cited.length === 0 && (
             <p className={styles.quiet}>
-              None of the saved Grok reports cite this rule yet.
+              None of the local reports cite this rule yet.
             </p>
           )}
           <ul className={styles.cites}>
             {cited.map((c) => (
               <li key={c.ticker}>
-                <Link to={`/report?ticker=${encodeURIComponent(c.ticker)}&provider=grok`}>
+                <Link to={`/local-report?ticker=${encodeURIComponent(c.ticker)}`}>
                   {c.ticker}
                 </Link>
                 <p>{c.excerpt}</p>
