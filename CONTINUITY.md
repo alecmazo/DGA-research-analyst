@@ -421,6 +421,7 @@ same repo is worked on the Mac mini at home, a laptop, and Railway deploys.
 | **Gamma folder** | **`ui842-20261120-gamma-folder`** | SKYD Gamma returned 400 because the request sent folderIds. Generation now sends folderId, which is the field Gamma accepts. |
 | **Tool choice** | **`ui843-20261120-tool-choice`** | SUP_20261120_7eb3d471. Analyst on Grok sent tool_choice with no tools. The final write keeps the tool list, and the retry reads the xAI error body. |
 | **Munger local** | **`ui844-20261123-munger-local`** | SUP_20261123_74ff75cd. The Munger page lists companies whose local note cites the rule. It no longer waits on a Grok line for the morning ticker. |
+| **Phone watchlist add** | **`ui845-20261124-mobile-watchlist`** | The Watchlist tab takes a ticker and writes the same list as the desk. Hold a row to remove it. Phone build 38. |
 | **Railway Pro** | (hosting, no build bump) | Workspace is Pro as of 2026-10-22, upgraded from Hobby. Single-process start and malloc trim stay. |
 | **Mobile Markets news** | phone OTA `mobile-ui32-markets-news-20261015` (no WEB_BUILD_VERSION bump) | Earnings and Market Wire moved from Research to Markets. Daily Brief removed from Markets. Market Pulse is GET /api/market/pulse (Yahoo/Google RSS, no LLM), ranked by |day %|. Desktop unchanged. |
 | **Mobile podcasts** | phone OTA `mobile-ui33-podcast-shows-20261026` (no WEB_BUILD_VERSION bump) | The phone player has DGA HiTech and Systems Over Goals Daily. Each episode plays its own file. Daily rows show the episode title. |
@@ -631,4 +632,4 @@ On This Mac, the card under Compare builds a ten-name book from saved local note
 - UI: Saved Reports `vN` / Δ pills; report modal delta banner + thesis timeline; Financials Value Rank spark from `ticker_metric_snapshots`.
 - APIs: `GET /api/report/{ticker}/history`, `GET /api/report/{ticker}/version/{id}`.
 
-*Last updated: 2026-11-23 · Agent: Cursor · Built: `ui844-20261123-munger-local` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui37-owned-cos-20261116` · Next: `ui845-YYYYMMDD-slug`*
+*Last updated: 2026-11-24 · Agent: Cursor · Built: `ui845-20261124-mobile-watchlist` · Railway workspace Pro (from Hobby) · Phone install: TestFlight · Phone source: `mobile-ui38-watchlist-add-20261124` · Next: `ui846-YYYYMMDD-slug`*

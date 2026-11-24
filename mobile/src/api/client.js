@@ -486,8 +486,16 @@ export const api = {
   // ---------- Watchlist ----------
   getWatchlist: (fresh = false) =>
     request(fresh ? `/api/watchlist?fresh=1&_t=${Date.now()}` : '/api/watchlist'),
-  addToWatchlist:      (ticker) => request(`/api/watchlist/${ticker}`, { method: 'POST' }),
-  removeFromWatchlist: (ticker) => request(`/api/watchlist/${ticker}`, { method: 'DELETE' }),
+  // The desk writes the signed-in list with POST /api/watchlist { ticker }.
+  // POST /api/watchlist/{ticker} is the old file list and does not show on the phone.
+  addToWatchlist: (ticker) => request('/api/watchlist', {
+    method: 'POST',
+    body: JSON.stringify({ ticker: String(ticker || '').trim().toUpperCase() }),
+  }),
+  removeFromWatchlist: (ticker) => request(
+    `/api/watchlist/${encodeURIComponent(String(ticker || '').trim().toUpperCase())}`,
+    { method: 'DELETE' },
+  ),
 
   // Free (zero-LLM) stock snapshot — same payload as the desktop ticker expand card
   getStockInfo: (ticker) =>

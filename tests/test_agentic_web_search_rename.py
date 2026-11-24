@@ -34,4 +34,4 @@ def test_llm_api_error_text_reads_xai_string_body():
             self.body = "Duplicate tool names: web_search"
 
     assert "Duplicate tool names" in fn(Fake())
-    assert 'WEB_BUILD_VERSION = "ui844-20261123-munger-local"' in src
+    assert 'WEB_BUILD_VERSION = "ui845-20261124-mobile-watchlist"' in src

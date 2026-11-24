@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, RefreshControl, TouchableOpacity,
-  ActivityIndicator, StyleSheet, Linking, Alert,
+  ActivityIndicator, StyleSheet, Linking, Alert, TextInput, Keyboard,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppResume } from '../hooks/useAppResume';
@@ -18,7 +18,7 @@ import {
   absChange, companyName, PctPill, SectionHeader,
 } from './marketsShared';
 
-function renderQuoteRow(row, i, n, t, s, setPeekTk) {
+function renderQuoteRow(row, i, n, t, s, setPeekTk, onLongPress) {
   const { tk, q, pct, chg, name } = row;
   const up = pct == null || isNaN(pct) ? null : pct >= 0;
   const chgColor = up == null ? t.textDim : up ? t.pillUpFg : t.pillDownFg;
@@ -31,6 +31,8 @@ function renderQuoteRow(row, i, n, t, s, setPeekTk) {
           haptics.onPressPrimary?.();
           setPeekTk(tk);
         }}
+        onLongPress={onLongPress ? () => onLongPress(tk) : undefined}
+        delayLongPress={350}
       >
         <View style={s.wlLeft}>
           <Text style={s.wlTk} numberOfLines={1}>{tk}</Text>
@@ -58,6 +60,8 @@ export default function WatchlistBoardScreen({ navigation }) {
   const [expanded, setExpanded] = useState({});
   const [peekTk, setPeekTk]     = useState(null);
   const [watch, setWatch]       = useState(null);
+  const [draft, setDraft]       = useState('');
+  const [adding, setAdding]     = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [quotesBusy, setQuotesBusy] = useState(false);
   const [lastQuotesAt, setLastQuotesAt] = useState(null);
@@ -168,6 +172,63 @@ export default function WatchlistBoardScreen({ navigation }) {
     setRefreshing(false);
   }, [loadQuotes]);
 
+  const reloadWatch = useCallback(async () => {
+    const wl = await api.getWatchlist(true);
+    setWatch(wl);
+    putWatchlist(wl);
+    return wl;
+  }, []);
+
+  const addTickers = useCallback(async () => {
+    const parts = draft.toUpperCase().split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+    const valid = [...new Set(parts.filter((tk) => /^[A-Z0-9.\-]{1,12}$/.test(tk)))];
+    if (!valid.length) {
+      Alert.alert('Add a ticker', 'Use a symbol such as NVDA.');
+      return;
+    }
+    const have = new Set(((watch && watch.tickers) || []).map((tk) => String(tk || '').toUpperCase()));
+    const fresh = valid.filter((tk) => !have.has(tk));
+    if (!fresh.length) {
+      Alert.alert('Already on the watchlist', valid.join(', '));
+      setDraft('');
+      return;
+    }
+    setAdding(true);
+    try {
+      for (const tk of fresh) {
+        await api.addToWatchlist(tk);
+      }
+      setDraft('');
+      Keyboard.dismiss();
+      haptics.onPressPrimary?.();
+      await reloadWatch();
+    } catch (e) {
+      Alert.alert('Could not add', e.message || String(e));
+    } finally {
+      setAdding(false);
+    }
+  }, [draft, watch, reloadWatch]);
+
+  const removeTicker = useCallback((tk) => {
+    const symbol = String(tk || '').toUpperCase();
+    if (!symbol) return;
+    Alert.alert('Remove from watchlist', `Remove ${symbol}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.removeFromWatchlist(symbol);
+            await reloadWatch();
+          } catch (e) {
+            Alert.alert('Could not remove', e.message || String(e));
+          }
+        },
+      },
+    ]);
+  }, [reloadWatch]);
+
   const onRefreshQuotes = useCallback(async () => {
     if (quotesBusy) return;
     setQuotesBusy(true);
@@ -262,8 +323,35 @@ export default function WatchlistBoardScreen({ navigation }) {
           icon="star-outline"
           t={t}
           s={s}
-          right={<Text style={s.asOf}>tap for snapshot · by day %</Text>}
+          right={<Text style={s.asOf}>tap for snapshot · hold to remove</Text>}
         >Watchlist</SectionHeader>
+        <View style={[s.addRow, { backgroundColor: t.surface, borderColor: t.border }]}>
+          <TextInput
+            value={draft}
+            onChangeText={(v) => setDraft(String(v || '').toUpperCase())}
+            placeholder="Add ticker"
+            placeholderTextColor={t.textDim}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            autoComplete="off"
+            returnKeyType="done"
+            onSubmitEditing={addTickers}
+            editable={!adding}
+            style={[s.addInput, { color: t.textPrimary }]}
+            accessibilityLabel="Ticker to add"
+          />
+          <TouchableOpacity
+            onPress={addTickers}
+            disabled={adding}
+            activeOpacity={0.7}
+            style={s.addBtn}
+            accessibilityLabel="Add ticker to watchlist"
+          >
+            {adding
+              ? <ActivityIndicator color="#0A1628" size="small" />
+              : <Text style={s.addBtnTxt}>Add</Text>}
+          </TouchableOpacity>
+        </View>
         {watch == null ? (
           <Card style={cardStyle}><ActivityIndicator color={t.primary} /></Card>
         ) : !trackingRows.length ? (
@@ -276,7 +364,7 @@ export default function WatchlistBoardScreen({ navigation }) {
           </Card>
         ) : (
           <Card style={[...cardStyle, { padding: 0 }]}>
-            {trackingRows.map((row, i) => renderQuoteRow(row, i, trackingRows.length, t, s, setPeekTk))}
+            {trackingRows.map((row, i) => renderQuoteRow(row, i, trackingRows.length, t, s, setPeekTk, removeTicker))}
           </Card>
         )}
 
@@ -294,7 +382,7 @@ export default function WatchlistBoardScreen({ navigation }) {
           </Card>
         ) : (
           <Card style={[...cardStyle, { padding: 0 }]}>
-            {ownedRows.map((row, i) => renderQuoteRow(row, i, ownedRows.length, t, s, setPeekTk))}
+            {ownedRows.map((row, i) => renderQuoteRow(row, i, ownedRows.length, t, s, setPeekTk, removeTicker))}
           </Card>
         )}
 
@@ -412,6 +500,20 @@ function makeStyles(t) {
     sectionLabel: { fontSize: 12, fontWeight: '800', color: t.textPrimary, letterSpacing: 0.8, textTransform: 'uppercase' },
     asOf: { fontSize: 10, color: t.textDim, fontWeight: '500' },
     muted: { fontSize: 13, color: t.textSecondary },
+    addRow: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      borderWidth: 1, borderRadius: 10, paddingLeft: 12, paddingRight: 6, paddingVertical: 6,
+      marginBottom: spacing.md,
+    },
+    addInput: {
+      flex: 1, fontSize: 16, fontWeight: '700', letterSpacing: 0.4,
+      paddingVertical: 8,
+    },
+    addBtn: {
+      backgroundColor: '#F5C542', borderRadius: 8,
+      paddingHorizontal: 16, paddingVertical: 10, minWidth: 64, alignItems: 'center',
+    },
+    addBtnTxt: { color: '#0A1628', fontWeight: '800', fontSize: 14 },
     quotesRefreshBtn: {
       width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
       backgroundColor: 'rgba(245,197,66,0.15)', borderWidth: 1, borderColor: 'rgba(245,197,66,0.45)',

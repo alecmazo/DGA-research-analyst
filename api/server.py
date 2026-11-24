@@ -5214,6 +5214,14 @@ class AgenticStartRequest(BaseModel):
         extra = "allow"
 
 
+def _bust_watchlist_paint(lp_id: str) -> None:
+    """Drop the short desk and phone caches so an add shows on the next read."""
+    lp = str(lp_id or "")
+    _WL_RESP_CACHE.pop((lp, True), None)
+    _WL_RESP_CACHE.pop((lp, False), None)
+    _MOBILE_HOME_CACHE.pop(lp, None)
+
+
 @app.post("/api/watchlist")
 def watchlist_add(request: Request, body: WatchlistAddRequest):
     claims = _claims_or_401(request)
@@ -5223,6 +5231,7 @@ def watchlist_add(request: Request, body: WatchlistAddRequest):
         raise HTTPException(status_code=400, detail="invalid ticker")
     _watchlist_migrate_legacy_once()
     _wl_add_db(lp_id, tk)
+    _bust_watchlist_paint(lp_id)
     return {"tickers": _wl_get_db(lp_id)}
 
 
@@ -5233,6 +5242,7 @@ def watchlist_remove(request: Request, ticker: str):
     tk = (ticker or "").strip().upper()
     _watchlist_migrate_legacy_once()
     _wl_remove_db(lp_id, tk)
+    _bust_watchlist_paint(lp_id)
     return {"tickers": _wl_get_db(lp_id)}
 
 
@@ -9147,7 +9157,7 @@ def info():
 # ── Build/version endpoint ────────────────────────────────────────────────────
 # The web client polls this to detect deploys and force a hard reload of
 # stale iOS PWA / Safari caches. Bumped on every UI deploy.
-WEB_BUILD_VERSION = "ui844-20261123-munger-local"
+WEB_BUILD_VERSION = "ui845-20261124-mobile-watchlist"
 
 
 @app.get("/api/build")
